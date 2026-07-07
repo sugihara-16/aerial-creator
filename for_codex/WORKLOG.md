@@ -4,6 +4,38 @@
 
 ### 2026-07-07
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent D/A: InteractionEnvelopeExtractor + InteractionEnvelopeEncoder
+- Summary: Implemented deterministic InteractionEnvelope extraction from IRG and a dependency-free InteractionEnvelopeEncoder contract that emits padded token tensors, masks, token type ids, source type ids, and source ids for the `interaction_envelope` workspace group.
+- Files changed:
+  - `amsrr/irg/__init__.py`
+  - `amsrr/irg/envelope_extractor.py`
+  - `amsrr/encoders/__init__.py`
+  - `amsrr/encoders/interaction_envelope_encoder.py`
+  - `tests/unit/irg/test_envelope_extractor.py`
+  - `tests/unit/encoders/test_interaction_envelope_encoder.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added internal encoder output contract `InteractionEnvelopeEncoderOutput` for P0 token/mask/source-id handoff.
+- Upstream dependencies used: v0.4 Sections 13, 21, 26.4, 27.1, 27.2, 28.5; Agent A schemas and workspace tensor shape helpers; Agent D IRGBuilder output.
+- Downstream impact: π_D/π_H scaffolding and future SharedInteractionWorkspace assembly can consume deterministic envelope tokens. ContactCandidateSampler can use envelope target region sets, contact count ranges, and modes without reinterpreting TaskSpec directly.
+- Tests added or run:
+  - Added `test_interaction_envelope_extract`
+  - Added `test_interaction_envelope_extracts_all_task_families`
+  - Added `test_interaction_envelope_encoder_contract`
+  - Added `test_interaction_envelope_encoder_batch_padding`
+- Commands run:
+  - `rg -n ...` and `sed -n ...` inspections for spec Sections 13/21, schemas, and IRG templates
+  - `mkdir -p amsrr/encoders tests/unit/encoders`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 23 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Assumptions: Required contact count range aggregates required ContactSlots only; optional slots still contribute contact mode and target-region tokens. The encoder implements the deterministic contract and `mlp_embedding` fallback metadata, not learned parameters.
+- Blockers: None.
+- Next steps: Implementation order item 8 can assemble modality token groups into full SharedInteractionWorkspace and learned query pooling contracts.
+
+### 2026-07-07
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent D: IRGBuilder + InteractionTemplates
 - Summary: Implemented deterministic IRGBuilder, SceneGraph normalization, IRG structural validator, and all five P0 task-family templates: free-flight navigation, object grasp/carry, valve operation, perching manipulation, and contact-mediated locomotion.
 - Files changed:
@@ -192,6 +224,27 @@
 ---
 
 ## Work Package Logs
+
+### Agent D/A: InteractionEnvelopeExtractor + InteractionEnvelopeEncoder
+
+#### 2026-07-07
+- Scope: Aggregate compact interaction requirements from IRG and expose deterministic encoder tokens for the envelope modality.
+- Files changed:
+  - `amsrr/irg/__init__.py`
+  - `amsrr/irg/envelope_extractor.py`
+  - `amsrr/encoders/__init__.py`
+  - `amsrr/encoders/interaction_envelope_encoder.py`
+  - `tests/unit/irg/test_envelope_extractor.py`
+  - `tests/unit/encoders/test_interaction_envelope_encoder.py`
+- Upstream dependencies: Agent A `InteractionEnvelope` and `SharedInteractionWorkspace` shape helper schemas; Agent D IRG node/edge conventions; v0.4 envelope and encoder contracts.
+- Implemented: Contact count range aggregation, contact mode aggregation, target region set extraction, wrench summary extraction, support/vertical thrust ratio summary hooks, precision/duration/capability extraction, branch option extraction for future fallback/mutually-exclusive IRGs, padded envelope token contract with masks and source ids.
+- Not implemented: Full multimodal SharedInteractionWorkspace assembly, learned MLP/Transformer modules, query pooling parameters, generic constraint-threshold schema beyond fields currently available in `InteractionEnvelope`.
+- Schema/interface changes: No persisted schema changes. Added internal encoder output dataclass for the interaction-envelope modality.
+- Downstream impact: Future policy scaffolding can use envelope token groups without raw dict reinterpretation. Full workspace assembly remains the next implementation-order step.
+- Tests added: `test_interaction_envelope_extract`, `test_interaction_envelope_extracts_all_task_families`, `test_interaction_envelope_encoder_contract`, `test_interaction_envelope_encoder_batch_padding`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 23 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: `InteractionEnvelopeEncoder` defaults to `backend_type="mlp_embedding"` when no dedicated backend key is provided. It emits deterministic scalar features; learned weights belong to later model code.
+- Open questions: None currently.
 
 ### Agent D: IRGBuilder + InteractionTemplates
 
