@@ -4,6 +4,46 @@
 
 ### 2026-07-07
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent B: URDF / PhysicalModel
+- Summary: Implemented URDF/xacro XML loader, thrust model YAML loader, PhysicalModel builder, ModuleCapabilityToken builder, normalized runtime Holon URDF asset, and Agent B unit tests.
+- Files changed:
+  - `assets/robots/holon/holon.urdf`
+  - `amsrr/robot_model/__init__.py`
+  - `amsrr/robot_model/urdf_loader.py`
+  - `amsrr/robot_model/thrust_model.py`
+  - `amsrr/robot_model/physical_model_builder.py`
+  - `tests/unit/robot_model/test_urdf_loader.py`
+  - `tests/unit/robot_model/test_thrust_model.py`
+  - `tests/unit/robot_model/test_physical_model_builder.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None. Existing `PhysicalModel`, `LinkModel`, `JointModel`, `RotorModel`, `DockPortSpec`, and `ModuleCapabilityToken` schemas were used unchanged.
+- Upstream dependencies used: v0.4 Sections 3.1, 3.2, 9.1-9.8, 26.2, 27.1, 27.2; `module_urdf/README_for_codex.md`; existing Agent A schemas.
+- Downstream impact: Agent C/D/F and later controller work can now load a configurable runtime URDF path and receive structured `PhysicalModel` plus compact module capability features.
+- Tests added or run:
+  - Added `test_urdf_parse_holon_if_present`
+  - Added `test_urdf_parse_holon_xacro_reference`
+  - Added `test_asset_urdf_uses_config_thrust_link_names`
+  - Added `test_thrust_model_loads_config`
+  - Added `test_thrust_model_rejects_duplicate_rotor_ids`
+  - Added `test_physical_model_total_mass_positive`
+  - Added `test_physical_model_rotors_and_dock_ports`
+  - Added `test_module_capability_token_from_physical_model`
+- Commands run:
+  - `mkdir -p assets/robots/holon`
+  - `cp module_urdf/holon.urdf.xacro assets/robots/holon/holon.urdf`
+  - `perl -0pi -e 's/thrust([1-4])\b/thrust_$1/g' assets/robots/holon/holon.urdf`
+  - `mkdir -p amsrr/robot_model tests/unit/robot_model`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 14 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Assumptions: `module_urdf/holon.urdf.xacro` can be parsed as XML without ROS/xacro macro expansion. Runtime asset path remains configurable and uses `assets/robots/holon/holon.urdf`. `thrust_1` config IDs are preserved as schema rotor IDs.
+- Blockers: None. `module_urdf/holon.urdf` is absent, so its explicit test is skipped by design.
+- Next steps: Agent C GeometryProcessor for primitives and mesh smoke, or Agent D IRGBuilder once geometry descriptors exist.
+
+### 2026-07-07
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Repository organization / handoff documentation
 - Summary: Moved Codex-facing project documents into `for_codex/` and prepared current implementation files for git tracking.
 - Files changed:
@@ -86,6 +126,29 @@
 ---
 
 ## Work Package Logs
+
+### Agent B: URDF / PhysicalModel
+
+#### 2026-07-07
+- Scope: Parse Holon URDF/xacro XML, load thrust limits, build `PhysicalModel`, derive dock ports and rotor models, and report module capability features.
+- Files changed:
+  - `assets/robots/holon/holon.urdf`
+  - `amsrr/robot_model/__init__.py`
+  - `amsrr/robot_model/urdf_loader.py`
+  - `amsrr/robot_model/thrust_model.py`
+  - `amsrr/robot_model/physical_model_builder.py`
+  - `tests/unit/robot_model/test_urdf_loader.py`
+  - `tests/unit/robot_model/test_thrust_model.py`
+  - `tests/unit/robot_model/test_physical_model_builder.py`
+- Upstream dependencies: Agent A schemas, `configs/robot/robot_model.yaml`, `configs/robot/thrust_model.yaml`, `module_urdf/holon.urdf.xacro`, `module_urdf/README_for_codex.md`.
+- Implemented: XML loader for URDF/xacro-derived files, link/joint/inertial/mesh extraction, frame-tree validation, rotor and dock candidate reporting, thrust model validation, runtime `PhysicalModel` builder, dock port derivation from connect point joints, rotor vectoring joint association, capability token derivation.
+- Not implemented: Full xacro macro expansion, transform-accurate aggregate inertia, non-mesh collision primitive reconstruction, external metadata config for dock ports beyond name-pattern derivation.
+- Schema/interface changes: None.
+- Downstream impact: Feasibility and controller work can consume exact link/joint/rotor/dock schema objects. Design/policy work can consume `ModuleCapabilityToken`.
+- Tests added: Agent B tests listed above.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 14 passed, 1 skipped.
+- Handoff notes: The normalized runtime URDF is at `assets/robots/holon/holon.urdf`, matching `configs/robot/robot_model.yaml`. The original developer reference xacro remains under `module_urdf/`.
+- Open questions: None currently.
 
 ### Repository Organization: Codex Handoff Docs
 

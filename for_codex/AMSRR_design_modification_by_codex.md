@@ -4,6 +4,26 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-07
 
+### Runtime Asset Supplement: Normalized Holon URDF
+
+- Context: v0.4 recommends `robot_model.module_urdf_path: assets/robots/holon/holon.urdf`, while this checkout provides `module_urdf/holon.urdf.xacro` as the developer reference and does not provide `module_urdf/holon.urdf`.
+- Decision: Added `assets/robots/holon/holon.urdf` as a normalized runtime asset derived from `module_urdf/holon.urdf.xacro`.
+- User direction: User approved converting the xacro into an easier-to-use asset under `assets/`.
+- Compatibility impact: Runtime path remains configurable and now matches `configs/robot/robot_model.yaml`. The original developer reference xacro is left unchanged.
+
+### Naming Supplement: Thrust Link IDs
+
+- Context: `configs/robot/thrust_model.yaml` uses rotor IDs `thrust_1` through `thrust_4`, while the developer reference xacro used link names `thrust1` through `thrust4`.
+- Decision: The normalized runtime URDF uses link names `thrust_1` through `thrust_4`, matching the thrust config IDs.
+- User direction: User approved changing to the `thrust_1` format during asset normalization.
+- Compatibility impact: `RotorModel.rotor_id` preserves the config ID, and `RotorModel.thrust_frame_link` now resolves directly to a same-named URDF link. The loader still supports normalized matching for compatible future assets.
+
+### Parser Supplement: xacro-Derived XML Without ROS Dependency
+
+- Context: The provided `module_urdf/holon.urdf.xacro` is parseable as XML for the fields needed by P0, and adding ROS/xacro dependencies would be unnecessary for the current scope.
+- Decision: Agent B loader parses URDF/xacro-derived XML with the Python standard library and ignores unknown/custom robot child tags while preserving useful metadata such as `baselink`.
+- Compatibility impact: No package installation is required. Full xacro macro expansion remains out of scope until an asset actually requires it.
+
 ### Approved Schema Supplement: `IRGEdgeType.ALLOWS`
 
 - Context: v0.4 Section 10.4 lists `IRGEdgeType`, but omits `allows`.
