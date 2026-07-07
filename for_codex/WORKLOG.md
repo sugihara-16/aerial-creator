@@ -4,6 +4,40 @@
 
 ### 2026-07-07
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent E/F: Minimal MorphologyGraph + Feasibility hard-check scaffolding
+- Summary: Implemented a deterministic minimal MorphologyGraph/DesignOutput builder and a design-level FeasibilityChecker scaffold for schema, connected graph, module count, port compatibility, closed-loop rejection, required slot coverage, coarse reachability, thrust margin, payload margin, and hover proxy checks.
+- Files changed:
+  - `amsrr/morphology/__init__.py`
+  - `amsrr/morphology/graph.py`
+  - `amsrr/feasibility/__init__.py`
+  - `amsrr/feasibility/checker.py`
+  - `amsrr/feasibility/violation_codes.py`
+  - `tests/unit/morphology/test_minimal_morphology_builder.py`
+  - `tests/unit/feasibility/test_feasibility_checker.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added implementation modules that consume existing `MorphologyGraph`, `DesignOutput`, and `FeasibilityResult` schemas.
+- Upstream dependencies used: v0.4 Sections 14, 15.2, 15.3, 16, 26.5, 26.6, 27.1, 27.2, 28.6, 28.7; Agent B PhysicalModel; Agent D IRGBuilder.
+- Downstream impact: Later design-policy scaffolding, assembly planning, contact candidate sampling, and assignment-level feasibility can consume a deterministic seed morphology and checker result.
+- Tests added or run:
+  - Added `test_minimal_morphology_builder_grasp_carry_design_output`
+  - Added `test_minimal_morphology_design_output_roundtrip`
+  - Added `test_feasibility_checker_accepts_minimal_design`
+  - Added `test_feasibility_checker_rejects_missing_required_slot_coverage`
+  - Added `test_feasibility_checker_rejects_closed_loop_v1`
+- Commands run:
+  - `rg -n ...` and `sed -n ...` inspections for spec Sections 14/16/26/28, schemas, and robot model utilities
+  - `mkdir -p amsrr/morphology amsrr/feasibility/checks tests/unit/morphology tests/unit/feasibility`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 35 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Assumptions: Minimal morphology is a deterministic seed/teacher scaffold, not an optimized policy output. Coarse thrust margin uses `abs(thrust_axis_local.z) * thrust_max_n` for the vectoring-capable Holon proxy. Coarse collision and QP hover are represented by necessary-condition scaffold checks, not exact simulation/QP.
+- Blockers: None.
+- Next steps: Continue with design policy scaffolding / deterministic teacher generator, then assembly planning and contact candidate sampling.
+
+### 2026-07-07
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent A/L: SharedInteractionWorkspace tensor/mask contract
 - Summary: Implemented workspace token group schema, strict group mask/slice validation, recommended learned-query specs, and a SharedInteractionWorkspaceBuilder that assembles modality token groups into a padded shared workspace with required empty groups.
 - Files changed:
@@ -257,6 +291,28 @@
 ---
 
 ## Work Package Logs
+
+### Agent E/F: Minimal MorphologyGraph + Feasibility Hard-Check Scaffolding
+
+#### 2026-07-07
+- Scope: Build a connected minimal MorphologyGraph/DesignOutput from TaskSpec + IRG + PhysicalModel, and evaluate design-level hard feasibility checks.
+- Files changed:
+  - `amsrr/morphology/__init__.py`
+  - `amsrr/morphology/graph.py`
+  - `amsrr/feasibility/__init__.py`
+  - `amsrr/feasibility/checker.py`
+  - `amsrr/feasibility/violation_codes.py`
+  - `tests/unit/morphology/test_minimal_morphology_builder.py`
+  - `tests/unit/feasibility/test_feasibility_checker.py`
+- Upstream dependencies: Agent B PhysicalModel and ModuleCapabilityToken, Agent D IRG ContactSlots, v0.4 MorphologyGraph/DesignOutput/FeasibilityResult schemas.
+- Implemented: Minimal module chain generation, dock port replication/compatibility masking, structural dock edges, robot anchor creation from ContactSlots, slot-anchor binding priors, design action trace, violation code constants, and design-level hard checks for required P0 validity conditions.
+- Not implemented: Learned π_D, candidate enumeration policy head, deterministic design teacher variants beyond the minimal seed, exact collision checking, exact QP hover feasibility, assignment-level feasibility, simulator integration.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: ContactCandidateSampler can start from known RobotAnchors and slot-anchor priors; later FeasibilityChecker work can refine coarse checks without changing result schema.
+- Tests added: Morphology builder and feasibility checker tests listed in the global entry.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 35 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: The checker version is `p0_agent_ef_v1`. The minimal builder creates optional slot anchors too when a ContactSlot allows them, but required coverage is checked against required slots and their `min_count_group`.
+- Open questions: None currently.
 
 ### Agent A/L: SharedInteractionWorkspace Tensor/Mask Contract
 

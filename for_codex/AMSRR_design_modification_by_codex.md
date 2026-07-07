@@ -4,6 +4,18 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-07
 
+### Minimal Morphology Seed Supplement
+
+- Context: v0.4 defines MorphologyGraph/DesignOutput and π_D action vocabulary, but a learned design policy and full deterministic teacher variants are later work.
+- Decision: Added `MinimalMorphologyBuilder` as a deterministic P0 seed builder. It creates a connected tree of Holon modules, replicates dock ports from `PhysicalModel`, creates RobotAnchors from IRG ContactSlots, and emits a DesignAction trace ending in `STOP`.
+- Compatibility impact: This produces valid `DesignOutput` objects for downstream FeasibilityChecker and ContactCandidateSampler scaffolding without pretending to be an optimized π_D policy.
+
+### FeasibilityChecker P0 Coarse Proxy Supplement
+
+- Context: v0.4 lists design-level hard checks including coarse reachability, collision, thrust margin, payload margin, and QP hover feasibility. Exact collision and QP solving require later simulator/controller integration.
+- Decision: Added a design-level `FeasibilityChecker` scaffold with deterministic structural checks and coarse force proxies. Hover thrust uses `abs(thrust_axis_local.z) * thrust_max_n` per rotor because the Holon module is vectoring-capable and the normalized URDF contains both positive and negative local thrust axes.
+- Compatibility impact: The checker owns deterministic hard violations now, while exact collision/QP checks can replace the proxy internals later without changing `FeasibilityResult`.
+
 ### SharedInteractionWorkspace Empty Group and Mask Supplement
 
 - Context: v0.4 requires `group_slices` and `group_masks`, and lists several required modality groups. P0 currently has only some modality encoders implemented.
