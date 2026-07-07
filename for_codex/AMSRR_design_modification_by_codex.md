@@ -4,6 +4,18 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-07
 
+### SharedInteractionWorkspace Empty Group and Mask Supplement
+
+- Context: v0.4 requires `group_slices` and `group_masks`, and lists several required modality groups. P0 currently has only some modality encoders implemented.
+- Decision: Added `WorkspaceTokenGroup` and `SharedInteractionWorkspaceBuilder`. Missing required modality groups are represented as zero-width slices with empty `[B, 0]` masks and explicit `d_model` in the token group contract.
+- Compatibility impact: A partial P0 encoder stack can still produce a valid full workspace while preserving required group keys. Downstream heads can rely on stable group presence even before every modality is implemented.
+
+### SharedInteractionWorkspace Strict Group Mask Validation Supplement
+
+- Context: v0.4 states masks must represent validity and zero-valued feature vectors must not imply validity.
+- Decision: `SharedInteractionWorkspace` now requires a `group_masks` entry for every group slice. Each group mask must have shape `[B, slice_width]` and match the corresponding slice of the global `mask`.
+- Compatibility impact: This strengthens the internal tensor contract without changing persisted task/IRG/envelope schemas. Existing tests were updated to pass explicit group masks.
+
 ### InteractionEnvelope Count and Optional Slot Supplement
 
 - Context: v0.4's grasp/carry envelope example has `required_contact_count_range: [2, 4]` and `required_contact_modes: [grasp, support]`. The current IRG template represents grasp as a required slot and support as an optional slot.

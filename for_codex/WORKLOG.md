@@ -4,6 +4,39 @@
 
 ### 2026-07-07
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent A/L: SharedInteractionWorkspace tensor/mask contract
+- Summary: Implemented workspace token group schema, strict group mask/slice validation, recommended learned-query specs, and a SharedInteractionWorkspaceBuilder that assembles modality token groups into a padded shared workspace with required empty groups.
+- Files changed:
+  - `amsrr/schemas/workspace.py`
+  - `amsrr/encoders/__init__.py`
+  - `amsrr/encoders/workspace_builder.py`
+  - `tests/unit/schemas/test_workspace.py`
+  - `tests/unit/encoders/test_workspace_builder.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: Strengthened internal workspace validation by adding `WorkspaceTokenGroup`, `OPTIONAL_WORKSPACE_GROUPS`, `WORKSPACE_GROUPS`, required `group_masks` shape checks, optional `contact_candidates`, and `recommended_learned_query_specs`.
+- Upstream dependencies used: v0.4 Sections 21.6, 21.7, 26.1, 27.1, 27.2; prior InteractionEnvelopeEncoder token-group output.
+- Downstream impact: Future modality encoders can produce `WorkspaceTokenGroup` objects and use `SharedInteractionWorkspaceBuilder` to assemble a single tensor/mask/source-id contract for π_D/π_H/π_L/critic/feasibility heads.
+- Tests added or run:
+  - Added `test_workspace_rejects_group_mask_mismatch`
+  - Added `test_workspace_token_group_shapes`
+  - Added `test_learned_query_spec_contract`
+  - Added `test_workspace_builder_assembles_required_group_slices`
+  - Added `test_workspace_builder_supports_optional_contact_candidate_group`
+  - Added `test_workspace_builder_rejects_mismatched_d_model`
+  - Added `test_empty_workspace_token_group_contract`
+- Commands run:
+  - `rg -n ...` and `sed -n ...` inspections for spec Section 21, workspace schema, and encoder outputs
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 30 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Assumptions: Empty modality groups are represented as `[B, 0]` nested-list rows plus explicit `d_model`, then become zero-width slices in the assembled workspace. Query specs are contracts only; learned query parameters are not implemented here.
+- Blockers: None.
+- Next steps: Implementation order item 9 can build MorphologyGraph and DesignOutput; later modality encoders can feed additional non-empty groups into the workspace builder.
+
+### 2026-07-07
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent D/A: InteractionEnvelopeExtractor + InteractionEnvelopeEncoder
 - Summary: Implemented deterministic InteractionEnvelope extraction from IRG and a dependency-free InteractionEnvelopeEncoder contract that emits padded token tensors, masks, token type ids, source type ids, and source ids for the `interaction_envelope` workspace group.
 - Files changed:
@@ -224,6 +257,26 @@
 ---
 
 ## Work Package Logs
+
+### Agent A/L: SharedInteractionWorkspace Tensor/Mask Contract
+
+#### 2026-07-07
+- Scope: Define and validate the internal NN tensor contract that fuses per-modality token groups with masks, source ids, group slices, and learned-query specs.
+- Files changed:
+  - `amsrr/schemas/workspace.py`
+  - `amsrr/encoders/__init__.py`
+  - `amsrr/encoders/workspace_builder.py`
+  - `tests/unit/schemas/test_workspace.py`
+  - `tests/unit/encoders/test_workspace_builder.py`
+- Upstream dependencies: Agent A workspace schema foundation, Agent D/A InteractionEnvelopeEncoder output, v0.4 SharedInteractionWorkspace and LearnedQuerySpec contract.
+- Implemented: `WorkspaceTokenGroup`, stricter `SharedInteractionWorkspace` group mask validation, optional contact candidate group support, recommended query specs, empty group factory, encoder-output-to-group adapter, and shared workspace assembly.
+- Not implemented: Learned query tensors/parameters, attention pooling, fusion encoder, policy heads, modality-specific encoders beyond the existing InteractionEnvelopeEncoder.
+- Schema/interface changes: Internal workspace schema validation was strengthened. `group_masks` are now required for every group slice and must match the corresponding global mask slice.
+- Downstream impact: Heads can rely on `source_ids` and `group_slices` to map outputs back to source schema ids. π_H contexts can opt into the optional `contact_candidates` group.
+- Tests added: Workspace group/mask/query tests and workspace builder tests listed in the global entry.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 30 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: `SharedInteractionWorkspaceBuilder` fills missing required groups with zero-width empty groups, so partial modality implementations can still produce a valid full workspace.
+- Open questions: None currently.
 
 ### Agent D/A: InteractionEnvelopeExtractor + InteractionEnvelopeEncoder
 
