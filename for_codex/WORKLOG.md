@@ -4,6 +4,35 @@
 
 ### 2026-07-07
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent C: GeometryProcessor
+- Summary: Implemented deterministic GeometryProcessor for primitives and mesh smoke, including asset resolution, primitive analytic surface decomposition, STL/OBJ mesh summary loading, surface patch graph construction, and contact region graph construction.
+- Files changed:
+  - `amsrr/geometry/__init__.py`
+  - `amsrr/geometry/asset_resolver.py`
+  - `amsrr/geometry/surface_patch_graph.py`
+  - `amsrr/geometry/contact_region_extractor.py`
+  - `amsrr/geometry/geometry_processor.py`
+  - `tests/unit/geometry/test_geometry_processor.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None. Existing `GeometryDescriptor`, `GlobalShapeFeatures`, `SurfacePatchGraph`, `ContactRegionGraph`, `SurfacePatchToken`, and `ContactRegion` schemas were used unchanged.
+- Upstream dependencies used: v0.4 Sections 8.1-8.10, 26.3, 27.1, 27.2; Agent A schemas; existing mesh assets under `module_urdf/mesh/`.
+- Downstream impact: Agent D IRGBuilder can consume primitive and mesh `GeometryDescriptor` outputs. P0 now has box primitive regions and mesh smoke coverage.
+- Tests added or run:
+  - Added `test_geometry_processor_box_regions`
+  - Added `test_geometry_processor_mesh_smoke`
+- Commands run:
+  - `mkdir -p amsrr/geometry tests/unit/geometry assets/objects/primitives assets/objects/meshes`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 16 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Assumptions: P0 mesh support is a deterministic smoke implementation, not full mesh repair/segmentation. Mesh descriptors expose hashed refs such as `mesh://sha256:<hash>` instead of raw asset paths.
+- Blockers: None.
+- Next steps: Agent D IRGBuilder and templates can use these descriptors; later mesh work can replace smoke normal-cluster aggregation with richer segmentation without schema changes.
+
+### 2026-07-07
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent B: URDF / PhysicalModel
 - Summary: Implemented URDF/xacro XML loader, thrust model YAML loader, PhysicalModel builder, ModuleCapabilityToken builder, normalized runtime Holon URDF asset, and Agent B unit tests.
 - Files changed:
@@ -126,6 +155,27 @@
 ---
 
 ## Work Package Logs
+
+### Agent C: GeometryProcessor
+
+#### 2026-07-07
+- Scope: Convert `GeometrySpec` references into `GeometryDescriptor`, learning-side patch/region tokens, and hashed exact/collision geometry refs for P0 primitives and mesh smoke.
+- Files changed:
+  - `amsrr/geometry/__init__.py`
+  - `amsrr/geometry/asset_resolver.py`
+  - `amsrr/geometry/surface_patch_graph.py`
+  - `amsrr/geometry/contact_region_extractor.py`
+  - `amsrr/geometry/geometry_processor.py`
+  - `tests/unit/geometry/test_geometry_processor.py`
+- Upstream dependencies: Agent A schema dataclasses, v0.4 GeometryProcessor contract, existing `module_urdf/mesh/battery_1.STL` smoke asset.
+- Implemented: Primitive analytic decomposition for box, sphere, cylinder, and capsule; box face region coverage; STL binary/ascii and OBJ smoke mesh summary; normal-cluster mesh patch aggregation; path-free descriptor refs; deterministic surface/contact graph edge construction.
+- Not implemented: Full mesh repair, curvature estimation, rim extraction, convex decomposition, SDF surface sampling, point cloud reconstruction, task-template-specific rim/edge extraction.
+- Schema/interface changes: None.
+- Downstream impact: IRGBuilder can request object surface contact regions for primitives and receive non-empty mesh patch clusters for mesh objects.
+- Tests added: `test_geometry_processor_box_regions`, `test_geometry_processor_mesh_smoke`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 16 passed, 1 skipped.
+- Handoff notes: `GeometryDescriptor.collision_ref` and `exact_geometry_ref` use hash URIs rather than raw filesystem paths. Asset paths remain resolver inputs only.
+- Open questions: None currently.
 
 ### Agent B: URDF / PhysicalModel
 
