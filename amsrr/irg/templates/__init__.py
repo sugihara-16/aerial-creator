@@ -1,0 +1,2 @@
+"""Interaction template library."""
+

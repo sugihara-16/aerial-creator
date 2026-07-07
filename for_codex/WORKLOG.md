@@ -4,6 +4,43 @@
 
 ### 2026-07-07
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent D: IRGBuilder + InteractionTemplates
+- Summary: Implemented deterministic IRGBuilder, SceneGraph normalization, IRG structural validator, and all five P0 task-family templates: free-flight navigation, object grasp/carry, valve operation, perching manipulation, and contact-mediated locomotion.
+- Files changed:
+  - `amsrr/irg/__init__.py`
+  - `amsrr/irg/irg_builder.py`
+  - `amsrr/irg/validator.py`
+  - `amsrr/irg/templates/__init__.py`
+  - `amsrr/irg/templates/base.py`
+  - `amsrr/irg/templates/free_flight.py`
+  - `amsrr/irg/templates/object_grasp_carry.py`
+  - `amsrr/irg/templates/valve_operation.py`
+  - `amsrr/irg/templates/perching_manipulation.py`
+  - `amsrr/irg/templates/contact_mediated_locomotion.py`
+  - `tests/unit/irg/test_irg_builder.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None. Existing TaskSpec, GeometryDescriptor, InteractionRequirementGraph, IRGNode, IRGEdge, PhaseType, ConstraintType, CapabilityType, and ContactMode schemas were used unchanged.
+- Upstream dependencies used: v0.4 Sections 10, 11, 12, 26.4, 27.1, 27.2, 28.3, 28.4; Agent A schemas; Agent C GeometryProcessor outputs.
+- Downstream impact: Agent E EnvelopeExtractor and downstream policy/feasibility work can now consume valid IRGs for every P0 task family. IRGs remain abstract and do not include final contact poses, robot anchors, morphology, trajectories, or actuator commands.
+- Tests added or run:
+  - Added `test_phase_label_to_phase_type_mapping`
+  - Added `test_irg_builder_grasp_carry_valid`
+  - Added `test_irg_builder_all_task_families_smoke`
+- Commands run:
+  - `find amsrr/irg tests/unit/irg -type f | sort`
+  - `sed -n ...` inspections for IRGBuilder, templates, validator, schemas, and spec sections
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `python3 - <<'PY' ...` smoke inspection of object grasp/carry IRG node and edge counts
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 19 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Assumptions: Template-local phase labels are preserved in `phase_label` and mapped into existing `PhaseType` values. Template-local constraint concepts that are not v0.4 `ConstraintType` enum values are represented by the closest standard enum and preserved in `parameters["template_constraint"]`.
+- Blockers: None.
+- Next steps: Agent E EnvelopeExtractor should compute compact summaries from these IRGs without treating the envelope as source of truth. The Section 26.4 `envelope_extractor.py` item remains for the next work package because this task explicitly targeted item 6, IRGBuilder and all task templates.
+
+### 2026-07-07
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent C: GeometryProcessor
 - Summary: Implemented deterministic GeometryProcessor for primitives and mesh smoke, including asset resolution, primitive analytic surface decomposition, STL/OBJ mesh summary loading, surface patch graph construction, and contact region graph construction.
 - Files changed:
@@ -155,6 +192,32 @@
 ---
 
 ## Work Package Logs
+
+### Agent D: IRGBuilder + InteractionTemplates
+
+#### 2026-07-07
+- Scope: Compile TaskSpec plus GeometryDescriptor-derived contact regions into a single typed InteractionRequirementGraph for all P0 task families.
+- Files changed:
+  - `amsrr/irg/__init__.py`
+  - `amsrr/irg/irg_builder.py`
+  - `amsrr/irg/validator.py`
+  - `amsrr/irg/templates/__init__.py`
+  - `amsrr/irg/templates/base.py`
+  - `amsrr/irg/templates/free_flight.py`
+  - `amsrr/irg/templates/object_grasp_carry.py`
+  - `amsrr/irg/templates/valve_operation.py`
+  - `amsrr/irg/templates/perching_manipulation.py`
+  - `amsrr/irg/templates/contact_mediated_locomotion.py`
+  - `tests/unit/irg/test_irg_builder.py`
+- Upstream dependencies: Agent A schema dataclasses and enum validation, Agent C GeometryProcessor contact regions, v0.4 IRG and template contracts.
+- Implemented: Deterministic node IDs and edge ordering, task/phase/contact-region/contact-slot/wrench/state/constraint/capability node generation, typed cross edges, structural validation, phase-label mapping, and smoke-valid IRGs for all five P0 task families.
+- Not implemented: InteractionEnvelope extraction, task-aware geometry re-extraction beyond current GeometryProcessor descriptors, exact valve rim/handle segmentation, final contact/candidate selection, robot anchor assignment, morphology generation, trajectory generation, actuator commands.
+- Schema/interface changes: None.
+- Downstream impact: Envelope extraction can derive contact count ranges, modes, region sets, wrench requirements, state targets, constraints, and capability requirements directly from the IRG.
+- Tests added: `test_phase_label_to_phase_type_mapping`, `test_irg_builder_grasp_carry_valid`, `test_irg_builder_all_task_families_smoke`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 19 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: `IRGBuilder.build_with_scene_graph()` returns both IRG and normalized SceneGraph for debugging. Non-template-required environment/obstacle descriptors are resolved lazily, so the v0.4 grasp/carry example can build even though it references `floor_geom` without declaring that geometry.
+- Open questions: None currently.
 
 ### Agent C: GeometryProcessor
 
