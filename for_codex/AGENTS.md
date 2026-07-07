@@ -58,7 +58,8 @@ work package には依存関係がある。設計書の implementation order に
 また、ユーザーから指示があった場合は、次の作業における``Agent X work package``自体の提案もすること。
 
 ## 実装ルール
-- 実装時は、まず該当箇所のv0.4設計書を確認してください。設計書に未定義な仕様については、システムに整合するように実装案を策定し、提示してください。また、設計書で指定された仕様では不都合がある場合についても同様に、修正設計案を提示してください。
+- 実装時は、まず該当箇所のv0.4設計書を確認してください。設計書に未定義な仕様については、システムに整合するようAMSRR_design_modification_by_codex.mdを作りましたので、に実装案を策定し、提示してください。また、設計書で指定された仕様では不都合がある場合についても同様に、修正設計案を提示してください。
+- 設計書からの変更した内容や補足した内容は、worklogとは別にAMSRR_design_modification_by_codex.mdにも記録する
 - schema-first implementation を優先する。
 - 変更は、依頼された work package の範囲に限定し、最小限に保つ。
 - schema fields、enum names、tensor shapes、masks、IDs、file paths を黙って変更してはならない。
