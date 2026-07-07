@@ -1,0 +1,16 @@
+robot_model:
+  module_type: holon
+  module_urdf_path: assets/robots/holon/holon.urdf
+  thrust_model_path: configs/robot/thrust_model.yaml
+  dock_port_detection:
+    mode: name_pattern
+    patterns:
+      pitch: "pitch_dock"
+      yaw: "yaw_dock"
+  rotor_detection:
+    mode: link_name_pattern
+    patterns:
+      thrust: "thrust_"
+      rotor_joint: "rotor_"
+      gimbal_joint: "gimbal_"
+

@@ -1,0 +1,18 @@
+rotors:
+  - rotor_id: thrust_1
+    thrust_min_n: 0.0
+    thrust_max_n: 20.0
+    reaction_torque_coeff_nm_per_n: 0.0
+  - rotor_id: thrust_2
+    thrust_min_n: 0.0
+    thrust_max_n: 20.0
+    reaction_torque_coeff_nm_per_n: 0.0
+  - rotor_id: thrust_3
+    thrust_min_n: 0.0
+    thrust_max_n: 20.0
+    reaction_torque_coeff_nm_per_n: 0.0
+  - rotor_id: thrust_4
+    thrust_min_n: 0.0
+    thrust_max_n: 20.0
+    reaction_torque_coeff_nm_per_n: 0.0
+

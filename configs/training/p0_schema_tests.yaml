@@ -1,0 +1,6 @@
+phase: P0
+run_tests:
+  - test_task_spec_parse_grasp_carry_yaml
+  - test_schema_roundtrip_json
+  - test_padded_tensor_masks
+
