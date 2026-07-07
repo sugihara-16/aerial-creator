@@ -4,6 +4,24 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-07
 
+### P0 ContactCandidate Pairwise Matrix Supplement
+
+- Context: v0.4 requires pairwise/group compatibility for `ContactCandidateSet`, but exact contact-pair geometry, collision, and grasp grouping belong to later sampler/controller work.
+- Decision: Added P0 pairwise helpers that mark immediate conflicts only: duplicate candidate IDs and candidates sharing the same robot anchor. Compatibility scores are deterministic smoke values: conflict `0.0`, same-slot different-anchor `0.75`, unrelated non-conflicting pair `0.5`, diagonal `1.0`.
+- Compatibility impact: This does not claim arbitrary candidate subsets are feasible. Later ContactCandidateSampler and assignment-level evaluators can replace the heuristic internals while keeping the same `ContactCandidateSet` fields.
+
+### Assignment-Level QP Smoke Supplement
+
+- Context: v0.4 says assignment-level wrench/friction/collision/QP feasibility is evaluated after pi_H selects a `ContactAssignment` set, and that Version 1 must not enumerate every candidate subset.
+- Decision: Added `evaluate_assignment_level_qp` as a selected-assignment smoke evaluator. It stores an `AssignmentFeasibilityResult` in `ContactCandidateSet.assignment_feasibility_cache` and emits `E_ASSIGNMENT_QP_INFEASIBLE` when the provided residual exceeds threshold.
+- Compatibility impact: The QP backend remains out of scope for this P0 piece. A later exact evaluator can supply the residuals and margins without changing the cache/result schema.
+
+### PolicyCommand Bias Builder Interface Supplement
+
+- Context: v0.4 requires pi_L to output `PolicyCommand` intent while final actuator commands must come from the QP/PID/controller layer.
+- Decision: Added `PolicyCommandBiasBuilder` and `DesiredBiasReferences` to convert `PolicyCommand` plus the active `InteractionKnot` into controller reference inputs: joint position/velocity references, desired wrench, body references, contact tracking references, anchor pose offsets, and merged priority weights.
+- Compatibility impact: The builder deliberately does not produce rotor thrusts, vectoring joint commands, or final actuator commands. Later QP/PID interfaces can consume these references as controller inputs.
+
 ### Minimal Morphology Seed Supplement
 
 - Context: v0.4 defines MorphologyGraph/DesignOutput and π_D action vocabulary, but a learned design policy and full deterministic teacher variants are later work.

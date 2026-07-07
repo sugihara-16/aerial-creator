@@ -4,6 +4,38 @@
 
 ### 2026-07-07
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent H/I: P0 interface-only smoke pieces
+- Summary: Implemented P0 interface-only helpers for ContactCandidateSet pairwise compatibility, assignment-level QP infeasibility reporting, and PolicyCommand-to-QP/PID reference bias building.
+- Files changed:
+  - `amsrr/policies/__init__.py`
+  - `amsrr/policies/contact_candidate_set.py`
+  - `amsrr/policies/assignment_feasibility.py`
+  - `amsrr/controllers/__init__.py`
+  - `amsrr/controllers/policy_command_builder.py`
+  - `tests/unit/policies/test_contact_candidate_interfaces.py`
+  - `tests/unit/controllers/test_policy_command_builder.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added interface helper modules that consume existing `ContactCandidateSet`, `AssignmentFeasibilityResult`, `ContactAssignment`, `InteractionKnot`, and `PolicyCommand` schemas.
+- Upstream dependencies used: v0.4 Sections 18, 19, 20, 26.8, 26.9, 27.2, 28.9, 28.10, 28.11, Appendix B.4; existing policy/contact candidate schemas.
+- Downstream impact: ContactCandidateSampler, π_H trajectory planners, π_L policies, and controller backends have smoke-tested interface contracts for candidate pairwise matrices, selected-assignment feasibility cache entries, and desired bias references.
+- Tests added or run:
+  - Added `test_contact_candidate_pairwise_conflict_matrix`
+  - Added `test_assignment_level_qp_infeasible_case`
+  - Added `test_policy_command_bias_builder`
+- Commands run:
+  - `rg -n ...` and `sed -n ...` inspections for spec Sections 18-20, 26.8, 26.9, and 27.2
+  - `mkdir -p amsrr/policies amsrr/controllers tests/unit/policies tests/unit/controllers`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 38 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Assumptions: Pairwise conflict is limited to immediate candidate conflicts such as shared robot anchor; no exhaustive subset feasibility is performed. Assignment-level QP infeasibility only evaluates a selected assignment set. PolicyCommandBiasBuilder emits references for QP/PID and never final actuator commands.
+- Blockers: None.
+- Next steps: P0 Section 27.2 unit-test smoke coverage is now complete; later phases can implement full ContactCandidateSampler, π_H baseline trajectory planner, π_L baseline policy, and controller interfaces.
+
+### 2026-07-07
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent E/F: Minimal MorphologyGraph + Feasibility hard-check scaffolding
 - Summary: Implemented a deterministic minimal MorphologyGraph/DesignOutput builder and a design-level FeasibilityChecker scaffold for schema, connected graph, module count, port compatibility, closed-loop rejection, required slot coverage, coarse reachability, thrust margin, payload margin, and hover proxy checks.
 - Files changed:
@@ -291,6 +323,28 @@
 ---
 
 ## Work Package Logs
+
+### Agent H/I: P0 Interface-Only Smoke Pieces
+
+#### 2026-07-07
+- Scope: Add the remaining P0 Section 27.2 smoke pieces for contact candidates, selected assignment feasibility, and policy command bias references.
+- Files changed:
+  - `amsrr/policies/__init__.py`
+  - `amsrr/policies/contact_candidate_set.py`
+  - `amsrr/policies/assignment_feasibility.py`
+  - `amsrr/controllers/__init__.py`
+  - `amsrr/controllers/policy_command_builder.py`
+  - `tests/unit/policies/test_contact_candidate_interfaces.py`
+  - `tests/unit/controllers/test_policy_command_builder.py`
+- Upstream dependencies: Existing contact candidate and policy schemas, v0.4 candidate/π_H/π_L/controller interface contracts.
+- Implemented: `build_pairwise_conflict_matrix`, `build_pairwise_compatibility_score`, `build_contact_candidate_set`, deterministic `assignment_key_from_assignments`, `evaluate_assignment_level_qp`, and `PolicyCommandBiasBuilder`.
+- Not implemented: Full morphology-conditioned candidate sampling, learned candidate encoder/scorer, π_H baseline planner, π_L baseline policy, actual QP allocation, PID/controller actuator outputs.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: Future Agent H/I implementations can replace helpers with richer implementations while keeping tested schema boundaries and no direct actuator output from π_L.
+- Tests added: `test_contact_candidate_pairwise_conflict_matrix`, `test_assignment_level_qp_infeasible_case`, `test_policy_command_bias_builder`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 38 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: `ASSIGNMENT_QP_INFEASIBLE_CODE` is `E_ASSIGNMENT_QP_INFEASIBLE`, matching v0.4 Appendix C. `PolicyCommandBiasBuilder` merges π_H priority weights with π_L command weights, with PolicyCommand taking precedence.
+- Open questions: None currently.
 
 ### Agent E/F: Minimal MorphologyGraph + Feasibility Hard-Check Scaffolding
 
