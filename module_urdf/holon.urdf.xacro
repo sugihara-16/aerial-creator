@@ -1,0 +1,975 @@
+<?xml version="1.0"?>
+<robot name="holon">
+
+  <!-- general attribute -->
+  <baselink name="fc" />
+  <thrust_link name="thrust" />
+  <m_f_rate value="-0.0172" />
+
+  <link name="root">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0.00001" />
+      <inertia ixx="0.000001" ixy="0.0" ixz="0.0" iyy="0.000001" iyz="0.0" izz="0.000001" />
+    </inertial>
+  </link>
+
+  <joint name="root_joint" type="fixed">
+    <parent link="root" />
+    <child link="main_body" />
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <axis xyz="0 0 1" />
+  </joint>
+
+  <link name="main_body">
+    <inertial>
+      <origin xyz="0.0081222 -0.00030396 0.024747" rpy="0 0 0" />
+      <mass value="0.2107" />
+      <inertia ixx="8.674E-05" ixy="4.2064E-08" ixz="2.4451E-07" iyy="7.0505E-05" iyz="3.7919E-07" izz="0.00013909" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/main_body.STL" />
+      </geometry>
+      <material name="holon_material_1">
+        <color rgba="0.1098 0.1098 0.1098 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/main_body.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <gazebo reference="main_body">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <link name="rotor_arm1">
+    <inertial>
+      <origin xyz="-0.008905 -7.6644E-05 -6.7529E-06" rpy="0 0 0" />
+      <mass value="0.020773" />
+      <inertia ixx="1.8801E-06" ixy="1.7581E-07" ixz="-1.3117E-07" iyy="0.00011003" iyz="1.5494E-12" izz="0.00011002" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/rotor_arm_pitch.STL" />
+      </geometry>
+      <material name="holon_material_2">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/rotor_arm_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <gazebo reference="rotor_arm1">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="base_arm_joint1" type="fixed">
+    <origin xyz="0.10819 0.10819 0.01425" rpy="0 0 0.7854" />
+    <parent link="main_body" />
+    <child link="rotor_arm1" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+
+  <link name="gimbal_link1">
+    <inertial>
+      <origin xyz="-0.00169725900249743 -0.000272366504490786 0.0132808657295699" rpy="0 0 0" />
+      <mass value="0.114616418241844" />
+      <inertia ixx="9.38482158354473E-05" ixy="3.64992590674264E-09" ixz="-3.02676478263231E-11" iyy="9.07404592245826E-05" iyz="8.29792175329466E-08" izz="0.000172315484295979" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/gimbal_link_1.STL" />
+      </geometry>
+      <material name="holon_material_3">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/gimbal_link_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <gazebo reference="gimbal_link1">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="gimbal1" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="rotor_arm1" />
+    <child link="gimbal_link1" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2.0" upper="2.0" effort="6.6" velocity="3.0" />
+    <dynamics damping="0.8" friction="0.0" />
+  </joint>
+
+
+  <link name="rotor_parent1">
+    <inertial>
+      <origin xyz="2.65327737142274E-07 -3.68881923621528E-07 0.000710177609176264" rpy="0 0 0" />
+      <mass value="0.00691611769799333" />
+      <inertia ixx="4.5107157257392E-06" ixy="-1.91930452913549E-11" ixz="-1.53248831777946E-12" iyy="4.51058993510653E-06" iyz="-3.52246595533004E-12" izz="8.99294623824822E-06" />
+    </inertial>
+  </link>
+
+  <gazebo reference="rotor_parent1">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="rotor_parent_link_joint1" type="fixed">
+    <origin xyz="0 0 0.0465" rpy="0 0 -3.1416" />
+    <parent link="gimbal_link1" />
+    <child link="rotor_parent1" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+
+  <link name="thrust1">
+    <inertial>
+      <origin xyz="2.65327737142274E-07 -3.68881923621528E-07 0.000710177609176264" rpy="0 0 0" />
+      <mass value="0.00691611769799333" />
+      <inertia ixx="4.5107157257392E-06" ixy="-1.91930452913759E-11" ixz="-1.53248831793394E-12" iyy="4.51058993510653E-06" iyz="-3.52246595469477E-12" izz="8.99294623824822E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/thrust_1.STL" />
+      </geometry>
+      <material name="holon_material_4">
+        <color rgba="0.858823529411765 0.858823529411765 0.858823529411765 0.8" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/thrust_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <gazebo reference="thrust1">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="rotor1" type="continuous">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="rotor_parent1" />
+    <child link="thrust1" />
+    <axis xyz="0 0 1" />
+    <limit effort="100.0" lower="1.0" upper="20.0" velocity="0.5" />
+  </joint>
+
+
+  <link name="pitch_dock_mech1">
+    <inertial>
+      <origin xyz="0.0435854552868389 0.00232898636321377 0.000438688187298798" rpy="0 0 0" />
+      <mass value="0.148244005774861" />
+      <inertia ixx="0.000114173293280184" ixy="-9.37810923948629E-06" ixz="-8.87429925132249E-07" iyy="7.46981083615199E-05" iyz="2.47744569585702E-06" izz="0.00010099002155708" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 1.5708" />
+      <geometry>
+        <mesh filename="mesh/pitch_dock_mech_1.STL" />
+      </geometry>
+      <material name="holon_material_5">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 0.5" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 1.5708" />
+      <geometry>
+        <mesh filename="mesh/pitch_dock_mech_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <gazebo reference="pitch_dock_mech1">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="pitch_dock_mech_joint1" type="revolute">
+    <origin xyz="0.145 0 0" rpy="0 0 0" />
+    <parent link="rotor_arm1" />
+    <child link="pitch_dock_mech1" />
+    <axis xyz="0 1 0" />
+    <limit lower="-1.5708" upper="1.5708" effort="6.6" velocity="3.0" />
+    <dynamics damping="0.8" friction="0.0" />
+  </joint>
+
+  <link name="pitch_connect_dummy_1">
+  </link>
+
+  <joint name="pitch_connect_point_1" type="fixed">
+    <origin xyz="0.045 0 0" rpy="0 0 0" />
+    <parent link="pitch_dock_mech1" />
+    <child link="pitch_connect_dummy_1" />
+    <axis xyz="0 1 0" />
+  </joint>
+
+
+
+  <link name="rotor_arm2">
+    <inertial>
+      <origin xyz="-0.0089049763794386 -7.66440041604505E-05 -6.75285073321874E-06" rpy="0 0 0" />
+      <mass value="0.0207734465973421" />
+      <inertia ixx="1.88007137697318E-06" ixy="1.75805882152954E-07" ixz="-1.31171869170117E-07" iyy="0.000110029015212834" iyz="1.54936095844934E-12" izz="0.00011001968969141" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/rotor_arm_2.STL" />
+      </geometry>
+      <material name="holon_material_6">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/rotor_arm_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <gazebo reference="rotor_arm2">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="base_arm_joint2" type="fixed">
+    <origin xyz="-0.108187337521542 0.108187337521542 0.0142500000000002" rpy="0 0 2.35619449019234" />
+    <parent link="main_body" />
+    <child link="rotor_arm2" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+
+  <link name="gimbal_link2">
+    <inertial>
+      <origin xyz="-0.0016972589098565 -0.000272370749522521 0.0132808554778339" rpy="0 0 0" />
+      <mass value="0.114616383108789" />
+      <inertia ixx="9.38482157682376E-05" ixy="3.64606078942524E-09" ixz="-3.07709708994777E-11" iyy="9.07404578052379E-05" iyz="8.29801630213139E-08" izz="0.000172315483098534" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/gimbal_link_2.STL" />
+      </geometry>
+      <material name="holon_material_7">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/gimbal_link_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <gazebo reference="gimbal_link2">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="gimbal2" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="rotor_arm2" />
+    <child link="gimbal_link2" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2.0" upper="2.0" effort="6.6" velocity="3.0" />
+    <dynamics damping="0.8" friction="0.0" />
+  </joint>
+
+
+  <link name="rotor_parent2">
+    <inertial>
+      <origin xyz="2.36174524131938E-07 -3.03535516627679E-07 0.000710167118880549" rpy="0 0 0" />
+      <mass value="0.00691609144527345" />
+      <inertia ixx="4.51071566851349E-06" ixy="-2.34654402125503E-11" ixz="-7.62826844258594E-13" iyy="4.51059056280382E-06" iyz="-4.5008192772841E-12" izz="8.99294711886863E-06" />
+    </inertial>
+  </link>
+
+  <gazebo reference="rotor_parent2">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="rotor_parent_link_joint2" type="fixed">
+    <origin xyz="0 0 0.0465" rpy="0 0 3.14159265358979" />
+    <parent link="gimbal_link2" />
+    <child link="rotor_parent2" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+
+  <link name="thrust2">
+    <inertial>
+      <origin xyz="2.36174524131938E-07 -3.03535516627679E-07 0.000710167118880549" rpy="0 0 0" />
+      <mass value="0.00691609144527345" />
+      <inertia ixx="4.51071566851349E-06" ixy="-2.34654402123176E-11" ixz="-7.62826844209998E-13" iyy="4.51059056280383E-06" iyz="-4.5008192772841E-12" izz="8.99294711886863E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/thrust_2.STL" />
+      </geometry>
+      <material name="holon_material_8">
+        <color rgba="0.858823529411765 0.858823529411765 0.858823529411765 0.8" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/thrust_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <gazebo reference="thrust2">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="rotor2" type="continuous">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="rotor_parent2" />
+    <child link="thrust2" />
+    <axis xyz="0 0 -1" />
+    <limit effort="100.0" lower="1.0" upper="20.0" velocity="0.5" />
+  </joint>
+
+
+  <link name="yaw_dock_mech1">
+    <inertial>
+      <origin xyz="0.0571915079154116 -0.000204875510043917 0.00031602581809291" rpy="0 0 0" />
+      <mass value="0.169879064120632" />
+      <inertia ixx="5.5925054754778E-05" ixy="-7.63039903836304E-08" ixz="7.71260021239915E-11" iyy="5.27941503830232E-05" iyz="1.91667460847847E-10" izz="4.50397218529975E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 -1.5708" />
+      <geometry>
+        <mesh filename="mesh/yaw_dock_mech_1.STL" />
+      </geometry>
+      <material name="holon_material_9">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 1.5708 -1.5708" />
+      <geometry>
+        <mesh filename="mesh/yaw_dock_mech_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="yaw_connect_dummy_1">
+  </link>
+
+  <joint name="yaw_connect_point_1" type="fixed">
+    <origin xyz="0.115 0 0" rpy="0 0 0" />
+    <parent link="yaw_dock_mech1" />
+    <child link="yaw_connect_dummy_1" />
+    <axis xyz="0 1 0" />
+  </joint>      
+
+  <gazebo reference="yaw_dock_mech1">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="yaw_dock_mech_joint1" type="revolute">
+    <origin xyz="0.145 0 0" rpy="0 0 0.006433" />
+    <parent link="rotor_arm2" />
+    <child link="yaw_dock_mech1" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.5708" upper="1.5708" effort="6.6" velocity="3.0" />
+    <dynamics damping="0.8" friction="0.0" />
+  </joint>
+
+
+  <link name="rotor_arm3">
+    <inertial>
+      <origin xyz="-0.00890497637943871 -7.66440041604088E-05 -6.75285073330027E-06" rpy="0 0 0" />
+      <mass value="0.0207734465973422" />
+      <inertia ixx="1.88007137697298E-06" ixy="1.75805882152779E-07" ixz="-1.31171869170029E-07" iyy="0.000110029015212834" iyz="1.54936095740691E-12" izz="0.00011001968969141" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/rotor_arm_3.STL" />
+      </geometry>
+      <material name="holon_material_10">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/rotor_arm_3.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <gazebo reference="rotor_arm3">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="base_arm_joint3" type="fixed">
+    <origin xyz="-0.108187337521542 -0.108187337521542 0.0142500000000003" rpy="0 0 -2.35619449019234" />
+    <parent link="main_body" />
+    <child link="rotor_arm3" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+
+  <link name="gimbal_link3">
+    <inertial>
+      <origin xyz="-0.00169725992142983 -0.000272365923473485 0.0132808573393451" rpy="0 0 0" />
+      <mass value="0.114616388991962" />
+      <inertia ixx="9.38482316289054E-05" ixy="3.6534522818941E-09" ixz="-3.04671566162151E-11" iyy="9.0740459220216E-05" iyz="8.29789646363117E-08" izz="0.000172315500314257" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/gimbal_link_3.STL" />
+      </geometry>
+      <material name="holon_material_11">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/gimbal_link_3.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <gazebo reference="gimbal_link3">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="gimbal3" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="rotor_arm3" />
+    <child link="gimbal_link3" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2.0" upper="2.0" effort="6.6" velocity="3.0" />
+    <dynamics damping="0.8" friction="0.0" />
+  </joint>
+
+
+  <link name="rotor_parent3">
+    <inertial>
+      <origin xyz="2.55597996351442E-07 -3.83532034620854E-07 0.000710169057828315" rpy="0 0 0" />
+      <mass value="0.0069160972239909" />
+      <inertia ixx="4.51073163997927E-06" ixy="-1.63114178919855E-11" ixz="-1.07582556275722E-12" iyy="4.5105919324411E-06" iyz="-3.26644438555444E-12" izz="8.99296441393612E-06" />
+    </inertial>
+  </link>
+
+  <gazebo reference="rotor_parent3">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="rotor_parent_link_joint3" type="fixed">
+    <origin xyz="0 0 0.0465" rpy="0 0 -3.14159265358979" />
+    <parent link="gimbal_link3" />
+    <child link="rotor_parent3" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+
+  <link name="thrust3">
+    <inertial>
+      <origin xyz="2.55597996351442E-07 -3.83532034620854E-07 0.000710169057828315" rpy="0 0 0" />
+      <mass value="0.0069160972239909" />
+      <inertia ixx="4.51073163997927E-06" ixy="-1.63114178919855E-11" ixz="-1.07582556275722E-12" iyy="4.5105919324411E-06" iyz="-3.26644438555444E-12" izz="8.99296441393612E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/thrust_3.STL" />
+      </geometry>
+      <material name="holon_material_12">
+        <color rgba="0.858823529411765 0.858823529411765 0.858823529411765 0.8" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/thrust_3.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <gazebo reference="thrust3">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="rotor3" type="continuous">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="rotor_parent3" />
+    <child link="thrust3" />
+    <axis xyz="0 0 1" />
+    <limit effort="100.0" lower="1.0" upper="20.0" velocity="0.5" />
+  </joint>
+
+
+  <link name="yaw_dock_mech2">
+    <inertial>
+      <origin xyz="0.0571915079174386 -0.000204875685570594 0.000316025655902956" rpy="0 0 0" />
+      <mass value="0.169879064059493" />
+      <inertia ixx="5.59250547599574E-05" ixy="-7.63033405059009E-08" ixz="7.69956108692984E-11" iyy="5.27941504119748E-05" iyz="1.91659615817426E-10" izz="4.50397218532834E-05" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 1.5708 -1.5708" />
+      <geometry>
+        <mesh filename="mesh/yaw_dock_mech_2.STL" />
+      </geometry>
+      <material name="holon_material_13">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 1.5708 -1.5708" />
+      <geometry>
+        <mesh filename="mesh/yaw_dock_mech_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <gazebo reference="yaw_dock_mech2">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="yaw_dock_mech_joint2" type="revolute">
+    <origin xyz="0.145 0 0" rpy="0 0 0.021103" />
+    <parent link="rotor_arm3" />
+    <child link="yaw_dock_mech2" />
+    <axis xyz="0 0 1" />
+    <limit lower="-1.5708" upper="1.5708" effort="6.6" velocity="3.0" />
+    <dynamics damping="0.8" friction="0.0" />
+  </joint>
+
+  <link name="yaw_connect_dummy_2">
+  </link>
+
+  <joint name="yaw_connect_point_2" type="fixed">
+    <origin xyz="0.115 0 0" rpy="0 0 0" />
+    <parent link="yaw_dock_mech2" />
+    <child link="yaw_connect_dummy_2" />
+    <axis xyz="0 1 0" />
+  </joint>        
+
+
+  <link name="rotor_arm4">
+    <inertial>
+      <origin xyz="-0.00890497637943893 -7.66440041604366E-05 -6.75285073323956E-06" rpy="0 0 0" />
+      <mass value="0.0207734465973421" />
+      <inertia ixx="1.88007137697315E-06" ixy="1.75805882152845E-07" ixz="-1.31171869170082E-07" iyy="0.000110029015212834" iyz="1.5493609541626E-12" izz="0.00011001968969141" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/rotor_arm_pitch.STL" />
+      </geometry>
+      <material name="holon_material_14">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/rotor_arm_4.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <gazebo reference="rotor_arm4">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="base_arm_joint4" type="fixed">
+    <origin xyz="0.108187337521543 -0.108187337521541 0.0142500000000002" rpy="0 0 -0.785398163397442" />
+    <parent link="main_body" />
+    <child link="rotor_arm4" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+
+  <link name="gimbal_link4">
+    <inertial>
+      <origin xyz="-0.00169725780076177 -0.000272367558028846 0.0132808581379445" rpy="0 0 0" />
+      <mass value="0.114616388484001" />
+      <inertia ixx="9.38482225295994E-05" ixy="3.64717382790391E-09" ixz="-3.07693606359249E-11" iyy="9.07404590388863E-05" iyz="8.29792247391166E-08" izz="0.000172315490914326" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/gimbal_link_4.STL" />
+      </geometry>
+      <material name="holon_material_15">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/gimbal_link_4.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <gazebo reference="gimbal_link4">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="gimbal4" type="revolute">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="rotor_arm4" />
+    <child link="gimbal_link4" />
+    <axis xyz="1 0 0" />
+    <limit lower="-2.0" upper="2.0" effort="6.6" velocity="3.0" />
+    <dynamics damping="0.8" friction="0.0" />
+  </joint>
+
+
+  <link name="rotor_parent4">
+    <inertial>
+      <origin xyz="2.36740666764712E-07 -3.65057131773705E-07 0.000710172018830876" rpy="0 0 0" />
+      <mass value="0.00691610544575051" />
+      <inertia ixx="4.51072284640819E-06" ixy="-2.15350765467308E-11" ixz="-9.72390486305882E-13" iyy="4.51059337456005E-06" iyz="-3.35157680188814E-12" izz="8.99295696836674E-06" />
+    </inertial>
+  </link>
+
+  <gazebo reference="rotor_parent4">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="rotor_parent_link_joint4" type="fixed">
+    <origin xyz="0 0 0.0465" rpy="0 0 -3.14159265358979" />
+    <parent link="gimbal_link4" />
+    <child link="rotor_parent4" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+
+  <link name="thrust4">
+    <inertial>
+      <origin xyz="2.36740666764712E-07 -3.65057131773705E-07 0.000710172018830876" rpy="0 0 0" />
+      <mass value="0.00691610544575051" />
+      <inertia ixx="4.51072284640819E-06" ixy="-2.15350765467308E-11" ixz="-9.72390486305882E-13" iyy="4.51059337456005E-06" iyz="-3.35157680178226E-12" izz="8.99295696836674E-06" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/thrust_4.STL" />
+      </geometry>
+      <material name="holon_material_16">
+        <color rgba="0.858823529411765 0.858823529411765 0.858823529411765 0.8" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <geometry>
+        <mesh filename="mesh/thrust_4.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <gazebo reference="thrust4">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="rotor4" type="continuous">
+    <origin xyz="0 0 0" rpy="0 0 0" />
+    <parent link="rotor_parent4" />
+    <child link="thrust4" />
+    <axis xyz="0 0 -1" />
+    <limit effort="100.0" lower="1.0" upper="20.0" velocity="0.5" />
+  </joint>
+
+
+  <link name="pitch_dock_mech2">
+    <inertial>
+      <origin xyz="0.0435854547629767 0.00232898470479128 0.000438690470207035" rpy="0 0 0" />
+      <mass value="0.14824400236095" />
+      <inertia ixx="0.000114173292290504" ixy="-9.37811054885086E-06" ixz="-8.87430519893771E-07" iyy="7.46981113729601E-05" iyz="2.47744138193205E-06" izz="0.000100990016313002" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 1.5708" />
+      <geometry>
+        <mesh filename="mesh/pitch_dock_mech_2.STL" />
+      </geometry>
+      <material name="holon_material_17">
+        <color rgba="0.752941176470588 0.752941176470588 0.752941176470588 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="0 0 1.5708" />
+      <geometry>
+        <mesh filename="mesh/pitch_dock_mech_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="pitch_connect_dummy_2">
+  </link>
+
+  <joint name="pitch_connect_point_2" type="fixed">
+    <origin xyz="0.045 0 0" rpy="0 0 0" />
+    <parent link="pitch_dock_mech2" />
+    <child link="pitch_connect_dummy_2" />
+    <axis xyz="0 1 0" />
+  </joint>
+
+
+  <gazebo reference="pitch_dock_mech2">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="pitch_dock_mech_joint2" type="revolute">
+    <origin xyz="0.145 0 0" rpy="0 0.031857 0" />
+    <parent link="rotor_arm4" />
+    <child link="pitch_dock_mech2" />
+    <axis xyz="0 1 0" />
+    <limit lower="-1.5708" upper="1.5708" effort="6.6" velocity="3.0" />
+    <dynamics damping="0.8" friction="0.0" />
+  </joint>
+
+
+  <link name="fc">
+    <inertial>
+      <origin xyz="-0.00140036767177208 -0.000698513126298634 -0.00232490747602546" rpy="0 0 0" />
+      <mass value="0.00586386970142205" />
+      <inertia ixx="7.90199071034628E-07" ixy="1.52591787147128E-09" ixz="-1.01209018934709E-11" iyy="7.88295004687787E-07" iyz="7.88700594237403E-11" izz="1.57099969747762E-06" />
+    </inertial>
+  </link>
+
+  <gazebo reference="fc">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="fc_joint" type="fixed">
+    <origin xyz="0 0.0001 0.060935" rpy="0 0 0" />
+    <parent link="main_body" />
+    <child link="fc" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+
+  <link name="battery1">
+    <inertial>
+      <origin xyz="-5.98493495209129E-05 2.87169107937579E-11 -0.032069808029366" rpy="0 0 0" />
+      <mass value="0.208516276418653" />
+      <inertia ixx="0.000101484961957605" ixy="1.83742309473515E-13" ixz="-4.60685696556113E-07" iyy="0.000171408361564041" iyz="1.41515083699141E-13" izz="0.000132682759440689" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="-1.5708 0 1.5708" />
+      <geometry>
+        <mesh filename="mesh/battery_1.STL" />
+      </geometry>
+      <material name="holon_material_18">
+        <color rgba="0.792156862745098 0.819607843137255 0.933333333333333 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="-1.5708 0 1.5708" />
+      <geometry>
+        <mesh filename="mesh/battery_1.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <gazebo reference="battery1">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="battery_joint1" type="fixed">
+    <origin xyz="0.014533 -0.0215 -0.006" rpy="0 0 0" />
+    <parent link="main_body" />
+    <child link="battery1" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+
+  <link name="battery2">
+    <inertial>
+      <origin xyz="0 0 0" rpy="0 0 0" />
+      <mass value="0" />
+      <inertia ixx="0" ixy="0" ixz="0" iyy="0" iyz="0" izz="0" />
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0" rpy="-1.5708 0 1.5708" />
+      <geometry>
+        <mesh filename="mesh/battery_2.STL" />
+      </geometry>
+      <material name="holon_material_19">
+        <color rgba="1 1 1 1" />
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0" rpy="-1.5708 0 1.5708" />
+      <geometry>
+        <mesh filename="mesh/battery_2.STL" />
+      </geometry>
+    </collision>
+  </link>
+
+  <gazebo reference="battery2">
+    <dampingFactor>0.00</dampingFactor>
+  </gazebo>
+
+  <joint name="battery_joint2" type="fixed">
+    <origin xyz="0.0145330085889911 0.0215000085889911 -0.00599999999999977" rpy="0 0 0" />
+    <parent link="main_body" />
+    <child link="battery2" />
+    <axis xyz="0 0 0" />
+  </joint>
+
+  <transmission name="gimbal1_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="gimbal1">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="servo1">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="pitch_dock_mech_joint1_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="pitch_dock_mech_joint1">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="servo2">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="gimbal2_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="gimbal2">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="servo3">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="yaw_dock_mech_joint1_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="yaw_dock_mech_joint1">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="servo4">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="gimbal3_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="gimbal3">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="servo5">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="yaw_dock_mech_joint2_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="yaw_dock_mech_joint2">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="servo6">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="gimbal4_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="gimbal4">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="servo7">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="pitch_dock_mech_joint2_tran">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="pitch_dock_mech_joint2">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="servo8">
+      <hardwareInterface>hardware_interface/EffortJointInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="rotor_tran1">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="rotor1">
+      <hardwareInterface>RotorInterface</hardwareInterface>
+    </joint>
+    <actuator name="rotor_actuator1">
+      <hardwareInterface>RotorInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="rotor_tran2">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="rotor2">
+      <hardwareInterface>RotorInterface</hardwareInterface>
+    </joint>
+    <actuator name="rotor_actuator2">
+      <hardwareInterface>RotorInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="rotor_tran3">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="rotor3">
+      <hardwareInterface>RotorInterface</hardwareInterface>
+    </joint>
+    <actuator name="rotor_actuator3">
+      <hardwareInterface>RotorInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <transmission name="rotor_tran4">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="rotor4">
+      <hardwareInterface>RotorInterface</hardwareInterface>
+    </joint>
+    <actuator name="rotor_actuator4">
+      <hardwareInterface>RotorInterface</hardwareInterface>
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+
+</robot>
