@@ -3,6 +3,29 @@
 ## Global Worklog
 
 ### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P3 Acceptance Gate Supplement
+- Work package / Agent label: Agent L: P3 acceptance gate
+- Summary: Added a P3 acceptance gate for Section 24.4. It runs the P3 assembly evaluation runner, checks assembly success rate, verifies construction-state/physical-graph consistency for successful assemblies, and exercises explicit retry and abort probes through the simplified executor.
+- Files changed:
+  - `amsrr/acceptance/p3_acceptance.py`
+  - `amsrr/acceptance/__init__.py`
+  - `tests/acceptance/test_p3_acceptance.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None to persisted schemas. Added acceptance-side `P3AcceptanceCriteria`, `P3AcceptanceReport`, and `run_p3_acceptance`.
+- Upstream dependencies used: v0.4 Section 24.4; Agent K P3 runner; Agent G assembly runner/retry/abort and simplified executor; P2 design distribution/policy for probe target graphs.
+- Downstream impact: P3 can now be mechanically checked before moving to P4 full grasp/carry integration.
+- Tests added or run:
+  - Added `test_p3_acceptance_section_24_4`
+- Commands run:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p3_assembly_runner.py tests/acceptance/test_p3_acceptance.py -q`
+  - `python3 -m compileall amsrr -q`
+- Tests run: P3 runner and P3 acceptance targeted tests passed: 3 passed. `python3 -m compileall amsrr -q` passed.
+- Assumptions: Retry/abort path testing uses explicit deterministic failure probes because the normal simplified executor succeeds deterministically.
+- Blockers: None.
+- Next steps: Run P3 acceptance and related targeted tests, commit order 5, then perform final docs/worklog verification.
+
+### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P3 Assembly Evaluation Runner Supplement
 - Work package / Agent label: Agent K: P3 assembly evaluation runner
 - Summary: Added a P3 assembly evaluation runner/config that samples grasp/carry tasks, reuses deterministic P2 design selection, executes the selected target morphology through `AssemblyRunner` and `SimplifiedAssemblyExecutor`, stores `AssemblyPlan` in `EpisodeArchive.assembly_plan`, and records assembly success/state/retry/abort metrics.
@@ -1131,6 +1154,24 @@
 - Open questions: None currently.
 
 ### Agent L: Tests and Acceptance
+
+#### 2026-07-08
+- Scope: Add P3 order 5 acceptance gate for v0.4 Section 24.4.
+- Files changed:
+  - `amsrr/acceptance/p3_acceptance.py`
+  - `amsrr/acceptance/__init__.py`
+  - `tests/acceptance/test_p3_acceptance.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: Agent K P3 runner, Agent G assembly runner/executor, P2 design distribution/policy, and `EpisodeArchive` JSONL roundtrip helpers.
+- Implemented: `P3AcceptanceCriteria`, `P3AcceptanceReport`, `run_p3_acceptance`, assembly success-rate gate, construction-state consistency gate, explicit retry probe, explicit abort probe, archive roundtrip validation, and acceptance test.
+- Not implemented: P4 full grasp/carry, Isaac execution, learned assembly, π_H/π_L/QP/PID execution, or actuator commands.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: P3 deterministic assembly integration now has a reproducible pass/fail milestone gate.
+- Tests added: `test_p3_acceptance_section_24_4`.
+- Tests passed: P3 runner and P3 acceptance targeted tests passed: 3 passed. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: The acceptance gate intentionally treats retry/abort probes separately from normal success-rate episodes so deterministic success runs do not need random failures.
+- Open questions: None currently.
 
 #### 2026-07-08
 - Scope: Mark P2 complete by wrapping the Section 24.3 design-level acceptance gate in an explicit milestone completion report.

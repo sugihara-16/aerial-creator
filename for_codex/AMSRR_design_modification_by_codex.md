@@ -28,6 +28,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 - Decision: Added Agent K `P3AssemblyEvaluationRunner`. It reuses the P2 grasp/carry task distribution and deterministic `P2DesignPolicy`, selects a feasible target `MorphologyGraph`, executes it through `AssemblyRunner` and `SimplifiedAssemblyExecutor`, stores the `AssemblyPlan` in `EpisodeArchive.assembly_plan`, and records assembly success/state/retry/abort metrics.
 - Compatibility impact: This is a simplified assembly integration runner only. It does not execute π_H, π_L, QP/PID, actuator commands, Isaac, or learned assembly control.
 
+### P3 Acceptance Gate Supplement
+
+- Context: v0.4 Section 24.4 defines P3 acceptance criteria but does not prescribe a concrete acceptance report schema or how to exercise retry/abort paths when the normal simplified executor succeeds deterministically.
+- Decision: Added Agent L `run_p3_acceptance`. It runs the P3 assembly evaluation runner, checks `assembly_success_rate >= 70%`, verifies successful archives have construction-state physical graph consistency, and runs explicit transient-failure retry and persistent-failure abort probes with the simplified executor.
+- Compatibility impact: This is an acceptance harness for deterministic simplified assembly integration. It does not run Isaac, π_H, π_L, QP/PID, actuator commands, or learned assembly control.
+
 ### π_D Joint-Angle Non-Design Clarification
 
 - Context: The v0.4 design text could be misread as treating `ModuleNode.pose_in_design_frame` or `DockEdge.relative_pose_src_to_dst` as continuous design variables for π_D, even though A-MSRR module joints are movable and their instantaneous angles belong to planning/control/runtime state rather than structure design.

@@ -25,6 +25,11 @@ from amsrr.acceptance.p2_completion import (
     P2CompletionReport,
     run_p2_completion,
 )
+from amsrr.acceptance.p3_acceptance import (
+    P3AcceptanceCriteria,
+    P3AcceptanceReport,
+    run_p3_acceptance,
+)
 
 __all__ = [
     "P1AcceptanceCriteria",
@@ -37,9 +42,12 @@ __all__ = [
     "P2AcceptanceReport",
     "P2CompletionCriteria",
     "P2CompletionReport",
+    "P3AcceptanceCriteria",
+    "P3AcceptanceReport",
     "run_p1_acceptance",
     "run_p2_5_inspection",
     "run_p2_5_learning_bootstrap",
     "run_p2_acceptance",
     "run_p2_completion",
+    "run_p3_acceptance",
 ]
