@@ -3,6 +3,31 @@
 ## Global Worklog
 
 ### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P3 Simplified Assembly Executor Supplement
+- Work package / Agent label: Agent G: P3 simplified assembly executor
+- Summary: Added a deterministic `SimplifiedAssemblyExecutor` backend for the assembly executor interface. It succeeds assembly steps by default, can return updated construction state on `verify_attach`, records per-step smoke metrics, and supports explicit failure injection for later retry/abort probes.
+- Files changed:
+  - `amsrr/assembly/simplified_executor.py`
+  - `amsrr/assembly/__init__.py`
+  - `tests/unit/assembly/test_simplified_executor.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None to persisted schemas. Added assembly-local `SimplifiedAssemblyExecutorConfig` and `SimplifiedAssemblyExecutor`.
+- Upstream dependencies used: Existing Agent G `AssemblyRunner`, `AssemblyExecutorInterface`, `mark_edge_attached`, and v0.4 P3 simplified sim acceptance guidance.
+- Downstream impact: Order 3 retry/abort behavior and Order 4 P3 runner can use the simplified executor to exercise success and failure paths without Isaac or controller dependencies.
+- Tests added or run:
+  - Added `test_simplified_executor_runs_full_assembly_and_returns_updated_state`
+  - Added `test_simplified_executor_can_inject_step_type_failure`
+  - Added `test_simplified_executor_success_without_target_graph_uses_runner_state_transition`
+- Commands run:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/assembly/test_graph_edit_planner.py tests/unit/assembly/test_assembly_runner.py tests/unit/assembly/test_simplified_executor.py -q`
+  - `python3 -m compileall amsrr -q`
+- Tests run: Agent G targeted assembly tests passed: 10 passed. `python3 -m compileall amsrr -q` passed.
+- Assumptions: Simplified executor metrics are smoke values only and do not imply physical docking feasibility.
+- Blockers: None.
+- Next steps: Run targeted Agent G tests, commit order 2, then implement retry/abort behavior.
+
+### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P3 Assembly Runner Core Supplement
 - Work package / Agent label: Agent G: P3 assembly state execution core
 - Summary: Added a deterministic `AssemblyRunner` core that runs `AssemblyPlan` steps through an `AssemblyExecutorInterface`, updates `ConstructionState` after successful `verify_attach` steps, records per-step results, and reports final physical-graph consistency metrics against the target `MorphologyGraph`.
@@ -1251,6 +1276,24 @@
 - Open questions: None currently.
 
 ### Agent G: π_A GraphEditAssemblyPlanner
+
+#### 2026-07-08
+- Scope: Add P3 order 2 simplified assembly executor backend.
+- Files changed:
+  - `amsrr/assembly/simplified_executor.py`
+  - `amsrr/assembly/__init__.py`
+  - `tests/unit/assembly/test_simplified_executor.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: Agent G runner/core state transitions, `AssemblyExecutorInterface`, and existing construction-state helpers.
+- Implemented: `SimplifiedAssemblyExecutorConfig`, `SimplifiedAssemblyExecutor`, default successful step execution, `verify_attach` updated-state return when target graph is provided, per-step smoke metrics, and deterministic failure injection by step id/type.
+- Not implemented: Retry/abort state-machine execution, P3 runner/acceptance, Isaac execution, physical docking dynamics, or controller/QP integration.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: P3 runner and acceptance can use this executor for deterministic success probes and controlled failure probes.
+- Tests added: `test_simplified_executor_runs_full_assembly_and_returns_updated_state`, `test_simplified_executor_can_inject_step_type_failure`, `test_simplified_executor_success_without_target_graph_uses_runner_state_transition`.
+- Tests passed: Agent G targeted assembly tests passed: 10 passed. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: Failure injection is executor-local; policy-level retry/abort handling remains the next order.
+- Open questions: None currently.
 
 #### 2026-07-08
 - Scope: Add P3 order 1 assembly execution core on top of the existing graph-edit planner.
