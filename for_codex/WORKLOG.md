@@ -4,6 +4,26 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.0 implementation order
+- Work package / Agent label: Agent K/L: P4.0 unit, archive completeness, and no-mislabeling tests
+- Summary: Added P4.0 runner unit tests that execute the simplified full pipeline, validate archive completeness for design/feasibility/assembly/trajectory/policy/controller/runtime/reward records, and verify explicit no-mislabeling metadata stating that P4.0 is simplified, not Isaac-backed, and not P4 full completion.
+- Files changed:
+  - `tests/unit/training/test_p4_0_full_pipeline_runner.py`
+- Schema/interface changes: None.
+- Upstream dependencies used: Order 3 P4.0 runner, Order 1 archive compatibility, Order 2 simplified env injection, and v0.4 P4.0 no-mislabeling requirement.
+- Downstream impact: Order 5 acceptance can build on these tested runner/archive invariants rather than duplicating every low-level field assertion.
+- Tests added or run: Added P4.0 runner archive/no-mislabeling unit tests.
+- Commands run:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p4_0_full_pipeline_runner.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_simplified_grasp_carry_env.py tests/unit/training/test_p1_runner.py tests/unit/training/test_p4_0_full_pipeline_runner.py -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+- Tests run: P4.0 runner tests passed: 2 passed. Related env/P1/P4.0 tests passed: 9 passed. Compileall passed. `git diff --check` passed.
+- Assumptions: P4.0 archives intentionally leave `actuator_target_records` empty because no Isaac actuator target conversion is performed in the simplified backend.
+- Blockers: None.
+- Next steps: Order 5, implement the P4.0 simplified acceptance gate over the tested runner.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.0 implementation order
 - Work package / Agent label: Agent K: P4.0 full-pipeline runner
 - Summary: Added a P4.0 simplified full-pipeline runner that wires P2 selected `DesignOutput`, P3 simplified assembly result, morphology-conditioned contact candidates, baseline pi_H trajectory, baseline pi_L policy commands, controller commands, rewards, metrics, and `EpisodeArchive` logging. The runner records explicit simplified-backend / not-Isaac / not-P4-full metadata.
 - Files changed:
@@ -1200,6 +1220,20 @@
 ## Work Package Logs
 
 ### P4.0 Implementation: Simplified Full-Pipeline Integration
+
+#### 2026-07-08
+- Scope: Order 4 P4.0 unit, archive completeness, and no-mislabeling tests.
+- Files changed:
+  - `tests/unit/training/test_p4_0_full_pipeline_runner.py`
+- Upstream dependencies: Order 3 runner and config, `EpisodeArchive` defaults, simplified env external design injection, P2/P3 scaffolds.
+- Implemented: Unit test coverage for P4.0 runner config loading, full simplified pipeline archive contents, P2 selected design usage, P3 assembly result usage, contact candidates, trajectory records, policy/controller commands, runtime observations, rewards, and explicit no-Isaac/no-P4-full rollout metadata.
+- Not implemented: P4.0 acceptance gate, report schema, full acceptance test, Isaac backend, or learning bootstrap.
+- Schema/interface changes: None.
+- Downstream impact: Agent L acceptance can aggregate runner metrics and check phase-level pass/fail criteria with confidence that per-archive fields are complete.
+- Tests added: `test_p4_0_full_pipeline_runner_archives_full_simplified_pipeline`, `test_p4_0_full_pipeline_runner_config_loader`.
+- Tests passed: P4.0 runner tests passed: 2 passed. Related env/P1/P4.0 tests passed: 9 passed. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Handoff notes: The test asserts `rollout_artifacts["is_p4_full_completion"] is False`, `isaac_backed is False`, and `physical_success_claim is False`.
+- Open questions: None currently.
 
 #### 2026-07-08
 - Scope: Order 3 P4.0 full-pipeline runner implementation.
