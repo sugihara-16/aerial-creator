@@ -4,6 +4,19 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-08
 
+### P4.3 Learning Target Clarification
+
+- Context: After the P4 Isaac-backed completion clarification, the P4.3 learning bootstrap text could still be read as focusing only on π_L or residual controller learning.
+- Decision: Updated the source design spec so P4.3 explicitly includes three staged learning targets: π_L / residual controller learning, π_H contact / trajectory policy learning, and π_D outcome-conditioned design scorer / selector fine-tuning. Added the recommended P4.3a-P4.3e order, expanded P4 full acceptance learning artifacts for all three policy families, and updated the P4 Mermaid diagram so the training loop points back to π_D, π_H, and π_L with their separate responsibilities.
+- Compatibility impact: No implementation files were changed in this design-only task. Deterministic `P2DesignPolicy`, deterministic π_H / π_L fallbacks, and `FeasibilityChecker` hard safety remain required; learned feasibility heads must not replace deterministic safety gates.
+
+### P4 Isaac-Backed Completion Clarification
+
+- Context: The previous v0.4 P4 text could be read as treating simplified full-pipeline wiring as P4 completion. The user provided a P4 design revision instruction requiring the source spec to distinguish simplified integration from Isaac-backed full grasp/carry completion.
+- Decision: Updated the source design spec to split P4 into `P4.0`, `P4-control / P4a`, `P4.1`, `P4.2`, `P4.3`, and P4 full completion. P4.0 is now explicitly a simplified full-pipeline integration stage and must not be called P4 complete. P4 full completion now requires Isaac Lab rollout, low-level flight validation, controller bridge / actuator mapping, Isaac actuator target execution, minimum learning run, checkpoint, metrics, reward curve, and rollout archive.
+- Additional clarification: P3 assembly success is now explicitly documented as simplified graph/state integration success rather than physical docking success. P4 full completion requires a bridge from π_A docking/detach/separation steps to controller targets and Isaac-backed execution results.
+- Compatibility impact: No implementation files were changed in this design-only task. Future P4 implementation must treat existing `QPIDController` / `QPAllocator` as simplified scaffolding until the Isaac controller bridge and actuator mapping are implemented.
+
 ### P3 Assembly Runner Core Supplement
 
 - Context: v0.4 Section 17 defines `AssemblyPlan`, `AssemblyStep`, and `ConstructionState`, and an earlier Agent G scaffold produced deterministic graph-edit plans, but P3 acceptance needs an executable deterministic runner that advances construction state and checks that the physical graph matches the target graph.

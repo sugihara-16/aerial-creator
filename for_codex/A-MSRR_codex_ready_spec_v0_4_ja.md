@@ -138,7 +138,12 @@ P0: schemas, URDF parser, GeometryProcessor, IRGBuilder, tests
 P1: diverse object grasp & carry with fixed/simple morphology
 P2: π_D + FeasibilityChecker for diverse object grasp & carry
 P3: π_A deterministic assembly integration
-P4: full grasp & carry with π_D, π_A, π_H, π_L, QP/PID
+P4.0: simplified full-pipeline integration
+P4-control / P4a: low-level flight validation in Isaac Lab
+P4.1: Isaac Lab backend smoke
+P4.2: Isaac deterministic full grasp & carry rollout
+P4.3: Isaac learning bootstrap
+P4 full completion: Isaac-backed rollout + minimum learning run + acceptance
 P5: valve operation
 P6: perching manipulation
 P7: contact-mediated locomotion
@@ -146,6 +151,8 @@ P8: joint fine-tuning and ablations
 ```
 
 最初の task target は **diverse object grasp & carry** である。これは、shape、size、mass、friction、target pose が異なる objects を grasp して transport することを意味する。
+
+P4 は単一の acceptance phase ではない。`P4.0` は simplified backend 上で既存 P2/P3/H/I/J/K scaffolds を full-pipeline wiring するための必要段階であるが、Isaac Lab 上の物理的 full grasp/carry completion ではない。P4 full completion は、Isaac Lab backend、controller bridge / actuator mapping、Isaac rollout、minimum learning run、checkpoint、metrics、reward curve、rollout archive を含む。
 
 ### 2.3 Version 1 inclusions
 
@@ -166,6 +173,8 @@ Version 1 は以下を **MUST** implement する。
 - π_H Contact-Wrench Trajectory Planner interface
 - π_L low-level policy interface
 - QP/PID controller interface
+- controller bridge / actuator mapping for Isaac Lab execution
+- Isaac Lab backend for module, morphology, object, and floor rollout
 - logging, datasets, metrics, and acceptance tests
 
 ### 2.4 Version 1 exclusions
@@ -2351,6 +2360,30 @@ N consecutive stable control steps
 
 Thresholds は config values である。
 
+### 17.7 P3/P4 assembly execution boundary
+
+P3 の assembly success は、deterministic `AssemblyRunner` と simplified executor による graph/state integration success であり、物理ドッキング成功率ではない。P3 acceptance は、`ConstructionState` と target `MorphologyGraph` の整合、retry/abort path、archive logging を確認するが、Isaac Lab 上で docking actuator、contact sensing、relative pose convergence、latch verification を物理的に検証したことを意味してはならない。
+
+P4.0 では、P3 assembly result を simplified full-pipeline integration の入力として使ってよい。この場合、docking / verify_attach / detach / separation の成功は simplified execution result として扱われ、P4 full completion の証明にはならない。
+
+P4 full completion では、π_A / `AssemblyRunner` の step を low-level controller target へ変換する bridge が必要である。この bridge は以下を扱う。
+
+```text
+move_to_staging / align_ports:
+  target relative pose, waypoint, alignment tolerance を controller target へ変換する。
+
+dock / verify_attach:
+  dock mechanism command, approach velocity/pose tolerance, contact/latch sensor result を扱う。
+
+detach / separation:
+  unload internal/contact wrench, split control graph, release latch, separation stability を扱う。
+
+retry / abort:
+  controller-safe recovery target または safe stop target を生成する。
+```
+
+将来的な Isaac-backed assembly execution では、docking / verify_attach / detach / separation の success/failure は simulator / controller / sensor result から返される。P4 full completion で assembly を含む rollout を主張する場合、simplified pseudo result ではなく Isaac-backed execution result を保存しなければならない。
+
 ---
 
 ## 18. ContactCandidateSampler and Morphology-Conditioned Filtering
@@ -2788,6 +2821,42 @@ flowchart TD
     H --> I[Simulator / Real System]
 ```
 
+### 20.8 Controller bridge and actuator mapping for Isaac
+
+`QPIDController` / `QPAllocator` の initial implementation は simplified scaffold であってよい。P4 full grasp/carry / Isaac execution では、`ControllerCommand` を Isaac backend の actuator targets へ変換する controller bridge が必須である。
+
+Agent I/J は以下を提供しなければならない。
+
+```text
+Input:
+  PolicyCommand
+  active InteractionKnot
+  RuntimeObservation
+  PhysicalModel
+  assembled MorphologyGraph / ConstructionState
+  controller status
+
+Output:
+  ControllerCommand
+  Isaac actuator target record
+  controller bridge metrics
+```
+
+Requirements:
+
+```text
+1. assembled morphology から active rotors, vectoring joints, dock actuators, module ids を抽出する。
+2. ControllerCommand -> Isaac actuator target 変換器を提供する。
+3. assembled morphology に応じた rotor / vectoring joint / dock actuator mapping を作る。
+4. missing actuator / unsupported actuator / clipped command / infeasible allocation を metrics として記録する。
+5. existing BoundedVerticalRotorAllocator は fallback として残してよい。
+6. exact multi-axis/contact-aware QP が未実装の場合は simplified allocator と明記する。
+7. π_A 用に docking / detach / separation control handoff request を controller target へ変換する bridge を提供する。
+8. controller infeasible / clipped / residual / unsupported wrench を RuntimeObservation と EpisodeArchive に保存する。
+```
+
+π_L は actuator command を直接出力してはならない。最終 actuator authority は常に controller / QP / safety layer と controller bridge に属する。
+
 ---
 
 ## 21. Encoder Architecture and Shared Interaction Workspace
@@ -3124,6 +3193,42 @@ thrust scale error
 contact break threshold
 ```
 
+### 23.5 Isaac Lab backend requirements for P4
+
+P4 full completion には Isaac Lab backend が必要である。simplified backend は P4.0 wiring と crash-free interface validation に使ってよいが、P4 full completion の物理的成功率、object drop rate、hard collision rate、controller/QP infeasible terminal rate を主張する source ではない。
+
+Isaac Lab backend は以下を提供しなければならない。
+
+```text
+spawn:
+  Holon module
+  assembled MorphologyGraph
+  object geometry / mass / friction
+  floor and required support surfaces
+
+runtime API:
+  reset(task_spec, morphology, assembly_state)
+  step(controller_command or actuator_targets)
+  get_runtime_observation()
+
+controller bridge:
+  ControllerCommand -> Isaac actuator target conversion
+  active rotor / vectoring joint / dock actuator mapping
+  missing / unsupported / clipped actuator metrics
+
+logging:
+  object pose
+  module pose and velocity
+  contact state
+  object drop event
+  hard collision event
+  controller infeasible status
+  QP residual / allocation residual
+  actuator target records
+```
+
+P4 full completion では、Isaac step で actuator command が実際に実行され、その結果から `RuntimeObservation`、reward、metrics、`EpisodeArchive` が更新されなければならない。deterministic rollout と minimum learning run の両方を保存すること。
+
 ---
 
 ## 24. Training Curriculum and Evaluation Phases
@@ -3179,15 +3284,304 @@ ConstructionState updates match physical graph changes
 
 ### 24.5 P4: full grasp & carry
 
-Goal: end-to-end object grasp & carry。
+P4 は、simplified full-pipeline integration と Isaac-backed full grasp/carry completion を明確に分ける。
+
+```text
+P4.0:
+  simplified full-pipeline integration
+
+P4-control / P4a:
+  low-level flight validation in Isaac Lab
+
+P4.1:
+  Isaac Lab backend smoke
+
+P4.2:
+  Isaac deterministic full grasp & carry rollout
+
+P4.3:
+  Isaac learning bootstrap
+
+P4 full completion:
+  Isaac-backed rollout + minimum learning run + acceptance
+```
+
+P4.0 は P4 full completion ではない。P4.0 の success_rate / object_drop_rate / collision_rate / QP infeasible rate は simplified backend 上の指標であり、Isaac Lab 上の物理的成功率ではない。P4.0 を P4 complete と呼んではならない。
+
+#### 24.5.1 P4.0: simplified full-pipeline integration
+
+Goal: simplified backend 上で、P2 selected `DesignOutput`、P3 assembly result、`ContactCandidateSampler`、π_H、π_L、controller scaffold、`EpisodeArchive` logging を接続する。
+
+P4.0 では以下を実装してよい。
+
+```text
+P2 / P2.5:
+  selected DesignOutput を使う。
+  auxiliary learned π_D scorer / feasibility head を参照可能にしてよい。
+  deterministic P2DesignPolicy / FeasibilityChecker fallback は残す。
+
+P3:
+  assembly result を使う。
+  P3 simplified assembly success を physical docking success と解釈しない。
+
+Design / morphology:
+  FixedSimpleDesignPolicy 固定経路を避ける。
+  P2 selected morphology / P3 assembled morphology を downstream に渡す。
+
+Contact / trajectory / control:
+  assembly 成功後の morphology から contact candidates を生成する。
+  selected assignment feasibility cache を記録する。
+  baseline π_H trajectory を生成する。
+  π_L は PolicyCommand を出す。
+  controller layer は ControllerCommand を出す。
+  π_L は actuator command を直接出さない。
+
+Logging:
+  EpisodeArchive に design, feasibility, assembly_plan, trajectory,
+  PolicyCommand, ControllerCommand, rewards, metrics を保存する。
+```
+
+P4.0 simplified acceptance:
+
+```text
+P2 selected DesignOutput を使う。
+P3 assembly result を使う。
+FixedSimpleDesignPolicy 固定経路を使わない。
+contact candidates が生成される。
+π_H trajectory が生成される。
+π_L PolicyCommand が生成される。
+ControllerCommand が生成される。
+EpisodeArchive に必要な情報が保存される。
+simplified success_rate / object_drop_rate / collision_rate / QP infeasible rate を記録する。
+report に simplified backend 指標であり物理成功率ではないことを明記する。
+```
+
+#### 24.5.2 P4-control / P4a: low-level flight validation in Isaac Lab
+
+Goal: object grasp/carry や contact task に入る前に、Isaac Lab 上で controller / actuator mapping / `RuntimeObservation` / `EpisodeArchive` の下位閉ループを検証する。
+
+P4 full completion の前提条件として、以下の低レイヤ検証を必須とする。
+
+1. Isaac single-module hover smoke
+
+```text
+Holon module 単体を Isaac Lab に spawn する。
+rotor / vectoring joint / actuator target が Isaac 側に渡ることを確認する。
+deterministic hover controller で一定時間 crash-free に hover できるか確認する。
+RuntimeObservation に pose, velocity, actuator/controller status を保存する。
+EpisodeArchive に controller_commands, actuator_targets, metrics を保存する。
+```
+
+2. Fixed morphology hover smoke
+
+```text
+2-module または 3-module の決め打ち connected morphology を spawn する。
+まず P2/P3 の出力でなく固定構造でよい。
+assembled morphology に対して active rotors / vectoring joints / dock actuators の mapping を確認する。
+hover, attitude hold, small position hold を行う。
+```
+
+3. Fixed morphology waypoint tracking
+
+```text
+object なしで、決め打ち構造を target pose / waypoint に追従させる。
+π_H は使わず、低レイヤ controller target を直接与えてよい。
+π_L を使う場合でも、π_L は PolicyCommand のみを出し、最終 actuator command は controller layer が出す。
+```
+
+P4-control acceptance:
+
+```text
+single-module hover が crash-free に完了する。
+fixed morphology hover が crash-free に完了する。
+fixed morphology waypoint tracking が一定 pose error 以下で完了する。
+ControllerCommand と Isaac actuator target record が EpisodeArchive に保存される。
+RuntimeObservation が各 step で保存される。
+controller infeasible / clipped allocation / residual metrics が保存される。
+```
+
+#### 24.5.3 P4.1: Isaac Lab backend smoke
+
+Goal: Isaac Lab backend の reset / step / observation / logging path を smoke-test する。
+
+P4.1 では、Holon module、assembled morphology、object、floor を spawn し、`ControllerCommand` から Isaac actuator targets への変換が動作することを確認する。contact-rich grasp/carry success は P4.2 で評価する。
 
 Acceptance:
 
 ```text
-success_rate >= 50% on held-out object distribution
+Isaac backend reset が TaskSpec と MorphologyGraph を受け取る。
+Isaac backend step が actuator targets を実行する。
+RuntimeObservation が module pose, object pose, contact/controller status を含む。
+EpisodeArchive が controller_commands, actuator target records, metrics を保存する。
+missing actuator / unsupported actuator / clipped command が metrics に記録される。
+```
+
+#### 24.5.4 P4.2: Isaac deterministic full grasp & carry rollout
+
+Goal: Isaac Lab 上で deterministic fallback policies/controllers を使い、object grasp & carry rollout を実行する。
+
+P4.2 は learned policy quality を主張する phase ではない。deterministic `P2DesignPolicy`、deterministic `FeasibilityChecker`、baseline π_H、baseline π_L、controller bridge / allocator fallback を残したまま、Isaac-backed rollout metrics を保存する。
+
+Acceptance:
+
+```text
+Isaac rollout success_rate を記録する。
+object_drop_rate を記録する。
+hard_collision_rate を記録する。
+controller/QP infeasible terminal rate を記録する。
+rollout archive を保存する。
+deterministic fallback が残っている。
+```
+
+#### 24.5.5 P4.3: Isaac learning bootstrap
+
+Goal: Isaac-backed rollout から、π_L、π_H、π_D scorer / selector の段階的な最小学習 run を開始する。
+
+P4.3 learning bootstrap は π_L だけを意味しない。P4.3 では以下の3系統を段階的に学習対象とする。ただし、最初から全 policy を同時に RL してはならない。deterministic fallback と deterministic safety gate を常に残すこと。
+
+1. π_L / residual controller learning
+
+```text
+Input:
+  Isaac RuntimeObservation
+  MorphologyGraph
+  PhysicalModel summary
+  active ContactWrenchTrajectory / InteractionKnot
+  controller status
+
+Output:
+  PolicyCommand
+  residual control intent
+```
+
+π_L / residual controller learning は、Isaac 上の `RuntimeObservation` を入力に、`PolicyCommand` または residual control intent を学習する。最終 actuator command は引き続き controller layer が出す。deterministic π_L fallback を残す。
+
+2. π_H contact / trajectory policy learning
+
+```text
+Input:
+  ContactCandidateSet
+  InteractionEnvelope
+  MorphologyGraph
+  RuntimeObservation
+  assignment feasibility cache
+
+Output:
+  contact assignment
+  ContactWrenchTrajectory
+  phase / knot timing
+  priority weights
+```
+
+π_H learning は、ContactCandidateSet、InteractionEnvelope、MorphologyGraph、RuntimeObservation を入力に、contact assignment、`ContactWrenchTrajectory`、phase/knot timing、priority weights を学習する。最初は baseline π_H trajectory を teacher にした imitation / supervised learning でもよい。その後、Isaac rollout reward を使った RL または fine-tuning へ進める。deterministic π_H fallback を残す。
+
+3. π_D outcome-conditioned design scorer / selector fine-tuning
+
+```text
+Input:
+  P2 candidate DesignOutput set
+  FeasibilityResult
+  Isaac rollout outcome
+  task success / object drop / collision / controller infeasible
+  reward / return
+
+Output:
+  candidate morphology scoring
+  candidate ranking
+  selected DesignOutput
+```
+
+π_D scorer fine-tuning は、P2.5 で学習した π_D scorer を初期値または補助モデルとして使ってよい。Isaac rollout 結果、task success、object drop、collision、controller infeasible、reward を使って、candidate morphology scoring / ranking を fine-tune する。π_D は引き続き final actuator command を出さない。deterministic `P2DesignPolicy` と `FeasibilityChecker` fallback を残す。hard safety 判定は `FeasibilityChecker` が source of truth であり、learned feasibility head で置き換えてはならない。
+
+P4.3 推奨順序:
+
+```text
+P4.3a:
+  deterministic π_D / π_H / π_L rollout で Isaac dataset を収集する。
+
+P4.3b:
+  π_L または residual controller を最小学習する。
+
+P4.3c:
+  π_H を teacher imitation または rollout reward で学習する。
+
+P4.3d:
+  π_D scorer を Isaac rollout outcome で fine-tune する。
+
+P4.3e:
+  必要に応じて π_D / π_H / π_L の joint fine-tuning を行う。
+  ただし最初から全 policy を同時に RL しない。
+```
+
+P2.5 の π_D scorer / feasibility head は補助モデルであり、P4 開始時点の production source of truth ではない。learned models を production path で使う場合は、deterministic safety gate を必ず通す。
+
+Required artifacts:
+
+```text
+π_L または residual controller checkpoint
+π_L / residual controller metrics
+π_L / residual controller reward curve
+π_H checkpoint
+π_H metrics
+π_H rollout evaluation
+π_D scorer fine-tuning checkpoint
+π_D scorer fine-tuning metrics
+π_D rollout outcome evaluation
+Isaac rollout archive
+training config hash
+deterministic fallback path metadata for π_D / π_H / π_L
+```
+
+full end-to-end fine-tuning は、P4.3 の minimum learning run が保存され、rollout / controller / safety metrics が確認された後の段階とする。
+
+#### 24.5.6 P4 full acceptance
+
+P4 full completion は、P4.0 simplified acceptance だけでは満たされない。以下を含む必要がある。
+
+```text
+P4.0 simplified full-pipeline wiring accepted
+P4-control low-level flight validation accepted
+P4.1 Isaac backend smoke accepted
+P4.2 Isaac deterministic rollout archived
+P4.3 minimum learning run archived
+```
+
+P4 full acceptance:
+
+```text
+success_rate >= 50% on held-out Isaac object distribution
 object_drop_rate <= 20%
 hard_collision_rate <= 5%
-QP infeasible terminal <= 10%
+controller/QP infeasible terminal <= 10%
+reward curve exists
+π_L or residual controller checkpoint / metrics / reward curve exist
+π_H checkpoint / metrics / rollout evaluation exist
+π_D scorer fine-tuning checkpoint / metrics / rollout outcome evaluation exist
+rollout archive exists
+deterministic fallback remains available for π_D / π_H / π_L
+learned production path passes deterministic safety gates
+```
+
+#### 24.5.7 P4 full-pipeline diagram
+
+```mermaid
+flowchart TD
+    A[P2 selected DesignOutput / π_D candidate scoring] --> B[P3 assembly result]
+    B --> C[ContactCandidateSampler]
+    C --> D[π_H: Contact assignment + ContactWrenchTrajectory]
+    D --> E[π_L: PolicyCommand / residual intent]
+    E --> F[Controller / QP-PID]
+    F --> G[Controller bridge]
+    G --> H[Isaac actuator targets]
+    H --> I[Isaac Lab step]
+    I --> J[RuntimeObservation]
+    J --> K[EpisodeArchive]
+    J --> L[Reward / metrics]
+    L --> M[Training loop]
+    M -. updates π_D scoring / selector .-> A
+    M -. updates π_H contact / trajectory policy .-> D
+    M -. updates π_L PolicyCommand / residual intent .-> E
+    F -. final actuator command only here .-> G
 ```
 
 ### 24.6 P5-P7 later tasks
@@ -3224,11 +3618,17 @@ class EpisodeArchive:
     trajectory_records: list[ContactWrenchTrajectory]
     policy_commands: list[PolicyCommand]
     controller_commands: list[ControllerCommand]
+    runtime_observations: list[RuntimeObservation]
+    actuator_target_records: list[dict]
     rewards: list[dict]
     metrics: dict
     success: bool
     failure_reason: str | None
+    rollout_artifacts: dict
+    learning_artifacts: dict
 ```
+
+`runtime_observations` と `actuator_target_records` は P4-control / Isaac-backed P4 で必須である。simplified P1-P4.0 archives では空 list でもよいが、Isaac rollout を P4 full completion の根拠にする場合は各 step の observation と actuator target conversion record を保存しなければならない。`learning_artifacts` は checkpoint、metrics、reward curve、rollout archive path などの reproducibility references を保存するために使う。
 
 ### 25.2 Dataset types
 
@@ -3247,6 +3647,12 @@ InteractionTrajectoryDataset:
 
 LowLevelControlDataset:
   runtime obs, π_H plan, π_L command, controller status, reward
+
+LowLevelFlightDataset:
+  Isaac single-module/fixed-morphology runtime obs, controller commands, actuator targets, pose errors, controller metrics
+
+IsaacRolloutDataset:
+  TaskSpec, morphology, assembly result, trajectories, runtime observations, actuator targets, rewards, success/drop/collision/QP metrics
 
 GeometryCache:
   geometry_ref hash -> GeometryDescriptor
@@ -3404,11 +3810,37 @@ amsrr/controllers/policy_command_builder.py
 amsrr/controllers/controller_base.py
 amsrr/controllers/qpid_controller.py
 amsrr/controllers/qp_allocator_interface.py
+amsrr/controllers/isaac_controller_bridge.py
+amsrr/controllers/actuator_mapping.py
 ```
 
 ### 26.10 Agent J/K/L
 
 Simulation、training、logging、tests は、schemas、geometry、IRGBuilder、robot model、feasibility checker の unit tests が pass した後に integrate すること。
+
+P4 では以下を分けて ownership すること。
+
+```text
+Agent J:
+  Isaac Lab backend
+  Holon / assembled morphology / object / floor spawn
+  reset / step / RuntimeObservation extraction
+  Isaac actuator target execution
+  P4-control low-level flight validation environments
+
+Agent K:
+  P4.0 simplified full-pipeline runner
+  P4-control rollout logging
+  P4.1 / P4.2 Isaac rollout runners
+  P4.3 minimum learning bootstrap
+  checkpoint / metrics / reward curve / rollout archive logging
+
+Agent L:
+  P4.0 simplified acceptance
+  P4-control acceptance
+  P4 full acceptance
+  archive completeness and no-mislabeling checks
+```
 
 ---
 
@@ -3434,10 +3866,17 @@ Simulation、training、logging、tests は、schemas、geometry、IRGBuilder、
 15. π_L command schema and baseline policy
 16. Desired Wrench / Pose / Joint Bias Builder
 17. QP/PID controller interface
-18. simulator integration
-19. datasets/logging
-20. training loops
-21. full integration tests
+18. P4.0 simplified full-pipeline integration runner
+19. P4.0 archive completeness and simplified acceptance
+20. controller bridge / actuator mapping for Isaac
+21. P4-control Isaac single-module hover
+22. P4-control Isaac fixed-morphology hover and waypoint tracking
+23. Isaac Lab backend smoke
+24. Isaac deterministic full grasp & carry rollout
+25. Isaac rollout datasets/logging
+26. minimum P4.3 learning bootstrap
+27. P4 full acceptance tests
+28. later training loops and joint fine-tuning
 ```
 
 ### 27.2 P0 unit tests
@@ -3473,6 +3912,15 @@ test_piH_selected_assignment_feasibility
 test_piL_baseline_outputs_policy_command
 test_policy_command_builder_outputs_qp_refs
 test_controller_interface_accepts_policy_command
+test_p4_0_uses_p2_selected_design_and_p3_assembly_result
+test_p4_0_archive_contains_trajectory_policy_controller_rewards
+test_controller_bridge_maps_controller_command_to_isaac_targets
+test_isaac_single_module_hover_smoke
+test_isaac_fixed_morphology_hover_smoke
+test_isaac_fixed_morphology_waypoint_tracking
+test_isaac_full_grasp_carry_rollout_archives_runtime_observations
+test_p4_minimum_learning_run_writes_checkpoint_metrics_reward_curve
+test_p4_full_acceptance_requires_isaac_rollout_and_learning_artifacts
 ```
 
 ---
@@ -3935,7 +4383,8 @@ run_tests:
 Codex は次の順序でシステムを実装しなければならない。
 
 ```text
-Schemas -> GeometryProcessor -> URDF/PhysicalModel -> IRGBuilder -> Envelope -> MorphologyGraph -> FeasibilityChecker -> π_D scaffolding -> π_A -> ContactCandidateSampler -> π_H -> π_L -> Controller -> Simulator -> Training
+Schemas -> GeometryProcessor -> URDF/PhysicalModel -> IRGBuilder -> Envelope -> MorphologyGraph -> FeasibilityChecker -> π_D scaffolding -> π_A -> ContactCandidateSampler -> π_H -> π_L -> Controller -> P4.0 simplified integration -> Controller bridge / actuator mapping -> P4-control Isaac low-level flight validation -> Isaac backend -> Isaac deterministic rollout -> P4.3 minimum learning bootstrap -> Training / fine-tuning
 ```
 
 P0 schema、geometry、URDF、IRGBuilder、feasibility tests が pass する前に policy training を開始してはならない。
+P4.0 simplified acceptance が pass しても P4 full completion と見なしてはならない。P4 full completion には Isaac-backed rollout、controller bridge / actuator mapping、minimum learning run、checkpoint、metrics、reward curve、rollout archive が必要である。

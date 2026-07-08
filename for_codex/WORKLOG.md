@@ -3,6 +3,59 @@
 ## Global Worklog
 
 ### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.3 learning target clarification
+- Work package / Agent label: P4.3 learning design revision / source-spec update
+- Summary: Clarified that P4.3 learning bootstrap targets π_L/residual controller learning, π_H contact/trajectory policy learning, and π_D outcome-conditioned design scorer/selector fine-tuning, not π_L alone. Added P4.3a-P4.3e recommended order, expanded P4 full acceptance learning artifacts for all three policy families, and updated the P4 Mermaid diagram so the training loop points back to π_D, π_H, and π_L with their separate output responsibilities.
+- Files changed:
+  - `for_codex/A-MSRR_codex_ready_spec_v0_4_ja.md`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: Source spec only. No Python implementation files were changed.
+- Upstream dependencies used: User-provided追加修正 request, current P4.3 design text, v0.4 Sections 15, 19, 20, 24.5, and P2.5 learning bootstrap status.
+- Downstream impact: Future P4.3 implementation must collect deterministic Isaac rollout datasets, then stage learning through π_L/residual control, π_H trajectory/contact policy, and π_D scorer fine-tuning before any optional joint fine-tuning. Deterministic fallbacks and `FeasibilityChecker` hard safety remain required.
+- Tests added or run: No tests added; this is a design-spec revision only.
+- Commands run:
+  - `rg -n "P4.3|learning bootstrap|Training loop|π_D|π_H|π_L|P4 full acceptance|minimum learning" for_codex/A-MSRR_codex_ready_spec_v0_4_ja.md`
+  - `sed -n ... for_codex/A-MSRR_codex_ready_spec_v0_4_ja.md`
+  - `sed -n ... for_codex/AMSRR_design_modification_by_codex.md`
+  - `sed -n ... for_codex/WORKLOG.md`
+  - `git status --short`
+  - `rg -n "P4\\.3a|P4\\.3b|P4\\.3c|P4\\.3d|P4\\.3e|π_L / residual controller|π_H contact / trajectory|π_D outcome-conditioned|updates π_D|updates π_H|updates π_L|deterministic safety gate|FeasibilityChecker" for_codex/A-MSRR_codex_ready_spec_v0_4_ja.md`
+  - `git diff --check`
+  - `git diff --stat`
+- Tests run: Documentation verification only. `rg` verification found the new P4.3 learning-target terms and training-loop update arrows in the source spec. `git diff --check` passed.
+- Assumptions: P2.5 π_D scorer can be used as an initializer or auxiliary model, but deterministic `P2DesignPolicy` and `FeasibilityChecker` remain the production fallback and hard-safety source of truth.
+- Blockers: None.
+- Next steps: When P4.3 implementation starts, collect deterministic Isaac rollout datasets before staging π_L/residual, π_H, and π_D scorer learning.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4 Isaac-backed completion clarification
+- Work package / Agent label: P4 design revision / source-spec update
+- Summary: Updated the source design spec per the user-provided P4 design revision instruction. P4 is now split into P4.0 simplified full-pipeline integration, P4-control/P4a low-level Isaac flight validation, P4.1 Isaac backend smoke, P4.2 Isaac deterministic full grasp/carry rollout, P4.3 Isaac learning bootstrap, and P4 full completion. The spec now states that P4.0 is necessary but not P4 complete, and that P4 full completion requires Isaac-backed rollout plus minimum learning run artifacts.
+- Files changed:
+  - `for_codex/A-MSRR_codex_ready_spec_v0_4_ja.md`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: Source spec only. Future implementation will need EpisodeArchive additions for `runtime_observations`, `actuator_target_records`, rollout artifacts, and learning artifacts; no Python implementation files were changed in this task.
+- Upstream dependencies used: User-provided `/home/leus/Downloads/p4_design_revision_instruction.md`, v0.4 Sections 17, 20, 23, 24, 25, 26, and 27.
+- Downstream impact: P4 implementation must not mark simplified backend acceptance as P4 complete. Future P4 work must implement controller bridge / actuator mapping, π_A docking/detach/separation handoff to controller targets, P4-control Isaac low-level flight validation, Isaac-backed rollout, and a minimum learning run before P4 full completion.
+- Tests added or run: No tests added; this is a design-spec revision only.
+- Commands run:
+  - `wc -l /home/leus/Downloads/p4_design_revision_instruction.md`
+  - `sed -n ... /home/leus/Downloads/p4_design_revision_instruction.md`
+  - `rg -n "P4|full grasp|SimplifiedGraspCarryEnv|π_H|π_L|QP|Controller|Simulation|Training Curriculum|Acceptance|Agent J|Agent K|Agent L|Implementation order|EpisodeArchive" for_codex/A-MSRR_codex_ready_spec_v0_4_ja.md`
+  - `sed -n ... for_codex/A-MSRR_codex_ready_spec_v0_4_ja.md`
+  - `rg -n "P4.0|P4-control|low-level flight|Isaac|Controller bridge|actuator mapping|P4 full completion" for_codex/A-MSRR_codex_ready_spec_v0_4_ja.md`
+  - `git diff --check`
+  - `find amsrr -type d -name __pycache__ -prune -exec rm -rf {} +`
+  - `git status --short`
+  - `git diff --stat`
+- Tests run: Documentation verification only. `rg` verification found the new P4 terms in the source spec. `git diff --check` passed.
+- Assumptions: The P4 revision changes the source design contract but intentionally does not implement any P4 code yet.
+- Blockers: None.
+- Next steps: When implementation resumes, begin with P4.0 simplified full-pipeline integration, then implement controller bridge / actuator mapping and P4-control Isaac low-level flight validation before claiming P4 full completion.
+
+### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P3 assembly integration supplements
 - Work package / Agent label: P3 final verification and handoff
 - Summary: Completed final verification after the P3 assembly runner/executor/retry/acceptance sequence. Full unit and acceptance suites passed, compile checks passed, and diff whitespace checks passed.
@@ -1082,6 +1135,42 @@
 ---
 
 ## Work Package Logs
+
+### P4.3 Design Revision: Learning Target Clarification
+
+#### 2026-07-08
+- Scope: Clarify P4.3 learning bootstrap targets in the source design spec only.
+- Files changed:
+  - `for_codex/A-MSRR_codex_ready_spec_v0_4_ja.md`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: User追加修正 request, existing P4 Isaac-backed completion clarification, P2.5 learned π_D scorer / feasibility head notes, and v0.4 π_D / π_H / π_L ownership boundaries.
+- Implemented: Three staged P4.3 learning target families, P4.3a-P4.3e recommended sequence, expanded P4 full acceptance learning artifacts for π_L/residual control, π_H, and π_D scorer fine-tuning, and updated Mermaid training-loop arrows to π_D / π_H / π_L.
+- Not implemented: Any training code, checkpoints, policy heads, dataset builders, acceptance code, or Isaac rollout code.
+- Schema/interface changes: Source spec only.
+- Downstream impact: Future P4.3 work must not interpret learning bootstrap as π_L-only. Learned π_D scorer usage remains outcome-conditioned scoring/ranking only, π_H learning owns contact assignment / trajectory timing, and π_L learning owns PolicyCommand / residual intent.
+- Tests added: None.
+- Tests passed: Documentation verification only: required P4.3 terms were found in the revised source spec; `git diff --check` passed.
+- Handoff notes: Learned models may enter production only through deterministic safety gates; hard feasibility remains owned by `FeasibilityChecker`.
+- Open questions: None currently.
+
+### P4 Design Revision: Isaac-Backed Full Completion Clarification
+
+#### 2026-07-08
+- Scope: Revise the source design spec only, clarifying P4 staging and preventing simplified full-pipeline acceptance from being treated as P4 completion.
+- Files changed:
+  - `for_codex/A-MSRR_codex_ready_spec_v0_4_ja.md`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: User-provided P4 design revision instruction, v0.4 Sections 17, 20, 23, 24, 25, 26, 27, and current P1/P2/P3 handoff state.
+- Implemented: P4 phase split, P4.0 simplified integration scope, P4-control low-level Isaac flight validation prerequisites, controller bridge / actuator mapping requirements, π_A docking/detach/separation bridge requirement, Isaac backend requirements, split P4 acceptance, P4 learning bootstrap requirements, P4 mermaid flow, EpisodeArchive P4 logging fields, Agent I/J/K/L P4 ownership notes, and revised implementation order.
+- Not implemented: Any P4 code, Isaac Lab backend, controller bridge, actuator mapping, P4 runner, P4 acceptance gate, or learning run.
+- Schema/interface changes: Source spec only. Future schema/code changes are implied for P4 archive logging, but no implementation module was changed.
+- Downstream impact: Future P4 implementation must proceed through P4.0, P4-control/P4a, P4.1, P4.2, P4.3, and P4 full acceptance rather than claiming completion after simplified backend wiring.
+- Tests added: None.
+- Tests passed: Documentation checks only: required P4 terms were found in the revised source spec; `git diff --check` passed.
+- Handoff notes: P2.5 learned models remain auxiliary and deterministic `P2DesignPolicy` / `FeasibilityChecker` fallback remains required at P4 start.
+- Open questions: None currently.
 
 ### P2.5: Post-P2 Inspection, Visualization, and Candidate Trace Export
 
