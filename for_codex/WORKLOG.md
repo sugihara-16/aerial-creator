@@ -3,6 +3,32 @@
 ## Global Worklog
 
 ### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P3 Retry/Abort State-Machine Supplement
+- Work package / Agent label: Agent G: P3 retry/abort behavior
+- Summary: Extended `AssemblyRunner` with deterministic retry/abort behavior. Failed planned steps now emit synthetic `retry` steps up to a configurable retry limit, then emit a synthetic `abort` step if the planned step still fails. `AssemblyRunReport` now records retry/abort counts, aborted status, and executed step types. The simplified executor can now fail matching steps once for transient failure tests.
+- Files changed:
+  - `amsrr/assembly/assembly_runner.py`
+  - `amsrr/assembly/simplified_executor.py`
+  - `tests/unit/assembly/test_assembly_runner.py`
+  - `tests/unit/assembly/test_simplified_executor.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None to persisted schemas. Extended assembly-local runner/executor dataclasses only.
+- Upstream dependencies used: Existing Agent G runner/executor scaffolding and v0.4 valid AssemblyStep types `retry` and `abort`.
+- Downstream impact: P3 runner/acceptance can now measure retry and abort path coverage directly from `AssemblyRunReport`.
+- Tests added or run:
+  - Added `test_assembly_runner_can_disable_retry_for_single_failure_stop`
+  - Added `test_simplified_executor_fail_once_allows_runner_retry_success`
+  - Updated failure-path tests to assert synthetic retry/abort records.
+- Commands run:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/assembly/test_graph_edit_planner.py tests/unit/assembly/test_assembly_runner.py tests/unit/assembly/test_simplified_executor.py -q`
+  - `python3 -m compileall amsrr -q`
+- Tests run: Agent G targeted assembly tests passed: 12 passed. `python3 -m compileall amsrr -q` passed.
+- Assumptions: Retry/abort steps are synthetic runtime steps and are not inserted into the source `AssemblyPlan.steps`, preserving the original deterministic graph-edit plan.
+- Blockers: None.
+- Next steps: Run targeted Agent G tests, commit order 3, then implement P3 assembly evaluation runner.
+
+### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P3 Simplified Assembly Executor Supplement
 - Work package / Agent label: Agent G: P3 simplified assembly executor
 - Summary: Added a deterministic `SimplifiedAssemblyExecutor` backend for the assembly executor interface. It succeeds assembly steps by default, can return updated construction state on `verify_attach`, records per-step smoke metrics, and supports explicit failure injection for later retry/abort probes.
@@ -1276,6 +1302,25 @@
 - Open questions: None currently.
 
 ### Agent G: π_A GraphEditAssemblyPlanner
+
+#### 2026-07-08
+- Scope: Add P3 order 3 retry/abort behavior to the deterministic assembly runner.
+- Files changed:
+  - `amsrr/assembly/assembly_runner.py`
+  - `amsrr/assembly/simplified_executor.py`
+  - `tests/unit/assembly/test_assembly_runner.py`
+  - `tests/unit/assembly/test_simplified_executor.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: Existing Agent G assembly runner/executor and v0.4 `AssemblyStep.step_type` values.
+- Implemented: Configurable retry limit, synthetic retry steps, synthetic abort steps, retry/abort counts, aborted status, executed step-type tracing, and fail-once support in the simplified executor.
+- Not implemented: Motion replanning, learned recovery policy, detach release gates, physical docking verification, controller/QP integration, or Isaac execution.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: P3 acceptance can test successful transient retry and persistent-failure abort paths without changing source assembly plans.
+- Tests added: `test_assembly_runner_can_disable_retry_for_single_failure_stop`, `test_simplified_executor_fail_once_allows_runner_retry_success`.
+- Tests passed: Agent G targeted assembly tests passed: 12 passed. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: Runtime retry/abort steps are represented in `AssemblyRunReport.executed_step_types`; `AssemblyPlan.steps` remains the source graph-edit plan.
+- Open questions: None currently.
 
 #### 2026-07-08
 - Scope: Add P3 order 2 simplified assembly executor backend.

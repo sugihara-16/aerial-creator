@@ -60,9 +60,33 @@ def test_simplified_executor_can_inject_step_type_failure(grasp_carry_dict: dict
 
     assert report.success is False
     assert report.failure_reason == "alignment timeout"
-    assert report.step_results[-1].violations[0].code == "E_ASSEMBLY_TIMEOUT"
-    assert report.step_results[-1].violations[0].node_or_edge_ref == "assembly_step:1:align_ports"
-    assert executor.executed_step_ids == [0, 1]
+    assert report.failures[0].code == "E_ASSEMBLY_TIMEOUT"
+    assert report.failures[0].node_or_edge_ref == "assembly_step:1:align_ports"
+    assert report.retry_count == 1
+    assert report.abort_count == 1
+    assert executor.executed_step_ids == [0, 1, len(report.plan.steps) + 2, 1, len(report.plan.steps) + 4]
+
+
+def test_simplified_executor_fail_once_allows_runner_retry_success(grasp_carry_dict: dict) -> None:
+    target_graph = _target_graph(grasp_carry_dict)
+    executor = SimplifiedAssemblyExecutor(
+        target_graph=target_graph,
+        config=SimplifiedAssemblyExecutorConfig(
+            failure_mode="fail_matching_steps",
+            fail_once_step_types=("dock",),
+            failure_code="E_DOCK_VERIFY_FAIL",
+            failure_message="transient dock failure",
+        ),
+    )
+
+    report = AssemblyRunner().run(target_graph, executor)
+
+    assert report.success is True
+    assert report.retry_count == len(target_graph.dock_edges)
+    assert report.abort_count == 0
+    assert report.aborted is False
+    assert report.state_matches_target is True
+    assert "retry" in report.executed_step_types
 
 
 def test_simplified_executor_success_without_target_graph_uses_runner_state_transition(grasp_carry_dict: dict) -> None:

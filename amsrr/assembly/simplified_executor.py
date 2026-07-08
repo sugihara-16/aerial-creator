@@ -18,6 +18,8 @@ class SimplifiedAssemblyExecutorConfig:
     failure_mode: SimplifiedFailureMode = "none"
     fail_step_ids: tuple[int, ...] = ()
     fail_step_types: tuple[str, ...] = ()
+    fail_once_step_ids: tuple[int, ...] = ()
+    fail_once_step_types: tuple[str, ...] = ()
     failure_code: str = "E_DOCK_VERIFY_FAIL"
     failure_message: str = "simplified assembly executor injected failure"
     default_step_duration_s: float = 0.1
@@ -43,6 +45,7 @@ class SimplifiedAssemblyExecutor:
         self.target_graph = target_graph
         self.config = config or SimplifiedAssemblyExecutorConfig()
         self.executed_step_ids: list[int] = []
+        self._failed_once_keys: set[tuple[int, str]] = set()
 
     def execute_step(self, step: AssemblyStep, state: ConstructionState) -> AssemblyExecutionResult:
         self.executed_step_ids.append(step.step_id)
@@ -75,6 +78,11 @@ class SimplifiedAssemblyExecutor:
     def _should_fail(self, step: AssemblyStep) -> bool:
         if self.config.failure_mode == "none":
             return False
+        step_key = (step.step_id, step.step_type)
+        if step.step_id in self.config.fail_once_step_ids or step.step_type in self.config.fail_once_step_types:
+            if step_key not in self._failed_once_keys:
+                self._failed_once_keys.add(step_key)
+                return True
         return step.step_id in self.config.fail_step_ids or step.step_type in self.config.fail_step_types
 
 

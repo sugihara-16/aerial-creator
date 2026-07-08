@@ -16,6 +16,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 - Decision: Added an Agent G `SimplifiedAssemblyExecutor` that deterministically succeeds assembly steps by default, optionally updates construction state on successful `verify_attach` when a target graph is available, and supports explicit failure injection by step id or step type for later retry/abort acceptance probes.
 - Compatibility impact: The executor is a smoke backend only. It does not model docking dynamics, path planning, contact physics, controller allocation, Isaac execution, or learned assembly control.
 
+### P3 Retry/Abort State-Machine Supplement
+
+- Context: v0.4 Section 24.4 requires retry/abort paths to be tested, while Section 17 only lists `retry` and `abort` as valid `AssemblyStep.step_type` values without prescribing a state-machine implementation.
+- Decision: Extended Agent G `AssemblyRunner` with deterministic retry/abort handling. On a failed planned step, the runner emits a synthetic `retry` step up to `max_retries_per_step`; if the planned step still fails, it emits a synthetic `abort` step and returns an unsuccessful `AssemblyRunReport` with retry/abort counts and executed step types.
+- Compatibility impact: Retry/abort remains deterministic scaffolding and does not imply learned assembly recovery, motion replanning, physical docking verification, or controller/QP feasibility.
+
 ### π_D Joint-Angle Non-Design Clarification
 
 - Context: The v0.4 design text could be misread as treating `ModuleNode.pose_in_design_frame` or `DockEdge.relative_pose_src_to_dst` as continuous design variables for π_D, even though A-MSRR module joints are movable and their instantaneous angles belong to planning/control/runtime state rather than structure design.

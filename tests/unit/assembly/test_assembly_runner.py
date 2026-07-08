@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from amsrr.assembly import AssemblyExecutionResult, AssemblyRunner, assembly_state_metrics, initial_construction_state
+from amsrr.assembly import (
+    AssemblyExecutionResult,
+    AssemblyRunner,
+    AssemblyRunnerConfig,
+    assembly_state_metrics,
+    initial_construction_state,
+)
 from amsrr.assembly.construction_state import AssemblyStep, ConstructionState
 from amsrr.irg.irg_builder import IRGBuilder
 from amsrr.morphology.grasp_carry_designs import (
@@ -70,9 +76,13 @@ def test_assembly_runner_stops_on_failed_step_without_completing_graph(grasp_car
 
     assert report.success is False
     assert report.failure_reason == "injected dock failure"
-    assert len(report.step_results) == 3
-    assert report.step_results[-1].success is False
+    assert len(report.step_results) == 6
+    assert report.step_results[-2].success is False
     assert report.failures[0].code == "E_DOCK_VERIFY_FAIL"
+    assert report.retry_count == 1
+    assert report.abort_count == 1
+    assert report.aborted is True
+    assert report.executed_step_types == ["move_to_staging", "align_ports", "dock", "retry", "dock", "abort"]
     assert report.attached_edge_count == 0
     assert report.state_matches_target is False
 
@@ -97,3 +107,16 @@ def test_assembly_runner_resumes_from_partial_construction_state(grasp_carry_dic
     assert resumed_report.plan.steps == []
     assert resumed_report.completed_step_count == 0
     assert resumed_report.state_matches_target is True
+
+
+def test_assembly_runner_can_disable_retry_for_single_failure_stop(grasp_carry_dict: dict) -> None:
+    target_graph = _target_graph(grasp_carry_dict)
+    report = AssemblyRunner(config=AssemblyRunnerConfig(max_retries_per_step=0)).run(
+        target_graph,
+        _FailingDockExecutor(),
+    )
+
+    assert report.success is False
+    assert report.retry_count == 0
+    assert report.abort_count == 1
+    assert report.executed_step_types == ["move_to_staging", "align_ports", "dock", "abort"]
