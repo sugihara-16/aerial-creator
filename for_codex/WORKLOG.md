@@ -4,6 +4,36 @@
 
 ### 2026-07-07
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent E: Deterministic design teacher and π_D scaffolding
+- Summary: Implemented the P1 fixed/simple morphology provider surface for π_D by adding a `DesignPolicyContext`, fixed-simple baseline design policy, deterministic design teacher variants, and a small action-candidate/STOP-mask generator over teacher traces.
+- Files changed:
+  - `amsrr/policies/__init__.py`
+  - `amsrr/policies/design_policy_base.py`
+  - `amsrr/policies/design_candidate_generator.py`
+  - `amsrr/policies/design_teacher.py`
+  - `tests/unit/policies/test_design_teacher.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added policy-side interface/scaffold modules that consume existing `TaskSpec`, `InteractionRequirementGraph`, `InteractionEnvelope`, `PhysicalModel`, and `DesignOutput` schemas.
+- Upstream dependencies used: v0.4 Sections 14, 15, 24.2, 26.5, 27.1; existing Agent E/F minimal morphology builder; Agent F FeasibilityChecker; Agent D IRGBuilder and EnvelopeExtractor; Agent B PhysicalModel.
+- Downstream impact: Agent G can consume a deterministic target `DesignOutput` for assembly planning; Agent H can consume fixed/simple morphology and RobotAnchors for ContactCandidateSampler implementation; later learned π_D heads can replace the teacher scorer while keeping the same `DesignPolicyContext -> DesignOutput` boundary.
+- Tests added or run:
+  - Added `test_design_teacher_selects_p1_grasp_support_variant`
+  - Added `test_design_candidate_trace_masks_stop_until_final_step`
+  - Added `test_fixed_simple_design_policy_outputs_feasible_stop`
+- Commands run:
+  - `sed -n ...` inspections for spec Sections 14, 15, 26.5, 27.1, schema, morphology builder, and existing tests
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/policies/test_design_teacher.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/policies/test_design_teacher.py -q` passed: 3 passed. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 41 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Assumptions: Teacher variants are deterministic labels over the existing minimal connected-tree morphology scaffold. P1 object grasp/carry defaults to `tri_anchor_support_grasp` when the IRG contains required grasp slots plus an optional support slot. The candidate generator is an action-mask scaffold, not a learned scorer.
+- Blockers: None.
+- Next steps: Continue with implementation order item 12, Agent G π_A GraphEditAssemblyPlanner, then Agent H ContactCandidateSampler.
+
+### 2026-07-07
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent H/I: P0 interface-only smoke pieces
 - Summary: Implemented P0 interface-only helpers for ContactCandidateSet pairwise compatibility, assignment-level QP infeasibility reporting, and PolicyCommand-to-QP/PID reference bias building.
 - Files changed:
@@ -323,6 +353,26 @@
 ---
 
 ## Work Package Logs
+
+### Agent E: Deterministic Design Teacher + π_D Scaffolding
+
+#### 2026-07-07
+- Scope: Implement implementation-order item 11 for P1 fixed/simple morphology: deterministic design teacher and π_D scaffolding only.
+- Files changed:
+  - `amsrr/policies/__init__.py`
+  - `amsrr/policies/design_policy_base.py`
+  - `amsrr/policies/design_candidate_generator.py`
+  - `amsrr/policies/design_teacher.py`
+  - `tests/unit/policies/test_design_teacher.py`
+- Upstream dependencies: Existing `MinimalMorphologyBuilder`, `DesignOutput`, IRG ContactSlot semantics, InteractionEnvelopeExtractor, PhysicalModel builder, FeasibilityChecker, and v0.4 π_D action vocabulary.
+- Implemented: `DesignPolicyContext`, `DesignPolicyBase` protocol, `FixedSimpleDesignPolicy`, `DesignTeacherVariant`, `DeterministicDesignTeacher`, `DesignTeacherExample`, `DesignCandidateGenerator`, `DesignActionCandidate`, `DesignCandidateStep`, P1 grasp/support teacher variant selection, and STOP-mask smoke checks.
+- Not implemented: Learned π_D scoring/sampling, optimized teacher geometry variants, policy training, assembly planning, contact candidate sampling, π_H, π_L, QP/PID controller behavior, simulator integration.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: P1 and Agent H can now request a stable fixed/simple `DesignOutput` with RobotAnchors before generating contact candidates. Agent G can plan assembly against the same target graph.
+- Tests added: `test_design_teacher_selects_p1_grasp_support_variant`, `test_design_candidate_trace_masks_stop_until_final_step`, `test_fixed_simple_design_policy_outputs_feasible_stop`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 41 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: Teacher trace STOP is masked until the final teacher step. Final STOP validity performs scaffold checks and optionally respects a FeasibilityChecker result. π_D still emits `DesignOutput` only and never controller or actuator commands.
+- Open questions: None currently.
 
 ### Agent H/I: P0 Interface-Only Smoke Pieces
 

@@ -4,6 +4,13 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-07
 
+### Deterministic Design Teacher Scaffold Supplement
+
+- Context: v0.4 requires a design grammar / teacher generator for bootstrapping π_D, but does not prescribe exact module poses, grammar expansion internals, or candidate-mask data structures for P1 fixed/simple morphology.
+- Decision: Added an Agent E deterministic teacher scaffold that uses the existing minimal connected-tree morphology builder as the P1 fixed/simple morphology provider. Teacher variants are stable labels (`chain_grasp`, `symmetric_two_anchor_grasp`, `tri_anchor_support_grasp`, `central_base_plus_two_grasp_arms`, `perch_anchor_frame`, `valve_torque_arm`, `support_shift_frame`) over a schema-compatible `DesignOutput`. For object grasp/carry, the default P1 selection is `tri_anchor_support_grasp` when the IRG has required grasp slots and an optional support slot; otherwise it falls back to `symmetric_two_anchor_grasp` or `chain_grasp`.
+- Candidate-mask supplement: Added a small `DesignCandidateGenerator` that wraps teacher action traces and masks `STOP` until the final teacher step. Its final STOP validity checks the existing Version 1 STOP conditions at a scaffold level: module count, base assignment, connected graph, port conflicts, required slot coverage, closed-loop rejection, and optional FeasibilityChecker result.
+- Compatibility impact: This does not implement a learned π_D, does not change persisted schemas, and does not claim the teacher variants are optimized designs. Later policy heads can replace the scorer/sampler internals while keeping the `DesignPolicyContext -> DesignOutput` boundary.
+
 ### P0 ContactCandidate Pairwise Matrix Supplement
 
 - Context: v0.4 requires pairwise/group compatibility for `ContactCandidateSet`, but exact contact-pair geometry, collision, and grasp grouping belong to later sampler/controller work.
