@@ -4,6 +4,34 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent H/F: Selected assignment feasibility proxy
+- Summary: Implemented selected-assignment feasibility evaluation for π_H-selected `ContactAssignment` sets, including candidate consistency, slot cardinality, pairwise conflict, grasp-opposition wrench proxy, friction/collision/QP residual hooks, cache updates, exports, and unit tests.
+- Files changed:
+  - `amsrr/policies/__init__.py`
+  - `amsrr/policies/assignment_feasibility.py`
+  - `tests/unit/policies/test_contact_candidate_interfaces.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added a policy-side evaluator function that returns the existing `AssignmentFeasibilityResult` schema.
+- Upstream dependencies used: v0.4 Sections 18.6, 18.7, 19.3, Appendix B.4, Appendix C; existing `ContactCandidateSet`, `ContactAssignment`, pairwise conflict matrices, and assignment-feasibility cache.
+- Downstream impact: Agent H π_H baseline can evaluate only its selected assignments and cache infeasible selections without enumerating arbitrary candidate subsets. Later exact QP/collision/wrench evaluators can pass residuals/margins through the same result schema.
+- Tests added or run:
+  - Added `test_selected_assignment_feasibility_accepts_opposing_grasp_pair`
+  - Added `test_selected_assignment_feasibility_rejects_cardinality_and_pair_conflict`
+  - Added `test_selected_assignment_feasibility_rejects_non_opposing_grasp_normals`
+- Commands run:
+  - `sed -n ...` inspections for spec Sections 18.6, 18.7, 19.3, Appendix B/C, and existing assignment feasibility code
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/policies/test_contact_candidate_interfaces.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/policies/test_contact_candidate_interfaces.py -q` passed: 5 passed. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 51 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Assumptions: Assignment-level hard checks here are deterministic proxies: selected cardinality, pair conflicts, friction margin, and opposing-normal grasp proxy. They are not exact wrench closure, exact collision, or exact QP solving.
+- Blockers: None.
+- Next steps: Continue with implementation order item 14, Agent H π_H trajectory schema/baseline planner.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent H: ContactCandidateSampler
 - Summary: Implemented a deterministic morphology-conditioned `ContactCandidateSampler` for P1 grasp/carry, optional group proposal support in `build_contact_candidate_set`, package exports, and unit tests covering non-empty candidate generation, grasp-pair proposals, anchor association preservation, and serialization.
 - Files changed:
@@ -415,6 +443,24 @@
 ---
 
 ## Work Package Logs
+
+### Agent H/F: Selected Assignment Feasibility Proxy
+
+#### 2026-07-08
+- Scope: Add assignment-level feasibility checks for selected `ContactAssignment` sets only, without subset enumeration.
+- Files changed:
+  - `amsrr/policies/__init__.py`
+  - `amsrr/policies/assignment_feasibility.py`
+  - `tests/unit/policies/test_contact_candidate_interfaces.py`
+- Upstream dependencies: Existing `ContactCandidateSet`, selected `ContactAssignment`, pairwise conflict matrix, candidate unary validity, and v0.4 assignment-level feasibility guidance.
+- Implemented: `evaluate_selected_assignment_feasibility`, violation code constants, slot min/max cardinality checks, assignment/candidate consistency checks, selected pairwise conflict checks, duplicate selected-candidate checks, grasp-opposition residual proxy, friction margin proxy, optional explicit wrench/QP/collision residual hooks, and deterministic cache update.
+- Not implemented: Exact force closure, exact support polygon/contact support ratio, full multi-contact collision, exact QP allocation, or π_H trajectory generation.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: π_H can now select candidate assignments and receive deterministic feasibility/cache labels before later exact solver integration.
+- Tests added: `test_selected_assignment_feasibility_accepts_opposing_grasp_pair`, `test_selected_assignment_feasibility_rejects_cardinality_and_pair_conflict`, `test_selected_assignment_feasibility_rejects_non_opposing_grasp_normals`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 51 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: The existing `evaluate_assignment_level_qp` smoke helper remains backward compatible. The new evaluator should be used when π_H has a selected assignment set and wants cardinality/pairwise/wrench-proxy labels in addition to optional QP residual labels.
+- Open questions: None currently.
 
 ### Agent H: ContactCandidateSampler
 

@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-08
 
+### Selected Assignment Feasibility Proxy Supplement
+
+- Context: v0.4 separates unary ContactCandidate screening from assignment-level feasibility after π_H selects `ContactAssignment` sets. It requires no exhaustive subset enumeration and leaves exact wrench/friction/collision/QP solving to later evaluator/controller work.
+- Decision: Added `evaluate_selected_assignment_feasibility` as a deterministic selected-assignment proxy evaluator. It checks selected candidate existence and assignment consistency, unary-valid candidates, slot min/max cardinality when supplied by the caller, pairwise conflict matrix entries, duplicate selected candidates, a grasp-opposition wrench proxy, optional explicit wrench/QP residual thresholds, optional friction margin, and optional collision margin. Results are stored in `ContactCandidateSet.assignment_feasibility_cache` using the existing deterministic assignment key.
+- Compatibility impact: This does not enumerate arbitrary candidate subsets and does not replace exact multi-contact feasibility. Later π_H and QP/collision backends can pass exact residuals/margins into the same `AssignmentFeasibilityResult` schema.
+
 ### P1 ContactCandidateSampler Deterministic Proposal Supplement
 
 - Context: v0.4 requires morphology-conditioned `ContactCandidateSampler` after π_D, with unary screens, pairwise/group compatibility, and no exhaustive candidate-subset enumeration. Exact reachability, collision, and assignment-level wrench/QP feasibility belong to later checker/controller work.
