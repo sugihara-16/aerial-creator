@@ -4,6 +4,25 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.0 implementation order
+- Work package / Agent label: Agent K/L: P4.0 final docs and verification
+- Summary: Completed P4.0 documentation handoff after Orders 1-5. Added the P4.0 implementation supplement to the design modification log, confirmed full unit and acceptance suites pass, and kept P4.0 explicitly scoped to simplified full-pipeline wiring rather than P4 full completion.
+- Files changed:
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: Documentation only in this order. Earlier Order 1 added backward-compatible `EpisodeArchive` fields.
+- Upstream dependencies used: Completed P4.0 Orders 1-5, v0.4 Sections 24.5.1, 25.1, 26.10, and 27.3.
+- Downstream impact: Future work can start P4-control / controller bridge / actuator mapping with P4.0 simplified acceptance as a prerequisite, without confusing P4.0 with Isaac-backed P4 full completion.
+- Tests added or run: No new tests added in this order.
+- Commands run:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance -q`
+- Tests run: Full unit suite passed: 99 passed, 1 skipped in 4.67s. Full acceptance suite passed: 7 passed in 118.22s.
+- Assumptions: P4.0 acceptance remains a simplified backend wiring gate only; Isaac-backed physical success metrics belong to later P4-control / P4.1 / P4.2 / P4 full acceptance.
+- Blockers: None.
+- Next steps: Proceed to controller bridge / actuator mapping and P4-control Isaac low-level flight validation before any P4 full completion claim.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.0 implementation order
 - Work package / Agent label: Agent L: P4.0 simplified acceptance gate
 - Summary: Added a P4.0 acceptance gate that runs the simplified full-pipeline runner, verifies P2 selected design and P3 assembly result usage, checks contact candidate / pi_H / pi_L / controller / archive completeness, records simplified success/drop/collision/QP metrics, and enforces no-mislabeling as non-Isaac and non-P4-full.
 - Files changed:
@@ -1243,6 +1262,21 @@
 ## Work Package Logs
 
 ### P4.0 Implementation: Simplified Full-Pipeline Integration
+
+#### 2026-07-08
+- Scope: Order 6 final docs, design modification log, and full verification.
+- Files changed:
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: P4.0 Orders 1-5 and full suite verification.
+- Implemented: P4.0 design modification supplement and final worklog handoff entry with full unit/acceptance results.
+- Not implemented: Isaac Lab backend, controller bridge / actuator mapping, P4-control, P4.1/P4.2 deterministic Isaac rollout, P4.3 learning bootstrap, or P4 full acceptance.
+- Schema/interface changes: None in this order.
+- Downstream impact: Next work package should start with controller bridge / actuator mapping and P4-control, using P4.0 acceptance as the simplified wiring prerequisite.
+- Tests added: None.
+- Tests passed: Full unit suite passed: 99 passed, 1 skipped in 4.67s. Full acceptance suite passed: 7 passed in 118.22s.
+- Handoff notes: P4.0 is accepted as simplified full-pipeline wiring only; it must not be reported as Isaac-backed full grasp/carry completion.
+- Open questions: None currently.
 
 #### 2026-07-08
 - Scope: Order 5 P4.0 simplified acceptance gate.

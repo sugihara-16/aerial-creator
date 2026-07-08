@@ -4,6 +4,13 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-08
 
+### P4.0 Simplified Full-Pipeline Implementation Supplement
+
+- Context: v0.4 Section 24.5.1 defines P4.0 as simplified full-pipeline wiring, not P4 full completion. The implementation needed to connect P2 selected `DesignOutput`, P3 simplified assembly result, morphology-conditioned contact candidates, pi_H, pi_L, controller scaffolding, and `EpisodeArchive` logging without claiming Isaac-backed physical success.
+- Decision: Added backward-compatible `EpisodeArchive` fields for runtime observations, actuator target records, rollout artifacts, and learning artifacts. Added a `SimplifiedGraspCarryEnv` path that accepts an external `DesignOutput` and optional assembled `MorphologyGraph`, bypassing `FixedSimpleDesignPolicy` on the P4.0 path. Added `P4_0FullPipelineRunner`, `configs/training/p4_0_grasp_carry.yaml`, unit/archive/no-mislabeling tests, and `run_p4_0_acceptance`.
+- Logging/no-mislabeling decision: P4.0 archives record `rollout_artifacts` with `phase="P4.0"`, `backend="simplified"`, `is_p4_full_completion=False`, `isaac_backed=False`, and `physical_success_claim=False`. The acceptance report includes an explicit backend note that P4.0 metrics are simplified backend indicators and not Isaac-backed physical success rates.
+- Compatibility impact: Existing P1/P2/P3 archives deserialize because the new archive fields have default empty values. P4.0 still does not implement Isaac Lab backend, controller bridge / actuator mapping, actuator target execution, P4-control, P4.1/P4.2, P4.3 learning bootstrap, or P4 full acceptance.
+
 ### P4.3 Learning Target Clarification
 
 - Context: After the P4 Isaac-backed completion clarification, the P4.3 learning bootstrap text could still be read as focusing only on π_L or residual controller learning.
