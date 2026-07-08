@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-08
 
+### P2 Grasp-Carry Morphology Variant Builder Supplement
+
+- Context: v0.4 Section 15.4 names design teacher variants (`chain_grasp`, `symmetric_two_anchor_grasp`, `tri_anchor_support_grasp`, `central_base_plus_two_grasp_arms`) but does not prescribe exact module poses, tree topology, control groups, or RobotAnchor placement for each variant.
+- Decision: Added Agent E `GraspCarryMorphologyVariantBuilder` as a deterministic P2 scaffold for object grasp/carry. The four variants now produce distinct connected-tree `MorphologyGraph` layouts: a linear chain, a central base with two direct grasp arms, a tri-anchor support/grasp frame with an optional support anchor on the base, and a central base with two two-link grasp arms. `DeterministicDesignTeacher` now routes object grasp/carry variants through this builder instead of merely annotating the minimal seed morphology.
+- Compatibility impact: This does not change persisted schemas and does not claim the variants are optimized or learned designs. It gives π_D training/evaluation a finite deterministic set of distinct `DesignOutput` demonstrations while preserving existing `DesignPolicyContext -> DesignOutput`, `ContactSlotID -> RobotAnchorID`, and FeasibilityChecker boundaries.
+
 ### P1 Acceptance Gate Supplement
 
 - Context: v0.4 Section 24.2 defines P1 acceptance criteria but does not prescribe a concrete test harness or result schema for recording the pass/fail gate.

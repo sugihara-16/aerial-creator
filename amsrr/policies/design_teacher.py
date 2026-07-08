@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from amsrr.morphology.graph import build_minimal_design_output
+from amsrr.morphology.grasp_carry_designs import (
+    GraspCarryMorphologyVariant,
+    build_grasp_carry_variant_design_output,
+)
 from amsrr.policies.design_candidate_generator import DesignCandidateGenerator, DesignCandidateStep
 from amsrr.policies.design_policy_base import DesignPolicyContext
 from amsrr.schemas.common import ContactMode, SchemaValidationError, StrEnum
@@ -42,9 +46,9 @@ class DesignTeacherExample:
 class DeterministicDesignTeacher:
     """Demonstration morphology teacher for π_D bootstrapping.
 
-    The current P1 implementation uses the existing minimal connected-tree
-    builder and labels its output with a deterministic teacher variant. It is a
-    bootstrap action-sequence provider, not a learned design policy.
+    For object grasp/carry, P2 variants produce distinct MorphologyGraphs. The
+    teacher is a bootstrap action-sequence provider, not a learned design
+    policy.
     """
 
     def __init__(self, candidate_generator: DesignCandidateGenerator | None = None) -> None:
@@ -57,7 +61,7 @@ class DeterministicDesignTeacher:
         variant: DesignTeacherVariant | str | None = None,
     ) -> DesignTeacherExample:
         selected_variant = DesignTeacherVariant(variant) if variant is not None else self.select_variant(context)
-        design_output = build_minimal_design_output(context.task_spec, context.irg, context.physical_model)
+        design_output = self._build_design_output(context, selected_variant)
         design_output = self._annotate_design_output(design_output, selected_variant, context)
         candidate_trace = self._candidate_generator.build_teacher_trace(design_output)
         return DesignTeacherExample(
@@ -98,6 +102,22 @@ class DeterministicDesignTeacher:
         if required_grasp_min_count >= 2:
             return DesignTeacherVariant.SYMMETRIC_TWO_ANCHOR_GRASP
         return DesignTeacherVariant.CHAIN_GRASP
+
+    @staticmethod
+    def _build_design_output(
+        context: DesignPolicyContext,
+        variant: DesignTeacherVariant,
+    ) -> DesignOutput:
+        if context.task_spec.task_type == TaskType.OBJECT_GRASP_CARRY and variant.value in {
+            item.value for item in GraspCarryMorphologyVariant
+        }:
+            return build_grasp_carry_variant_design_output(
+                context.task_spec,
+                context.irg,
+                context.physical_model,
+                variant=variant.value,
+            )
+        return build_minimal_design_output(context.task_spec, context.irg, context.physical_model)
 
     @staticmethod
     def _annotate_design_output(

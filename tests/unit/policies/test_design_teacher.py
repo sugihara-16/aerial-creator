@@ -33,7 +33,9 @@ def test_design_teacher_selects_p1_grasp_support_variant(grasp_carry_dict: dict)
     assert design.task_id == context.task_spec.task_id
     assert design.irg_id == context.irg.irg_id
     assert design.target_morphology.graph_id.startswith("morphology:grasp_carry_box_001:")
+    assert design.target_morphology.graph_id.endswith("tri_anchor_support_grasp")
     assert design.design_scores["fixed_simple_p1"] == 1.0
+    assert design.design_scores["p2_grasp_carry_variant_builder"] == 1.0
     assert design.design_scores["teacher_action_count"] == float(len(design.design_actions))
     assert {anchor.anchor_type for anchor in design.target_morphology.robot_anchors} == {"grasp", "support"}
     assert design.design_actions[-1].action_type == DesignActionType.STOP

@@ -4,6 +4,39 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent E: P2 grasp/carry morphology variant builder
+- Summary: Implemented real deterministic P2 grasp/carry morphology variants for `chain_grasp`, `symmetric_two_anchor_grasp`, `tri_anchor_support_grasp`, and `central_base_plus_two_grasp_arms`, and routed object grasp/carry `DeterministicDesignTeacher` output through the new variant builder.
+- Files changed:
+  - `amsrr/morphology/__init__.py`
+  - `amsrr/morphology/grasp_carry_designs.py`
+  - `amsrr/policies/design_teacher.py`
+  - `tests/unit/morphology/test_grasp_carry_variants.py`
+  - `tests/unit/policies/test_design_teacher.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None. Existing `MorphologyGraph`, `DesignOutput`, `DesignAction`, `RobotAnchor`, and `ControlGroup` schemas were used unchanged.
+- Upstream dependencies used: v0.4 Sections 14, 15.3, 15.4, 16, 24.3, 26.5, 27.1; existing IRG ContactSlot semantics, PhysicalModel dock ports/capability token, FeasibilityChecker, and design teacher/candidate trace boundaries.
+- Downstream impact: P2 design evaluation can now sample/evaluate distinct teacher morphology demonstrations instead of four labels over one minimal seed graph. ContactCandidateSampler and FeasibilityChecker continue to consume the same schema objects.
+- Tests added or run:
+  - Added `test_grasp_carry_variants_build_distinct_feasible_morphologies`
+  - Added `test_grasp_carry_variant_topology_shapes`
+  - Added `test_grasp_carry_variants_cover_required_slot_min_count`
+  - Updated `test_design_teacher_selects_p1_grasp_support_variant`
+- Commands run:
+  - `sed -n ...` inspections for morphology builder, design teacher, and existing tests
+  - `python3 -c "from amsrr.robot_model.physical_model_builder import build_physical_model_from_config; ..."` to inspect Holon dock ports
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/morphology/test_grasp_carry_variants.py tests/unit/policies/test_design_teacher.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: Targeted morphology/design teacher tests passed: 6 passed. Full unit suite passed: 70 passed, 1 skipped. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Assumptions: Exact variant poses/topologies are not specified by v0.4, so this implementation defines deterministic scaffold layouts for P2 teacher/evaluation use. These variants are not optimized morphology search results and are not learned π_D outputs yet.
+- Blockers: None.
+- Next steps: Continue with Agent F P2 FeasibilityChecker strengthening or Agent E P2 candidate/evaluation policy scaffolding, then add the P2 acceptance runner/gate.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent L: P1 tests and acceptance
 - Summary: Added an explicit P1 acceptance gate for v0.4 Section 24.2 using the configured simplified grasp/carry runner, EpisodeArchive JSONL output, and randomized contact-candidate smoke checks.
 - Files changed:
@@ -599,6 +632,28 @@
 ---
 
 ## Work Package Logs
+
+### Agent E: P2 Grasp-Carry Morphology Variant Builder
+
+#### 2026-07-08
+- Scope: Implement P2 order 1 real object grasp/carry morphology variants as distinct `MorphologyGraph` outputs, without changing schemas or downstream policy/controller interfaces.
+- Files changed:
+  - `amsrr/morphology/__init__.py`
+  - `amsrr/morphology/grasp_carry_designs.py`
+  - `amsrr/policies/design_teacher.py`
+  - `tests/unit/morphology/test_grasp_carry_variants.py`
+  - `tests/unit/policies/test_design_teacher.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: v0.4 MorphologyGraph/DesignOutput schemas, π_D teacher variant names, STOP validity constraints, IRG ContactSlots, Holon PhysicalModel dock ports, and existing FeasibilityChecker hard-check scaffold.
+- Implemented: `GraspCarryMorphologyVariant`, `GraspCarryMorphologyVariantBuilder`, `build_grasp_carry_variant_design_output`, four deterministic connected-tree layouts, variant-specific module roles/poses/edges/control groups, required/optional RobotAnchor placement, design action traces, and design teacher routing for object grasp/carry variants.
+- Not implemented: Learned π_D scorer/sampler, optimized morphology search, P2 design runner, P2 acceptance gate, exact collision/QP feasibility, or Isaac execution.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: Future P2 design datasets and feasibility labeling can distinguish topology variants while preserving existing `DesignOutput` and `RobotAnchor` contracts. Existing P1 simplified flow continues to use `FixedSimpleDesignPolicy` through the same interface.
+- Tests added: `test_grasp_carry_variants_build_distinct_feasible_morphologies`, `test_grasp_carry_variant_topology_shapes`, `test_grasp_carry_variants_cover_required_slot_min_count`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/morphology/test_grasp_carry_variants.py tests/unit/policies/test_design_teacher.py -q` passed: 6 passed. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 70 passed, 1 skipped. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Handoff notes: `central_base_plus_two_grasp_arms` requires enough module budget for a five-module two-link-arm layout. The default grasp/carry teacher selection still chooses `tri_anchor_support_grasp` when an optional support slot exists and `max_modules >= 3`.
+- Open questions: None currently.
 
 ### Agent L: Tests and Acceptance
 
