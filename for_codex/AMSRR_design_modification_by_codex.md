@@ -2,6 +2,15 @@
 
 This file records implementation-time supplements or deviations from `A-MSRR_codex_ready_spec_v0_4_ja.md`.
 
+## 2026-07-08
+
+### GraphEditAssemblyPlanner Scaffold Supplement
+
+- Context: v0.4 defines `AssemblyPlan`, `AssemblyStep`, and `ConstructionState`, and requires a deterministic π_A `GraphEditAssemblyPlanner`, but does not prescribe how a target `MorphologyGraph` should be expanded into P1/P3 smoke-level assembly steps.
+- Decision: Added an Agent G deterministic graph-edit planner that treats the target morphology as a connected tree rooted at `base_module_id`. Starting from an initial construction state containing only the base component, each unattached `DockEdge` is expanded in stable `edge_id` order into four steps: `move_to_staging`, `align_ports`, `dock`, and `verify_attach`. The construction-state helper can mark verified edges as attached and rebuild the assembled subgraph with attached latch states and port occupancy.
+- Interface supplement: Added implementation-local dataclasses matching the v0.4 assembly contracts inside `amsrr/assembly`: `AssemblyPlan`, `AssemblyStep`, `ConstructionState`, `AssemblyExecutionResult`, plus `ControlHandoffRequest` for controller handoff scaffolding. These are not added to the persisted `amsrr/schemas` package.
+- Compatibility impact: This is deterministic π_A scaffolding, not learned assembly flight control and not simulator execution. Attach/detach safety is represented only as interface structure and precondition/success-condition records; exact motion planning, retry execution, QP feasibility during detach, and simulator verification remain later work.
+
 ## 2026-07-07
 
 ### Deterministic Design Teacher Scaffold Supplement

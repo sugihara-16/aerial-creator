@@ -2,6 +2,39 @@
 
 ## Global Worklog
 
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent G: π_A GraphEditAssemblyPlanner
+- Summary: Implemented deterministic graph-edit assembly planning over target `MorphologyGraph` dock edges, construction-state helpers, control handoff request scaffolding, executor interface records, package exports, and Agent G unit tests.
+- Files changed:
+  - `amsrr/assembly/__init__.py`
+  - `amsrr/assembly/construction_state.py`
+  - `amsrr/assembly/graph_edit_planner.py`
+  - `amsrr/assembly/control_handoff.py`
+  - `amsrr/assembly/executor_interface.py`
+  - `tests/unit/assembly/test_graph_edit_planner.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No changes to existing persisted schema modules. Added implementation-local assembly dataclasses/interfaces that match v0.4 Section 17 contracts inside `amsrr/assembly`.
+- Upstream dependencies used: v0.4 Sections 17, 26.7, 27.1; existing `MorphologyGraph`, `DockEdge`, `Violation`, `MinimalMorphologyBuilder`, IRGBuilder, and PhysicalModel builder.
+- Downstream impact: P1/P3 can now derive deterministic assembly step sequences from fixed/simple target morphologies. Agent H can proceed to ContactCandidateSampler using assembled/target graph contracts without needing learned assembly.
+- Tests added or run:
+  - Added `test_initial_construction_state_contains_base_only`
+  - Added `test_graph_edit_planner_builds_deterministic_attach_sequence`
+  - Added `test_graph_edit_planner_resumes_from_construction_state`
+  - Added `test_control_handoff_request_for_docking_step`
+- Commands run:
+  - `sed -n ...` and `rg -n ...` inspections for spec Section 17, 26.7, 27.1, existing schemas, and tests
+  - `mkdir -p amsrr/assembly tests/unit/assembly`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/assembly/test_graph_edit_planner.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/assembly/test_graph_edit_planner.py -q` passed: 4 passed. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 45 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Assumptions: Target morphology is treated as a connected tree rooted at `base_module_id` for v1/P1 scaffold planning. Each new dock edge expands to `move_to_staging -> align_ports -> dock -> verify_attach`. Exact assembly motion planning, retry execution, learned assembly, and simulator verification are out of scope for this slice.
+- Blockers: None.
+- Next steps: Continue with implementation order item 13, Agent H ContactCandidateSampler and ContactCandidateSet group proposal generation.
+
 ### 2026-07-07
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent E: Deterministic design teacher and π_D scaffolding
@@ -353,6 +386,27 @@
 ---
 
 ## Work Package Logs
+
+### Agent G: π_A GraphEditAssemblyPlanner
+
+#### 2026-07-08
+- Scope: Implement implementation-order item 12: deterministic π_A assembly planner and construction/execution interface scaffolding.
+- Files changed:
+  - `amsrr/assembly/__init__.py`
+  - `amsrr/assembly/construction_state.py`
+  - `amsrr/assembly/graph_edit_planner.py`
+  - `amsrr/assembly/control_handoff.py`
+  - `amsrr/assembly/executor_interface.py`
+  - `tests/unit/assembly/test_graph_edit_planner.py`
+- Upstream dependencies: Agent E target `MorphologyGraph` / `DesignOutput`, v0.4 assembly contracts, `Violation`, and existing schema serialization helpers.
+- Implemented: `AssemblyStep`, `AssemblyPlan`, `ConstructionState`, `initial_construction_state`, `construction_state_from_current_graph`, `mark_edge_attached`, `GraphEditAssemblyPlanner`, `AssemblyPlannerConfig`, `ControlHandoffManager`, `ControlHandoffRequest`, `AssemblyExecutionResult`, and `AssemblyExecutorInterface`.
+- Not implemented: Learned assembly policy, simulator executor, path/motion planner, retry/abort state-machine execution, detach execution gates, QP/PID controller integration, or physical docking verification.
+- Schema/interface changes: None to existing persisted schemas. Added assembly-local dataclasses/interfaces matching v0.4.
+- Downstream impact: Later P1/P3 code can request deterministic assembly plans for target morphologies and can hand assembly steps to simulator/controller interfaces once those exist.
+- Tests added: `test_initial_construction_state_contains_base_only`, `test_graph_edit_planner_builds_deterministic_attach_sequence`, `test_graph_edit_planner_resumes_from_construction_state`, `test_control_handoff_request_for_docking_step`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 45 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: The planner expands each target dock edge into four deterministic steps and returns no `next_step` when the target graph already has no remaining dock edges. Construction subgraphs keep only assembled modules/edges, while unattached modules remain in `ConstructionState.unattached_modules` and singleton components.
+- Open questions: None currently.
 
 ### Agent E: Deterministic Design Teacher + π_D Scaffolding
 
