@@ -4,6 +4,36 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent L: P2 acceptance gate
+- Summary: Added a mechanical P2 acceptance gate for Section 24.3 that runs the P2 design evaluation runner, checks `valid_design_rate >= 70%`, verifies accepted-design required slot coverage, probes closed-loop invalid rejection, and validates feasibility label storage in `EpisodeArchive.feasibility_result`.
+- Files changed:
+  - `amsrr/acceptance/__init__.py`
+  - `amsrr/acceptance/p2_acceptance.py`
+  - `tests/acceptance/test_p2_acceptance.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None. Added acceptance-side `P2AcceptanceCriteria`, `P2AcceptanceReport`, and `run_p2_acceptance`.
+- Upstream dependencies used: v0.4 Section 24.3; Agent K P2 design runner/archive output; Agent E P2 `P2DesignPolicy` and grasp/carry variants; Agent F `FeasibilityChecker` labels/margins.
+- Downstream impact: P2 now has a reproducible pass/fail gate before moving to later assembly/end-to-end phases. The gate remains design-level only and does not run π_H, π_L, QP/PID/controller commands, Isaac, or learned training.
+- Tests added or run:
+  - Added `test_p2_acceptance_section_24_3`
+- Commands run:
+  - `sed -n ...`, `rg -n ...`, `git status --short`, `git diff --stat`, and `git log -3 --oneline` inspections for acceptance, feasibility labels, Section 24.3, and current commit format
+  - `git add ...`
+  - `git commit -m "[P2][Agent K] Add design evaluation runner"`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p2_acceptance.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: Targeted P2 acceptance test passed: 1 passed in 23.45s. Full unit suite passed: 80 passed, 1 skipped. Full acceptance suite passed: 2 passed in 64.82s. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Assumptions: `required_slot_coverage >= 90% for accepted designs` is enforced as a minimum over accepted archived designs, which is stricter than an average-only interpretation. The normal P2 distribution produces tree morphologies, so closed-loop invalid rejection is tested through an explicit synthetic closed-loop design probe.
+- Blockers: None.
+- Next steps: Commit Agent L P2 acceptance changes if accepted, then continue to the next P2/P3 work package.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent K: P2 design evaluation runner
 - Summary: Added a P2 design-evaluation runner that samples diverse grasp/carry TaskSpecs, runs TaskSpec -> Geometry/IRG -> InteractionEnvelope -> P2 π_D candidate evaluation -> FeasibilityChecker, and stores selected `DesignOutput` plus selected `FeasibilityResult` labels/margins in `EpisodeArchive` JSONL records.
 - Files changed:

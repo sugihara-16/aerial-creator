@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-08
 
+### P2 Acceptance Gate Supplement
+
+- Context: v0.4 Section 24.3 defines P2 acceptance criteria but does not prescribe a concrete report schema or how to probe `closed_loop_invalid designs rejected` when the normal P2 design distribution only generates tree morphologies.
+- Decision: Added Agent L `amsrr.acceptance.p2_acceptance` as a mechanical P2 acceptance gate. It runs the configured P2 design runner, checks `valid_design_rate`, verifies required slot coverage for accepted archived designs, validates feasibility label storage across `EpisodeArchive.feasibility_result`, and synthesizes an explicit closed-loop invalid design to verify `F_CLOSED_LOOP_REJECT_V1` rejection and labels.
+- Compatibility impact: This is an acceptance harness and does not change persisted schemas. It does not run π_H, π_L, controller allocation, actuator commands, Isaac, or learned training.
+
 ### P2 Design Evaluation Runner Supplement
 
 - Context: v0.4 Section 24.3 requires P2 design evaluation over diverse grasp/carry tasks and requires feasibility labels to be stored, but it does not prescribe a concrete runner/config format for executing the TaskSpec -> Geometry -> IRG -> Envelope -> π_D -> FeasibilityChecker path before learned training.

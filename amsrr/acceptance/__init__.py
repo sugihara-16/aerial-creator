@@ -5,9 +5,17 @@ from amsrr.acceptance.p1_acceptance import (
     P1AcceptanceReport,
     run_p1_acceptance,
 )
+from amsrr.acceptance.p2_acceptance import (
+    P2AcceptanceCriteria,
+    P2AcceptanceReport,
+    run_p2_acceptance,
+)
 
 __all__ = [
     "P1AcceptanceCriteria",
     "P1AcceptanceReport",
+    "P2AcceptanceCriteria",
+    "P2AcceptanceReport",
     "run_p1_acceptance",
+    "run_p2_acceptance",
 ]
