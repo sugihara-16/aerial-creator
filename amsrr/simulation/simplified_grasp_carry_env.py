@@ -57,6 +57,7 @@ class SimplifiedGraspCarryBuildArtifacts:
     design_output: DesignOutput
     contact_candidate_set: ContactCandidateSet
     contact_wrench_trajectory: ContactWrenchTrajectory
+    design_source: str
 
 
 @dataclass
@@ -86,13 +87,20 @@ class SimplifiedGraspCarryEnv:
         task_spec: TaskSpec,
         *,
         config: SimplifiedGraspCarryEnvConfig | None = None,
+        design_output: DesignOutput | None = None,
+        assembled_morphology: MorphologyGraph | None = None,
         low_level_policy: BaselineLowLevelPolicy | None = None,
         controller: QPIDController | None = None,
     ) -> None:
         self.config = config or SimplifiedGraspCarryEnvConfig()
         self.low_level_policy = low_level_policy or BaselineLowLevelPolicy()
         self.controller = controller or QPIDController()
-        self.artifacts = _build_artifacts(task_spec, self.config)
+        self.artifacts = _build_artifacts(
+            task_spec,
+            self.config,
+            design_output_override=design_output,
+            morphology_override=assembled_morphology,
+        )
         self._rng = random.Random(0)
         self._episode_id = "uninitialized"
         self._step_index = 0
@@ -111,13 +119,24 @@ class SimplifiedGraspCarryEnv:
         task_spec: TaskSpec | None = None,
         morphology: MorphologyGraph | None = None,
         *,
+        design_output: DesignOutput | None = None,
+        assembled_morphology: MorphologyGraph | None = None,
         seed: int | None = None,
         episode_id: str | None = None,
     ) -> RuntimeObservation:
-        if task_spec is not None or morphology is not None:
-            if task_spec is None:
-                raise SchemaValidationError("SimplifiedGraspCarryEnv.reset requires task_spec when morphology override is supplied")
-            self.artifacts = _build_artifacts(task_spec, self.config, morphology_override=morphology)
+        if morphology is not None and assembled_morphology is not None:
+            raise SchemaValidationError(
+                "SimplifiedGraspCarryEnv.reset accepts either morphology or assembled_morphology, not both"
+            )
+        morphology_override = assembled_morphology or morphology
+        if task_spec is not None or design_output is not None or morphology_override is not None:
+            rebuild_task = task_spec or self.artifacts.task_spec
+            self.artifacts = _build_artifacts(
+                rebuild_task,
+                self.config,
+                design_output_override=design_output,
+                morphology_override=morphology_override,
+            )
         if seed is not None:
             self._rng = random.Random(seed)
         self._episode_id = episode_id or f"episode_{seed if seed is not None else 0}"
@@ -386,30 +405,32 @@ def _build_artifacts(
     task_spec: TaskSpec,
     config: SimplifiedGraspCarryEnvConfig,
     *,
+    design_output_override: DesignOutput | None = None,
     morphology_override: MorphologyGraph | None = None,
 ) -> SimplifiedGraspCarryBuildArtifacts:
     builder_result = IRGBuilder().build_with_scene_graph(task_spec)
     irg = builder_result.irg
     envelope = InteractionEnvelopeExtractor().extract(irg)
     physical_model = build_physical_model_from_config(config.robot_model_config_path)
-    design = FixedSimpleDesignPolicy().design(
-        DesignPolicyContext(
-            task_spec=task_spec,
-            irg=irg,
-            interaction_envelope=envelope,
-            physical_model=physical_model,
+    if design_output_override is None:
+        design = FixedSimpleDesignPolicy().design(
+            DesignPolicyContext(
+                task_spec=task_spec,
+                irg=irg,
+                interaction_envelope=envelope,
+                physical_model=physical_model,
+            )
         )
-    )
+        design_source = "fixed_simple"
+    else:
+        design = design_output_override
+        design_source = "external_design_output"
     if morphology_override is not None:
-        design = DesignOutput(
-            task_id=design.task_id,
-            irg_id=design.irg_id,
-            target_morphology=morphology_override,
-            module_roles=design.module_roles,
-            slot_anchor_binding_prior=design.slot_anchor_binding_prior,
-            design_actions=design.design_actions,
-            design_logprobs=design.design_logprobs,
-            design_scores=design.design_scores,
+        design = _design_with_target_morphology(design, morphology_override)
+        design_source = (
+            "external_design_output_with_assembled_morphology"
+            if design_output_override is not None
+            else "fixed_simple_with_morphology_override"
         )
     candidate_set = ContactCandidateSampler().sample(
         task_spec=task_spec,
@@ -433,6 +454,20 @@ def _build_artifacts(
         design_output=design,
         contact_candidate_set=candidate_set,
         contact_wrench_trajectory=trajectory,
+        design_source=design_source,
+    )
+
+
+def _design_with_target_morphology(design: DesignOutput, morphology_graph: MorphologyGraph) -> DesignOutput:
+    return DesignOutput(
+        task_id=design.task_id,
+        irg_id=design.irg_id,
+        target_morphology=morphology_graph,
+        module_roles=dict(design.module_roles),
+        slot_anchor_binding_prior=list(design.slot_anchor_binding_prior),
+        design_actions=list(design.design_actions),
+        design_logprobs=list(design.design_logprobs) if design.design_logprobs is not None else None,
+        design_scores=dict(design.design_scores),
     )
 
 

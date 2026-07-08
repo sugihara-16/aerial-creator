@@ -4,6 +4,27 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.0 implementation order
+- Work package / Agent label: Agent JP1/K: simplified env external DesignOutput / assembled morphology injection
+- Summary: Added a P4.0-compatible injection path to `SimplifiedGraspCarryEnv` so callers can provide a selected external `DesignOutput` and optional assembled morphology. The existing P1 fixed/simple default path remains unchanged, while external design paths bypass `FixedSimpleDesignPolicy`.
+- Files changed:
+  - `amsrr/simulation/simplified_grasp_carry_env.py`
+  - `tests/unit/simulation/test_simplified_grasp_carry_env.py`
+- Schema/interface changes: None to persisted schemas. Added optional concrete-env arguments and an internal build-artifact `design_source` label.
+- Upstream dependencies used: P4.0 requirement to use P2 selected morphology / P3 assembled morphology downstream and avoid `FixedSimpleDesignPolicy` fixed path.
+- Downstream impact: The P4.0 runner can instantiate or reset the simplified env with the P2 selected design and P3 assembled morphology before contact candidate generation, π_H, π_L, and controller execution.
+- Tests added or run: Added external design/assembled morphology injection test.
+- Commands run:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_simplified_grasp_carry_env.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p1_runner.py -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+- Tests run: Simplified env tests passed: 4 passed. P1 runner tests passed: 3 passed. Compileall passed. `git diff --check` passed.
+- Assumptions: In P4.0, "assembled morphology" is represented by the successful P3 construction state's physical graph or an equivalent `MorphologyGraph`; this does not claim physical docking success.
+- Blockers: None.
+- Next steps: Order 3, implement the P4.0 full-pipeline runner over P2 selected design, P3 assembly result, contact candidates, π_H, π_L, controller, rewards, metrics, and archive logging.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.0 implementation order
 - Work package / Agent label: Agent A/K: P4.0 archive compatibility
 - Summary: Added backward-compatible P4 archive fields to `EpisodeArchive` for runtime observations, actuator target records, rollout artifacts, and learning artifacts. Existing P1/P2/P3 archive construction remains valid because the new fields use defaults.
 - Files changed:
@@ -1158,6 +1179,21 @@
 ## Work Package Logs
 
 ### P4.0 Implementation: Simplified Full-Pipeline Integration
+
+#### 2026-07-08
+- Scope: Order 2 simplified env external `DesignOutput` / assembled morphology injection.
+- Files changed:
+  - `amsrr/simulation/simplified_grasp_carry_env.py`
+  - `tests/unit/simulation/test_simplified_grasp_carry_env.py`
+- Upstream dependencies: P4.0 selected design / assembled morphology handoff requirement, existing `SimplifiedGraspCarryEnv`, P2 deterministic `P2DesignPolicy`, and P3 simplified assembly boundary.
+- Implemented: Optional `design_output` and `assembled_morphology` injection on env construction/reset, internal `design_source` labeling, external-design build path that bypasses `FixedSimpleDesignPolicy`, and assembled morphology replacement while preserving design metadata.
+- Not implemented: P4.0 runner, archive completeness checks, P4.0 acceptance, Isaac backend, controller bridge, or actuator mapping.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: Agent K can build P4.0 episodes using P2 selected `DesignOutput` and P3 assembled `MorphologyGraph` before sampling contacts and planning trajectories.
+- Tests added: `test_simplified_grasp_carry_env_accepts_external_design_output`.
+- Tests passed: Simplified env tests passed: 4 passed. P1 runner tests passed: 3 passed. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Handoff notes: Existing P1 `FixedSimpleDesignPolicy` path remains the default for callers that do not provide an external design.
+- Open questions: None currently.
 
 #### 2026-07-08
 - Scope: Order 1 archive compatibility for P4.0/P4 logging fields.
