@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="700" viewBox="0 0 980 700">
+<rect x="0" y="0" width="100%" height="100%" fill="#ffffff"/>
+<style>text { font-family: Arial, sans-serif; fill: #1f2933; }</style>
+<text x="24.0" y="34.0" font-size="18" font-weight="700" text-anchor="start">chain_grasp - candidate, accepted, score=10.173</text>
+<line x1="330.0" y1="165.0" x2="330.0" y2="495.0" stroke="#60738a" stroke-width="3" stroke-linecap="round"><title>DockEdge 0: 0 -> 1, grasp_arm</title></line>
+<text x="330.0" y="322.0" font-size="11" font-weight="400" text-anchor="start">e0:grasp_arm</text>
+<circle cx="330.0" cy="165.0" r="34.0" fill="#ffe08a" stroke="#9a7412" stroke-width="3"/>
+<text x="330.0" y="160.0" font-size="14" font-weight="700" text-anchor="middle">M0</text>
+<text x="330.0" y="178.0" font-size="10" font-weight="400" text-anchor="middle">base</text>
+<circle cx="330.0" cy="495.0" r="34.0" fill="#d9edf7" stroke="#3a6f8f" stroke-width="3"/>
+<text x="330.0" y="490.0" font-size="14" font-weight="700" text-anchor="middle">M1</text>
+<text x="330.0" y="508.0" font-size="10" font-weight="400" text-anchor="middle">chain_grasp_link</text>
+<text x="650.0" y="120.0" font-size="14" font-weight="700" text-anchor="start">RobotAnchors</text>
+<line x1="330.0" y1="165.0" x2="372.0" y2="147.0" stroke="#cc7a00" stroke-width="1" stroke-linecap="round"></line>
+<circle cx="372.0" cy="147.0" r="8.0" fill="#f6b26b" stroke="#9c5700" stroke-width="1"/>
+<text x="650.0" y="142.0" font-size="11" font-weight="400" text-anchor="start">A0: module M0, type=grasp, slots=[0]</text>
+<line x1="330.0" y1="495.0" x2="372.0" y2="495.0" stroke="#cc7a00" stroke-width="1" stroke-linecap="round"></line>
+<circle cx="372.0" cy="495.0" r="8.0" fill="#f6b26b" stroke="#9c5700" stroke-width="1"/>
+<text x="650.0" y="159.0" font-size="11" font-weight="400" text-anchor="start">A1: module M1, type=grasp, slots=[0]</text>
+<text x="650.0" y="330.0" font-size="14" font-weight="700" text-anchor="start">Slot-anchor binding prior</text>
+<text x="650.0" y="352.0" font-size="11" font-weight="400" text-anchor="start">slot 0 -&gt; anchor A0, score=1.00, required_slot_coverage</text>
+<text x="650.0" y="369.0" font-size="11" font-weight="400" text-anchor="start">slot 0 -&gt; anchor A1, score=1.00, required_slot_coverage</text>
+<text x="650.0" y="500.0" font-size="14" font-weight="700" text-anchor="start">Control groups</text>
+<text x="650.0" y="522.0" font-size="11" font-weight="400" text-anchor="start">all_modules: role=whole_body, modules=[0,1]</text>
+</svg>

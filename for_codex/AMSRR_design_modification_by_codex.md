@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-08
 
+### P2.5 Inspection and Candidate Trace Export Supplement
+
+- Context: The user accepted P2 as complete for the current v0.4 Section 24.3 design-level gate, but requested a pre-P3 inspection phase so humans can inspect morphology variants and all P2DesignPolicy candidate evaluations, not only the selected design.
+- Decision: Added P2.5 as an additional inspection/debugging phase, not a replacement for P2 completion. It adds SVG morphology graph/layout visualization for all four grasp/carry variants, JSONL/CSV export of per-candidate evaluation traces including an explicit closed-loop invalid rejection probe, a markdown inspection report, and a P2.5 acceptance gate.
+- Compatibility impact: P2.5 uses existing `P2DesignPolicy`, P2 design runner/config, `FeasibilityChecker`, `DesignOutput`, `FeasibilityResult`, and `EpisodeArchive`-compatible labels/margins. It does not run Isaac, π_H, π_L, QP/PID, actuator commands, or learned training.
+
 ### P2 Completion Gate Supplement
 
 - Context: v0.4 Section 24.3 defines the P2 acceptance criteria, but it does not define a phase-completion report that downstream work can use to distinguish "acceptance function exists" from "P2 milestone is complete."

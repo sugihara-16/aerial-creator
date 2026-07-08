@@ -1,0 +1,6 @@
+episode_id,sample_id,task_id,variant_name,candidate_source,candidate_id,selected,accepted,rejected,design_score,feasible,hard_violation_codes,required_slot_coverage,anchor_coverage,capability_coverage,thrust_margin,payload_margin,reachability_margin,module_count,dock_edge_count,base_module_id
+p2_5_trace_0000,0,grasp_carry_box_001_p2_0000,chain_grasp,policy_variant,0,False,True,False,10.172858591100379,True,,1.0,1.0,1.0,2.829764318500632,5.4831345353047265,1.0,2,1,0
+p2_5_trace_0000,0,grasp_carry_box_001_p2_0000,symmetric_two_anchor_grasp,policy_variant,1,False,True,False,10.53106249842096,True,,1.0,1.0,1.0,3.1351041640349346,5.4831345353047265,1.0,3,2,0
+p2_5_trace_0000,0,grasp_carry_box_001_p2_0000,tri_anchor_support_grasp,policy_variant,2,True,True,False,11.38106249842096,True,,1.0,1.0,1.0,3.1351041640349346,8.724701802957089,1.0,3,2,0
+p2_5_trace_0000,0,grasp_carry_box_001_p2_0000,central_base_plus_two_grasp_arms,policy_variant,3,False,True,False,10.400091941883577,True,,1.0,1.0,1.0,3.4168199031392956,5.4831345353047265,1.0,5,4,0
+p2_5_trace_0000,0,grasp_carry_box_001_p2_0000,tri_anchor_support_grasp_closed_loop_probe,closed_loop_invalid_probe,4,False,False,True,-90.21893750157903,False,F_CLOSED_LOOP_REJECT_V1,1.0,1.0,1.0,3.1351041640349346,8.724701802957089,1.0,3,2,0

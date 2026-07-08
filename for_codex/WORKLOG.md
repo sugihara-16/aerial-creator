@@ -3,6 +3,73 @@
 ## Global Worklog
 
 ### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus user-requested P2.5 inspection phase
+- Work package / Agent label: P2.5: Post-P2 inspection, visualization, and candidate trace export
+- Summary: Added P2.5 as an additional pre-P3 inspection/debugging phase that visualizes all P2 grasp/carry morphology variants, exports every evaluated candidate including accepted/rejected/selected labels, generates a human-readable inspection report, and provides a P2.5 acceptance gate.
+- Files changed:
+  - `amsrr/training/p2_inspection_context.py`
+  - `amsrr/training/p2_candidate_trace_export.py`
+  - `amsrr/visualization/__init__.py`
+  - `amsrr/visualization/p2_morphology.py`
+  - `amsrr/reporting/__init__.py`
+  - `amsrr/reporting/p2_5_inspection_report.py`
+  - `amsrr/acceptance/__init__.py`
+  - `amsrr/acceptance/p2_5_inspection.py`
+  - `tests/unit/visualization/test_p2_morphology_visualization.py`
+  - `tests/unit/training/test_p2_candidate_trace_export.py`
+  - `tests/unit/reporting/test_p2_5_inspection_report.py`
+  - `tests/acceptance/test_p2_5_inspection.py`
+  - `outputs/p2_5/visualization/*.svg`
+  - `outputs/p2_5/candidate_traces/p2_candidate_trace.jsonl`
+  - `outputs/p2_5/candidate_traces/p2_candidate_summary.csv`
+  - `outputs/p2_5/report/p2_5_inspection_report.md`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None to persisted schemas. Added inspection/report/acceptance-side helper dataclasses only.
+- Upstream dependencies used: Existing P2 completion, Agent E grasp/carry variants and `P2DesignPolicy`, Agent F feasibility labels/margins, Agent K P2 design config/distribution, `DesignOutput`, `FeasibilityResult`, and current P2 runner context.
+- Downstream impact: P3 should not start until a human has inspected `outputs/p2_5/report/p2_5_inspection_report.md` and the SVG visualizations. P2 completion semantics remain unchanged; P2.5 is an additional inspection gate.
+- Generated visualization files:
+  - `outputs/p2_5/visualization/chain_grasp_graph.svg`
+  - `outputs/p2_5/visualization/chain_grasp_layout.svg`
+  - `outputs/p2_5/visualization/symmetric_two_anchor_grasp_graph.svg`
+  - `outputs/p2_5/visualization/symmetric_two_anchor_grasp_layout.svg`
+  - `outputs/p2_5/visualization/tri_anchor_support_grasp_graph.svg`
+  - `outputs/p2_5/visualization/tri_anchor_support_grasp_layout.svg`
+  - `outputs/p2_5/visualization/central_base_plus_two_grasp_arms_graph.svg`
+  - `outputs/p2_5/visualization/central_base_plus_two_grasp_arms_layout.svg`
+- Candidate trace outputs:
+  - `outputs/p2_5/candidate_traces/p2_candidate_trace.jsonl`
+  - `outputs/p2_5/candidate_traces/p2_candidate_summary.csv`
+- Inspection report: `outputs/p2_5/report/p2_5_inspection_report.md`
+- Candidate counts in generated trace: 5 records total; 4 accepted; 1 rejected; 1 selected.
+- Representative violation code: `F_CLOSED_LOOP_REJECT_V1` from the explicit `tri_anchor_support_grasp_closed_loop_probe` rejected candidate.
+- Tests added or run:
+  - Added `test_p2_morphology_visualization_outputs_graph_and_layout_svgs`
+  - Added `test_p2_candidate_trace_export_writes_all_candidates_and_probe`
+  - Added `test_p2_5_inspection_report_contains_summary_and_scope_notes`
+  - Added `test_p2_5_inspection_acceptance_gate`
+- Commands run:
+  - Read attached request text from `/home/leus/.codex/attachments/.../pasted-text.txt`
+  - `git status --short`, `git diff --stat`, `find ...`, `sed -n ...`, `rg ...`, and `git log ...` inspections
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/visualization/test_p2_morphology_visualization.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p2_candidate_trace_export.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/reporting/test_p2_5_inspection_report.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p2_5_inspection.py -q`
+  - `python3 -m amsrr.visualization.p2_morphology --config configs/training/p2_design_grasp_carry.yaml --output-dir outputs/p2_5/visualization`
+  - `python3 -m amsrr.training.p2_candidate_trace_export --config configs/training/p2_design_grasp_carry.yaml --output-dir outputs/p2_5/candidate_traces`
+  - `python3 -m amsrr.reporting.p2_5_inspection_report --trace-dir outputs/p2_5/candidate_traces --visualization-dir outputs/p2_5/visualization --output-dir outputs/p2_5/report --config configs/training/p2_design_grasp_carry.yaml`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: P2.5 targeted tests passed individually: visualization 1 passed, trace export 1 passed, report 1 passed, P2.5 acceptance 1 passed. Full unit suite passed: 83 passed, 1 skipped. Full acceptance suite passed: 4 passed in 88.72s. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- P2.5 explicitly not executed: Isaac, π_H, π_L, QP/PID, actuator commands, learned training.
+- Assumptions: The normal P2 variant set currently yields accepted candidates for the default sample, so P2.5 appends an explicit closed-loop invalid probe through `P2DesignPolicy.evaluate_design_outputs()` to externalize a rejected candidate and its labels without changing P2 completion.
+- Blockers: None.
+- Next steps: Commit final P2.5 report/acceptance changes. Human review of the report and SVGs is recommended before P3.
+
+### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent L: P2 completion gate
 - Summary: Added a P2 milestone completion wrapper that runs the Section 24.3 P2 acceptance gate and emits explicit boolean completion checks for valid design rate, required slot coverage, closed-loop invalid rejection, and feasibility label storage.
@@ -780,6 +847,36 @@
 ---
 
 ## Work Package Logs
+
+### P2.5: Post-P2 Inspection, Visualization, and Candidate Trace Export
+
+#### 2026-07-08
+- Scope: Add a pre-P3 inspection/debugging phase without replacing the existing P2 completion gate.
+- Files changed:
+  - `amsrr/training/p2_inspection_context.py`
+  - `amsrr/training/p2_candidate_trace_export.py`
+  - `amsrr/visualization/__init__.py`
+  - `amsrr/visualization/p2_morphology.py`
+  - `amsrr/reporting/__init__.py`
+  - `amsrr/reporting/p2_5_inspection_report.py`
+  - `amsrr/acceptance/__init__.py`
+  - `amsrr/acceptance/p2_5_inspection.py`
+  - `tests/unit/visualization/test_p2_morphology_visualization.py`
+  - `tests/unit/training/test_p2_candidate_trace_export.py`
+  - `tests/unit/reporting/test_p2_5_inspection_report.py`
+  - `tests/acceptance/test_p2_5_inspection.py`
+  - `outputs/p2_5/`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: User-requested P2.5 phase, existing P2 design policy/variants, FeasibilityChecker labels/margins, P2 design config/distribution, and Section 24.3 completion.
+- Implemented: SVG morphology graph/layout visualization for all four P2 variants, JSONL/CSV per-candidate trace export, explicit closed-loop rejected probe, markdown inspection report, and P2.5 acceptance gate.
+- Not implemented: Isaac, π_H, π_L, QP/PID, actuator commands, learned training, P3 assembly integration.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: Human reviewers can inspect `outputs/p2_5/report/p2_5_inspection_report.md`, SVG layouts, and candidate traces before P3. P2 completion remains unchanged.
+- Tests added: `test_p2_morphology_visualization_outputs_graph_and_layout_svgs`, `test_p2_candidate_trace_export_writes_all_candidates_and_probe`, `test_p2_5_inspection_report_contains_summary_and_scope_notes`, `test_p2_5_inspection_acceptance_gate`.
+- Tests passed: Targeted P2.5 tests passed individually. Full unit suite passed: 83 passed, 1 skipped. Full acceptance suite passed: 4 passed in 88.72s. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Handoff notes: The generated trace contains 5 records: four normal P2 policy variants plus one closed-loop invalid probe, with counts accepted=4, rejected=1, selected=1.
+- Open questions: Human review of P2.5 visualization/report is still recommended before P3 starts.
 
 ### Agent E: P2 π_D Candidate Selection Scaffold
 
