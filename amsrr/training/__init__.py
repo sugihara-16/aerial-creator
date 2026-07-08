@@ -25,6 +25,13 @@ from amsrr.training.p2_design_runner import (
     P2DesignRunnerResult,
     load_p2_design_runner_config,
 )
+from amsrr.training.p3_assembly_runner import (
+    P3_ASSEMBLY_RUNNER_VERSION,
+    P3AssemblyEvaluationRunner,
+    P3AssemblyRunnerConfig,
+    P3AssemblyRunnerResult,
+    load_p3_assembly_runner_config,
+)
 
 __all__ = [
     "P1GraspCarryTaskDistribution",
@@ -40,8 +47,13 @@ __all__ = [
     "P2DesignRunnerResult",
     "P2DesignTaskSample",
     "P2GraspCarryDesignDistribution",
+    "P3_ASSEMBLY_RUNNER_VERSION",
+    "P3AssemblyEvaluationRunner",
+    "P3AssemblyRunnerConfig",
+    "P3AssemblyRunnerResult",
     "load_p1_runner_config",
     "load_p1_task_distribution_config",
     "load_p2_design_distribution_config",
     "load_p2_design_runner_config",
+    "load_p3_assembly_runner_config",
 ]

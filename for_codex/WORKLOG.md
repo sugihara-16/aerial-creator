@@ -3,6 +3,31 @@
 ## Global Worklog
 
 ### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P3 Assembly Evaluation Runner Supplement
+- Work package / Agent label: Agent K: P3 assembly evaluation runner
+- Summary: Added a P3 assembly evaluation runner/config that samples grasp/carry tasks, reuses deterministic P2 design selection, executes the selected target morphology through `AssemblyRunner` and `SimplifiedAssemblyExecutor`, stores `AssemblyPlan` in `EpisodeArchive.assembly_plan`, and records assembly success/state/retry/abort metrics.
+- Files changed:
+  - `amsrr/training/p3_assembly_runner.py`
+  - `amsrr/training/__init__.py`
+  - `configs/training/p3_assembly_grasp_carry.yaml`
+  - `tests/unit/training/test_p3_assembly_runner.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None to persisted schemas. Added training-side `P3AssemblyRunnerConfig`, `P3AssemblyRunnerResult`, and `P3AssemblyEvaluationRunner`.
+- Upstream dependencies used: P2 task distribution/config, `P2DesignPolicy`, `FeasibilityChecker` labels through selected candidate results, Agent G assembly runner/executor, and `EpisodeArchive`.
+- Downstream impact: Agent L P3 acceptance can aggregate assembly success rate, retry/abort coverage, and construction-state consistency from runner archives/reports.
+- Tests added or run:
+  - Added `test_p3_assembly_runner_collects_successful_assembly_archives`
+  - Added `test_p3_assembly_runner_config_loader`
+- Commands run:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p2_design_runner.py tests/unit/training/test_p3_assembly_runner.py tests/unit/assembly/test_graph_edit_planner.py tests/unit/assembly/test_assembly_runner.py tests/unit/assembly/test_simplified_executor.py -q`
+  - `python3 -m compileall amsrr -q`
+- Tests run: P3 runner plus related P2/assembly targeted tests passed: 17 passed. `python3 -m compileall amsrr -q` passed.
+- Assumptions: P3 assembly runner remains simplified and intentionally does not run contact candidates, π_H, π_L, QP/PID, actuator commands, or Isaac.
+- Blockers: None.
+- Next steps: Run targeted Agent K tests, commit order 4, then implement P3 acceptance gate.
+
+### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P3 Retry/Abort State-Machine Supplement
 - Work package / Agent label: Agent G: P3 retry/abort behavior
 - Summary: Extended `AssemblyRunner` with deterministic retry/abort behavior. Failed planned steps now emit synthetic `retry` steps up to a configurable retry limit, then emit a synthetic `abort` step if the planned step still fails. `AssemblyRunReport` now records retry/abort counts, aborted status, and executed step types. The simplified executor can now fail matching steps once for transient failure tests.
@@ -1162,6 +1187,25 @@
 - Open questions: None currently.
 
 ### Agent K: P1 Task Distribution, Runner, Metrics, and Logging
+
+#### 2026-07-08
+- Scope: Add P3 order 4 assembly evaluation runner, config, archive metrics, and tests.
+- Files changed:
+  - `amsrr/training/p3_assembly_runner.py`
+  - `amsrr/training/__init__.py`
+  - `configs/training/p3_assembly_grasp_carry.yaml`
+  - `tests/unit/training/test_p3_assembly_runner.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: P2 design distribution/policy, Agent G assembly runner/executor, PhysicalModel builder, IRGBuilder, InteractionEnvelopeExtractor, and `EpisodeArchive` JSONL helpers.
+- Implemented: `P3_ASSEMBLY_RUNNER_VERSION`, `P3AssemblyRunnerConfig`, `P3AssemblyRunnerResult`, `load_p3_assembly_runner_config`, `P3AssemblyEvaluationRunner`, P3 config file, assembly archive metrics, and unit tests.
+- Not implemented: P3 acceptance gate, retry/abort acceptance probes, Isaac execution, π_H/π_L/QP/PID execution, or actuator commands.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: Agent L can implement P3 Section 24.4 acceptance over this runner.
+- Tests added: `test_p3_assembly_runner_collects_successful_assembly_archives`, `test_p3_assembly_runner_config_loader`.
+- Tests passed: P3 runner plus related P2/assembly targeted tests passed: 17 passed. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: The runner stores the source `AssemblyPlan` as JSON-compatible data in `EpisodeArchive.assembly_plan`; full `AssemblyRunReport` records remain runtime evaluation objects.
+- Open questions: None currently.
 
 #### 2026-07-08
 - Scope: Implement P2 design evaluation distribution, runner, metrics, and EpisodeArchive feasibility-label logging.

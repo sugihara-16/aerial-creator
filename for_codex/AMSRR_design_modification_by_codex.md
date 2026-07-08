@@ -22,6 +22,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 - Decision: Extended Agent G `AssemblyRunner` with deterministic retry/abort handling. On a failed planned step, the runner emits a synthetic `retry` step up to `max_retries_per_step`; if the planned step still fails, it emits a synthetic `abort` step and returns an unsuccessful `AssemblyRunReport` with retry/abort counts and executed step types.
 - Compatibility impact: Retry/abort remains deterministic scaffolding and does not imply learned assembly recovery, motion replanning, physical docking verification, or controller/QP feasibility.
 
+### P3 Assembly Evaluation Runner Supplement
+
+- Context: v0.4 Section 24.4 defines P3 assembly acceptance but does not prescribe a concrete evaluation runner or archive metrics for the deterministic assembly integration phase.
+- Decision: Added Agent K `P3AssemblyEvaluationRunner`. It reuses the P2 grasp/carry task distribution and deterministic `P2DesignPolicy`, selects a feasible target `MorphologyGraph`, executes it through `AssemblyRunner` and `SimplifiedAssemblyExecutor`, stores the `AssemblyPlan` in `EpisodeArchive.assembly_plan`, and records assembly success/state/retry/abort metrics.
+- Compatibility impact: This is a simplified assembly integration runner only. It does not execute π_H, π_L, QP/PID, actuator commands, Isaac, or learned assembly control.
+
 ### π_D Joint-Angle Non-Design Clarification
 
 - Context: The v0.4 design text could be misread as treating `ModuleNode.pose_in_design_frame` or `DockEdge.relative_pose_src_to_dst` as continuous design variables for π_D, even though A-MSRR module joints are movable and their instantaneous angles belong to planning/control/runtime state rather than structure design.
