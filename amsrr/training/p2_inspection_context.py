@@ -6,7 +6,7 @@ from pathlib import Path
 from amsrr.irg.envelope_extractor import InteractionEnvelopeExtractor
 from amsrr.irg.irg_builder import IRGBuilder
 from amsrr.policies.design_policy_base import DesignPolicyContext
-from amsrr.policies.design_policy_p2 import P2DesignPolicy, P2DesignSelection
+from amsrr.policies.design_policy_p2 import P2DesignPolicy, P2DesignPolicyConfig, P2DesignSelection
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
 from amsrr.schemas.interaction_envelope import InteractionEnvelope
 from amsrr.schemas.irg import InteractionRequirementGraph
@@ -93,6 +93,7 @@ class P2InspectionContext:
     physical_model: PhysicalModel
     design_context: DesignPolicyContext
     selection: P2DesignSelection
+    policy_config: P2DesignPolicyConfig
 
 
 def default_grasp_carry_task_spec() -> TaskSpec:
@@ -130,4 +131,5 @@ def build_p2_inspection_context(
         physical_model=physical_model,
         design_context=design_context,
         selection=selection,
+        policy_config=policy_config,
     )
