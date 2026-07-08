@@ -3,6 +3,27 @@
 ## Global Worklog
 
 ### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P3 assembly integration supplements
+- Work package / Agent label: P3 final verification and handoff
+- Summary: Completed final verification after the P3 assembly runner/executor/retry/acceptance sequence. Full unit and acceptance suites passed, compile checks passed, and diff whitespace checks passed.
+- Files changed:
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None.
+- Upstream dependencies used: Completed P3 order 1-5 commits, full unit suite, full acceptance suite, and existing AGENTS.md handoff rules.
+- Downstream impact: P3 deterministic assembly integration is now mechanically checked. Future P4 work can start from the P3 acceptance gate, while remembering that this remains simplified assembly integration and does not run Isaac, π_H, π_L, QP/PID, or actuator commands.
+- Tests added or run: No new tests added in this final handoff step.
+- Commands run:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: Full unit suite passed: 96 passed, 1 skipped. Full acceptance suite passed: 6 passed in 115.39s. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Assumptions: P3 acceptance is satisfied by deterministic simplified assembly integration per v0.4 Section 24.4. Physical docking, Isaac, π_H, π_L, QP/PID, actuator commands, and full grasp/carry task execution remain P4/later work.
+- Blockers: None.
+- Next steps: Proceed to P4 full grasp/carry integration after reviewing P3 acceptance outputs and deciding whether Isaac-backed assembly validation is needed before P4.
+
+### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P3 Acceptance Gate Supplement
 - Work package / Agent label: Agent L: P3 acceptance gate
 - Summary: Added a P3 acceptance gate for Section 24.4. It runs the P3 assembly evaluation runner, checks assembly success rate, verifies construction-state/physical-graph consistency for successful assemblies, and exercises explicit retry and abort probes through the simplified executor.
@@ -1154,6 +1175,20 @@
 - Open questions: None currently.
 
 ### Agent L: Tests and Acceptance
+
+#### 2026-07-08
+- Scope: Final P3 verification and handoff after order 1-5 implementation commits.
+- Files changed:
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: P3 Agent G runner/executor/retry work, Agent K P3 runner, Agent L P3 acceptance, and full repo tests.
+- Implemented: Final worklog handoff entry with full verification commands and results.
+- Not implemented: No new functionality in this handoff step.
+- Schema/interface changes: None.
+- Downstream impact: Future P4 work can treat P3 acceptance as passing in this checkout.
+- Tests added: None.
+- Tests passed: Full unit suite passed: 96 passed, 1 skipped. Full acceptance suite passed: 6 passed in 115.39s. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Handoff notes: P3 remains simplified deterministic assembly integration; P4 must still integrate contact candidates, π_H, π_L, QP/PID/controller execution, and full grasp/carry success criteria.
+- Open questions: Whether to add Isaac-backed assembly validation before or during P4 remains a planning decision, not a blocker for the current simplified P3 gate.
 
 #### 2026-07-08
 - Scope: Add P3 order 5 acceptance gate for v0.4 Section 24.4.
