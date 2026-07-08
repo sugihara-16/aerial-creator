@@ -29,6 +29,13 @@ from amsrr.policies.contact_wrench_trajectory import (
     select_feasible_assignments,
 )
 from amsrr.policies.design_candidate_generator import DesignActionCandidate, DesignCandidateGenerator, DesignCandidateStep
+from amsrr.policies.design_policy_p2 import (
+    P2_DESIGN_POLICY_VERSION,
+    P2DesignCandidateEvaluation,
+    P2DesignPolicy,
+    P2DesignPolicyConfig,
+    P2DesignSelection,
+)
 from amsrr.policies.design_policy_base import DesignPolicyBase, DesignPolicyContext, FixedSimpleDesignPolicy
 from amsrr.policies.design_teacher import DesignTeacherExample, DesignTeacherVariant, DeterministicDesignTeacher
 from amsrr.policies.high_level_policy_base import HighLevelPolicyBase, HighLevelPolicyContext
@@ -54,6 +61,11 @@ __all__ = [
     "BaselineTrajectoryPlannerConfig",
     "BaselineLowLevelPolicy",
     "BaselineLowLevelPolicyConfig",
+    "P2_DESIGN_POLICY_VERSION",
+    "P2DesignCandidateEvaluation",
+    "P2DesignPolicy",
+    "P2DesignPolicyConfig",
+    "P2DesignSelection",
     "DesignActionCandidate",
     "DesignCandidateGenerator",
     "DesignCandidateStep",

@@ -4,6 +4,35 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent E: P2 π_D candidate selection scaffold
+- Summary: Added deterministic P2 design-policy scaffold that enumerates multiple grasp/carry candidate morphologies, evaluates each with `FeasibilityChecker`, separates accepted/rejected candidates, computes deterministic soft scores, and returns the best accepted design.
+- Files changed:
+  - `amsrr/policies/__init__.py`
+  - `amsrr/policies/design_policy_p2.py`
+  - `tests/unit/policies/test_p2_design_policy.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None. Existing `DesignOutput.design_scores` stores P2 selection metadata as float keys with `p2_design_policy_*` prefixes.
+- Upstream dependencies used: v0.4 Sections 15, 16, 24.3, 26.5, 27.1; Agent E grasp/carry variant builder; Agent F P2 FeasibilityChecker labels/margins; existing `DesignPolicyContext` and `DesignOutput` schemas.
+- Downstream impact: P2 runner/acceptance can now call `P2DesignPolicy.evaluate_candidates()` to obtain all candidates plus accepted/rejected splits, or `design()` to get the deterministic selected design. Later learned π_D heads can replace scoring while preserving the candidate/evaluation boundary.
+- Tests added or run:
+  - Added `test_p2_design_policy_enumerates_variants_and_selects_best_accepted`
+  - Added `test_p2_design_policy_splits_rejected_candidates_with_feasibility_checker`
+  - Added `test_p2_design_policy_falls_back_to_best_rejected_when_none_accepted`
+- Commands run:
+  - `sed -n ...` inspections for design policy, teacher, candidate generator, package exports, and existing tests
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/policies/test_p2_design_policy.py tests/unit/policies/test_design_teacher.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: Targeted P2 design policy/design teacher tests passed: 6 passed. Full unit suite passed: 77 passed, 1 skipped. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Assumptions: This is deterministic π_D scaffolding, not a learned policy head. The soft score is a hand-coded P2 baseline combining feasibility margins with small support/complexity/variant priors; it is documented as replaceable by learned scoring later.
+- Blockers: None.
+- Next steps: Continue with Agent K/L P2 design runner and acceptance gate, or add dataset logging around the new candidate selection results.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent F: P2 design-level FeasibilityChecker strengthening
 - Summary: Strengthened design-level `FeasibilityChecker` for P2 acceptance by stabilizing hard-check labels and numeric margins for slot coverage, anchor capability, closed-loop rejection, port conflicts, thrust/payload margins, and coarse reachability.
 - Files changed:
@@ -662,6 +691,26 @@
 ---
 
 ## Work Package Logs
+
+### Agent E: P2 π_D Candidate Selection Scaffold
+
+#### 2026-07-08
+- Scope: Add deterministic P2 π_D scaffold that enumerates candidate morphology designs, labels them with FeasibilityChecker results, and deterministically selects a design by soft score.
+- Files changed:
+  - `amsrr/policies/__init__.py`
+  - `amsrr/policies/design_policy_p2.py`
+  - `tests/unit/policies/test_p2_design_policy.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: Agent E grasp/carry morphology variants, Agent F P2 FeasibilityChecker labels/margins, existing `DesignPolicyContext`, `DesignOutput`, and v0.4 π_D / P2 acceptance guidance.
+- Implemented: `P2DesignPolicyConfig`, `P2DesignCandidateEvaluation`, `P2DesignSelection`, `P2DesignPolicy`, variant enumeration, candidate feasibility evaluation, accepted/rejected split, deterministic soft scoring, selected-design annotation, and package exports.
+- Not implemented: Learned π_D neural scoring, policy-gradient training, replay/dataset generation, P2 runner/acceptance gate, or simulator execution.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: P2 runners can inspect `selection.candidates`, `accepted_candidates`, `rejected_candidates`, and `selected_candidate`, while callers that only need a design can use `P2DesignPolicy.design(context)`.
+- Tests added: `test_p2_design_policy_enumerates_variants_and_selects_best_accepted`, `test_p2_design_policy_splits_rejected_candidates_with_feasibility_checker`, `test_p2_design_policy_falls_back_to_best_rejected_when_none_accepted`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/policies/test_p2_design_policy.py tests/unit/policies/test_design_teacher.py -q` passed: 6 passed. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 77 passed, 1 skipped. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Handoff notes: The current hand-coded soft score intentionally prefers accepted candidates first, then balances slot/capability coverage, reachability, thrust/payload margins, optional support, variant prior, and complexity. It is a deterministic baseline for P2 before learned scoring.
+- Open questions: None currently.
 
 ### Agent F: P2 Design-Level FeasibilityChecker
 

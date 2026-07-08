@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-08
 
+### P2 Design Policy Candidate Selection Scaffold Supplement
+
+- Context: v0.4 Section 15 defines π_D action/candidate scaffolding and Section 24.3 requires P2 design evaluation, but it does not prescribe a deterministic baseline for enumerating multiple candidate designs, separating accepted/rejected candidates, or selecting among accepted candidates before learned π_D training.
+- Decision: Added Agent E `P2DesignPolicy` as a deterministic π_D scaffold. It enumerates grasp/carry morphology variants, evaluates each `DesignOutput` with the deterministic `FeasibilityChecker`, splits candidates into accepted and rejected sets, computes a deterministic soft score from feasibility margins plus small support/complexity/variant priors, and returns the highest-scoring accepted design. If no candidate is accepted, it returns the highest-scoring rejected candidate for debugging/dataset labeling.
+- Compatibility impact: This is not a learned π_D head and does not output actuator commands. Selection metadata is stored as float entries in `DesignOutput.design_scores` (`p2_design_policy_*`) without changing persisted schemas.
+
 ### P2 Grasp-Carry Morphology Variant Builder Supplement
 
 - Context: v0.4 Section 15.4 names design teacher variants (`chain_grasp`, `symmetric_two_anchor_grasp`, `tri_anchor_support_grasp`, `central_base_plus_two_grasp_arms`) but does not prescribe exact module poses, tree topology, control groups, or RobotAnchor placement for each variant.
