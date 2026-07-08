@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from amsrr.schemas.contact_candidates import ContactCandidate, ContactCandidateSet
+from amsrr.schemas.contact_candidates import ContactCandidate, ContactCandidateGroupProposal, ContactCandidateSet
 
 
 CONTACT_CANDIDATE_SET_VERSION = "p0_agent_hi_v1"
@@ -52,19 +52,22 @@ def build_contact_candidate_set(
     task_id: str,
     morphology_graph_id: str,
     candidates: list[ContactCandidate],
+    group_proposals: list[ContactCandidateGroupProposal] | None = None,
+    sampler_version: str = CONTACT_CANDIDATE_SET_VERSION,
 ) -> ContactCandidateSet:
+    sorted_candidates = sorted(candidates, key=lambda candidate: candidate.candidate_id)
     return ContactCandidateSet(
         set_id=set_id,
         task_id=task_id,
         morphology_graph_id=morphology_graph_id,
-        candidates=sorted(candidates, key=lambda candidate: candidate.candidate_id),
-        candidate_mask=[candidate.unary_valid for candidate in sorted(candidates, key=lambda candidate: candidate.candidate_id)],
-        slot_coverage=build_slot_coverage(sorted(candidates, key=lambda candidate: candidate.candidate_id)),
-        pairwise_conflict_matrix=build_pairwise_conflict_matrix(sorted(candidates, key=lambda candidate: candidate.candidate_id)),
-        pairwise_compatibility_score=build_pairwise_compatibility_score(sorted(candidates, key=lambda candidate: candidate.candidate_id)),
-        group_proposals=[],
+        candidates=sorted_candidates,
+        candidate_mask=[candidate.unary_valid for candidate in sorted_candidates],
+        slot_coverage=build_slot_coverage(sorted_candidates),
+        pairwise_conflict_matrix=build_pairwise_conflict_matrix(sorted_candidates),
+        pairwise_compatibility_score=build_pairwise_compatibility_score(sorted_candidates),
+        group_proposals=sorted(group_proposals or [], key=lambda proposal: proposal.group_id),
         assignment_feasibility_cache={},
-        sampler_version=CONTACT_CANDIDATE_SET_VERSION,
+        sampler_version=sampler_version,
     )
 
 

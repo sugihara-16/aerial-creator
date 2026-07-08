@@ -4,6 +4,35 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent H: ContactCandidateSampler
+- Summary: Implemented a deterministic morphology-conditioned `ContactCandidateSampler` for P1 grasp/carry, optional group proposal support in `build_contact_candidate_set`, package exports, and unit tests covering non-empty candidate generation, grasp-pair proposals, anchor association preservation, and serialization.
+- Files changed:
+  - `amsrr/policies/__init__.py`
+  - `amsrr/policies/contact_candidate_set.py`
+  - `amsrr/policies/contact_candidate_sampler.py`
+  - `tests/unit/policies/test_contact_candidate_sampler.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Extended the existing contact-candidate helper function with optional `group_proposals` and `sampler_version` arguments while preserving prior defaults.
+- Upstream dependencies used: v0.4 Sections 18, 24.2, 26.8, 27.1, 28.9; Agent D IRGBuilder and EnvelopeExtractor; Agent E fixed/simple `DesignOutput`; GeometryProcessor descriptors and ContactRegionGraph; existing ContactCandidate schemas.
+- Downstream impact: Agent H π_H baseline planner can now consume finite morphology-conditioned `ContactCandidateSet` objects with slot coverage, pairwise matrices, and small grasp/support group proposals.
+- Tests added or run:
+  - Added `test_contact_candidate_sampler_returns_non_empty_grasp_carry_candidates`
+  - Added `test_contact_candidate_sampler_builds_grasp_pair_group_proposals`
+  - Added `test_contact_candidate_sampler_uses_robot_anchor_associations`
+- Commands run:
+  - `sed -n ...` inspections for spec Section 18, Agent H deliverables, geometry, IRG, morphology, and existing candidate helpers
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/policies/test_contact_candidate_sampler.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/policies/test_contact_candidate_sampler.py -q` passed: 3 passed. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 48 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Assumptions: P1 sampler emits deterministic smoke candidates and unary scores, not exact reachability/collision/QP feasibility. Default quota is one candidate per ContactSlot × ContactRegion × RobotAnchor. Grasp-pair proposals are small pairwise/group hints and are not task-feasibility proofs.
+- Blockers: None.
+- Next steps: Continue with implementation order item 14, Agent H π_H trajectory schema/baseline planner and selected-assignment feasibility interface.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent G: π_A GraphEditAssemblyPlanner
 - Summary: Implemented deterministic graph-edit assembly planning over target `MorphologyGraph` dock edges, construction-state helpers, control handoff request scaffolding, executor interface records, package exports, and Agent G unit tests.
 - Files changed:
@@ -386,6 +415,25 @@
 ---
 
 ## Work Package Logs
+
+### Agent H: ContactCandidateSampler
+
+#### 2026-07-08
+- Scope: Implement P1 morphology-conditioned contact candidate sampling and group-proposal scaffolding only.
+- Files changed:
+  - `amsrr/policies/__init__.py`
+  - `amsrr/policies/contact_candidate_set.py`
+  - `amsrr/policies/contact_candidate_sampler.py`
+  - `tests/unit/policies/test_contact_candidate_sampler.py`
+- Upstream dependencies: `TaskSpec`, IRG ContactSlots, `InteractionEnvelope`, `MorphologyGraph` RobotAnchors, `GeometryDescriptor` / ContactRegionGraph, and existing `ContactCandidateSet` helper functions.
+- Implemented: `ContactCandidateSamplerConfig`, `ContactCandidateSampler`, deterministic candidate IDs, entity-pose world transform, unary smoke scores, compatible-anchor filtering, `build_group_proposals`, `grasp_pair` group proposals, `support_set` fallback proposals, optional group-proposal support in `build_contact_candidate_set`, and package exports.
+- Not implemented: Learned candidate encoder/scorer, task-specific advanced sampling quotas, exact reachability, exact local collision/clearance, assignment-level wrench/friction/QP feasibility, π_H selection, or simulator/runtime contact verification.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: π_H baseline can now select over finite candidate pools with slot coverage and group hints. Assignment-level evaluators can later populate `assignment_feasibility_cache`.
+- Tests added: `test_contact_candidate_sampler_returns_non_empty_grasp_carry_candidates`, `test_contact_candidate_sampler_builds_grasp_pair_group_proposals`, `test_contact_candidate_sampler_uses_robot_anchor_associations`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 48 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: Candidate generation preserves `ContactSlotID -> RobotAnchorID -> ContactCandidateID`; candidates are generated only for anchors already associated with the slot by π_D. Group proposals deliberately do not imply full task feasibility.
+- Open questions: None currently.
 
 ### Agent G: π_A GraphEditAssemblyPlanner
 

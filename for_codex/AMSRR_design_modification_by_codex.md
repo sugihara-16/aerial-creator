@@ -4,6 +4,13 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-08
 
+### P1 ContactCandidateSampler Deterministic Proposal Supplement
+
+- Context: v0.4 requires morphology-conditioned `ContactCandidateSampler` after π_D, with unary screens, pairwise/group compatibility, and no exhaustive candidate-subset enumeration. Exact reachability, collision, and assignment-level wrench/QP feasibility belong to later checker/controller work.
+- Decision: Added an Agent H deterministic sampler that consumes `TaskSpec`, IRG ContactSlots, `InteractionEnvelope`, target `MorphologyGraph` RobotAnchors, and `GeometryDescriptor` contact regions. It emits one candidate per compatible ContactSlot × ContactRegion × RobotAnchor by default, transforms patch/region positions from entity frame to world frame using the entity pose, and records deterministic unary smoke scores for mode match, normal alignment, local reachability, surface quality, moment-arm proxy, support quality, friction plausibility, and anchor capability.
+- Group proposal supplement: Added small `grasp_pair` proposals for valid same-slot grasp candidates with different anchors, prioritized by opposing normals, and `support_set` proposals for support candidates when no grasp-pair proposal exists for a slot. This is pair/group scaffolding only and does not claim selected groups are full task-feasible.
+- Compatibility impact: The sampler runs only after a morphology with RobotAnchors exists. It preserves the `ContactSlotID -> RobotAnchorID -> ContactCandidateID` boundary, does not perform exhaustive subset feasibility, and leaves selected-assignment wrench/QP checks for later π_H/assignment-level evaluators.
+
 ### GraphEditAssemblyPlanner Scaffold Supplement
 
 - Context: v0.4 defines `AssemblyPlan`, `AssemblyStep`, and `ConstructionState`, and requires a deterministic π_A `GraphEditAssemblyPlanner`, but does not prescribe how a target `MorphologyGraph` should be expanded into P1/P3 smoke-level assembly steps.
