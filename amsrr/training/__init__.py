@@ -32,6 +32,14 @@ from amsrr.training.p3_assembly_runner import (
     P3AssemblyRunnerResult,
     load_p3_assembly_runner_config,
 )
+from amsrr.training.p4_0_full_pipeline_runner import (
+    P4_0_FULL_PIPELINE_RUNNER_VERSION,
+    P4_0_SIMPLIFIED_BACKEND_NOTE,
+    P4_0FullPipelineRunner,
+    P4_0FullPipelineRunnerConfig,
+    P4_0FullPipelineRunnerResult,
+    load_p4_0_full_pipeline_runner_config,
+)
 
 __all__ = [
     "P1GraspCarryTaskDistribution",
@@ -51,9 +59,15 @@ __all__ = [
     "P3AssemblyEvaluationRunner",
     "P3AssemblyRunnerConfig",
     "P3AssemblyRunnerResult",
+    "P4_0_FULL_PIPELINE_RUNNER_VERSION",
+    "P4_0_SIMPLIFIED_BACKEND_NOTE",
+    "P4_0FullPipelineRunner",
+    "P4_0FullPipelineRunnerConfig",
+    "P4_0FullPipelineRunnerResult",
     "load_p1_runner_config",
     "load_p1_task_distribution_config",
     "load_p2_design_distribution_config",
     "load_p2_design_runner_config",
     "load_p3_assembly_runner_config",
+    "load_p4_0_full_pipeline_runner_config",
 ]

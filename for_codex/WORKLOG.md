@@ -4,6 +4,27 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.0 implementation order
+- Work package / Agent label: Agent K: P4.0 full-pipeline runner
+- Summary: Added a P4.0 simplified full-pipeline runner that wires P2 selected `DesignOutput`, P3 simplified assembly result, morphology-conditioned contact candidates, baseline pi_H trajectory, baseline pi_L policy commands, controller commands, rewards, metrics, and `EpisodeArchive` logging. The runner records explicit simplified-backend / not-Isaac / not-P4-full metadata.
+- Files changed:
+  - `amsrr/training/p4_0_full_pipeline_runner.py`
+  - `amsrr/training/__init__.py`
+  - `configs/training/p4_0_grasp_carry.yaml`
+- Schema/interface changes: None to persisted schemas. Uses the additive `EpisodeArchive` fields from Order 1.
+- Upstream dependencies used: P2 design distribution/policy, P3 assembly runner/executor semantics, Order 2 simplified env external design injection, Agent H pi_H baseline, Agent I pi_L/controller scaffolds, v0.4 Section 24.5.1 P4.0 requirements.
+- Downstream impact: Order 4 can add archive completeness and no-mislabeling tests against the new runner. Order 5 can implement the P4.0 acceptance gate over this runner.
+- Tests added or run: No unit test files added in this order; import/config smoke and compile checks passed.
+- Commands run:
+  - `python3 -m compileall amsrr -q`
+  - `python3 -c "from amsrr.training import load_p4_0_full_pipeline_runner_config, P4_0FullPipelineRunner; ..."`
+  - `git diff --check`
+- Tests run: Compileall passed. P4.0 runner config/import smoke passed. `git diff --check` passed.
+- Assumptions: P3 `AssemblyRunReport.final_state.physical_graph` is the simplified assembled morphology for P4.0 wiring only and does not imply physical docking success.
+- Blockers: None.
+- Next steps: Order 4, add unit/archive/no-mislabeling tests for the P4.0 runner.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.0 implementation order
 - Work package / Agent label: Agent JP1/K: simplified env external DesignOutput / assembled morphology injection
 - Summary: Added a P4.0-compatible injection path to `SimplifiedGraspCarryEnv` so callers can provide a selected external `DesignOutput` and optional assembled morphology. The existing P1 fixed/simple default path remains unchanged, while external design paths bypass `FixedSimpleDesignPolicy`.
 - Files changed:
@@ -1179,6 +1200,22 @@
 ## Work Package Logs
 
 ### P4.0 Implementation: Simplified Full-Pipeline Integration
+
+#### 2026-07-08
+- Scope: Order 3 P4.0 full-pipeline runner implementation.
+- Files changed:
+  - `amsrr/training/p4_0_full_pipeline_runner.py`
+  - `amsrr/training/__init__.py`
+  - `configs/training/p4_0_grasp_carry.yaml`
+- Upstream dependencies: P2 selected design path, P3 simplified assembly result, Order 2 env injection, ContactCandidateSampler, `GraspCarryBaselinePlanner`, `BaselineLowLevelPolicy`, `QPIDController`, and `EpisodeArchive`.
+- Implemented: `P4_0FullPipelineRunnerConfig`, `P4_0FullPipelineRunnerResult`, config loader, `P4_0FullPipelineRunner`, deterministic episode sampling, P2 selection, P3 assembly execution, simplified rollout execution, reward/metric aggregation, archive writing, and explicit simplified-backend no-P4-full metadata.
+- Not implemented: Unit/archive/no-mislabeling tests, P4.0 acceptance gate, Isaac backend, controller bridge, actuator mapping, or learning bootstrap.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: Order 4 can assert the runner uses P2/P3 outputs, generates candidates/trajectory/policy/controller records, and does not label P4.0 as Isaac-backed or full P4 completion.
+- Tests added: None in this order.
+- Tests passed: `python3 -m compileall amsrr -q` passed. P4.0 config/import smoke passed. `git diff --check` passed.
+- Handoff notes: Archive `rollout_artifacts["note"]` states that P4.0 metrics are simplified backend indicators, not Isaac-backed physical success rates.
+- Open questions: None currently.
 
 #### 2026-07-08
 - Scope: Order 2 simplified env external `DesignOutput` / assembled morphology injection.
