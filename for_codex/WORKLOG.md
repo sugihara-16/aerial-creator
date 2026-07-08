@@ -4,6 +4,34 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent H: pi_H baseline planner
+- Summary: Implemented a deterministic P1 grasp/carry high-level planner that selects feasible contact assignments from `ContactCandidateSet` group proposals, caches assignment feasibility labels, and emits a schema-valid `ContactWrenchTrajectory`.
+- Files changed:
+  - `amsrr/policies/__init__.py`
+  - `amsrr/policies/high_level_policy_base.py`
+  - `amsrr/policies/contact_wrench_trajectory.py`
+  - `tests/unit/policies/test_high_level_baseline.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added policy-side `HighLevelPolicyContext`, `HighLevelPolicyBase`, `BaselineTrajectoryPlannerConfig`, and `GraspCarryBaselinePlanner`.
+- Upstream dependencies used: v0.4 Sections 19, 26.8, 27.1, 28.10; Agent H ContactCandidateSampler; selected assignment feasibility evaluator; existing policy schemas.
+- Downstream impact: Agent I pi_L baseline can now consume a deterministic `ContactWrenchTrajectory` with approach/attach/maintain/release assignments, posture anchor targets, object goal targets, and priority weights.
+- Tests added or run:
+  - Added `test_grasp_carry_baseline_planner_outputs_contact_wrench_trajectory`
+  - Added `test_select_feasible_assignments_uses_grasp_pair_group`
+- Commands run:
+  - `sed -n ...` inspections for spec Section 19, Agent H deliverables, policy schemas, and existing tests
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/policies/test_high_level_baseline.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/policies/test_high_level_baseline.py -q` passed: 2 passed. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 53 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Assumptions: P1 pi_H baseline prefers `grasp_pair` proposals and emits a fixed five-knot grasp/carry schedule. It is deterministic scaffold logic, not a learned high-level policy or exhaustive assignment search.
+- Blockers: None.
+- Next steps: Continue with implementation order item 15 / P1 order 6, Agent I pi_L baseline policy and controller interface work.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent H/F: Selected assignment feasibility proxy
 - Summary: Implemented selected-assignment feasibility evaluation for π_H-selected `ContactAssignment` sets, including candidate consistency, slot cardinality, pairwise conflict, grasp-opposition wrench proxy, friction/collision/QP residual hooks, cache updates, exports, and unit tests.
 - Files changed:
@@ -443,6 +471,25 @@
 ---
 
 ## Work Package Logs
+
+### Agent H: pi_H Baseline Planner
+
+#### 2026-07-08
+- Scope: Implement a deterministic baseline pi_H planner for P1 grasp/carry after ContactCandidateSampler and selected-assignment feasibility.
+- Files changed:
+  - `amsrr/policies/__init__.py`
+  - `amsrr/policies/high_level_policy_base.py`
+  - `amsrr/policies/contact_wrench_trajectory.py`
+  - `tests/unit/policies/test_high_level_baseline.py`
+- Upstream dependencies: `ContactCandidateSet` group proposals, selected-assignment feasibility, IRG state targets/contact slots, InteractionEnvelope, MorphologyGraph, and existing policy schemas.
+- Implemented: `HighLevelPolicyContext`, `HighLevelPolicyBase`, `BaselineTrajectoryPlannerConfig`, `GraspCarryBaselinePlanner`, `select_feasible_assignments`, five-knot deterministic grasp/carry trajectory generation, object goal extraction, free-anchor pose targets, wrench target scaffolding, and feasibility cache integration.
+- Not implemented: Learned pi_H heads, trajectory optimization, multi-knot re-planning from live observations, exact wrench/QP optimization, contact schedule search beyond group-proposal attempts, or simulator execution.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: pi_L and controller interfaces can now consume active `InteractionKnot`s and `ContactAssignment`s from a full `ContactWrenchTrajectory`.
+- Tests added: `test_grasp_carry_baseline_planner_outputs_contact_wrench_trajectory`, `test_select_feasible_assignments_uses_grasp_pair_group`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 53 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: Planner selection uses `evaluate_selected_assignment_feasibility`, so infeasible attempted groups are cached on the candidate set. The returned trajectory never contains final actuator commands.
+- Open questions: None currently.
 
 ### Agent H/F: Selected Assignment Feasibility Proxy
 

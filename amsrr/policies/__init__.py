@@ -23,9 +23,15 @@ from amsrr.policies.contact_candidate_sampler import (
     ContactCandidateSamplerConfig,
     build_group_proposals,
 )
+from amsrr.policies.contact_wrench_trajectory import (
+    BaselineTrajectoryPlannerConfig,
+    GraspCarryBaselinePlanner,
+    select_feasible_assignments,
+)
 from amsrr.policies.design_candidate_generator import DesignActionCandidate, DesignCandidateGenerator, DesignCandidateStep
 from amsrr.policies.design_policy_base import DesignPolicyBase, DesignPolicyContext, FixedSimpleDesignPolicy
 from amsrr.policies.design_teacher import DesignTeacherExample, DesignTeacherVariant, DeterministicDesignTeacher
+from amsrr.policies.high_level_policy_base import HighLevelPolicyBase, HighLevelPolicyContext
 
 __all__ = [
     "ASSIGNMENT_QP_INFEASIBLE_CODE",
@@ -38,6 +44,7 @@ __all__ = [
     "CONTACT_GROUP_INSUFFICIENT_CODE",
     "ContactCandidateSampler",
     "ContactCandidateSamplerConfig",
+    "BaselineTrajectoryPlannerConfig",
     "DesignActionCandidate",
     "DesignCandidateGenerator",
     "DesignCandidateStep",
@@ -47,6 +54,9 @@ __all__ = [
     "DesignTeacherVariant",
     "DeterministicDesignTeacher",
     "FixedSimpleDesignPolicy",
+    "GraspCarryBaselinePlanner",
+    "HighLevelPolicyBase",
+    "HighLevelPolicyContext",
     "assignment_key_from_assignments",
     "build_contact_candidate_set",
     "build_group_proposals",
@@ -54,4 +64,5 @@ __all__ = [
     "build_pairwise_conflict_matrix",
     "evaluate_assignment_level_qp",
     "evaluate_selected_assignment_feasibility",
+    "select_feasible_assignments",
 ]

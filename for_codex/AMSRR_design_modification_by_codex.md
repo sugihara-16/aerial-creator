@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-08
 
+### P1 pi_H Grasp-Carry Baseline Planner Supplement
+
+- Context: v0.4 defines the `ContactWrenchTrajectory` schema and says pi_H selects `ContactAssignment` sets from `ContactCandidateSet`, but does not prescribe a deterministic P1 baseline planner.
+- Decision: Added an Agent H `GraspCarryBaselinePlanner` that consumes IRG, `InteractionEnvelope`, target `MorphologyGraph`, `ContactCandidateSet`, and optional `RuntimeObservation`. It prioritizes existing `grasp_pair` group proposals, converts selected candidates to maintain-state `ContactAssignment`s, checks them with `evaluate_selected_assignment_feasibility`, and emits a five-knot grasp/carry baseline trajectory: approach, attach, lift/maintain, transport, release.
+- Compatibility impact: This is a deterministic baseline pi_H implementation, not a learned high-level policy. It does not output actuator commands and does not perform exhaustive candidate subset search. Later learned pi_H heads can replace the group selection/scoring while keeping the same `HighLevelPolicyContext -> ContactWrenchTrajectory` boundary.
+
 ### Selected Assignment Feasibility Proxy Supplement
 
 - Context: v0.4 separates unary ContactCandidate screening from assignment-level feasibility after π_H selects `ContactAssignment` sets. It requires no exhaustive subset enumeration and leaves exact wrench/friction/collision/QP solving to later evaluator/controller work.
