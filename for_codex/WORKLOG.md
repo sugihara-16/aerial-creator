@@ -3,6 +3,25 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control virtual thrust channel supplement
+- Work package / Agent label: P4-Control / P4a planning: virtual thrust channel and acceptance split
+- Summary: Recorded the user's P4-control implementation clarifications before code changes. The supplement fixes per-control-step `q`-conditioned rigid-body model and allocation matrix updates, QP-primary allocation, vectoring rotor virtual thrust channel expansion with back-conversion to `ControllerCommand`, degraded-only status for `BoundedVerticalRotorAllocator`, and separate fast pytest versus real Isaac smoke gates.
+- Files changed:
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None. Documentation/planning only.
+- Upstream dependencies used: User clarification, v0.4 Sections 20 and 24.5.2, and `for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md`.
+- Downstream impact: Agent I implementation must rebuild composite inertia, COM, rotor origins, rotor axes, and allocation matrix `B(q)` every control cycle from `RuntimeObservation` joint positions. Agent L must keep fast pytest checks separate from real Isaac smoke completion.
+- Tests added or run: No tests added; documentation-only supplement. `git diff --check` passed.
+- Commands run:
+  - `git diff --check`
+  - `git diff --stat`
+  - `git diff -- for_codex/AMSRR_design_modification_by_codex.md for_codex/WORKLOG.md`
+- Assumptions: Virtual thrust channels are internal QP variables only; public output remains `ControllerCommand`.
+- Blockers: None.
+- Next steps: Commit this planning supplement, then start Agent I Order 1 `RigidBodyControlModel`.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus controller supplement cross-reference
 - Work package / Agent label: Documentation integration: main spec reference to P4-control QP/PID supplement
 - Summary: Inserted references to the controller supplement into the main v0.4 design spec. Section 20.1 now points controller implementers to `for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md` for QP/PID, quasi-static rigid-body model update, QP allocation, Isaac bridge, and P4-control acceptance details. Section 24.5.2 also references the supplement and summarizes the resolved P4-control implementation decisions.
@@ -1345,6 +1364,21 @@
 ## Work Package Logs
 
 ### P4-Control / P4a: QP/PID Controller Specification
+
+#### 2026-07-09
+- Scope: Record P4-control virtual thrust channel, QP-primary allocation, and split acceptance-gate clarifications before implementation.
+- Files changed:
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: User clarification, v0.4 controller/P4-control sections, and the controller supplement.
+- Implemented: Documentation supplement requiring per-step `q`-conditioned rigid-body model and `B(q)` updates, virtual thrust channels inside QP with back-conversion to rotor thrust/vectoring targets, degraded-only bounded vertical fallback, and separate fast pytest / real Isaac smoke acceptance gates.
+- Not implemented: Controller code, rigid-body model, QP allocator, Isaac bridge, P4-control runner, or acceptance gate.
+- Schema/interface changes: None.
+- Downstream impact: Agent I/J/K/L implementation should treat these clarified requirements as active P4-control constraints.
+- Tests added: None.
+- Tests passed: `git diff --check` passed.
+- Handoff notes: P4-control completion requires real Isaac smoke; Isaac-unavailable skips are acceptable only for non-completion unit smoke paths.
+- Open questions: None currently known.
 
 #### 2026-07-09
 - Scope: Add main-spec cross-references to the P4-control QP/PID controller supplement.

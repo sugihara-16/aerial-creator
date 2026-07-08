@@ -4,6 +4,13 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Virtual Thrust Channel and Acceptance Split Supplement
+
+- Context: Before starting P4-control / P4a implementation, the user clarified several controller-level requirements: the rigid-body model and allocation matrix must be rebuilt every control cycle from current joint positions, vectoring rotors should be expanded into virtual thrust channels inside the QP, pseudoinverse allocation must not be the main path, Isaac-unavailable tests may skip only unit smoke portions, and P4-control acceptance must distinguish fast pytest gates from real Isaac smoke gates.
+- Decision: P4-control Agent I implementation will update composite inertia, COM, rotor origins, rotor axes, and allocation matrix `B(q)` from `RuntimeObservation.module_states[*].joint_positions` every control cycle. The primary allocator will be a QP path; `BoundedVerticalRotorAllocator` remains only a degraded fallback and must not be the source for P4-control completion. Vectoring rotor allocation may use virtual thrust channels internally, but controller output must be back-converted to `ControllerCommand.rotor_thrusts_n` and absolute `ControllerCommand.vectoring_joint_targets`, then re-evaluated for achieved wrench, residual, clipping, and unsupported-command metrics.
+- Acceptance decision: P4-control acceptance is split into a fast pytest gate for deterministic/unit/interface/archive checks and a real Isaac smoke gate for actual single-module hover, fixed-morphology hover, and fixed-morphology waypoint tracking. Tests may skip Isaac-specific smoke when Isaac is unavailable, but P4-control completion must not pass without the real Isaac smoke gate.
+- Compatibility impact: This is a controller implementation supplement. It preserves the v0.4 responsibility boundary: `π_L` outputs `PolicyCommand` only, controller/QP owns `ControllerCommand`, and the Isaac bridge owns final actuator target conversion. P4-control must not claim object grasp/carry success, π_D/π_H/π_L learning, P4.2 success, P4.3 learning bootstrap, or P4 full completion.
+
 ### Main Spec Cross-Reference to QP/PID Controller Supplement
 
 - Context: After the P4-control QP/PID controller supplement was revised and its open questions were resolved, the user requested that the main design spec explicitly refer to the controller supplement at an appropriate location.
