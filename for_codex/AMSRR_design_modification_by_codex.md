@@ -4,6 +4,13 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-08
 
+### P1 Task Distribution Runner and EpisodeArchive Supplement
+
+- Context: v0.4 requires P1 object grasp/carry randomization over object size, mass, friction, and target pose, plus EpisodeArchive logging and reproducibility metadata. It does not prescribe exact config field names or a JSON storage format.
+- Decision: Added Agent K config-driven P1 distribution and runner modules. `P1TaskDistributionConfig` randomizes box primitive size, object mass/friction, initial object pose, and object target pose. `P1SimplifiedRunner` runs the simplified env over sampled tasks, computes batch metrics, and emits `EpisodeArchive` records.
+- Logging supplement: Added `EpisodeArchive` with the v0.4 fields plus a `reproducibility` map for source hash, random seed, simulator version, URDF hash, and thrust model hash. JSONL helpers write/read archive sequences for lightweight P1 dataset/debug logs.
+- Compatibility impact: This is dataset/logging scaffolding for the simplified env, not a training loop and not an Isaac data recorder. The randomization config can be expanded later for wind, sensor noise, thrust scale error, contact break thresholds, and additional object shapes.
+
 ### P1 Simplified Grasp-Carry Simulation Env Supplement
 
 - Context: v0.4 requires simulator-specific code to remain behind interfaces, allows simplified contact in Version 1, and defines P1 acceptance as validating the GeometryProcessor/IRGBuilder/pi_H/pi_L/controller loop with no schema/checker crashes over 1000 episodes.

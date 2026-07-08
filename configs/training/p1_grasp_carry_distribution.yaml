@@ -1,0 +1,29 @@
+runner:
+  episode_count: 1000
+  seed: 0
+  source_hash: unknown
+  simulator_version: simplified_grasp_carry_env_v1
+  archive_success_only: false
+
+env:
+  dt_s: 0.1
+  max_episode_steps: 40
+  goal_tolerance_m: 0.05
+  object_tracking_speed_mps: 10.0
+  initial_position_jitter_m: 0.02
+  contact_break_force_n: 100.0
+  robot_model_config_path: configs/robot/robot_model.yaml
+
+distribution:
+  object_size_x_m: [0.22, 0.38]
+  object_size_y_m: [0.14, 0.28]
+  object_size_z_m: [0.10, 0.22]
+  object_mass_kg: [0.5, 2.0]
+  object_friction: [0.35, 0.9]
+  initial_x_m: [0.65, 0.95]
+  initial_y_m: [-0.25, 0.25]
+  initial_z_m: [0.35, 0.55]
+  target_x_m: [1.6, 2.4]
+  target_y_m: [-0.35, 0.35]
+  target_z_m: [0.35, 0.55]
+  target_tolerance_pos_m: 0.05

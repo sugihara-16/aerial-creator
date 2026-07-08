@@ -4,6 +4,38 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent K: P1 task distribution, runner, metrics, and EpisodeArchive logging
+- Summary: Implemented P1 order 8 task randomization config, grasp/carry task distribution, simplified env runner, EpisodeArchive schema/logging, batch metrics, and archive JSONL roundtrip tests.
+- Files changed:
+  - `amsrr/logging/__init__.py`
+  - `amsrr/logging/episode_archive.py`
+  - `amsrr/training/__init__.py`
+  - `amsrr/training/p1_task_distribution.py`
+  - `amsrr/training/p1_runner.py`
+  - `configs/training/p1_grasp_carry_distribution.yaml`
+  - `tests/unit/training/test_p1_runner.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added logging/training-side `EpisodeArchive`, `P1TaskDistributionConfig`, `P1TaskSample`, `P1GraspCarryTaskDistribution`, `P1RunnerConfig`, `P1RunnerResult`, and `P1SimplifiedRunner`.
+- Upstream dependencies used: v0.4 Sections 23.4, 24.2, 25.1, 25.3, 26.10; existing TaskSpec, IRG, InteractionEnvelope, DesignOutput, PolicyCommand, ControllerCommand, simplified env, and config/hash utilities.
+- Downstream impact: P1 simplified runs can now be sampled from a configured object distribution, summarized by metrics, and serialized as EpisodeArchive JSONL records for later dataset/training work.
+- Tests added or run:
+  - Added `test_p1_distribution_randomizes_configured_fields`
+  - Added `test_p1_runner_collects_metrics_and_archives`
+  - Added `test_p1_runner_config_loader`
+- Commands run:
+  - `sed -n ...` and `rg -n ...` inspections for spec Sections 23/24/25/26, TaskSpec schemas, simplified env, config/hash utilities, and existing tests
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p1_runner.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p1_runner.py -q` passed: 3 passed. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 67 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Assumptions: P1 randomization currently covers box primitive size, object mass, object friction, initial object pose, and target pose. Object shape stays box for this slice; wind, sensor noise, thrust scale error, and contact break threshold randomization are deferred.
+- Blockers: None.
+- Next steps: Continue with broader dataset/logging integration or Isaac Lab backend binding after this P1 runner is accepted.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent JP1: simplified grasp-carry simulation env
 - Summary: Implemented P1 order 7 interface-backed simplified grasp/carry environment that runs the existing TaskSpec -> IRG -> Envelope -> fixed/simple morphology -> ContactCandidateSampler -> pi_H -> pi_L -> QPID controller loop without Isaac dependencies, plus 1000-episode crash-free unit coverage.
 - Files changed:
@@ -540,6 +572,28 @@
 ---
 
 ## Work Package Logs
+
+### Agent K: P1 Task Distribution, Runner, Metrics, and Logging
+
+#### 2026-07-08
+- Scope: Implement P1 order 8 task distribution, runner, metrics, and EpisodeArchive logging for the simplified grasp/carry backend.
+- Files changed:
+  - `amsrr/logging/__init__.py`
+  - `amsrr/logging/episode_archive.py`
+  - `amsrr/training/__init__.py`
+  - `amsrr/training/p1_task_distribution.py`
+  - `amsrr/training/p1_runner.py`
+  - `configs/training/p1_grasp_carry_distribution.yaml`
+  - `tests/unit/training/test_p1_runner.py`
+- Upstream dependencies: v0.4 domain randomization and EpisodeArchive guidance, existing TaskSpec and policy/controller schemas, `SimplifiedGraspCarryEnv`, and config/hash utilities.
+- Implemented: Config-loaded P1 grasp/carry distribution, object size/mass/friction/initial-pose/target-pose sampling, per-episode runner over the simplified env, batch success/crash/failure metrics, EpisodeArchive dataclass, reproducibility metadata, JSONL write/read helpers, and unit tests.
+- Not implemented: Learned training loop, replay buffer, dataset sharding, Isaac recorder, wind/sensor/thrust-scale randomization, non-box object shape sampling, or large-scale filesystem dataset management.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: Simplified P1 runs now produce archives and metrics suitable for debugging and later dataset/training integration.
+- Tests added: `test_p1_distribution_randomizes_configured_fields`, `test_p1_runner_collects_metrics_and_archives`, `test_p1_runner_config_loader`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p1_runner.py -q` passed: 3 passed. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 67 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: `EpisodeArchive` includes a `reproducibility` map as an implementation supplement for Section 25.3. Config currently lives at `configs/training/p1_grasp_carry_distribution.yaml`.
+- Open questions: None currently.
 
 ### Agent JP1: Simplified Grasp-Carry Simulation Env
 
