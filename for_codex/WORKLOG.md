@@ -4,6 +4,34 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent L: P2 completion gate
+- Summary: Added a P2 milestone completion wrapper that runs the Section 24.3 P2 acceptance gate and emits explicit boolean completion checks for valid design rate, required slot coverage, closed-loop invalid rejection, and feasibility label storage.
+- Files changed:
+  - `amsrr/acceptance/__init__.py`
+  - `amsrr/acceptance/p2_completion.py`
+  - `tests/acceptance/test_p2_completion.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None to persisted schemas. Added acceptance-side `P2CompletionCriteria`, `P2CompletionReport`, and `run_p2_completion`.
+- Upstream dependencies used: v0.4 Section 24.3; existing `run_p2_acceptance`, `P2AcceptanceReport`, P2 design runner archives, and Agent F feasibility labels/margins.
+- Downstream impact: Downstream P3/P4 work can treat `run_p2_completion(...).passed` as the local P2 milestone gate before assembly/end-to-end integration. This remains design-level and does not run π_H, π_L, QP/PID, actuator commands, Isaac, or learned training.
+- Tests added or run:
+  - Added `test_p2_completion_milestone_section_24_3`
+- Commands run:
+  - `git status --short`, `sed -n ...`, `rg -n ...`, `ls -la ...`, and `git log -5 --oneline` inspections for spec/worklog/acceptance state
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p2_completion.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: Targeted P2 completion test passed: 1 passed in 23.62s. Full unit suite passed: 80 passed, 1 skipped. Full acceptance suite passed: 3 passed in 88.20s. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Assumptions: P2 completion is defined as successful Section 24.3 design-level acceptance. It intentionally does not imply assembly execution, π_H/π_L/controller execution, Isaac Sim execution, or full grasp/carry success; those begin in P3/P4.
+- Blockers: None.
+- Next steps: Commit P2 completion changes if accepted, then advance to P3 assembly integration.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent L: P2 acceptance gate
 - Summary: Added a mechanical P2 acceptance gate for Section 24.3 that runs the P2 design evaluation runner, checks `valid_design_rate >= 70%`, verifies accepted-design required slot coverage, probes closed-loop invalid rejection, and validates feasibility label storage in `EpisodeArchive.feasibility_result`.
 - Files changed:
@@ -817,6 +845,42 @@
 ### Agent L: Tests and Acceptance
 
 #### 2026-07-08
+- Scope: Mark P2 complete by wrapping the Section 24.3 design-level acceptance gate in an explicit milestone completion report.
+- Files changed:
+  - `amsrr/acceptance/__init__.py`
+  - `amsrr/acceptance/p2_completion.py`
+  - `tests/acceptance/test_p2_completion.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: `run_p2_acceptance`, Agent K P2 design runner, Agent E P2 design policy/variants, Agent F feasibility labels, and v0.4 Section 24.3.
+- Implemented: `P2CompletionCriteria`, `P2CompletionReport`, `run_p2_completion`, explicit completion checks, and a 1000-episode P2 completion acceptance test.
+- Not implemented: P3 assembly execution, P4 end-to-end grasp/carry success, Isaac Sim execution, learned π_D training, π_H/π_L/controller execution inside the P2 gate.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: Future work can use `run_p2_completion(...).passed` as the local signal that the P2 design-level milestone is complete before advancing to P3/P4.
+- Tests added: `test_p2_completion_milestone_section_24_3`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p2_completion.py -q` passed: 1 passed in 23.62s. Full unit suite passed: 80 passed, 1 skipped. Full acceptance suite passed: 3 passed in 88.20s. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Handoff notes: The completion report mirrors Section 24.3 exactly and deliberately does not claim actuator-command or simulator-task success.
+- Open questions: None currently.
+
+#### 2026-07-08
+- Scope: Implement P2 Section 24.3 acceptance reporting and tests.
+- Files changed:
+  - `amsrr/acceptance/__init__.py`
+  - `amsrr/acceptance/p2_acceptance.py`
+  - `tests/acceptance/test_p2_acceptance.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: v0.4 P2 acceptance criteria, Agent K P2 design runner, Agent E P2 design policy and variants, Agent F FeasibilityChecker labels/margins, and `EpisodeArchive`.
+- Implemented: `P2AcceptanceCriteria`, `P2AcceptanceReport`, `run_p2_acceptance`, Section 24.3 metric checks, synthetic closed-loop invalid probe, archive label validation, and a 1000-episode acceptance test.
+- Not implemented: P2 completion wrapper in this entry, learned π_D training, Isaac validation, π_H/π_L/controller execution, or assembly integration.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: P2 design-level validity and feasibility-label persistence can be checked mechanically before later phases.
+- Tests added: `test_p2_acceptance_section_24_3`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p2_acceptance.py -q` passed: 1 passed in 23.45s. Full unit suite passed: 80 passed, 1 skipped. Full acceptance suite passed: 2 passed in 64.82s. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Handoff notes: Closed-loop rejection is tested with an explicit synthetic invalid design because the normal P2 candidate builders intentionally emit connected trees.
+- Open questions: None currently.
+
+#### 2026-07-08
 - Scope: Implement P1 Section 24.2 acceptance reporting and tests.
 - Files changed:
   - `amsrr/acceptance/__init__.py`
@@ -835,6 +899,26 @@
 - Open questions: None currently.
 
 ### Agent K: P1 Task Distribution, Runner, Metrics, and Logging
+
+#### 2026-07-08
+- Scope: Implement P2 design evaluation distribution, runner, metrics, and EpisodeArchive feasibility-label logging.
+- Files changed:
+  - `amsrr/training/__init__.py`
+  - `amsrr/training/p2_design_distribution.py`
+  - `amsrr/training/p2_design_runner.py`
+  - `configs/training/p2_design_grasp_carry.yaml`
+  - `tests/unit/training/test_p2_design_runner.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: v0.4 P2 acceptance criteria and logging guidance, Agent E P2 design policy/variants, Agent F FeasibilityChecker labels/margins, IRGBuilder, InteractionEnvelopeExtractor, PhysicalModel, and EpisodeArchive.
+- Implemented: P2 grasp/carry design distribution, config loader, design evaluation runner, selected-design archive writing, feasibility label/margin metric extraction, P2 config file, package exports, and unit tests.
+- Not implemented: P2 completion wrapper in this entry, per-candidate archive rows, learned training loops, Isaac recorder, π_H/π_L/controller execution, or actuator-command logging.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: Agent L P2 acceptance/completion can aggregate design-level validity and labels directly from archived `EpisodeArchive.feasibility_result` values.
+- Tests added: `test_p2_design_distribution_randomizes_and_marks_metadata`, `test_p2_design_runner_collects_feasibility_archives`, `test_p2_design_runner_config_loader`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p2_design_runner.py -q` passed: 3 passed. Full unit suite passed: 80 passed, 1 skipped. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Handoff notes: The runner archives the selected candidate's feasibility result; rejected-candidate supervision is available through `P2DesignSelection` but not yet emitted as separate dataset rows.
+- Open questions: None currently.
 
 #### 2026-07-08
 - Scope: Implement P1 order 8 task distribution, runner, metrics, and EpisodeArchive logging for the simplified grasp/carry backend.

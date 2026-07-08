@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-08
 
+### P2 Completion Gate Supplement
+
+- Context: v0.4 Section 24.3 defines the P2 acceptance criteria, but it does not define a phase-completion report that downstream work can use to distinguish "acceptance function exists" from "P2 milestone is complete."
+- Decision: Added Agent L `run_p2_completion` as a thin completion wrapper over `run_p2_acceptance`. It emits a `P2CompletionReport` with explicit boolean completion checks for the Section 24.3 gates: valid design rate, required slot coverage for accepted designs, closed-loop invalid rejection, and feasibility label storage.
+- Compatibility impact: This adds acceptance-side report dataclasses only and does not change persisted schemas. P2 completion remains design-level; π_H, π_L, controller allocation, actuator commands, Isaac execution, and later P3/P4 behavior are outside this gate.
+
 ### P2 Acceptance Gate Supplement
 
 - Context: v0.4 Section 24.3 defines P2 acceptance criteria but does not prescribe a concrete report schema or how to probe `closed_loop_invalid designs rejected` when the normal P2 design distribution only generates tree morphologies.

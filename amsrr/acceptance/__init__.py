@@ -10,12 +10,20 @@ from amsrr.acceptance.p2_acceptance import (
     P2AcceptanceReport,
     run_p2_acceptance,
 )
+from amsrr.acceptance.p2_completion import (
+    P2CompletionCriteria,
+    P2CompletionReport,
+    run_p2_completion,
+)
 
 __all__ = [
     "P1AcceptanceCriteria",
     "P1AcceptanceReport",
     "P2AcceptanceCriteria",
     "P2AcceptanceReport",
+    "P2CompletionCriteria",
+    "P2CompletionReport",
     "run_p1_acceptance",
     "run_p2_acceptance",
+    "run_p2_completion",
 ]
