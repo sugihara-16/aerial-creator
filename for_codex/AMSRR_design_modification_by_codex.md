@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-08
 
+### P3 Assembly Runner Core Supplement
+
+- Context: v0.4 Section 17 defines `AssemblyPlan`, `AssemblyStep`, and `ConstructionState`, and an earlier Agent G scaffold produced deterministic graph-edit plans, but P3 acceptance needs an executable deterministic runner that advances construction state and checks that the physical graph matches the target graph.
+- Decision: Added an Agent G `AssemblyRunner` core. It executes a planned sequence through an `AssemblyExecutorInterface`, records per-step `AssemblyExecutionResult` objects, updates `ConstructionState` on successful `verify_attach` steps when the executor does not provide an updated state, and computes graph/state consistency metrics for modules, dock edges, and occupied target ports.
+- Compatibility impact: This remains deterministic π_A scaffolding. It does not introduce learned assembly, motion planning, Isaac execution, QP/PID control, or physical docking verification. Later simplified/Isaac executors can provide richer `updated_state` values behind the same executor interface.
+
 ### π_D Joint-Angle Non-Design Clarification
 
 - Context: The v0.4 design text could be misread as treating `ModuleNode.pose_in_design_frame` or `DockEdge.relative_pose_src_to_dst` as continuous design variables for π_D, even though A-MSRR module joints are movable and their instantaneous angles belong to planning/control/runtime state rather than structure design.

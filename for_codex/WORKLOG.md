@@ -3,6 +3,31 @@
 ## Global Worklog
 
 ### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P3 Assembly Runner Core Supplement
+- Work package / Agent label: Agent G: P3 assembly state execution core
+- Summary: Added a deterministic `AssemblyRunner` core that runs `AssemblyPlan` steps through an `AssemblyExecutorInterface`, updates `ConstructionState` after successful `verify_attach` steps, records per-step results, and reports final physical-graph consistency metrics against the target `MorphologyGraph`.
+- Files changed:
+  - `amsrr/assembly/assembly_runner.py`
+  - `amsrr/assembly/__init__.py`
+  - `tests/unit/assembly/test_assembly_runner.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None to persisted schemas. Added assembly-local `AssemblyRunnerConfig` and `AssemblyRunReport` dataclasses.
+- Upstream dependencies used: v0.4 Sections 17 and 24.4; existing Agent G `GraphEditAssemblyPlanner`, `ConstructionState`, `AssemblyExecutorInterface`, and P2 grasp/carry morphology variants.
+- Downstream impact: P3 simplified executor and acceptance work can now execute deterministic assembly plans and evaluate whether construction-state physical graph changes match the target graph.
+- Tests added or run:
+  - Added `test_assembly_runner_completes_plan_and_updates_construction_state`
+  - Added `test_assembly_runner_stops_on_failed_step_without_completing_graph`
+  - Added `test_assembly_runner_resumes_from_partial_construction_state`
+- Commands run:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/assembly/test_graph_edit_planner.py tests/unit/assembly/test_assembly_runner.py -q`
+  - `python3 -m compileall amsrr -q`
+- Tests run: Agent G targeted assembly tests passed: 7 passed. `python3 -m compileall amsrr -q` passed.
+- Assumptions: Successful `verify_attach` is the deterministic point at which the core can mark a target dock edge attached if the executor does not provide a richer updated state.
+- Blockers: None.
+- Next steps: Run targeted Agent G tests, commit order 1, then implement the simplified assembly executor.
+
+### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus user-requested P2.5 learning bootstrap
 - Work package / Agent label: P2.5: Supervised learning bootstrap for π_D scorer and feasibility head
 - Summary: Added a P2.5 learning bootstrap that turns deterministic `P2DesignPolicy` candidate evaluations and `FeasibilityChecker` labels into a supervised dataset, trains a minimal learned π_D candidate scorer, trains a minimal learned feasibility head, saves checkpoints/metrics/loss curves, and updates the P2.5 report/acceptance gate. This is not full RL and does not replace deterministic design selection or hard safety checks.
@@ -1226,6 +1251,24 @@
 - Open questions: None currently.
 
 ### Agent G: π_A GraphEditAssemblyPlanner
+
+#### 2026-07-08
+- Scope: Add P3 order 1 assembly execution core on top of the existing graph-edit planner.
+- Files changed:
+  - `amsrr/assembly/assembly_runner.py`
+  - `amsrr/assembly/__init__.py`
+  - `tests/unit/assembly/test_assembly_runner.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: Existing Agent G planner/state dataclasses, `AssemblyExecutorInterface`, v0.4 Section 17 contracts, and P2 morphology variants.
+- Implemented: `AssemblyRunnerConfig`, `AssemblyRunReport`, `AssemblyRunner`, automatic successful `verify_attach` state transition, final target graph consistency metrics, success/failure report serialization, and focused unit tests.
+- Not implemented: Simplified executor, retry/abort policy execution, P3 runner/acceptance, Isaac execution, or physical docking verification.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: Later P3 work can plug in deterministic simplified executors and aggregate assembly success/state-consistency metrics.
+- Tests added: `test_assembly_runner_completes_plan_and_updates_construction_state`, `test_assembly_runner_stops_on_failed_step_without_completing_graph`, `test_assembly_runner_resumes_from_partial_construction_state`.
+- Tests passed: Agent G targeted assembly tests passed: 7 passed. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: `state_matches_target` checks assembled module IDs, dock edge endpoint/port keys, and occupied target ports; target edge latch states remain target metadata rather than the equality criterion.
+- Open questions: None currently.
 
 #### 2026-07-08
 - Scope: Implement implementation-order item 12: deterministic π_A assembly planner and construction/execution interface scaffolding.
