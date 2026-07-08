@@ -4,6 +4,35 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent JP1: simplified grasp-carry simulation env
+- Summary: Implemented P1 order 7 interface-backed simplified grasp/carry environment that runs the existing TaskSpec -> IRG -> Envelope -> fixed/simple morphology -> ContactCandidateSampler -> pi_H -> pi_L -> QPID controller loop without Isaac dependencies, plus 1000-episode crash-free unit coverage.
+- Files changed:
+  - `amsrr/simulation/__init__.py`
+  - `amsrr/simulation/base.py`
+  - `amsrr/simulation/simplified_grasp_carry_env.py`
+  - `tests/unit/simulation/test_simplified_grasp_carry_env.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added simulation-side `SimulationEnvBase`, `SimplifiedGraspCarryEnvConfig`, `SimplifiedGraspCarryBuildArtifacts`, `SimplifiedEpisodeResult`, `SimplifiedBatchRunResult`, `SimplifiedGraspCarryEnv`, and `run_crash_free_episodes`.
+- Upstream dependencies used: v0.4 Sections 23, 24.2, 25.1, 26.10; Agent D IRGBuilder/EnvelopeExtractor; Agent E fixed/simple design policy; Agent H ContactCandidateSampler and pi_H baseline; Agent I pi_L and QPID controller interfaces.
+- Downstream impact: P1 can validate the schema/runtime/controller loop before Isaac Lab integration. Later Agent J Isaac environments can implement the same `SimulationEnvBase` boundary while reusing policy/controller interfaces.
+- Tests added or run:
+  - Added `test_simplified_grasp_carry_env_matches_base_protocol`
+  - Added `test_simplified_grasp_carry_env_runs_policy_controller_episode`
+  - Added `test_simplified_grasp_carry_1000_episodes_crash_free`
+- Commands run:
+  - `sed -n ...` and `rg -n ...` inspections for spec Sections 23/24/25/26, existing pi_H/pi_L/controller tests, and worklog/design notes
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_simplified_grasp_carry_env.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_simplified_grasp_carry_env.py -q` passed: 3 passed, including 1000 simplified episodes with 0 crashes. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 64 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Assumptions: The P1 simplified env uses kinematic/fixed-joint contact after attach, high-level object target tracking, deterministic small initial XY jitter, and controller status checks. It is not an Isaac Lab environment and does not model high-fidelity contact, friction, aerodynamic, or collision dynamics.
+- Blockers: None.
+- Next steps: Continue with Isaac Lab environment integration or dataset/logging once P1 simplified env behavior is accepted.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent I: pi_L + QP/PID interfaces
 - Summary: Implemented P1 order 6 Agent I interfaces: deterministic pi_L baseline, controller context/base protocol, QP allocator interface, dependency-free bounded vertical rotor allocator, QPID controller scaffold, package exports, and policy/controller unit tests.
 - Files changed:
@@ -511,6 +540,25 @@
 ---
 
 ## Work Package Logs
+
+### Agent JP1: Simplified Grasp-Carry Simulation Env
+
+#### 2026-07-08
+- Scope: Implement P1 order 7 simplified grasp/carry simulation environment for interface-backed crash-free validation before Isaac Lab binding.
+- Files changed:
+  - `amsrr/simulation/__init__.py`
+  - `amsrr/simulation/base.py`
+  - `amsrr/simulation/simplified_grasp_carry_env.py`
+  - `tests/unit/simulation/test_simplified_grasp_carry_env.py`
+- Upstream dependencies: v0.4 simplified contact and P1 acceptance requirements, existing TaskSpec/RuntimeObservation schemas, IRGBuilder, InteractionEnvelopeExtractor, fixed/simple design policy, ContactCandidateSampler, GraspCarryBaselinePlanner, BaselineLowLevelPolicy, and QPIDController.
+- Implemented: `SimulationEnvBase`, simplified reset/step/get-runtime-observation boundary, deterministic pipeline build artifacts, kinematic/fixed-joint grasp attach approximation, active object-target tracking, contact-state emission, task-progress metrics, per-episode result summaries, batch 1000-episode runner, and unit tests.
+- Not implemented: Isaac Lab/Isaac Sim integration, physics contact solver, friction/slip dynamics, collision geometry stepping, stochastic actuator faults, dataset archive writer, or training loop integration.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: P1 can validate no schema/checker/controller crashes over 1000 simplified episodes. Later simulator backends can implement `SimulationEnvBase` while preserving existing policy/controller contracts.
+- Tests added: `test_simplified_grasp_carry_env_matches_base_protocol`, `test_simplified_grasp_carry_env_runs_policy_controller_episode`, `test_simplified_grasp_carry_1000_episodes_crash_free`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_simplified_grasp_carry_env.py -q` passed: 3 passed, including 1000 simplified episodes with 0 crashes. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 64 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: The env deliberately keeps simulator-specific dependencies out of `amsrr/simulation`; the current backend is deterministic and suitable for interface smoke and acceptance checks, not physics validation.
+- Open questions: None currently.
 
 ### Agent I: pi_L + QP/PID Interfaces
 

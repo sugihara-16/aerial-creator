@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-08
 
+### P1 Simplified Grasp-Carry Simulation Env Supplement
+
+- Context: v0.4 requires simulator-specific code to remain behind interfaces, allows simplified contact in Version 1, and defines P1 acceptance as validating the GeometryProcessor/IRGBuilder/pi_H/pi_L/controller loop with no schema/checker crashes over 1000 episodes.
+- Decision: Added an Agent JP1 `SimplifiedGraspCarryEnv` under `amsrr/simulation`. It implements the `reset`, `step`, and `get_runtime_observation` boundary, builds the existing TaskSpec -> IRG -> Envelope -> fixed/simple DesignOutput -> ContactCandidateSet -> pi_H trajectory pipeline, runs `BaselineLowLevelPolicy` and `QPIDController`, and uses a kinematic/fixed-joint approximation after attach to move the object toward active object targets.
+- Compatibility impact: This is not an Isaac Lab environment and does not model high-fidelity contact dynamics. It is an interface-backed smoke backend for P1 crash-free validation before Isaac integration. Later Isaac environments can implement the same `SimulationEnvBase` boundary.
+
 ### P1 pi_L + QP/PID Controller Interface Supplement
 
 - Context: v0.4 defines the `PolicyCommand` and `ControllerCommand` schemas and the pi_H -> pi_L -> QP/PID flow, but does not prescribe a deterministic P1 low-level baseline policy or dependency-free controller backend.
