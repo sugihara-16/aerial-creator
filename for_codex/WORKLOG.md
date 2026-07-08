@@ -4,6 +4,36 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent F: P2 design-level FeasibilityChecker strengthening
+- Summary: Strengthened design-level `FeasibilityChecker` for P2 acceptance by stabilizing hard-check labels and numeric margins for slot coverage, anchor capability, closed-loop rejection, port conflicts, thrust/payload margins, and coarse reachability.
+- Files changed:
+  - `amsrr/feasibility/checker.py`
+  - `tests/unit/feasibility/test_feasibility_checker.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None. Existing `FeasibilityResult` schema is unchanged; P2 labels are stored as float entries in `proxy_scores` with `L_...` keys, and acceptance margins are stored in the existing `margins` map.
+- Upstream dependencies used: v0.4 Sections 16.2-16.8, 24.3, 26.6, 27.1; existing Agent E P2 grasp/carry morphology variants, IRG ContactSlot and CapabilityRequirement edges, PhysicalModel thrust data, and MorphologyGraph/DesignOutput schemas.
+- Downstream impact: P2 runners/acceptance can aggregate `L_FEASIBLE`, `L_<hard_check_code>`, required-slot coverage ratios, closed-loop rejection, port conflict counts, thrust margin, and payload margin directly from archived `FeasibilityResult` records.
+- Tests added or run:
+  - Added `test_p2_feasibility_checker_records_acceptance_margins_for_variant`
+  - Added `test_p2_feasibility_checker_uses_capability_requirement_force_label`
+  - Added `test_p2_feasibility_checker_records_port_conflict_margins`
+  - Added `test_p2_feasibility_checker_records_reachability_margins`
+  - Updated existing missing slot coverage and closed-loop tests to assert labels/margins
+- Commands run:
+  - `sed -n ...` and `rg -n ...` inspections for spec Sections 16/24/26, checker, IRG templates, and tests
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/feasibility/test_feasibility_checker.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/feasibility/test_feasibility_checker.py -q` passed: 7 passed. Full unit suite passed: 74 passed, 1 skipped. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Assumptions: `FeasibilityResult` has no dedicated label field in v0.4, so deterministic P2 labels are represented as `proxy_scores["L_..."]` floats. These labels do not replace hard violations and are intended for acceptance/dataset aggregation.
+- Blockers: None.
+- Next steps: Continue with Agent E P2 candidate/evaluation policy scaffolding or Agent K/L P2 design runner and acceptance gate.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent E: P2 grasp/carry morphology variant builder
 - Summary: Implemented real deterministic P2 grasp/carry morphology variants for `chain_grasp`, `symmetric_two_anchor_grasp`, `tri_anchor_support_grasp`, and `central_base_plus_two_grasp_arms`, and routed object grasp/carry `DeterministicDesignTeacher` output through the new variant builder.
 - Files changed:
@@ -632,6 +662,25 @@
 ---
 
 ## Work Package Logs
+
+### Agent F: P2 Design-Level FeasibilityChecker
+
+#### 2026-07-08
+- Scope: Strengthen design-level feasibility outputs for P2 grasp/carry design evaluation and acceptance aggregation.
+- Files changed:
+  - `amsrr/feasibility/checker.py`
+  - `tests/unit/feasibility/test_feasibility_checker.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: v0.4 hard-check list and P2 acceptance criteria, existing `FeasibilityResult`, IRG `CapabilityRequirement --applies_to--> ContactSlot` edges, Agent E P2 grasp/carry morphology variants, and PhysicalModel thrust data.
+- Implemented: Checker version `p2_agent_f_design_v1`, stable `L_FEASIBLE` / `L_HARD_VIOLATION` / `L_<hard_check_code>` labels, coverage and capability ratios, CapabilityRequirement min-force checks, reachability ratios, port conflict counts, closed-loop rejection margins, detailed thrust/payload force margins, and metadata violation counts.
+- Not implemented: Exact collision checking, exact QP hover solve, learned feasibility head, P2 runner/acceptance harness, or simulator validation.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: Agent K/L P2 runners can store and aggregate feasibility labels directly from `EpisodeArchive.feasibility_result`. Agent E design policy work can use deterministic rejection labels for candidate evaluation.
+- Tests added: `test_p2_feasibility_checker_records_acceptance_margins_for_variant`, `test_p2_feasibility_checker_uses_capability_requirement_force_label`, `test_p2_feasibility_checker_records_port_conflict_margins`, `test_p2_feasibility_checker_records_reachability_margins`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/feasibility/test_feasibility_checker.py -q` passed: 7 passed. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 74 passed, 1 skipped. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Handoff notes: `proxy_scores["L_..."]` entries are deterministic labels encoded in the available float map, not learned proxy values. Hard safety remains owned by `hard_violations` and `feasible`.
+- Open questions: None currently.
 
 ### Agent E: P2 Grasp-Carry Morphology Variant Builder
 

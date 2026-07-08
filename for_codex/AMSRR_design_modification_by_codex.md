@@ -10,6 +10,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 - Decision: Added Agent E `GraspCarryMorphologyVariantBuilder` as a deterministic P2 scaffold for object grasp/carry. The four variants now produce distinct connected-tree `MorphologyGraph` layouts: a linear chain, a central base with two direct grasp arms, a tri-anchor support/grasp frame with an optional support anchor on the base, and a central base with two two-link grasp arms. `DeterministicDesignTeacher` now routes object grasp/carry variants through this builder instead of merely annotating the minimal seed morphology.
 - Compatibility impact: This does not change persisted schemas and does not claim the variants are optimized or learned designs. It gives π_D training/evaluation a finite deterministic set of distinct `DesignOutput` demonstrations while preserving existing `DesignPolicyContext -> DesignOutput`, `ContactSlotID -> RobotAnchorID`, and FeasibilityChecker boundaries.
 
+### P2 FeasibilityChecker Acceptance Labels Supplement
+
+- Context: v0.4 Section 24.3 requires P2 acceptance to measure valid design rate, required slot coverage for accepted designs, closed-loop invalid rejection, and stored feasibility labels, but `FeasibilityResult` does not define a dedicated label field.
+- Decision: Strengthened Agent F design-level `FeasibilityChecker` without changing schemas. It now records stable P2 count/ratio/margin keys in `FeasibilityResult.margins` for required slot coverage, anchor capability coverage, coarse reachability, port conflicts, closed-loop rejection, thrust margin, and payload margin. It also stores deterministic 0/1 label scores in `proxy_scores` using `L_FEASIBLE`, `L_HARD_VIOLATION`, and `L_<hard_check_code>` keys.
+- Compatibility impact: Existing hard violation codes and `FeasibilityResult` fields remain unchanged. The `L_...` entries are acceptance/dataset labels stored in the available float map, not learned proxy estimates and not replacements for deterministic hard checks.
+
 ### P1 Acceptance Gate Supplement
 
 - Context: v0.4 Section 24.2 defines P1 acceptance criteria but does not prescribe a concrete test harness or result schema for recording the pass/fail gate.
