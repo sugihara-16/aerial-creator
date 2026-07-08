@@ -13,6 +13,11 @@ from amsrr.controllers.qp_allocator_interface import (
     RotorAllocationSpec,
 )
 from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
+from amsrr.controllers.rigid_body_model import (
+    RigidBodyControlModel,
+    RigidBodyControlModelBuilder,
+    RotorControlElement,
+)
 
 __all__ = [
     "BoundedVerticalRotorAllocator",
@@ -28,5 +33,8 @@ __all__ = [
     "QP_INFEASIBLE_CODE",
     "QP_THRUST_CLIPPED_CODE",
     "QP_UNSUPPORTED_WRENCH_CODE",
+    "RigidBodyControlModel",
+    "RigidBodyControlModelBuilder",
     "RotorAllocationSpec",
+    "RotorControlElement",
 ]

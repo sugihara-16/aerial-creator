@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control RigidBodyControlModel Implementation Supplement
+
+- Context: Agent I Order 1 implemented the deterministic rigid-body model update required before QP allocation and Isaac bridge work. The v0.4 spec and controller supplement require link-level quasi-static inertia aggregation and per-step `q`-conditioned rotor geometry updates, while leaving the exact controller-local body-frame convention and multi-module actuator key convention to implementation.
+- Decision: Added `amsrr/controllers/rigid_body_model.py` with controller-local `RigidBodyControlModel`, `RotorControlElement`, and `RigidBodyControlModelBuilder`. The body frame origin is the composite COM and its orientation is the current base/control module orientation. `center_of_mass_body` is therefore `(0, 0, 0)`, rotor origins are stored relative to the COM in body frame, and allocation columns use `r_i x F_i` with reaction torque coefficients. Multi-module actuator keys use deterministic `module_<module_id>:<local_id>` strings.
+- Compatibility impact: No persisted schema was changed. The model is an internal controller contract exported from `amsrr.controllers`. It does not output actuator commands, does not replace QP allocation, and does not claim Isaac validation. The scalar rotor allocation matrix is the per-current-geometry basis that the later virtual-thrust-channel QP allocator will expand and back-convert.
+
 ### P4-Control Virtual Thrust Channel and Acceptance Split Supplement
 
 - Context: Before starting P4-control / P4a implementation, the user clarified several controller-level requirements: the rigid-body model and allocation matrix must be rebuilt every control cycle from current joint positions, vectoring rotors should be expanded into virtual thrust channels inside the QP, pseudoinverse allocation must not be the main path, Isaac-unavailable tests may skip only unit smoke portions, and P4-control acceptance must distinguish fast pytest gates from real Isaac smoke gates.

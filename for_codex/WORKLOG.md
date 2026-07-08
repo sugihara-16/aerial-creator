@@ -3,6 +3,38 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control controller supplement and virtual thrust channel supplement
+- Work package / Agent label: Agent I: P4-control Order 1 RigidBodyControlModel
+- Summary: Implemented deterministic per-control-step rigid-body model update for P4-control. Added controller-local `RigidBodyControlModel`, `RotorControlElement`, and `RigidBodyControlModelBuilder` that compute link-level composite mass/COM/inertia, current rotor origins and axes, scalar rotor allocation columns, vectoring joint axes, dock actuator ids, and actuator limits from `PhysicalModel`, `MorphologyGraph`, and `RuntimeObservation.module_states[*].joint_positions`.
+- Files changed:
+  - `amsrr/controllers/rigid_body_model.py`
+  - `amsrr/controllers/__init__.py`
+  - `tests/unit/controllers/test_rigid_body_model.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None to persisted schemas. Added controller-local dataclasses and exports.
+- Upstream dependencies used: v0.4 Sections 20, 24.5.2, 26.9, 27.1; `for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md`; user P4-control clarification; Agent B `PhysicalModel`; Agent I controller scaffolds.
+- Downstream impact: The next Agent I order can build the primary QP allocator on top of `RigidBodyControlModel.allocation_matrix_body` and rotor/vectoring metadata, while keeping `BoundedVerticalRotorAllocator` as degraded fallback only.
+- Tests added or run:
+  - Added `tests/unit/controllers/test_rigid_body_model.py`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/controllers/test_rigid_body_model.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/controllers -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+- Commands run:
+  - `git status --short`
+  - `sed -n ... amsrr/controllers/*.py`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/controllers/test_rigid_body_model.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/controllers -q`
+  - `python3 -m compileall amsrr -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: Targeted rigid-body model tests passed: 3 passed. Controller unit tests passed: 8 passed. Full unit suite passed: 102 passed, 1 skipped in 4.83s. Compileall passed.
+- Assumptions: Controller-local body frame uses composite COM as origin and base/control module orientation as attitude. Multi-module actuator ids use `module_<module_id>:<local_id>` strings.
+- Blockers: None.
+- Next steps: Commit Agent I Order 1, then proceed to Agent I Order 2 primary QP allocator unless method-level undefined issues appear.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control virtual thrust channel supplement
 - Work package / Agent label: P4-Control / P4a planning: virtual thrust channel and acceptance split
 - Summary: Recorded the user's P4-control implementation clarifications before code changes. The supplement fixes per-control-step `q`-conditioned rigid-body model and allocation matrix updates, QP-primary allocation, vectoring rotor virtual thrust channel expansion with back-conversion to `ControllerCommand`, degraded-only status for `BoundedVerticalRotorAllocator`, and separate fast pytest versus real Isaac smoke gates.
@@ -1364,6 +1396,24 @@
 ## Work Package Logs
 
 ### P4-Control / P4a: QP/PID Controller Specification
+
+#### 2026-07-09
+- Scope: Implement Agent I Order 1 deterministic `RigidBodyControlModel` update.
+- Files changed:
+  - `amsrr/controllers/rigid_body_model.py`
+  - `amsrr/controllers/__init__.py`
+  - `tests/unit/controllers/test_rigid_body_model.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: `PhysicalModel`, `MorphologyGraph`, `RuntimeObservation`, Holon URDF-derived joints/links/rotors, P4-control controller supplement, and user virtual-thrust-channel clarification.
+- Implemented: Link-tree forward kinematics from current joint positions, `fc`/baselink-relative module transforms, composite COM and link-level inertia aggregation, body frame at COM with base module orientation, current rotor origin/axis extraction, scalar rotor allocation matrix columns, vectoring joint axes, dock actuator ids, active actuator limits, controller package exports, and unit tests.
+- Not implemented: Virtual thrust channel QP expansion, QP solve, back-conversion to `ControllerCommand`, Isaac controller bridge, P4-control runner, or real Isaac smoke.
+- Schema/interface changes: None to persisted schemas. Added controller-local internal dataclasses only.
+- Downstream impact: The QP allocator can now consume current `B(q)`-style rotor geometry and per-module actuator keys without re-parsing URDF or hard-coding robot paths.
+- Tests added: `test_rigid_body_model_builds_single_module_allocation_matrix`, `test_rigid_body_model_updates_rotor_axis_from_joint_position`, `test_rigid_body_model_handles_multiple_modules_with_unique_actuator_ids`.
+- Tests passed: Targeted rigid-body tests passed: 3 passed. Controller unit tests passed: 8 passed. Full unit suite passed: 102 passed, 1 skipped. Compileall passed.
+- Handoff notes: Zero-axis fixed joints are intentionally skipped in the joint-axis map while still participating in kinematic transforms. Rotor allocation columns are scalar-thrust columns; virtual channel expansion belongs to the next QP allocator order.
+- Open questions: None currently known.
 
 #### 2026-07-09
 - Scope: Record P4-control virtual thrust channel, QP-primary allocation, and split acceptance-gate clarifications before implementation.
