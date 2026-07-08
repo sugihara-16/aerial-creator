@@ -4,11 +4,23 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-08
 
+### π_D Joint-Angle Non-Design Clarification
+
+- Context: The v0.4 design text could be misread as treating `ModuleNode.pose_in_design_frame` or `DockEdge.relative_pose_src_to_dst` as continuous design variables for π_D, even though A-MSRR module joints are movable and their instantaneous angles belong to planning/control/runtime state rather than structure design.
+- Decision: Clarified the source design spec directly. π_D designs graph-level structure only: module count, connection topology, docking port pairs, base module, module roles, RobotAnchors, slot-anchor priors, control groups, and graph-level metadata. π_D must not output movable joint angles, runtime module relative poses, pose trajectories, actuator commands, rotor thrust, joint torque, or vectoring joint targets.
+- Compatibility impact: No code change is required at this point. Existing design-level feasibility checks use graph/capability/coverage/margin necessary conditions and do not score a single nominal joint configuration. Existing pose fields remain nominal/canonical metadata for assembly reference, visualization, coarse precheck, debugging, and simulator initialization.
+
+### P2.5 Learning Bootstrap Supplement
+
+- Context: P2.5 inspection existed as a human/debugging phase, but did not yet create a supervised learning bootstrap from deterministic P2 candidate labels. The user requested a minimal learned π_D scorer and learned feasibility head trained from `P2DesignPolicy.evaluate_candidates()` / deterministic `FeasibilityChecker` outputs, without full RL and without replacing the production path.
+- Decision: Added a P2.5 candidate dataset builder that exports all accepted/rejected/selected candidates across multiple sampled grasp/carry tasks, including deterministic features, labels, design scores, violation codes, margins, and train/val ID splits. Added two lightweight MLP training loops: one for teacher-selected π_D candidate classification and one for deterministic feasible/infeasible classification. Checkpoints, metrics, and loss curves are saved under `outputs/p2_5/training`.
+- Compatibility impact: The learned models are auxiliary bootstrap artifacts only. They are not used by `P2DesignPolicy`, `FeasibilityChecker`, P2 acceptance, P2.5 inspection, Isaac, π_H, π_L, QP/PID, or actuator command execution. Deterministic `P2DesignPolicy` and `FeasibilityChecker` remain the source of truth for design selection and hard safety checks.
+
 ### P2.5 Inspection and Candidate Trace Export Supplement
 
 - Context: The user accepted P2 as complete for the current v0.4 Section 24.3 design-level gate, but requested a pre-P3 inspection phase so humans can inspect morphology variants and all P2DesignPolicy candidate evaluations, not only the selected design.
 - Decision: Added P2.5 as an additional inspection/debugging phase, not a replacement for P2 completion. It adds SVG morphology graph/layout visualization for all four grasp/carry variants, JSONL/CSV export of per-candidate evaluation traces including an explicit closed-loop invalid rejection probe, a markdown inspection report, and a P2.5 acceptance gate.
-- Compatibility impact: P2.5 uses existing `P2DesignPolicy`, P2 design runner/config, `FeasibilityChecker`, `DesignOutput`, `FeasibilityResult`, and `EpisodeArchive`-compatible labels/margins. It does not run Isaac, π_H, π_L, QP/PID, actuator commands, or learned training.
+- Compatibility impact: P2.5 uses existing `P2DesignPolicy`, P2 design runner/config, `FeasibilityChecker`, `DesignOutput`, `FeasibilityResult`, and `EpisodeArchive`-compatible labels/margins. The inspection path does not run Isaac, π_H, π_L, QP/PID, or actuator commands.
 
 ### P2 Completion Gate Supplement
 

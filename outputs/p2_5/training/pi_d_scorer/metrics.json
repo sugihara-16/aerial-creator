@@ -1,0 +1,7 @@
+{
+  "num_train_samples": 255.0,
+  "num_val_samples": 65.0,
+  "selected_accuracy": 1.0,
+  "train_loss": 0.10842715948820114,
+  "val_loss": 0.10839308053255081
+}

@@ -1,0 +1,49 @@
+{
+  "accepted_count": 256,
+  "config_path": "configs/training/p2_design_grasp_carry.yaml",
+  "feature_names": [
+    "variant_chain_grasp",
+    "variant_symmetric_two_anchor_grasp",
+    "variant_tri_anchor_support_grasp",
+    "variant_central_base_plus_two_grasp_arms",
+    "candidate_source_closed_loop_probe",
+    "candidate_id",
+    "required_slot_coverage",
+    "anchor_coverage",
+    "capability_coverage",
+    "thrust_margin",
+    "payload_margin",
+    "reachability_margin",
+    "module_count",
+    "dock_edge_count",
+    "robot_anchor_count",
+    "contact_slot_count",
+    "control_group_count",
+    "port_conflict_count",
+    "closed_loop_rejected"
+  ],
+  "hard_violation_counts": {
+    "F_CLOSED_LOOP_REJECT_V1": 64
+  },
+  "normal_variant_names": [
+    "chain_grasp",
+    "symmetric_two_anchor_grasp",
+    "tri_anchor_support_grasp",
+    "central_base_plus_two_grasp_arms"
+  ],
+  "production_path": "learned bootstrap models are not used in production path",
+  "record_count": 320,
+  "rejected_count": 64,
+  "sample_count": 64,
+  "selected_count": 64,
+  "source_of_truth": "P2DesignPolicy + deterministic FeasibilityChecker",
+  "train_count": 255,
+  "val_count": 65,
+  "variant_counts": {
+    "central_base_plus_two_grasp_arms": 64,
+    "chain_grasp": 64,
+    "symmetric_two_anchor_grasp": 64,
+    "tri_anchor_support_grasp": 64,
+    "tri_anchor_support_grasp_closed_loop_probe": 64
+  }
+}

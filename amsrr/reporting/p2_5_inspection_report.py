@@ -13,7 +13,8 @@ from amsrr.training.p2_candidate_trace_export import TRACE_JSONL_NAME
 
 
 REPORT_NAME = "p2_5_inspection_report.md"
-P2_5_NON_EXECUTION_NOTE = "P2.5 は learned training / Isaac / π_H / π_L / QP/PID を実行しない"
+P2_5_NON_EXECUTION_NOTE = "P2.5 inspection path は Isaac / π_H / π_L / QP/PID / actuator command execution を実行しない"
+P2_5_LEARNED_NON_PRODUCTION_NOTE = "learned models are NOT used in production path"
 
 
 @dataclass(frozen=True)
@@ -32,6 +33,8 @@ def generate_p2_5_inspection_report(
     visualization_dir: str | Path = "outputs/p2_5/visualization",
     output_dir: str | Path = "outputs/p2_5/report",
     config_path: str | Path = "configs/training/p2_design_grasp_carry.yaml",
+    dataset_dir: str | Path = "outputs/p2_5/datasets",
+    training_dir: str | Path = "outputs/p2_5/training",
     generated_at: datetime | None = None,
 ) -> P2_5InspectionReportManifest:
     trace_path = Path(trace_dir) / TRACE_JSONL_NAME
@@ -47,6 +50,8 @@ def generate_p2_5_inspection_report(
             generated_at=generated,
             trace_path=trace_path,
             visualization_dir=Path(visualization_dir),
+            dataset_dir=Path(dataset_dir),
+            training_dir=Path(training_dir),
             report_dir=target_dir,
         ),
         encoding="utf-8",
@@ -78,6 +83,8 @@ def _report_markdown(
     generated_at: datetime,
     trace_path: Path,
     visualization_dir: Path,
+    dataset_dir: Path,
+    training_dir: Path,
     report_dir: Path,
 ) -> str:
     variant_counts = Counter(record["variant_name"] for record in records)
@@ -100,6 +107,7 @@ def _report_markdown(
         "payload_margin": _numeric_summary(records, "payload_margin"),
         "reachability_margin": _numeric_summary(records, "reachability_margin"),
     }
+    learning = _learning_artifacts(dataset_dir, training_dir)
     selected_examples = [record for record in records if record["selected"]][:3]
     rejected_examples = [record for record in records if record["rejected"]][:3]
     lines = [
@@ -115,7 +123,8 @@ def _report_markdown(
         "",
         "P2 は learned design ではなく deterministic scaffold です。",
         f"{P2_5_NON_EXECUTION_NOTE}。",
-        "P2.5 では actuator command も生成しません。",
+        f"{P2_5_LEARNED_NON_PRODUCTION_NOTE}。",
+        "deterministic P2DesignPolicy / FeasibilityChecker remain source of truth.",
         "",
         "## Variant Counts",
         "",
@@ -149,11 +158,18 @@ def _report_markdown(
         "",
         _representative_table(rejected_examples),
         "",
+        "## Learning Bootstrap Artifacts",
+        "",
+        _learning_section(learning, report_dir),
+        "",
         "## Scope Notes",
         "",
         "- P2 completion gate は変更していません。",
         "- P2.5 は P3 に進む前の inspection / debugging phase です。",
-        "- P2.5 では Isaac、π_H / π_L、QP/PID、actuator command、learned training は未実行です。",
+        "- P2.5 learning bootstrap は supervised training のみであり、full RL ではありません。",
+        "- P2.5 では Isaac、π_H / π_L、QP/PID、actuator command execution は未実行です。",
+        "- learned models are NOT used in production path.",
+        "- deterministic P2DesignPolicy / FeasibilityChecker remain source of truth.",
         "- P3 に進む前に、人間が visualization とこの report を確認してください。",
         "",
     ]
@@ -220,6 +236,74 @@ def _representative_table(records: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _learning_artifacts(dataset_dir: Path, training_dir: Path) -> dict[str, Any]:
+    dataset_summary_path = dataset_dir / "p2_candidate_dataset_summary.json"
+    scorer_metrics_path = training_dir / "pi_d_scorer" / "metrics.json"
+    feasibility_metrics_path = training_dir / "feasibility_head" / "metrics.json"
+    return {
+        "dataset_path": dataset_dir / "p2_candidate_dataset.jsonl",
+        "dataset_summary_path": dataset_summary_path,
+        "train_ids_path": dataset_dir / "train_ids.json",
+        "val_ids_path": dataset_dir / "val_ids.json",
+        "dataset_summary": _read_optional_json(dataset_summary_path),
+        "pi_d_scorer_checkpoint_path": training_dir / "pi_d_scorer" / "checkpoint.pt",
+        "pi_d_scorer_metrics_path": scorer_metrics_path,
+        "pi_d_scorer_metrics": _read_optional_json(scorer_metrics_path),
+        "feasibility_head_checkpoint_path": training_dir / "feasibility_head" / "checkpoint.pt",
+        "feasibility_head_metrics_path": feasibility_metrics_path,
+        "feasibility_head_metrics": _read_optional_json(feasibility_metrics_path),
+    }
+
+
+def _learning_section(learning: dict[str, Any], report_dir: Path) -> str:
+    summary = learning["dataset_summary"] or {}
+    scorer_metrics = learning["pi_d_scorer_metrics"] or {}
+    feasibility_metrics = learning["feasibility_head_metrics"] or {}
+    lines = [
+        f"- Dataset path: `{_relative_link(learning['dataset_path'], report_dir)}`",
+        f"- Dataset summary: `{_relative_link(learning['dataset_summary_path'], report_dir)}`",
+        f"- Train IDs: `{_relative_link(learning['train_ids_path'], report_dir)}`",
+        f"- Val IDs: `{_relative_link(learning['val_ids_path'], report_dir)}`",
+        f"- Train / val sample count: `{summary.get('train_count', 'missing')}` / `{summary.get('val_count', 'missing')}`",
+        f"- π_D scorer checkpoint: `{_relative_link(learning['pi_d_scorer_checkpoint_path'], report_dir)}`",
+        f"- π_D scorer metrics: `{_relative_link(learning['pi_d_scorer_metrics_path'], report_dir)}`",
+        f"- Feasibility head checkpoint: `{_relative_link(learning['feasibility_head_checkpoint_path'], report_dir)}`",
+        f"- Feasibility head metrics: `{_relative_link(learning['feasibility_head_metrics_path'], report_dir)}`",
+        "",
+        "π_D scorer metrics:",
+        "",
+        _metrics_table(scorer_metrics),
+        "",
+        "Feasibility head metrics:",
+        "",
+        _metrics_table(feasibility_metrics),
+        "",
+        f"{P2_5_LEARNED_NON_PRODUCTION_NOTE}.",
+        "deterministic P2DesignPolicy / FeasibilityChecker remain source of truth.",
+    ]
+    return "\n".join(lines)
+
+
+def _metrics_table(metrics: dict[str, Any]) -> str:
+    lines = ["| metric | value |", "| --- | ---: |"]
+    if not metrics:
+        lines.append("| missing | 0 |")
+        return "\n".join(lines)
+    for key, value in sorted(metrics.items()):
+        if isinstance(value, (int, float)):
+            lines.append(f"| `{key}` | {float(value):.6f} |")
+        else:
+            lines.append(f"| `{key}` | `{value}` |")
+    return "\n".join(lines)
+
+
+def _read_optional_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    with path.open("r", encoding="utf-8") as handle:
+        return json.load(handle)
+
+
 def _relative_link(path: Path | None, base_dir: Path) -> str:
     if path is None:
         return "missing"
@@ -232,12 +316,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--visualization-dir", default="outputs/p2_5/visualization")
     parser.add_argument("--output-dir", default="outputs/p2_5/report")
     parser.add_argument("--config", default="configs/training/p2_design_grasp_carry.yaml")
+    parser.add_argument("--dataset-dir", default="outputs/p2_5/datasets")
+    parser.add_argument("--training-dir", default="outputs/p2_5/training")
     args = parser.parse_args(argv)
     manifest = generate_p2_5_inspection_report(
         trace_dir=args.trace_dir,
         visualization_dir=args.visualization_dir,
         output_dir=args.output_dir,
         config_path=args.config,
+        dataset_dir=args.dataset_dir,
+        training_dir=args.training_dir,
     )
     print(f"report: {manifest.report_path}")
     print(

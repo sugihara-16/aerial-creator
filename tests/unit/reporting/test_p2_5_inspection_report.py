@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from amsrr.reporting.p2_5_inspection_report import (
+    P2_5_LEARNED_NON_PRODUCTION_NOTE,
     P2_5_NON_EXECUTION_NOTE,
     generate_p2_5_inspection_report,
 )
@@ -33,13 +34,15 @@ def test_p2_5_inspection_report_contains_summary_and_scope_notes(tmp_path: Path)
     assert "Violation Code Histogram" in text
     assert "Representative Selected Designs" in text
     assert "Representative Rejected Designs" in text
+    assert "Learning Bootstrap Artifacts" in text
     assert P2_5_NON_EXECUTION_NOTE in text
+    assert P2_5_LEARNED_NON_PRODUCTION_NOTE in text
     assert "Isaac" in text
     assert "π_H / π_L" in text
     assert "QP/PID" in text
-    assert "learned training" in text
+    assert "supervised training" in text
+    assert "deterministic P2DesignPolicy / FeasibilityChecker remain source of truth" in text
     assert manifest.record_count == 5
     assert manifest.accepted_count == 4
     assert manifest.rejected_count == 1
     assert manifest.selected_count == 1
-

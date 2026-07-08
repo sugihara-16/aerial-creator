@@ -6,7 +6,11 @@ from pathlib import Path
 from typing import Any
 
 from amsrr.morphology.grasp_carry_designs import GRASP_CARRY_VARIANT_ORDER
-from amsrr.reporting.p2_5_inspection_report import P2_5_NON_EXECUTION_NOTE, generate_p2_5_inspection_report
+from amsrr.reporting.p2_5_inspection_report import (
+    P2_5_LEARNED_NON_PRODUCTION_NOTE,
+    P2_5_NON_EXECUTION_NOTE,
+    generate_p2_5_inspection_report,
+)
 from amsrr.schemas.common import SchemaBase, SchemaValidationError
 from amsrr.training.p2_candidate_trace_export import export_p2_candidate_traces
 from amsrr.visualization.p2_morphology import render_p2_morphology_visualizations
@@ -79,6 +83,8 @@ def run_p2_5_inspection(
         visualization_dir=visualization_dir,
         output_dir=report_dir,
         config_path=criteria.config_path,
+        dataset_dir=root / "datasets",
+        training_dir=root / "training",
     )
     records = _read_jsonl(Path(traces.jsonl_path))
     visualization_files = sorted(list(visualization.graph_files.values()) + list(visualization.layout_files.values()))
@@ -155,9 +161,11 @@ def _failure_reasons(
         report_text = report_path.read_text(encoding="utf-8")
         if P2_5_NON_EXECUTION_NOTE not in report_text:
             reasons.append("inspection report missing non-execution note")
-        for phrase in ("Isaac", "π_H", "π_L", "QP/PID", "learned training"):
+        for phrase in ("Isaac", "π_H", "π_L", "QP/PID", "actuator command"):
             if phrase not in report_text:
                 reasons.append(f"inspection report missing scope phrase: {phrase}")
+        if P2_5_LEARNED_NON_PRODUCTION_NOTE not in report_text:
+            reasons.append("inspection report missing learned-model non-production note")
     return reasons
 
 

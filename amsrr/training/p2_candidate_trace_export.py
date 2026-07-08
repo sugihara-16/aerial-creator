@@ -43,6 +43,37 @@ def export_p2_candidate_traces(
 ) -> P2CandidateTraceExportManifest:
     target_dir = Path(output_dir)
     target_dir.mkdir(parents=True, exist_ok=True)
+    records = build_p2_candidate_trace_records(
+        config_path=config_path,
+        sample_count=sample_count,
+        seed=seed,
+        include_closed_loop_probe=include_closed_loop_probe,
+    )
+    jsonl_path = target_dir / TRACE_JSONL_NAME
+    csv_path = target_dir / TRACE_CSV_NAME
+    _write_jsonl(jsonl_path, records)
+    _write_csv(csv_path, records)
+    accepted_count = sum(1 for record in records if record["accepted"])
+    rejected_count = sum(1 for record in records if record["rejected"])
+    selected_count = sum(1 for record in records if record["selected"])
+    return P2CandidateTraceExportManifest(
+        output_dir=str(target_dir),
+        jsonl_path=str(jsonl_path),
+        csv_path=str(csv_path),
+        record_count=len(records),
+        accepted_count=accepted_count,
+        rejected_count=rejected_count,
+        selected_count=selected_count,
+    )
+
+
+def build_p2_candidate_trace_records(
+    *,
+    config_path: str | Path = "configs/training/p2_design_grasp_carry.yaml",
+    sample_count: int = 1,
+    seed: int = 0,
+    include_closed_loop_probe: bool = True,
+) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     for sample_index in range(sample_count):
         context = build_p2_inspection_context(
@@ -77,22 +108,7 @@ def export_p2_candidate_traces(
                     candidate_source=source_label,
                 )
             )
-    jsonl_path = target_dir / TRACE_JSONL_NAME
-    csv_path = target_dir / TRACE_CSV_NAME
-    _write_jsonl(jsonl_path, records)
-    _write_csv(csv_path, records)
-    accepted_count = sum(1 for record in records if record["accepted"])
-    rejected_count = sum(1 for record in records if record["rejected"])
-    selected_count = sum(1 for record in records if record["selected"])
-    return P2CandidateTraceExportManifest(
-        output_dir=str(target_dir),
-        jsonl_path=str(jsonl_path),
-        csv_path=str(csv_path),
-        record_count=len(records),
-        accepted_count=accepted_count,
-        rejected_count=rejected_count,
-        selected_count=selected_count,
-    )
+    return records
 
 
 def _closed_loop_probe_design(task_spec, irg, physical_model) -> DesignOutput:

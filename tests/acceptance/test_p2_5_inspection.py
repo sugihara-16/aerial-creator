@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from amsrr.acceptance import P2_5InspectionCriteria, run_p2_5_inspection
+from amsrr.reporting.p2_5_inspection_report import P2_5_LEARNED_NON_PRODUCTION_NOTE, P2_5_NON_EXECUTION_NOTE
 
 
 def test_p2_5_inspection_acceptance_gate(tmp_path: Path) -> None:
@@ -26,7 +27,7 @@ def test_p2_5_inspection_acceptance_gate(tmp_path: Path) -> None:
     assert report.rejected_count >= 1
     assert report.selected_count == 1
     text = Path(report.inspection_report_path).read_text(encoding="utf-8")
-    assert "P2.5 は learned training / Isaac / π_H / π_L / QP/PID を実行しない" in text
+    assert P2_5_NON_EXECUTION_NOTE in text
+    assert P2_5_LEARNED_NON_PRODUCTION_NOTE in text
     assert "actuator command" in text
     assert type(report).from_json(report.to_json()).to_dict() == report.to_dict()
-

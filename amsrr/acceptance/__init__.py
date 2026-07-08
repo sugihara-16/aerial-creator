@@ -15,6 +15,11 @@ from amsrr.acceptance.p2_5_inspection import (
     P2_5InspectionReport,
     run_p2_5_inspection,
 )
+from amsrr.acceptance.p2_5_learning_bootstrap import (
+    P2_5LearningBootstrapCriteria,
+    P2_5LearningBootstrapReport,
+    run_p2_5_learning_bootstrap,
+)
 from amsrr.acceptance.p2_completion import (
     P2CompletionCriteria,
     P2CompletionReport,
@@ -26,12 +31,15 @@ __all__ = [
     "P1AcceptanceReport",
     "P2_5InspectionCriteria",
     "P2_5InspectionReport",
+    "P2_5LearningBootstrapCriteria",
+    "P2_5LearningBootstrapReport",
     "P2AcceptanceCriteria",
     "P2AcceptanceReport",
     "P2CompletionCriteria",
     "P2CompletionReport",
     "run_p1_acceptance",
     "run_p2_5_inspection",
+    "run_p2_5_learning_bootstrap",
     "run_p2_acceptance",
     "run_p2_completion",
 ]

@@ -1,0 +1,9 @@
+{
+  "binary_accuracy": 1.0,
+  "num_train_samples": 255.0,
+  "num_val_samples": 65.0,
+  "precision": 1.0,
+  "recall": 1.0,
+  "train_loss": 0.00012452361988835037,
+  "val_loss": 0.00012500998855102807
+}

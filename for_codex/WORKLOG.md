@@ -3,6 +3,96 @@
 ## Global Worklog
 
 ### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus user-requested P2.5 learning bootstrap
+- Work package / Agent label: P2.5: Supervised learning bootstrap for π_D scorer and feasibility head
+- Summary: Added a P2.5 learning bootstrap that turns deterministic `P2DesignPolicy` candidate evaluations and `FeasibilityChecker` labels into a supervised dataset, trains a minimal learned π_D candidate scorer, trains a minimal learned feasibility head, saves checkpoints/metrics/loss curves, and updates the P2.5 report/acceptance gate. This is not full RL and does not replace deterministic design selection or hard safety checks.
+- Files changed:
+  - `amsrr/training/p2_candidate_trace_export.py`
+  - `amsrr/training/p2_learning_dataset.py`
+  - `amsrr/training/p2_learned_scorer.py`
+  - `amsrr/training/p2_feasibility_head_training.py`
+  - `amsrr/reporting/p2_5_inspection_report.py`
+  - `amsrr/acceptance/p2_5_inspection.py`
+  - `amsrr/acceptance/p2_5_learning_bootstrap.py`
+  - `amsrr/acceptance/__init__.py`
+  - `tests/unit/training/test_p2_learning_dataset.py`
+  - `tests/unit/training/test_p2_learned_scorer.py`
+  - `tests/unit/training/test_p2_feasibility_head_training.py`
+  - `tests/unit/reporting/test_p2_5_inspection_report.py`
+  - `tests/acceptance/test_p2_5_inspection.py`
+  - `tests/acceptance/test_p2_5_learning_bootstrap.py`
+  - `outputs/p2_5/datasets/p2_candidate_dataset.jsonl`
+  - `outputs/p2_5/datasets/p2_candidate_dataset_summary.json`
+  - `outputs/p2_5/datasets/train_ids.json`
+  - `outputs/p2_5/datasets/val_ids.json`
+  - `outputs/p2_5/training/pi_d_scorer/checkpoint.pt`
+  - `outputs/p2_5/training/pi_d_scorer/metrics.json`
+  - `outputs/p2_5/training/pi_d_scorer/loss_curve.csv`
+  - `outputs/p2_5/training/feasibility_head/checkpoint.pt`
+  - `outputs/p2_5/training/feasibility_head/metrics.json`
+  - `outputs/p2_5/training/feasibility_head/loss_curve.csv`
+  - `outputs/p2_5/report/p2_5_inspection_report.md`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None to persisted schemas. Added training/acceptance helper dataclasses only.
+- Upstream dependencies used: Existing P2 task distribution/config, `P2DesignPolicy.evaluate_candidates()`/`evaluate_design_outputs()`, deterministic `FeasibilityChecker`, P2.5 candidate trace export, and P2.5 report/acceptance scaffolding.
+- Dataset output: `outputs/p2_5/datasets/p2_candidate_dataset.jsonl`
+- Dataset counts: 320 candidate records from 64 task samples; train=255, val=65; accepted=256, rejected=64, selected=64.
+- Dataset labels/features: all normal P2 candidates plus closed-loop invalid probes are stored with selected/accepted/feasible labels, teacher scores, design scores, violation labels/codes, feasibility margins, slot/capability coverage, thrust/payload/reachability margins, module count, and dock edge count.
+- Training commands:
+  - `python3 -m amsrr.training.p2_learning_dataset --config configs/training/p2_design_grasp_carry.yaml --output-dir outputs/p2_5/datasets --sample-count 64 --seed 0`
+  - `python3 -m amsrr.training.p2_learned_scorer --dataset outputs/p2_5/datasets/p2_candidate_dataset.jsonl --train-ids outputs/p2_5/datasets/train_ids.json --val-ids outputs/p2_5/datasets/val_ids.json --output-dir outputs/p2_5/training/pi_d_scorer --epochs 40 --seed 0`
+  - `python3 -m amsrr.training.p2_feasibility_head_training --dataset outputs/p2_5/datasets/p2_candidate_dataset.jsonl --train-ids outputs/p2_5/datasets/train_ids.json --val-ids outputs/p2_5/datasets/val_ids.json --output-dir outputs/p2_5/training/feasibility_head --epochs 40 --seed 1`
+- π_D scorer checkpoint: `outputs/p2_5/training/pi_d_scorer/checkpoint.pt`
+- π_D scorer metrics: train_loss=0.10842715948820114, val_loss=0.10839308053255081, selected_accuracy=1.0, num_train_samples=255, num_val_samples=65.
+- Feasibility head checkpoint: `outputs/p2_5/training/feasibility_head/checkpoint.pt`
+- Feasibility head metrics: train_loss=0.00012452361988835037, val_loss=0.00012500998855102807, binary_accuracy=1.0, precision=1.0, recall=1.0, num_train_samples=255, num_val_samples=65.
+- Report update: `outputs/p2_5/report/p2_5_inspection_report.md` now records dataset paths/counts, scorer/head checkpoint paths, metrics, and explicitly states that learned models are NOT used in production path and deterministic `P2DesignPolicy` / `FeasibilityChecker` remain source of truth.
+- Tests added or run:
+  - Added `test_p2_learning_dataset_builds_records_and_split`
+  - Added `test_p2_learned_scorer_training_writes_checkpoint_and_metrics`
+  - Added `test_p2_feasibility_head_training_writes_checkpoint_and_metrics`
+  - Added `test_p2_5_learning_bootstrap_acceptance_gate`
+- Commands run:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p2_learning_dataset.py tests/unit/training/test_p2_learned_scorer.py tests/unit/training/test_p2_feasibility_head_training.py tests/unit/reporting/test_p2_5_inspection_report.py tests/acceptance/test_p2_5_learning_bootstrap.py -q`
+  - `python3 -m amsrr.training.p2_learning_dataset --config configs/training/p2_design_grasp_carry.yaml --output-dir outputs/p2_5/datasets --sample-count 64 --seed 0`
+  - `python3 -m amsrr.training.p2_learned_scorer --dataset outputs/p2_5/datasets/p2_candidate_dataset.jsonl --train-ids outputs/p2_5/datasets/train_ids.json --val-ids outputs/p2_5/datasets/val_ids.json --output-dir outputs/p2_5/training/pi_d_scorer --epochs 40 --seed 0`
+  - `python3 -m amsrr.training.p2_feasibility_head_training --dataset outputs/p2_5/datasets/p2_candidate_dataset.jsonl --train-ids outputs/p2_5/datasets/train_ids.json --val-ids outputs/p2_5/datasets/val_ids.json --output-dir outputs/p2_5/training/feasibility_head --epochs 40 --seed 1`
+  - `python3 -m amsrr.reporting.p2_5_inspection_report --trace-dir outputs/p2_5/candidate_traces --visualization-dir outputs/p2_5/visualization --output-dir outputs/p2_5/report --config configs/training/p2_design_grasp_carry.yaml --dataset-dir outputs/p2_5/datasets --training-dir outputs/p2_5/training`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+- Tests run: Targeted learning/report/acceptance tests passed: 5 passed. Full unit suite passed: 86 passed, 1 skipped. Full acceptance suite passed: 5 passed in 89.94s. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Production-path status: The learned π_D scorer and learned feasibility head are not used in production path. Deterministic `P2DesignPolicy` remains the design-selection source of truth, and deterministic `FeasibilityChecker` remains the hard safety/source-of-truth checker.
+- Explicitly not executed: full RL, Isaac, π_H, π_L, QP/PID, actuator command execution.
+- Assumptions: Minimal MLPs are sufficient for bootstrap acceptance because this task proves dataset -> training -> checkpoint -> metrics wiring rather than model quality. The high accuracy reflects deterministic teacher labels and simple diagnostic features, not a claim of general learned policy performance.
+- Blockers: None.
+- Next steps: Commit P2.5 learning bootstrap changes if accepted, then proceed toward P3 only after human review of P2.5 report/visualizations and confirmation that learned artifacts remain auxiliary.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 clarification
+- Work package / Agent label: Design clarification: π_D structural scope and joint-angle non-design rule
+- Summary: Clarified the source design spec to state that π_D designs graph-level A-MSRR structure only and must not treat movable joint angles or runtime module relative poses as design freedoms. Clarified `ModuleNode.pose_in_design_frame` and `DockEdge.relative_pose_src_to_dst` as nominal/canonical metadata, not optimized joint configurations, and clarified that design-level feasibility must not score a single nominal joint configuration.
+- Files changed:
+  - `for_codex/A-MSRR_codex_ready_spec_v0_4_ja.md`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None.
+- Upstream dependencies used: User clarification, current P2/P2.5 implementation, Section 14 MorphologyGraph, Section 15 π_D, and Section 16 FeasibilityChecker.
+- Downstream impact: Future π_D, feasibility, visualization, and report work must treat pose fields as canonical/nominal metadata only. Joint-angle optimization and runtime relative-pose trajectories belong to π_H, π_L, QP/PID, controller/runtime state, or simulator logic.
+- Tests added or run: No code tests added; this is a source-spec/documentation clarification.
+- Commands run:
+  - `git status --short`
+  - `rg -n "π_D|MorphologyGraph|pose_in_design_frame|DockEdge|Design-level|Feasibility|feasibility|relative_pose" for_codex/A-MSRR_codex_ready_spec_v0_4_ja.md`
+  - `rg -n "pose_in_design_frame|relative_pose_src_to_dst|joint angle|joint_angle|joint target|vectoring|rotor thrust|torque" amsrr tests for_codex -g '*.py' -g '*.md'`
+  - `sed -n ...` inspections for Sections 14, 15, 16, and worked example text
+- Tests run: Not run because no source code changed. Existing code inspection indicates current P2 design-level checker does not score single joint angles or a single nominal module-relative pose.
+- Assumptions: Current P2 scaffold `pose_in_design_frame` values are nominal layout/reference values for visualization/debugging and not learned or optimized continuous joint outputs.
+- Blockers: None.
+- Next steps: If desired, regenerate P2.5 report text to include this clarification, but functional code changes are not required for correctness.
+
+### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus user-requested P2.5 inspection phase
 - Work package / Agent label: P2.5: Post-P2 inspection, visualization, and candidate trace export
 - Summary: Added P2.5 as an additional pre-P3 inspection/debugging phase that visualizes all P2 grasp/carry morphology variants, exports every evaluated candidate including accepted/rejected/selected labels, generates a human-readable inspection report, and provides a P2.5 acceptance gate.
