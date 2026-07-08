@@ -2,6 +2,32 @@
 
 This file records implementation-time supplements or deviations from `A-MSRR_codex_ready_spec_v0_4_ja.md`.
 
+## 2026-07-09
+
+### Main Spec Cross-Reference to QP/PID Controller Supplement
+
+- Context: After the P4-control QP/PID controller supplement was revised and its open questions were resolved, the user requested that the main design spec explicitly refer to the controller supplement at an appropriate location.
+- Decision: Added references to `for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md` in v0.4 Section 20.1 and Section 24.5.2. The main spec now points controller implementers to the supplement for quasi-static rigid-body model updates, QP allocation, Isaac actuator target conversion, and P4-control acceptance details while preserving the `π_L` / controller responsibility boundary.
+- Compatibility impact: Documentation only. No Python controller code, schema code, or acceptance code was changed.
+
+### P4-Control QP/PID Controller Open Questions Resolved
+
+- Context: The controller draft listed open questions for QP backend choice, Isaac thrust target semantics, vectoring command semantics, reaction torque handling, inertia aggregation fidelity, and waypoint tracking thresholds. The user answered that Python and libraries are acceptable initially, vectoring joints should use absolute position targets, reaction torque should be included, and accepted link-level quasi-static inertia aggregation plus initial waypoint thresholds.
+- Decision: Updated `for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md` to replace the open-question section with implementation decisions. The spec now sets Python/library-based QP as the initial path, per-thruster thrust target as the primary Isaac-side representation with wrench-composer fallback for custom Holon articulation, absolute vectoring joint targets, reaction torque in QP, link-level quasi-static rigid-body aggregation, and configurable initial waypoint thresholds of 0.20 m position error, 0.25 rad attitude error, and 1.0 s hold duration.
+- Compatibility impact: Documentation only. No Python controller code, schema code, or acceptance code was changed. Future implementation must still stop and ask before making incompatible assumptions if additional undefined controller details appear.
+
+### P4-Control QP/PID Controller Spec Revision
+
+- Context: The initial controller draft included a reference-implementation notes section and English-first wording. The user clarified that `aerial_robot_base` is temporary reference material only, that the controller spec should be Japanese-first like the main design spec, that allocation must be QP rather than pseudoinverse, and that assembled morphologies should be treated as a quasi-static single rigid body whose inertia and rotor origins are updated from joint angles every control cycle.
+- Decision: Rewrote `for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md` as a Japanese controller-specific draft. Removed the reference-code section, made QP allocation normative, added quasi-static rigid-body model update requirements for assembled morphologies, clarified controller/bridge logging, and listed implementation-time open questions for solver choice, Isaac actuator semantics, vectoring command semantics, reaction torque handling, inertia aggregation, and waypoint thresholds.
+- Compatibility impact: Documentation only. No Python controller code, schema code, or acceptance code was changed. The revised spec remains aligned with v0.4: `π_L` outputs `PolicyCommand` only, the controller owns `ControllerCommand`, and the bridge owns final Isaac actuator target conversion.
+
+### P4-Control QP/PID Controller Design Spec Draft
+
+- Context: The P4-control / P4a work will implement a near-complete low-level QP/PID controller, but v0.4 Section 20 intentionally leaves several controller details underspecified. The user provided `aerial_robot_base` as a temporary reference source and pointed to `gimbalrotor_controller.cpp` with `underactuate_=false`, `gimbal_calc_in_fc_=true`, and `gimbal_dof_=1` as the relevant branch.
+- Decision: Added `for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md` as a controller-specific draft skeleton. It records the current controller ownership boundaries, reference-code reading notes, initial QP/PID allocation structure, Isaac bridge/logging expectations, proposed Agent I/J/K/L files, and open questions that must be settled before implementation.
+- Compatibility impact: Documentation only. No Python controller code, schema code, or acceptance code was changed in this step. The draft preserves the v0.4 rule that `π_L` emits `PolicyCommand` only and final actuator authority remains in the controller / bridge layer.
+
 ## 2026-07-08
 
 ### P4.0 Simplified Full-Pipeline Implementation Supplement

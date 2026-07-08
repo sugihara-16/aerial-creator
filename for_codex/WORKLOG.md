@@ -2,6 +2,89 @@
 
 ## Global Worklog
 
+### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus controller supplement cross-reference
+- Work package / Agent label: Documentation integration: main spec reference to P4-control QP/PID supplement
+- Summary: Inserted references to the controller supplement into the main v0.4 design spec. Section 20.1 now points controller implementers to `for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md` for QP/PID, quasi-static rigid-body model update, QP allocation, Isaac bridge, and P4-control acceptance details. Section 24.5.2 also references the supplement and summarizes the resolved P4-control implementation decisions.
+- Files changed:
+  - `for_codex/A-MSRR_codex_ready_spec_v0_4_ja.md`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None. Documentation only.
+- Upstream dependencies used: User request, revised controller supplement, v0.4 Sections 20 and 24.5.2.
+- Downstream impact: Future P4-control work should consult the controller supplement before changing Agent I/J/K/L implementation files. The main spec still preserves the original `π_L` intent-only rule.
+- Tests added or run: No tests added or run; documentation-only change. `git diff --check` was run.
+- Commands run:
+  - `sed -n ... for_codex/A-MSRR_codex_ready_spec_v0_4_ja.md`
+  - `git diff --check`
+- Assumptions: The supplement is a controller-specific supplement, not a replacement for the full v0.4 source of truth.
+- Blockers: None.
+- Next steps: Proceed to detailed implementation planning for Agent I only after any remaining controller supplement details are accepted.
+
+### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus controller design draft v0.1 resolved decisions
+- Work package / Agent label: Agent I/J/K/L planning: P4-control QP/PID controller decision recording
+- Summary: Recorded the user's answers to the controller-spec open questions. The controller spec now fixes Python/library-based QP as the initial backend, per-thruster thrust target as the primary Isaac representation with wrench-composer fallback for custom Holon articulation, absolute vectoring joint targets, reaction torque inclusion, link-level quasi-static inertia aggregation, and configurable initial waypoint thresholds.
+- Files changed:
+  - `for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None. Documentation only.
+- Upstream dependencies used: User answers for controller open questions; local Isaac Lab examples/docs showing both per-thruster multirotor support and wrench-composer force application paths.
+- Downstream impact: Agent I can implement link-level rigid-body model update and QP allocation without asking these questions again. Agent J bridge should preserve per-rotor thrust target records even if the custom Holon Isaac backend applies them through wrench composer.
+- Tests added or run: No tests added or run; documentation-only decision recording. `git diff --check` was run after edits.
+- Commands run:
+  - `sed -n ... /home/leus/IsaacLab/scripts/demos/quadcopter.py`
+  - `sed -n ... /home/leus/IsaacLab/source/isaaclab_tasks/isaaclab_tasks/direct/quadcopter/quadcopter_env.py`
+  - `sed -n ... /home/leus/IsaacLab/source/isaaclab_contrib/isaaclab_contrib/assets/multirotor/multirotor.py`
+  - `sed -n ... for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md`
+  - `git diff --check`
+- Assumptions: For Isaac, the A-MSRR archive contract uses per-thruster thrust targets as the stable representation even if a backend implementation applies equivalent forces through wrench composer.
+- Blockers: None for this documentation update.
+- Next steps: Begin Agent I implementation planning for `rigid_body_model.py`, QP allocation, and bridge-facing actuator target records.
+
+### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus revised controller design draft v0.1
+- Work package / Agent label: Agent I/J/K/L planning: P4-control QP/PID controller specification revision
+- Summary: Revised the controller-specific spec per user guidance. Removed the reference-implementation notes section, rewrote the draft in Japanese, made QP allocation normative instead of pseudoinverse allocation, and added the quasi-static assembled-morphology rule: every control step updates inertia, CoM, rotor origins, and rotor axes from joint angles, then controls the whole morphology as a single rigid body.
+- Files changed:
+  - `for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None. Documentation only.
+- Upstream dependencies used: User clarification, v0.4 Sections 20, 23.5, 24.5.2, 25, 26.9-26.10, 27.1, and the existing controller draft.
+- Downstream impact: Future Agent I/J/K/L implementation should treat the revised spec as the active controller supplement and should not encode `aerial_robot_base` as a source dependency or spec reference. Allocation is QP-owned; any fallback must be explicitly labeled degraded/non-QP.
+- Tests added or run: No tests added or run; documentation-only revision. `git diff --check` was run after edits.
+- Commands run:
+  - `sed -n ... for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md`
+  - `sed -n ... for_codex/AMSRR_design_modification_by_codex.md`
+  - `sed -n ... for_codex/WORKLOG.md`
+  - `git diff --check`
+- Assumptions: The unresolved controller details are now explicitly listed as implementation-before-coding questions in the spec.
+- Blockers: None for this documentation revision.
+- Next steps: Resolve the listed open questions, then begin Agent I implementation of rigid-body model update, QP allocation, and Isaac bridge contracts.
+
+### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus controller design draft v0.1
+- Work package / Agent label: Agent I/J/K/L planning: P4-control QP/PID controller specification draft
+- Summary: Read the temporary `aerial_robot_base` gimbal rotor controller reference at a high level under the requested branch assumptions (`underactuate_=false`, `gimbal_calc_in_fc_=true`, `gimbal_dof_=1`) and added a controller-specific design spec skeleton for the upcoming near-complete QP/PID controller work.
+- Files changed:
+  - `for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None. Documentation only.
+- Upstream dependencies used: v0.4 Sections 20, 23.5, 24.5.2, 25, 26.9-26.10, 27.1; existing `amsrr/controllers` scaffolds; reference file `/home/leus/ros2/aerial_robot_base_ws/src/aerial_robot_base/robots/gimbalrotor/src/control/gimbalrotor_controller.cpp`.
+- Downstream impact: Future P4-control implementation can refine the controller draft before editing Agent I/J/K/L source files. The draft highlights required decisions around frames, allocation matrix equations, actuator target records, Isaac bridge semantics, and QP fallback behavior.
+- Tests added or run: No tests added or run; this step created documentation only.
+- Commands run:
+  - `wc -l /home/leus/ros2/aerial_robot_base_ws/src/aerial_robot_base/robots/gimbalrotor/src/control/gimbalrotor_controller.cpp`
+  - `rg -n ... /home/leus/ros2/aerial_robot_base_ws/src/aerial_robot_base/robots/gimbalrotor/src/control/gimbalrotor_controller.cpp`
+  - `sed -n ... /home/leus/ros2/aerial_robot_base_ws/src/aerial_robot_base/robots/gimbalrotor/src/control/gimbalrotor_controller.cpp`
+  - `sed -n ... /home/leus/ros2/aerial_robot_base_ws/src/aerial_robot_base/robots/gimbalrotor/include/gimbalrotor/control/gimbalrotor_controller.h`
+- Assumptions: The reference reading was intentionally shallow and branch-specific; exact frame conventions, Isaac actuator semantics, and QP solver choice remain open in the draft.
+- Blockers: None for the documentation skeleton.
+- Next steps: Refine the controller spec into concrete equations/config/tests, then start Agent I controller allocation and Isaac bridge implementation.
+
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.0 implementation order
 - Work package / Agent label: Agent K/L: P4.0 final docs and verification
@@ -1260,6 +1343,72 @@
 ---
 
 ## Work Package Logs
+
+### P4-Control / P4a: QP/PID Controller Specification
+
+#### 2026-07-09
+- Scope: Add main-spec cross-references to the P4-control QP/PID controller supplement.
+- Files changed:
+  - `for_codex/A-MSRR_codex_ready_spec_v0_4_ja.md`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: User request, revised controller supplement, v0.4 Section 20 and Section 24.5.2.
+- Implemented: Main spec references to `for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md` from low-level control and P4-control sections.
+- Not implemented: Controller code, schema changes, Isaac bridge, P4-control runner, or acceptance gate.
+- Schema/interface changes: None.
+- Downstream impact: Controller implementers now have an explicit pointer from the source design spec to the controller supplement.
+- Tests added: None.
+- Tests passed: Not run; documentation-only change. `git diff --check` passed.
+- Handoff notes: The cross-reference does not weaken the main spec rule that `π_L` outputs intent only.
+- Open questions: None currently known at this documentation level.
+
+#### 2026-07-09
+- Scope: Record resolved controller implementation decisions before coding.
+- Files changed:
+  - `for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: User answers to open questions, revised P4-control controller spec, local Isaac Lab multirotor/quadcopter examples.
+- Implemented: Initial Python/library QP backend decision, per-thruster thrust target primary representation with wrench-composer fallback, absolute vectoring joint targets, reaction torque inclusion, link-level quasi-static inertia aggregation, and initial waypoint thresholds.
+- Not implemented: Controller code, QP backend, Isaac bridge, P4-control runner, or acceptance gate.
+- Schema/interface changes: None.
+- Downstream impact: Agent I/J can now implement against resolved controller assumptions; additional undefined details still require user confirmation before incompatible assumptions are encoded.
+- Tests added: None.
+- Tests passed: Not run; documentation-only decision recording. `git diff --check` passed after edits.
+- Handoff notes: Archive per-rotor thrust targets even if Isaac execution uses wrench composer internally.
+- Open questions: None currently known at this planning level.
+
+#### 2026-07-09
+- Scope: Revise the P4-control controller spec after user clarification.
+- Files changed:
+  - `for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: User clarification, v0.4 controller/P4-control sections, existing controller draft.
+- Implemented: Japanese-first controller spec, no reference-implementation notes section, QP allocation as the required allocator path, quasi-static rigid-body model update for assembled morphologies, ControllerCommand / bridge / archive logging requirements, and implementation-before-coding questions.
+- Not implemented: Controller code, QP solver backend, rigid-body model code, actuator mapping, Isaac bridge, P4-control runner, or acceptance gate.
+- Schema/interface changes: None.
+- Downstream impact: Agent I implementation should build deterministic model-update and QP allocation code from the revised spec and keep any non-QP fallback explicitly marked as degraded.
+- Tests added: None.
+- Tests passed: Not run; documentation-only revision. `git diff --check` passed after edits.
+- Handoff notes: Combined morphology control assumes joint motion is quasi-static. Each control cycle updates inertia/CoM/rotor geometry from current joint angles, then controls the current shape as one rigid body.
+- Open questions: QP solver/backend choice, Isaac actuator semantics, vectoring target semantics, reaction torque treatment, inertia aggregation fidelity, waypoint error thresholds.
+
+#### 2026-07-09
+- Scope: Create a controller-specific draft spec and read the gimbal rotor reference controller at a high level before implementation.
+- Files changed:
+  - `for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: v0.4 controller/P4-control sections, current Agent I controller scaffolds, temporary `aerial_robot_base` reference source.
+- Implemented: Draft controller spec skeleton with reference branch notes, QP/PID layer placeholders, allocation model placeholders, Isaac bridge/logging expectations, proposed Agent I/J/K/L files, and open questions.
+- Not implemented: Controller code, actuator mapping, Isaac bridge, P4-control runner, acceptance gate, QP solver backend, or Isaac execution.
+- Schema/interface changes: None.
+- Downstream impact: Agent I implementation should begin only after this draft is refined into concrete equations and config/test requirements.
+- Tests added: None.
+- Tests passed: Not run; documentation-only task.
+- Handoff notes: Keep `π_L` authority limited to `PolicyCommand`; controller/bridge remains final actuator authority. The reference branch sends base thrust plus torque allocation matrix to FC rather than directly publishing gimbal commands.
+- Open questions: Frame conventions, actuator target semantics in Isaac, reaction torque handling, solver/fallback choice, multi-module inertia aggregation, and waypoint error thresholds.
 
 ### P4.0 Implementation: Simplified Full-Pipeline Integration
 
