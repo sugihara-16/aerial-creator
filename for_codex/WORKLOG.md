@@ -3,6 +3,27 @@
 ## Global Worklog
 
 ### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.0 implementation order
+- Work package / Agent label: Agent A/K: P4.0 archive compatibility
+- Summary: Added backward-compatible P4 archive fields to `EpisodeArchive` for runtime observations, actuator target records, rollout artifacts, and learning artifacts. Existing P1/P2/P3 archive construction remains valid because the new fields use defaults.
+- Files changed:
+  - `amsrr/logging/episode_archive.py`
+  - `tests/unit/training/test_p1_runner.py`
+- Schema/interface changes: Additive `EpisodeArchive` interface fields with default empty list/dict values.
+- Upstream dependencies used: v0.4 Section 25.1 EpisodeArchive contract and P4.0/P4 logging requirements.
+- Downstream impact: P4.0 can archive simplified rollout records now, while later P4-control / Isaac-backed runs can fill runtime observations and actuator target records without changing the archive type again.
+- Tests added or run: Added legacy archive default-field restoration assertions in the P1 runner archive roundtrip test.
+- Commands run:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p1_runner.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p2_design_runner.py tests/unit/training/test_p3_assembly_runner.py -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+- Tests run: P1 runner tests passed: 3 passed. P2/P3 runner tests passed: 5 passed. Compileall passed. `git diff --check` passed.
+- Assumptions: P1-P4.0 simplified archives may leave `runtime_observations` and `actuator_target_records` empty unless a runner explicitly records them; Isaac-backed P4 must populate them per the source spec.
+- Blockers: None.
+- Next steps: Order 2, add external `DesignOutput` / assembled morphology injection to the simplified env without using `FixedSimpleDesignPolicy` on the P4.0 path.
+
+### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.3 learning target clarification
 - Work package / Agent label: P4.3 learning design revision / source-spec update
 - Summary: Clarified that P4.3 learning bootstrap targets π_L/residual controller learning, π_H contact/trajectory policy learning, and π_D outcome-conditioned design scorer/selector fine-tuning, not π_L alone. Added P4.3a-P4.3e recommended order, expanded P4 full acceptance learning artifacts for all three policy families, and updated the P4 Mermaid diagram so the training loop points back to π_D, π_H, and π_L with their separate output responsibilities.
@@ -1135,6 +1156,23 @@
 ---
 
 ## Work Package Logs
+
+### P4.0 Implementation: Simplified Full-Pipeline Integration
+
+#### 2026-07-08
+- Scope: Order 1 archive compatibility for P4.0/P4 logging fields.
+- Files changed:
+  - `amsrr/logging/episode_archive.py`
+  - `tests/unit/training/test_p1_runner.py`
+- Upstream dependencies: v0.4 Section 25.1, P4.0 simplified archive requirements, existing P1/P2/P3 runner archive behavior.
+- Implemented: Defaulted `runtime_observations`, `actuator_target_records`, `rollout_artifacts`, and `learning_artifacts` on `EpisodeArchive`; added a legacy dict restoration check for archives missing those fields.
+- Not implemented: P4.0 runner, simplified env injection, P4.0 acceptance, Isaac actuator target conversion, or learned training artifacts.
+- Schema/interface changes: Additive archive fields only; existing archives deserialize with defaults.
+- Downstream impact: Later P4.0 runner can store trajectory/policy/controller/reward metrics immediately and can optionally include simplified runtime observations, while P4-control/Isaac work can fill actuator records.
+- Tests added: Legacy `EpisodeArchive.from_dict` default restoration assertions in `test_p1_runner_collects_metrics_and_archives`.
+- Tests passed: P1 runner tests passed: 3 passed. P2/P3 runner tests passed: 5 passed. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Handoff notes: Keep P4.0 no-mislabeling checks separate: these fields enable P4 logging but do not imply Isaac-backed rollout or P4 full completion.
+- Open questions: None currently.
 
 ### P4.3 Design Revision: Learning Target Clarification
 

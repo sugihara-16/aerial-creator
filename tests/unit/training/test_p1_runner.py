@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from amsrr.logging import read_episode_archives_jsonl
+from amsrr.logging import EpisodeArchive, read_episode_archives_jsonl
 from amsrr.schemas.task_spec import TaskSpec
 from amsrr.training import (
     P1GraspCarryTaskDistribution,
@@ -62,6 +62,10 @@ def test_p1_runner_collects_metrics_and_archives(
     assert first.episode_id == "p1_runner_0000"
     assert first.policy_commands
     assert first.controller_commands
+    assert first.runtime_observations == []
+    assert first.actuator_target_records == []
+    assert first.rollout_artifacts == {}
+    assert first.learning_artifacts == {}
     assert first.rewards
     assert first.trajectory_records
     assert first.task_hash == first.task_spec.stable_hash()
@@ -71,6 +75,14 @@ def test_p1_runner_collects_metrics_and_archives(
     loaded = read_episode_archives_jsonl(archive_path)
     assert len(loaded) == 8
     assert loaded[0].to_dict() == first.to_dict()
+    legacy_archive = first.to_dict()
+    for key in ("runtime_observations", "actuator_target_records", "rollout_artifacts", "learning_artifacts"):
+        legacy_archive.pop(key)
+    restored = EpisodeArchive.from_dict(legacy_archive)
+    assert restored.runtime_observations == []
+    assert restored.actuator_target_records == []
+    assert restored.rollout_artifacts == {}
+    assert restored.learning_artifacts == {}
     assert type(result).from_json(result.to_json()).to_dict() == result.to_dict()
 
 

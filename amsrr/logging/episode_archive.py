@@ -11,6 +11,7 @@ from amsrr.schemas.interaction_envelope import InteractionEnvelope
 from amsrr.schemas.irg import InteractionRequirementGraph
 from amsrr.schemas.morphology import DesignOutput
 from amsrr.schemas.policies import ContactWrenchTrajectory, ControllerCommand, PolicyCommand
+from amsrr.schemas.runtime import RuntimeObservation
 from amsrr.schemas.task_spec import TaskSpec
 
 
@@ -34,6 +35,10 @@ class EpisodeArchive(SchemaBase):
     metrics: dict[str, float]
     success: bool
     failure_reason: str | None
+    runtime_observations: list[RuntimeObservation] = field(default_factory=list)
+    actuator_target_records: list[dict[str, Any]] = field(default_factory=list)
+    rollout_artifacts: dict[str, Any] = field(default_factory=dict)
+    learning_artifacts: dict[str, Any] = field(default_factory=dict)
     reproducibility: dict[str, str | int | float | bool] = field(default_factory=dict)
 
     def validate(self) -> None:
