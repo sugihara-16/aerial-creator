@@ -4,6 +4,29 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.0 implementation order
+- Work package / Agent label: Agent L: P4.0 simplified acceptance gate
+- Summary: Added a P4.0 acceptance gate that runs the simplified full-pipeline runner, verifies P2 selected design and P3 assembly result usage, checks contact candidate / pi_H / pi_L / controller / archive completeness, records simplified success/drop/collision/QP metrics, and enforces no-mislabeling as non-Isaac and non-P4-full.
+- Files changed:
+  - `amsrr/acceptance/p4_0_acceptance.py`
+  - `amsrr/acceptance/__init__.py`
+  - `amsrr/training/p4_0_full_pipeline_runner.py`
+  - `tests/acceptance/test_p4_0_acceptance.py`
+- Schema/interface changes: None to persisted schemas. Added acceptance-side report/criteria dataclasses and metric aliases `collision_rate` / `qp_infeasible_rate`.
+- Upstream dependencies used: Order 3 runner, Order 4 runner tests, v0.4 Section 24.5.1 P4.0 simplified acceptance and no-mislabeling text.
+- Downstream impact: P4.0 can now be mechanically accepted without claiming P4 full completion. Later P4-control / P4.1 work must remain separate.
+- Tests added or run: Added P4.0 acceptance test.
+- Commands run:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p4_0_acceptance.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p4_0_full_pipeline_runner.py tests/acceptance/test_p4_0_acceptance.py -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+- Tests run: P4.0 acceptance targeted test passed: 1 passed. P4.0 unit + acceptance passed: 3 passed. Compileall passed. `git diff --check` passed.
+- Assumptions: Because v0.4 does not set a P4.0 success-rate threshold, this gate checks wiring/archive completeness and metric recording rather than adding a new success threshold.
+- Blockers: None.
+- Next steps: Order 6, update docs / WORKLOG / design modification log and run final verification.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.0 implementation order
 - Work package / Agent label: Agent K/L: P4.0 unit, archive completeness, and no-mislabeling tests
 - Summary: Added P4.0 runner unit tests that execute the simplified full pipeline, validate archive completeness for design/feasibility/assembly/trajectory/policy/controller/runtime/reward records, and verify explicit no-mislabeling metadata stating that P4.0 is simplified, not Isaac-backed, and not P4 full completion.
 - Files changed:
@@ -1220,6 +1243,23 @@
 ## Work Package Logs
 
 ### P4.0 Implementation: Simplified Full-Pipeline Integration
+
+#### 2026-07-08
+- Scope: Order 5 P4.0 simplified acceptance gate.
+- Files changed:
+  - `amsrr/acceptance/p4_0_acceptance.py`
+  - `amsrr/acceptance/__init__.py`
+  - `amsrr/training/p4_0_full_pipeline_runner.py`
+  - `tests/acceptance/test_p4_0_acceptance.py`
+- Upstream dependencies: P4.0 runner/archive tests, P4.0 no-mislabeling metadata, v0.4 Section 24.5.1 and Section 27.3 acceptance items.
+- Implemented: `P4_0AcceptanceCriteria`, `P4_0AcceptanceReport`, `run_p4_0_acceptance`, P2/P3 usage checks, FixedSimple absence check, candidate/trajectory/policy/controller/archive completeness checks, simplified metric recording checks, no-mislabeling checks, backend-note report field, acceptance export, and acceptance test.
+- Not implemented: Isaac controller bridge, actuator mapping, P4-control, P4.1/P4.2/P4.3, or P4 full acceptance.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: P4.0 simplified full-pipeline wiring can be accepted independently, and later P4 stages can require this gate as a prerequisite.
+- Tests added: `test_p4_0_acceptance_simplified_full_pipeline`.
+- Tests passed: P4.0 acceptance targeted test passed: 1 passed. P4.0 unit + acceptance passed: 3 passed. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Handoff notes: The report explicitly says the metrics are not Isaac-backed physical success rates; this is not P4 full completion.
+- Open questions: None currently.
 
 #### 2026-07-08
 - Scope: Order 4 P4.0 unit, archive completeness, and no-mislabeling tests.
