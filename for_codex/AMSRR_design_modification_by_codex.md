@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-08
 
+### P2 Design Evaluation Runner Supplement
+
+- Context: v0.4 Section 24.3 requires P2 design evaluation over diverse grasp/carry tasks and requires feasibility labels to be stored, but it does not prescribe a concrete runner/config format for executing the TaskSpec -> Geometry -> IRG -> Envelope -> π_D -> FeasibilityChecker path before learned training.
+- Decision: Added Agent K `P2DesignEvaluationRunner` and `P2GraspCarryDesignDistribution`. The runner samples randomized object grasp/carry TaskSpecs, builds geometry descriptors through `IRGBuilder.build_with_scene_graph()`, extracts the `InteractionEnvelope`, evaluates `P2DesignPolicy` candidates, and stores the selected `DesignOutput` plus selected `FeasibilityResult` in `EpisodeArchive` JSONL records.
+- Compatibility impact: This is an evaluation/dataset scaffold, not a learned training loop, not Isaac execution, and not a controller/actuator-command runner. It uses existing `EpisodeArchive.feasibility_result`, `FeasibilityResult.proxy_scores`, and `FeasibilityResult.margins` fields without changing persisted schemas.
+
 ### P2 Design Policy Candidate Selection Scaffold Supplement
 
 - Context: v0.4 Section 15 defines π_D action/candidate scaffolding and Section 24.3 requires P2 design evaluation, but it does not prescribe a deterministic baseline for enumerating multiple candidate designs, separating accepted/rejected candidates, or selecting among accepted candidates before learned π_D training.

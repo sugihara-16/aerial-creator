@@ -4,6 +4,37 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent K: P2 design evaluation runner
+- Summary: Added a P2 design-evaluation runner that samples diverse grasp/carry TaskSpecs, runs TaskSpec -> Geometry/IRG -> InteractionEnvelope -> P2 π_D candidate evaluation -> FeasibilityChecker, and stores selected `DesignOutput` plus selected `FeasibilityResult` labels/margins in `EpisodeArchive` JSONL records.
+- Files changed:
+  - `amsrr/training/__init__.py`
+  - `amsrr/training/p2_design_distribution.py`
+  - `amsrr/training/p2_design_runner.py`
+  - `configs/training/p2_design_grasp_carry.yaml`
+  - `tests/unit/training/test_p2_design_runner.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None. Existing `EpisodeArchive.feasibility_result`, `FeasibilityResult.proxy_scores`, `FeasibilityResult.margins`, and `DesignOutput.design_scores` are used unchanged.
+- Upstream dependencies used: v0.4 Sections 23.4, 24.3, 25.1, 26.10; Agent E P2 variant builder and `P2DesignPolicy`; Agent F P2 feasibility labels/margins; existing `IRGBuilder`, `InteractionEnvelopeExtractor`, `PhysicalModel`, and `EpisodeArchive` logging.
+- Downstream impact: P2 acceptance and dataset generation can now read archived design-level labels directly from `EpisodeArchive.feasibility_result`. The runner remains design-level only and does not run π_H, π_L, controller allocation, actuator commands, Isaac, or learned training.
+- Tests added or run:
+  - Added `test_p2_design_distribution_randomizes_and_marks_metadata`
+  - Added `test_p2_design_runner_collects_feasibility_archives`
+  - Added `test_p2_design_runner_config_loader`
+- Commands run:
+  - `sed -n ...`, `rg --files ...`, `rg -n ...`, `git status --short`, and `git diff --stat` inspections for training runners, policy/checker interfaces, schema/logging utilities, config files, and worklogs
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p2_design_runner.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: Targeted P2 design runner tests passed: 3 passed. Full unit suite passed: 80 passed, 1 skipped. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Assumptions: P2 object diversity reuses and slightly widens the P1 box grasp/carry randomization fields for this slice. The runner archives the selected candidate's feasibility labels; full per-candidate dataset rows can be added later if P2 training needs rejected-candidate supervision beyond the current selected-design archive.
+- Blockers: None.
+- Next steps: Add an Agent L P2 acceptance gate over this runner, or extend archive output to store per-candidate feasibility traces if required by the training dataset format.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent E: P2 π_D candidate selection scaffold
 - Summary: Added deterministic P2 design-policy scaffold that enumerates multiple grasp/carry candidate morphologies, evaluates each with `FeasibilityChecker`, separates accepted/rejected candidates, computes deterministic soft scores, and returns the best accepted design.
 - Files changed:
