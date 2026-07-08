@@ -4,6 +4,33 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent L: P1 tests and acceptance
+- Summary: Added an explicit P1 acceptance gate for v0.4 Section 24.2 using the configured simplified grasp/carry runner, EpisodeArchive JSONL output, and randomized contact-candidate smoke checks.
+- Files changed:
+  - `amsrr/acceptance/__init__.py`
+  - `amsrr/acceptance/p1_acceptance.py`
+  - `tests/acceptance/test_p1_acceptance.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added acceptance-side `P1AcceptanceCriteria`, `P1AcceptanceReport`, and `run_p1_acceptance`.
+- Upstream dependencies used: v0.4 Sections 24.2, 25.1, 26.12, 27.3; existing P1 task distribution config, `P1SimplifiedRunner`, `EpisodeArchive`, fixed/simple design policy, ContactCandidateSampler, pi_H baseline, pi_L baseline, and QPID controller.
+- Downstream impact: P1 has a reproducible pass/fail acceptance harness before Isaac Lab integration. Later simulator backends can add equivalent acceptance coverage without changing the Section 24.2 criteria.
+- Tests added or run:
+  - Added `test_p1_acceptance_section_24_2`
+- Commands run:
+  - `sed -n ...` and `rg -n ...` inspections for spec Sections 24/26/27, acceptance ownership, runner/env/logging modules, and existing tests
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p1_acceptance.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p1_acceptance.py -q` passed: 1 passed in 41.26s. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 67 passed, 1 skipped. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Assumptions: Section 24.2 can be evaluated on the interface-backed simplified env for P1. Isaac Lab remains a later simulator-backend validation step, not a prerequisite for this acceptance gate.
+- Blockers: None.
+- Next steps: Commit Agent L acceptance changes if accepted, then move to the next post-P1 work package.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent K: P1 task distribution, runner, metrics, and EpisodeArchive logging
 - Summary: Implemented P1 order 8 task randomization config, grasp/carry task distribution, simplified env runner, EpisodeArchive schema/logging, batch metrics, and archive JSONL roundtrip tests.
 - Files changed:
@@ -572,6 +599,26 @@
 ---
 
 ## Work Package Logs
+
+### Agent L: Tests and Acceptance
+
+#### 2026-07-08
+- Scope: Implement P1 Section 24.2 acceptance reporting and tests.
+- Files changed:
+  - `amsrr/acceptance/__init__.py`
+  - `amsrr/acceptance/p1_acceptance.py`
+  - `tests/acceptance/test_p1_acceptance.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: v0.4 P1 acceptance criteria, `P1SimplifiedRunner`, P1 task distribution config, `EpisodeArchive`, `SimplifiedGraspCarryEnv`, ContactCandidateSampler, pi_H/pi_L/controller baselines.
+- Implemented: `P1AcceptanceCriteria`, `P1AcceptanceReport`, `run_p1_acceptance`, and a 1000-episode acceptance test that checks success rate, zero crashes, non-empty contact candidates on randomized valid objects, and archive roundtrip counts.
+- Not implemented: Isaac Lab backend validation, learned pi_L training, held-out object evaluation, and high-fidelity contact physics checks.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: P1 completion can now be verified by running `tests/acceptance/test_p1_acceptance.py`; future simulator backends can reuse the same criteria.
+- Tests added: `test_p1_acceptance_section_24_2`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p1_acceptance.py -q` passed: 1 passed in 41.26s. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 67 passed, 1 skipped. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Handoff notes: Acceptance currently targets the simplified backend explicitly. Keep Isaac Lab checks separate under Agent J / simulator integration.
+- Open questions: None currently.
 
 ### Agent K: P1 Task Distribution, Runner, Metrics, and Logging
 

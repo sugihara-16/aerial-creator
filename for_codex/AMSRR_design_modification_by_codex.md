@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-08
 
+### P1 Acceptance Gate Supplement
+
+- Context: v0.4 Section 24.2 defines P1 acceptance criteria but does not prescribe a concrete test harness or result schema for recording the pass/fail gate.
+- Decision: Added Agent L `amsrr.acceptance.p1_acceptance` as a lightweight acceptance harness. It runs the configured P1 simplified runner over 1000 randomized training-distribution episodes, checks the minimum success rate and zero crash criteria, samples valid randomized objects for non-empty contact candidates, and returns a serializable `P1AcceptanceReport`.
+- Compatibility impact: This closes the P1 gate against the interface-backed simplified backend. It does not invoke Isaac Lab and does not claim high-fidelity physics validation; later Agent J simulator backends can be tested behind the same policy/controller boundaries.
+
 ### P1 Task Distribution Runner and EpisodeArchive Supplement
 
 - Context: v0.4 requires P1 object grasp/carry randomization over object size, mass, friction, and target pose, plus EpisodeArchive logging and reproducibility metadata. It does not prescribe exact config field names or a JSON storage format.
