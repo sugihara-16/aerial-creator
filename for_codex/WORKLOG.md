@@ -4,6 +4,46 @@
 
 ### 2026-07-08
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
+- Work package / Agent label: Agent I: pi_L + QP/PID interfaces
+- Summary: Implemented P1 order 6 Agent I interfaces: deterministic pi_L baseline, controller context/base protocol, QP allocator interface, dependency-free bounded vertical rotor allocator, QPID controller scaffold, package exports, and policy/controller unit tests.
+- Files changed:
+  - `amsrr/controllers/__init__.py`
+  - `amsrr/controllers/controller_base.py`
+  - `amsrr/controllers/qp_allocator_interface.py`
+  - `amsrr/controllers/qpid_controller.py`
+  - `amsrr/policies/__init__.py`
+  - `amsrr/policies/low_level_policy_base.py`
+  - `tests/unit/controllers/test_qpid_controller.py`
+  - `tests/unit/policies/test_low_level_baseline.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added policy-side `LowLevelPolicyContext`, `LowLevelPolicyBase`, `BaselineLowLevelPolicyConfig`, `BaselineLowLevelPolicy`, and `select_active_knot`; added controller-side `ControllerContext`, `ControllerBase`, `QPAllocationProblem`, `QPAllocationResult`, `QPAllocatorInterface`, `BoundedVerticalRotorAllocator`, `RotorAllocationSpec`, `QPIDControllerConfig`, and `QPIDController`.
+- Upstream dependencies used: v0.4 Sections 20, 26.9, 27.1, 28.11; existing `PolicyCommand`, `RuntimeObservation`, `PhysicalModel`, `ContactWrenchTrajectory`, and `PolicyCommandBiasBuilder`.
+- Downstream impact: P1 simplified grasp-carry simulation can consume deterministic `PolicyCommand` and `ControllerCommand` outputs through stable interfaces. Later learned pi_L heads and exact QP backends can replace the baseline/allocator without changing the context boundaries.
+- Tests added or run:
+  - Added `test_baseline_low_level_policy_outputs_policy_command`
+  - Added `test_baseline_low_level_policy_selects_knot_from_runtime_time`
+  - Added `test_baseline_low_level_policy_suppresses_residual_when_controller_infeasible`
+  - Added `test_select_active_knot_rejects_empty_trajectory`
+  - Added `test_bounded_vertical_rotor_allocator_feasible_and_unsupported_residual`
+  - Added `test_bounded_vertical_rotor_allocator_reports_infeasible_clip`
+  - Added `test_qpid_controller_outputs_controller_command`
+  - Added `test_qpid_controller_reports_infeasible_vertical_wrench`
+- Commands run:
+  - `sed -n ...` and `rg -n ...` inspections for spec Section 20/26/27, policy schemas, pi_H planner, controller bias builder, physical-model builder, and existing tests
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/policies/test_low_level_baseline.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/controllers/test_qpid_controller.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/policies/test_low_level_baseline.py -q` passed: 4 passed. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/controllers/test_qpid_controller.py -q` passed: 4 passed. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 61 passed, 1 skipped. `python3 -m compileall amsrr -q` passed. `git diff --check` passed.
+- Assumptions: P1 pi_L baseline is a deterministic tracking-intent scaffold. Object pose error is converted to a clipped residual wrench proxy; contact tracking bias is a small scaled copy of active assignment wrench targets. The P1 controller allocator supports bounded vertical thrust allocation only and reports unsupported lateral/torque wrench residuals as metrics/violations.
+- Blockers: None.
+- Next steps: Continue with P1 order 7, simplified grasp-carry simulation environment.
+
+### 2026-07-08
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4
 - Work package / Agent label: Agent H: pi_H baseline planner
 - Summary: Implemented a deterministic P1 grasp/carry high-level planner that selects feasible contact assignments from `ContactCandidateSet` group proposals, caches assignment feasibility labels, and emits a schema-valid `ContactWrenchTrajectory`.
 - Files changed:
@@ -471,6 +511,29 @@
 ---
 
 ## Work Package Logs
+
+### Agent I: pi_L + QP/PID Interfaces
+
+#### 2026-07-08
+- Scope: Implement P1 order 6 Agent I interfaces that map active pi_H knots/runtime observations to `PolicyCommand`, then to controller-owned `ControllerCommand` outputs.
+- Files changed:
+  - `amsrr/controllers/__init__.py`
+  - `amsrr/controllers/controller_base.py`
+  - `amsrr/controllers/qp_allocator_interface.py`
+  - `amsrr/controllers/qpid_controller.py`
+  - `amsrr/policies/__init__.py`
+  - `amsrr/policies/low_level_policy_base.py`
+  - `tests/unit/controllers/test_qpid_controller.py`
+  - `tests/unit/policies/test_low_level_baseline.py`
+- Upstream dependencies: v0.4 Section 20 pi_L/controller split, Agent H `ContactWrenchTrajectory`, existing runtime/physical-model/policy schemas, and `PolicyCommandBiasBuilder`.
+- Implemented: `LowLevelPolicyContext`, `LowLevelPolicyBase`, `BaselineLowLevelPolicyConfig`, `BaselineLowLevelPolicy`, runtime-time active knot selection, object target residual wrench proxy, active contact tracking bias, controller-status residual suppression, `ControllerContext`, `ControllerBase`, QP allocator problem/result/backend protocol, bounded vertical rotor allocator, QPID controller scaffold, vectoring joint clipping, PD joint torque proxy, dock-mechanism hold commands, and focused tests.
+- Not implemented: Learned pi_L head, exact multi-axis/vectoring/contact QP, OSQP/C++ backend, high-fidelity object/contact dynamics, simulator execution, or training integration.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: P1 simplified grasp-carry simulation can run through pi_H trajectory, pi_L intent, desired-reference builder, and controller command scaffolding without introducing a simulator dependency yet.
+- Tests added: `test_baseline_low_level_policy_outputs_policy_command`, `test_baseline_low_level_policy_selects_knot_from_runtime_time`, `test_baseline_low_level_policy_suppresses_residual_when_controller_infeasible`, `test_select_active_knot_rejects_empty_trajectory`, `test_bounded_vertical_rotor_allocator_feasible_and_unsupported_residual`, `test_bounded_vertical_rotor_allocator_reports_infeasible_clip`, `test_qpid_controller_outputs_controller_command`, `test_qpid_controller_reports_infeasible_vertical_wrench`.
+- Tests passed: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/policies/test_low_level_baseline.py -q` passed: 4 passed. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/controllers/test_qpid_controller.py -q` passed: 4 passed. `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q` passed: 61 passed, 1 skipped. `python3 -m compileall amsrr -q` passed.
+- Handoff notes: The pi_L baseline intentionally emits residual intent only. `ControllerCommand` fields are produced only in the controller layer. The current allocator is a simplified bounded vertical allocator and reports unsupported wrench residuals for future exact QP replacement.
+- Open questions: None currently.
 
 ### Agent H: pi_H Baseline Planner
 

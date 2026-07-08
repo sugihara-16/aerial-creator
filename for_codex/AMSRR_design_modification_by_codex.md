@@ -4,6 +4,13 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-08
 
+### P1 pi_L + QP/PID Controller Interface Supplement
+
+- Context: v0.4 defines the `PolicyCommand` and `ControllerCommand` schemas and the pi_H -> pi_L -> QP/PID flow, but does not prescribe a deterministic P1 low-level baseline policy or dependency-free controller backend.
+- Decision: Added an Agent I `BaselineLowLevelPolicy` that consumes `RuntimeObservation`, `MorphologyGraph`, `PhysicalModel`, `ContactWrenchTrajectory`, and an optional active `InteractionKnot`. It selects the active knot by runtime time when not supplied, emits zero anchor pose offsets for active assignments, small contact-tracking biases derived from active assignment wrench targets, and a clipped object pose/velocity residual wrench intent when the active knot contains object targets.
+- Controller supplement: Added `ControllerContext`, `ControllerBase`, `QPAllocationProblem`, `QPAllocationResult`, `QPAllocatorInterface`, `BoundedVerticalRotorAllocator`, and `QPIDController`. The P1 allocator solves only bounded vertical thrust allocation, reports unsupported lateral/torque wrench residuals, clips vectoring joints to URDF limits, and applies a PD proxy for non-vectoring joint torque references.
+- Compatibility impact: The policy emits only `PolicyCommand` intent and never rotor thrusts, vectoring targets, joint torques, or dock commands. The controller layer owns `ControllerCommand` output. Exact multi-axis/vectoring/contact QP remains a future allocator backend behind `QPAllocatorInterface`.
+
 ### P1 pi_H Grasp-Carry Baseline Planner Supplement
 
 - Context: v0.4 defines the `ContactWrenchTrajectory` schema and says pi_H selects `ContactAssignment` sets from `ContactCandidateSet`, but does not prescribe a deterministic P1 baseline planner.
