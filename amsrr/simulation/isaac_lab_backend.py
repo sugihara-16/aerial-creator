@@ -238,6 +238,49 @@ class IsaacLabBackend:
         )
         return command
 
+    def holon_fixed_morphology_hover_smoke_command(
+        self,
+        *,
+        config_path: str | Path = "configs/env/isaac_lab.yaml",
+        convert_if_missing: bool = True,
+        force_convert: bool = False,
+        steps: int = 600,
+        module_count: int = 2,
+        module_spacing_m: float = 0.45,
+        hover_target_height: float = 0.5,
+        position_tolerance_m: float = 0.20,
+        attitude_tolerance_rad: float = 0.25,
+        hold_duration_s: float = 1.0,
+        generated_usd_dir: str | Path | None = None,
+        generated_usd_path: str | Path | None = None,
+    ) -> list[str]:
+        command = self.holon_spawn_probe_command(
+            config_path=config_path,
+            convert_if_missing=convert_if_missing,
+            force_convert=force_convert,
+            steps=steps,
+            generated_usd_dir=generated_usd_dir,
+            generated_usd_path=generated_usd_path,
+        )
+        command.extend(
+            [
+                "--fixed-morphology-hover-smoke",
+                "--fixed-module-count",
+                str(module_count),
+                "--fixed-module-spacing-m",
+                str(module_spacing_m),
+                "--hover-target-height",
+                str(hover_target_height),
+                "--hover-position-tolerance-m",
+                str(position_tolerance_m),
+                "--hover-attitude-tolerance-rad",
+                str(attitude_tolerance_rad),
+                "--hover-hold-duration-s",
+                str(hold_duration_s),
+            ]
+        )
+        return command
+
     def run_holon_single_module_hover_smoke(
         self,
         *,
@@ -255,6 +298,36 @@ class IsaacLabBackend:
             convert_if_missing=not force_convert,
             force_convert=force_convert,
             steps=steps,
+            hover_target_height=hover_target_height,
+            position_tolerance_m=position_tolerance_m,
+            attitude_tolerance_rad=attitude_tolerance_rad,
+            hold_duration_s=hold_duration_s,
+            generated_usd_dir=self.config.generated_usd_dir,
+            generated_usd_path=self.config.generated_usd_path,
+        )
+        return _run_json_command(command, timeout_s=timeout_s)
+
+    def run_holon_fixed_morphology_hover_smoke(
+        self,
+        *,
+        config_path: str | Path = "configs/env/isaac_lab.yaml",
+        force_convert: bool = True,
+        steps: int = 600,
+        module_count: int = 2,
+        module_spacing_m: float = 0.45,
+        hover_target_height: float = 0.5,
+        position_tolerance_m: float = 0.20,
+        attitude_tolerance_rad: float = 0.25,
+        hold_duration_s: float = 1.0,
+        timeout_s: float | None = None,
+    ) -> dict[str, Any]:
+        command = self.holon_fixed_morphology_hover_smoke_command(
+            config_path=config_path,
+            convert_if_missing=not force_convert,
+            force_convert=force_convert,
+            steps=steps,
+            module_count=module_count,
+            module_spacing_m=module_spacing_m,
             hover_target_height=hover_target_height,
             position_tolerance_m=position_tolerance_m,
             attitude_tolerance_rad=attitude_tolerance_rad,

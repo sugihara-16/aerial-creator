@@ -4,6 +4,13 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Fixed-Morphology Hover Smoke Supplement
+
+- Context: After the fixed assembly URDF generator was available, P4-control needed to validate that a rigid 2-module Holon asset can be converted, spawned, controlled, and reported through the same QP/controller/bridge path as the single-module smoke.
+- Decision: Extended the Holon Isaac probe with `--fixed-morphology-hover-smoke`. The probe generates the rigid combined URDF on demand, converts it to USD, spawns it as one articulation, reconstructs per-module runtime observations from prefixed Isaac joint names, applies module-prefixed rotor/vectoring/dock actuator targets, and reports fixed-hover pass/fail metrics with the `fixed_morphology_hover_*` prefix.
+- Runner decision: `P4ControlIsaacEnv.run_smokes(dry_run=False)` now runs both real `single_module_hover` and real `fixed_morphology_hover`; `fixed_morphology_waypoint` remains an explicit skipped smoke until the waypoint target path is implemented and validated.
+- Compatibility impact: This validates fixed-morphology hover only. It does not validate waypoint tracking, archive completeness, object grasp/carry, learned policies, P4-control completion, or P4 full completion. The fixed morphology remains a pre-generated rigid assembly approximation and does not claim physical docking success.
+
 ### P4-Control Fixed-Morphology Assembly Asset Preparation Supplement
 
 - Context: The user approved treating the first fixed-morphology smoke as a pre-generated rigid combined URDF/USD asset, with dock connection represented as a fixed joint equivalent. Before running Isaac, the repository needed a deterministic way to generate that asset and the controller needed correct multi-module gravity compensation.

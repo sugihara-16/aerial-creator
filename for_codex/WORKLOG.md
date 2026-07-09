@@ -4,6 +4,38 @@
 
 ### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus approved fixed-morphology rigid assembly representation
+- Work package / Agent label: Agent J/K boundary: P4-control Order 16 fixed-morphology hover smoke
+- Summary: Implemented and validated the real Isaac fixed-morphology hover smoke for a rigid 2-module Holon assembly. The Holon probe now generates a combined fixed URDF, converts/spawns it as one Isaac articulation, reconstructs module-local runtime state from prefixed Isaac joints, applies module-prefixed rotor/vectoring/dock targets, and reports `fixed_morphology_hover_*` metrics. The runner now executes real `single_module_hover` and real `fixed_morphology_hover`; waypoint remains skipped.
+- Files changed:
+  - `amsrr/simulation/p4_control_controller_smoke.py`
+  - `amsrr/simulation/isaac_lab_backend.py`
+  - `amsrr/simulation/p4_control_isaac_env.py`
+  - `configs/training/p4_control_low_level.yaml`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - `tests/unit/simulation/test_p4_control_controller_smoke.py`
+  - `tests/unit/simulation/test_p4_control_isaac_env.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema change. Added fixed-hover CLI/report fields, backend command/run helpers, `fixed_morphology_module_spacing_m` runner config, and a fixed-morphology controller smoke helper.
+- Upstream dependencies used: Order 15 fixed assembly URDF generator, rigid-body QP allocator, module-prefixed actuator mapping, Isaac wrench composer/body force application, and the user-approved rigid combined URDF/USD representation.
+- Downstream impact: P4-control real smoke runner now has two of the three required low-level Isaac smoke results available as real Isaac-backed passes. P4-control completion remains blocked by fixed-morphology waypoint tracking and archive completeness.
+- Tests added or run:
+  - Added `test_fixed_morphology_controller_command_smoke_builds_multi_module_bridge_record`.
+  - Extended backend/env tests for fixed-hover command construction and runner result mapping.
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_control_isaac_env.py tests/unit/simulation/test_p4_control_controller_smoke.py -q`
+  - `python3 -m py_compile scripts/p4_control_holon_spawn_probe.py amsrr/simulation/isaac_lab_backend.py amsrr/simulation/p4_control_isaac_env.py amsrr/simulation/p4_control_controller_smoke.py`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `git diff --check`
+- Commands run:
+  - `eval "$(~/.local/bin/micromamba shell hook -s bash)" && micromamba activate isaaclab3 && PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/leus/amsrr:$PYTHONPATH /home/leus/IsaacLab/isaaclab.sh -p /home/leus/amsrr/scripts/p4_control_holon_spawn_probe.py --config /home/leus/amsrr/configs/env/isaac_lab.yaml --force-convert --generated-usd-dir /tmp/amsrr_isaac_holon_fixed_hover --generated-usd-path /tmp/amsrr_isaac_holon_fixed_hover/holon_fixed_2/holon_fixed_2.usda --steps 600 --fixed-morphology-hover-smoke --fixed-module-count 2 --fixed-module-spacing-m 0.45 --hover-target-height 0.5 --hover-position-tolerance-m 0.20 --hover-attitude-tolerance-rad 0.25 --hover-hold-duration-s 1.0`
+  - `eval "$(~/.local/bin/micromamba shell hook -s bash)" && micromamba activate isaaclab3 && PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/leus/amsrr:$PYTHONPATH python3 -c '...'` to run `P4ControlIsaacEnv.run_smokes(dry_run=False)` with generated USD under `/tmp/amsrr_isaac_holon_runner_fixed`
+- Tests run: Related simulation tests passed: 8 passed. Full unit suite passed: 126 passed, 1 skipped. Diff check passed. Direct real Isaac fixed-hover smoke passed with `fixed_morphology_hover_smoke_passed=true`, `fixed_morphology_hover_steps=200`, hold time `1.0 s`, final position error `0.014247 m`, final attitude error `0.006313 rad`, max position error `0.022915 m`, QP infeasible count `0`, controller clipped count `0`, and no missing/unsupported/clipped bridge targets. Runner real smoke passed `single_module_hover` and `fixed_morphology_hover`; `fixed_morphology_waypoint` remained skipped with `real_isaac_execution_not_implemented`.
+- Assumptions: The fixed assembly uses two modules, `0.45 m` spacing along module-0 x, and fixed root-to-root connection. This is a low-level flight validation asset, not a physical docking or P3 assembly success artifact.
+- Blockers: Fixed-morphology waypoint tracking is still unimplemented. P4-control completion also remains blocked by EpisodeArchive runtime/controller/actuator logging for these real smokes.
+- Next steps: Commit Order 16, then implement fixed-morphology waypoint smoke using the same generated rigid assembly and direct controller target path.
+
+### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus approved fixed-morphology rigid assembly representation
 - Work package / Agent label: Agent I/J boundary: P4-control Order 15 fixed-morphology assembly asset preparation
 - Summary: Prepared the fixed-morphology path without running Isaac yet. Added a deterministic URDF generator for rigid multi-module Holon assemblies and corrected `QPIDController` multi-module gravity compensation so hover/body-target wrench generation uses the current `RigidBodyControlModel.total_mass_kg` rather than single-module `PhysicalModel.aggregate_mass_kg`.
 - Files changed:

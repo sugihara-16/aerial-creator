@@ -92,23 +92,39 @@ def build_single_module_morphology(
     *,
     graph_id: str = "single-module-controller-command-smoke",
 ) -> MorphologyGraph:
+    return build_fixed_morphology(
+        physical_model,
+        graph_id=graph_id,
+        module_count=1,
+        module_spacing_m=0.0,
+    )
+
+
+def build_fixed_morphology(
+    physical_model: PhysicalModel,
+    *,
+    graph_id: str = "fixed-morphology-controller-command-smoke",
+    module_count: int = 2,
+    module_spacing_m: float = 0.45,
+) -> MorphologyGraph:
     capability = build_module_capability_token(physical_model)
     return MorphologyGraph(
         graph_id=graph_id,
         modules=[
             ModuleNode(
-                module_id=0,
+                module_id=module_id,
                 module_type="holon",
-                pose_in_design_frame=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
-                role_id="base",
-                is_base=True,
+                pose_in_design_frame=(module_spacing_m * module_id, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+                role_id="base" if module_id == 0 else "fixed_attached",
+                is_base=module_id == 0,
                 capability_token=capability,
             )
+            for module_id in range(module_count)
         ],
         ports=[],
         dock_edges=[],
         robot_anchors=[],
-        control_groups=[ControlGroup(group_id="all", module_ids=[0], role="whole_body")],
+        control_groups=[ControlGroup(group_id="all", module_ids=list(range(module_count)), role="whole_body")],
         base_module_id=0,
         is_closed_loop=False,
     )
@@ -143,6 +159,7 @@ def build_runtime_observation(
 
 
 def bridge_supported_controller_command(controller_command: ControllerCommand) -> ControllerCommand:
+    module_ids = _command_module_ids(controller_command)
     vectoring_targets = dict(controller_command.vectoring_joint_targets)
     for command_key in list(vectoring_targets):
         if command_key.startswith("module_"):
@@ -150,10 +167,43 @@ def bridge_supported_controller_command(controller_command: ControllerCommand) -
         global_key = f"module_0:{command_key}"
         if global_key in vectoring_targets:
             del vectoring_targets[command_key]
+    dock_commands: dict[str, float] = {}
+    for command_key, value in controller_command.dock_mechanism_commands.items():
+        if command_key.startswith("module_") or not module_ids:
+            dock_commands[command_key] = value
+            continue
+        for module_id in module_ids:
+            dock_commands[f"module_{module_id}:{command_key}"] = value
     return ControllerCommand(
         rotor_thrusts_n=dict(controller_command.rotor_thrusts_n),
         vectoring_joint_targets=vectoring_targets,
         joint_torque_commands={},
-        dock_mechanism_commands=dict(controller_command.dock_mechanism_commands),
+        dock_mechanism_commands=dock_commands,
         controller_status=controller_command.controller_status,
     )
+
+
+def _command_module_ids(controller_command: ControllerCommand) -> list[int]:
+    module_ids: set[int] = set()
+    for command_values in (
+        controller_command.rotor_thrusts_n,
+        controller_command.vectoring_joint_targets,
+        controller_command.dock_mechanism_commands,
+    ):
+        for command_key in command_values:
+            module_id = _module_id_from_global_key(command_key)
+            if module_id is not None:
+                module_ids.add(module_id)
+    return sorted(module_ids)
+
+
+def _module_id_from_global_key(command_key: str) -> int | None:
+    if not command_key.startswith("module_"):
+        return None
+    module_text, separator, _ = command_key.partition(":")
+    if separator == "":
+        return None
+    module_id_text = module_text[len("module_") :]
+    if not module_id_text.isdigit():
+        return None
+    return int(module_id_text)

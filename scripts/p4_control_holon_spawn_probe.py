@@ -48,7 +48,28 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run a closed-loop single-module hover smoke with QPIDController commands.",
     )
+    parser.add_argument(
+        "--fixed-morphology-hover-smoke",
+        action="store_true",
+        help="Run a closed-loop fixed-morphology hover smoke with a rigid combined URDF.",
+    )
+    parser.add_argument(
+        "--fixed-morphology-waypoint-smoke",
+        action="store_true",
+        help="Run a closed-loop fixed-morphology waypoint smoke with a rigid combined URDF.",
+    )
+    parser.add_argument("--fixed-module-count", type=int, default=2, help="Module count for fixed-morphology smokes.")
+    parser.add_argument("--fixed-module-spacing-m", type=float, default=0.45, help="Rigid spacing between fixed modules.")
     parser.add_argument("--hover-target-height", type=float, default=None, help="Closed-loop hover target z in meters.")
+    parser.add_argument(
+        "--waypoint-target-position-m",
+        type=float,
+        nargs=3,
+        default=None,
+        metavar=("X", "Y", "Z"),
+        help="Fixed-morphology waypoint target position in meters.",
+    )
+    parser.add_argument("--waypoint-target-yaw-rad", type=float, default=0.0, help="Fixed-morphology waypoint target yaw.")
     parser.add_argument("--hover-position-tolerance-m", type=float, default=0.20, help="Closed-loop hover position tolerance.")
     parser.add_argument("--hover-attitude-tolerance-rad", type=float, default=0.25, help="Closed-loop hover attitude tolerance.")
     parser.add_argument("--hover-hold-duration-s", type=float, default=1.0, help="Required final hold duration for hover pass.")
@@ -79,7 +100,12 @@ def main() -> int:
     print(json.dumps(report, sort_keys=True))
     if not report.get("spawn_passed"):
         return 1
-    for key in ("command_probe_passed", "single_module_hover_smoke_passed"):
+    for key in (
+        "command_probe_passed",
+        "single_module_hover_smoke_passed",
+        "fixed_morphology_hover_smoke_passed",
+        "fixed_morphology_waypoint_smoke_passed",
+    ):
         if report.get(key) is False:
             return 1
     return 0
@@ -94,10 +120,12 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     from isaaclab.sim.converters import UrdfConverter, UrdfConverterCfg
     import torch
 
+    from amsrr.robot_model.fixed_morphology_urdf import split_fixed_module_name, write_fixed_morphology_urdf
     from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
     from amsrr.simulation.isaac_lab_backend import IsaacLabBackend, load_isaac_lab_backend_config
     from amsrr.simulation.p4_control_controller_smoke import (
         bridge_supported_controller_command,
+        build_fixed_morphology,
         build_runtime_observation,
         build_single_module_controller_command_smoke,
         build_single_module_morphology,
@@ -109,9 +137,18 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     urdf_path = _expand_path(backend_config.holon_urdf_path)
     usd_dir = _expand_path(args.generated_usd_dir or backend_config.generated_usd_dir)
     usd_path = _expand_path(args.generated_usd_path or backend_config.generated_usd_path)
+    fixed_smoke_requested = bool(args.fixed_morphology_hover_smoke or args.fixed_morphology_waypoint_smoke)
+    if fixed_smoke_requested:
+        fixed_urdf_path = usd_dir / "fixed_morphology_urdf" / f"holon_fixed_{int(args.fixed_module_count)}.urdf"
+        urdf_path = write_fixed_morphology_urdf(
+            urdf_path,
+            fixed_urdf_path,
+            module_count=int(args.fixed_module_count),
+            module_spacing_m=float(args.fixed_module_spacing_m),
+        )
     converted = False
 
-    if args.force_convert or (args.convert_if_missing and not usd_path.exists()):
+    if args.force_convert or fixed_smoke_requested or (args.convert_if_missing and not usd_path.exists()):
         converter_cfg = UrdfConverterCfg(
             asset_path=str(urdf_path),
             usd_dir=str(usd_dir),
@@ -167,7 +204,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         ),
         actuators={
             "gimbal_joints": ImplicitActuatorCfg(
-                joint_names_expr=["gimbal.*"],
+                joint_names_expr=[".*gimbal.*"],
                 stiffness=args.gimbal_stiffness,
                 damping=args.gimbal_damping,
             ),
@@ -177,7 +214,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
                 damping=args.dock_damping,
             ),
             "rotor_spinner_joints": ImplicitActuatorCfg(
-                joint_names_expr=["rotor.*"],
+                joint_names_expr=[".*rotor.*"],
                 stiffness=0.0,
                 damping=0.0,
             ),
@@ -187,8 +224,8 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
 
     sim.reset()
     sim_dt = sim.get_physics_dt()
-    thrust_body_ids, thrust_body_names = robot.find_bodies("thrust_.*")
-    gimbal_joint_ids, gimbal_joint_names = robot.find_joints("gimbal.*")
+    thrust_body_ids, thrust_body_names = robot.find_bodies(".*thrust_.*")
+    gimbal_joint_ids, gimbal_joint_names = robot.find_joints(".*gimbal.*")
     robot_mass = float(robot.data.body_mass.torch[0].sum().detach().cpu())
     gravity = float(torch.tensor(sim.cfg.gravity, device=sim.device).norm().detach().cpu())
     force_per_rotor_n = float(args.force_per_rotor_n)
@@ -197,8 +234,11 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             raise RuntimeError("Cannot compute hover force without thrust bodies.")
         force_per_rotor_n = robot_mass * gravity * float(args.hover_force_scale) / len(thrust_body_ids)
     command_applied = force_per_rotor_n != 0.0 or args.gimbal_target_rad != 0.0
-    if force_per_rotor_n != 0.0 and len(thrust_body_ids) != 4:
-        raise RuntimeError(f"Expected 4 thrust bodies, found {len(thrust_body_ids)}: {thrust_body_names}")
+    expected_thrust_bodies = 4 * int(args.fixed_module_count) if fixed_smoke_requested else 4
+    if force_per_rotor_n != 0.0 and len(thrust_body_ids) != expected_thrust_bodies:
+        raise RuntimeError(
+            f"Expected {expected_thrust_bodies} thrust bodies, found {len(thrust_body_ids)}: {thrust_body_names}"
+        )
     if args.gimbal_target_rad != 0.0 and not gimbal_joint_ids:
         raise RuntimeError("Cannot command gimbal target without gimbal joints.")
 
@@ -236,6 +276,40 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             build_runtime_observation=build_runtime_observation,
             build_single_module_morphology=build_single_module_morphology,
             bridge_supported_controller_command=bridge_supported_controller_command,
+        )
+    if fixed_smoke_requested:
+        waypoint_position = args.waypoint_target_position_m
+        target_height = float(args.hover_target_height if args.hover_target_height is not None else args.spawn_height)
+        if waypoint_position is None:
+            waypoint_position = [0.25, 0.0, target_height]
+        if args.fixed_morphology_waypoint_smoke:
+            target_position = tuple(float(value) for value in waypoint_position)
+            target_yaw = float(args.waypoint_target_yaw_rad)
+            report_prefix = "fixed_morphology_waypoint"
+        else:
+            target_position = (0.0, 0.0, target_height)
+            target_yaw = 0.0
+            report_prefix = "fixed_morphology_hover"
+        hover_smoke_report = _run_fixed_morphology_smoke(
+            robot=robot,
+            sim=sim,
+            sim_dt=sim_dt,
+            physical_model=physical_model,
+            device=sim.device,
+            steps=max(0, args.steps),
+            module_count=int(args.fixed_module_count),
+            module_spacing_m=float(args.fixed_module_spacing_m),
+            target_position=target_position,  # type: ignore[arg-type]
+            target_yaw_rad=target_yaw,
+            position_tolerance_m=float(args.hover_position_tolerance_m),
+            attitude_tolerance_rad=float(args.hover_attitude_tolerance_rad),
+            hold_duration_s=float(args.hover_hold_duration_s),
+            stop_on_hold=bool(args.hover_stop_on_hold),
+            control_dt_s=float(args.dt),
+            build_fixed_morphology=build_fixed_morphology,
+            bridge_supported_controller_command=bridge_supported_controller_command,
+            split_fixed_module_name=split_fixed_module_name,
+            report_prefix=report_prefix,
         )
     for _ in range(0 if hover_smoke_report is not None else max(0, args.steps)):
         if controller_bundle is not None:
@@ -281,7 +355,14 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         )
     hover_command_ok = True
     if hover_smoke_report is not None:
-        hover_command_ok = bool(hover_smoke_report.get("single_module_hover_smoke_passed"))
+        hover_command_ok = any(
+            bool(hover_smoke_report.get(key))
+            for key in (
+                "single_module_hover_smoke_passed",
+                "fixed_morphology_hover_smoke_passed",
+                "fixed_morphology_waypoint_smoke_passed",
+            )
+        )
 
     report = {
         "spawn_passed": True,
@@ -505,6 +586,305 @@ def _run_single_module_hover_smoke(
     }
 
 
+def _run_fixed_morphology_smoke(
+    *,
+    robot,
+    sim,
+    sim_dt: float,
+    physical_model,
+    device: str,
+    steps: int,
+    module_count: int,
+    module_spacing_m: float,
+    target_position: tuple[float, float, float],
+    target_yaw_rad: float,
+    position_tolerance_m: float,
+    attitude_tolerance_rad: float,
+    hold_duration_s: float,
+    stop_on_hold: bool,
+    control_dt_s: float,
+    build_fixed_morphology,
+    bridge_supported_controller_command,
+    split_fixed_module_name,
+    report_prefix: str,
+) -> dict[str, object]:
+    from amsrr.controllers.actuator_mapping import build_actuator_mapping
+    from amsrr.controllers.controller_base import ControllerContext
+    from amsrr.controllers.isaac_controller_bridge import IsaacControllerBridge
+    from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
+    from amsrr.schemas.policies import InteractionKnot, PolicyCommand
+
+    morphology_graph = build_fixed_morphology(
+        physical_model,
+        graph_id=f"{report_prefix}-smoke",
+        module_count=module_count,
+        module_spacing_m=module_spacing_m,
+    )
+    actuator_mapping = build_actuator_mapping(morphology_graph, physical_model)
+    bridge = IsaacControllerBridge()
+    controller = QPIDController(
+        config=QPIDControllerConfig(
+            allocation_mode="rigid_body_qp",
+            control_dt_s=control_dt_s,
+        )
+    )
+    target_quat = _yaw_quat_xyzw(target_yaw_rad)
+    target_pose = (
+        float(target_position[0]),
+        float(target_position[1]),
+        float(target_position[2]),
+        target_quat[0],
+        target_quat[1],
+        target_quat[2],
+        target_quat[3],
+    )
+    target_twist = [0.0] * 6
+    previous_command = None
+    max_position_error = 0.0
+    max_attitude_error = 0.0
+    final_position_error = 0.0
+    final_attitude_error = 0.0
+    qp_infeasible_count = 0
+    clipped_count = 0
+    missing_actuator_count = 0
+    unsupported_actuator_count = 0
+    clipped_target_count = 0
+    finite_state = True
+    hold_steps = 0
+    max_hold_steps = 0
+    hold_steps_required = max(1, int(round(hold_duration_s / max(sim_dt, 1.0e-9))))
+    min_height = float("inf")
+    max_height = float("-inf")
+    last_controller_status = None
+    last_bridge_metrics: dict[str, float] = {}
+    executed_steps = 0
+
+    for step_idx in range(max(0, steps)):
+        executed_steps = step_idx + 1
+        root_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
+        root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch)
+        runtime_observation = _build_fixed_runtime_observation(
+            morphology_graph,
+            time_s=step_idx * sim_dt,
+            root_pose_world=root_pose,  # type: ignore[arg-type]
+            root_twist_world=root_twist,
+            joint_names=robot.joint_names,
+            joint_positions_tensor=robot.data.joint_pos.torch,
+            joint_velocities_tensor=robot.data.joint_vel.torch,
+            module_count=module_count,
+            module_spacing_m=module_spacing_m,
+            split_fixed_module_name=split_fixed_module_name,
+        )
+        controller_command = controller.compute(
+            ControllerContext(
+                runtime_observation=runtime_observation,
+                morphology_graph=morphology_graph,
+                physical_model=physical_model,
+                active_knot=InteractionKnot(t_rel_s=step_idx * sim_dt, contact_assignments=[]),
+                policy_command=PolicyCommand(
+                    desired_body_pose=target_pose,
+                    desired_body_twist=target_twist,
+                ),
+                previous_command=previous_command,
+                control_dt_s=control_dt_s,
+            )
+        )
+        bridged_command = bridge_supported_controller_command(controller_command)
+        actuator_record = bridge.convert(
+            bridged_command,
+            actuator_mapping,
+            time_s=step_idx * sim_dt,
+            command_index=step_idx,
+        )
+        _apply_actuator_record(robot, actuator_record, physical_model, device)
+        robot.write_data_to_sim()
+        sim.step()
+        robot.update(sim_dt)
+
+        root_pose_after = _tensor_row(robot.data.root_pose_w.torch)
+        root_pos = root_pose_after[:3]
+        position_error = _position_error_norm(root_pos, target_pose[:3])
+        attitude_error = _quat_error_norm(root_pose_after[3:7], target_pose[3:7])
+        final_position_error = position_error
+        final_attitude_error = attitude_error
+        max_position_error = max(max_position_error, position_error)
+        max_attitude_error = max(max_attitude_error, attitude_error)
+        min_height = min(min_height, root_pos[2])
+        max_height = max(max_height, root_pos[2])
+        finite_state = finite_state and all(_is_finite(value) for value in root_pose_after)
+        if position_error <= position_tolerance_m and attitude_error <= attitude_tolerance_rad:
+            hold_steps += 1
+        else:
+            hold_steps = 0
+        max_hold_steps = max(max_hold_steps, hold_steps)
+
+        status = bridged_command.controller_status
+        last_controller_status = status.to_dict()
+        last_bridge_metrics = dict(actuator_record.metrics)
+        if not status.qp_feasible:
+            qp_infeasible_count += 1
+        if status.metrics.get("clipped", 0.0) > 0.0:
+            clipped_count += 1
+        missing_actuator_count += len(actuator_record.missing_actuators)
+        unsupported_actuator_count += len(actuator_record.unsupported_actuators)
+        clipped_target_count += len(actuator_record.clipped_targets)
+        previous_command = bridged_command
+        if stop_on_hold and hold_steps >= hold_steps_required:
+            break
+
+    hold_time_s = max_hold_steps * sim_dt
+    passed = (
+        executed_steps > 0
+        and finite_state
+        and qp_infeasible_count == 0
+        and missing_actuator_count == 0
+        and unsupported_actuator_count == 0
+        and clipped_target_count == 0
+        and final_position_error <= position_tolerance_m
+        and final_attitude_error <= attitude_tolerance_rad
+        and hold_time_s + 1.0e-9 >= hold_duration_s
+    )
+    return {
+        f"{report_prefix}_smoke": True,
+        f"{report_prefix}_smoke_passed": passed,
+        f"{report_prefix}_target_pose": list(target_pose),
+        f"{report_prefix}_module_count": int(module_count),
+        f"{report_prefix}_module_spacing_m": float(module_spacing_m),
+        f"{report_prefix}_steps": int(executed_steps),
+        f"{report_prefix}_requested_steps": int(max(0, steps)),
+        f"{report_prefix}_duration_s": float(executed_steps * sim_dt),
+        f"{report_prefix}_hold_time_s": hold_time_s,
+        f"{report_prefix}_hold_required_s": hold_duration_s,
+        f"{report_prefix}_stopped_on_hold": bool(stop_on_hold and executed_steps < max(0, steps)),
+        f"{report_prefix}_position_tolerance_m": position_tolerance_m,
+        f"{report_prefix}_attitude_tolerance_rad": attitude_tolerance_rad,
+        f"{report_prefix}_final_position_error_m": final_position_error,
+        f"{report_prefix}_final_attitude_error_rad": final_attitude_error,
+        f"{report_prefix}_max_position_error_m": max_position_error,
+        f"{report_prefix}_max_attitude_error_rad": max_attitude_error,
+        f"{report_prefix}_min_height_m": min_height if executed_steps > 0 else None,
+        f"{report_prefix}_max_height_m": max_height if executed_steps > 0 else None,
+        f"{report_prefix}_finite_state": finite_state,
+        f"{report_prefix}_qp_infeasible_count": qp_infeasible_count,
+        f"{report_prefix}_controller_clipped_count": clipped_count,
+        f"{report_prefix}_missing_actuator_count": missing_actuator_count,
+        f"{report_prefix}_unsupported_actuator_count": unsupported_actuator_count,
+        f"{report_prefix}_clipped_target_count": clipped_target_count,
+        f"{report_prefix}_last_controller_status": last_controller_status,
+        f"{report_prefix}_last_bridge_metrics": last_bridge_metrics,
+    }
+
+
+def _build_fixed_runtime_observation(
+    morphology_graph,
+    *,
+    time_s: float,
+    root_pose_world: tuple[float, float, float, float, float, float, float],
+    root_twist_world: list[float],
+    joint_names: list[str],
+    joint_positions_tensor,
+    joint_velocities_tensor,
+    module_count: int,
+    module_spacing_m: float,
+    split_fixed_module_name,
+):
+    from amsrr.schemas.policies import ControllerStatus
+    from amsrr.schemas.runtime import ModuleRuntimeState, RuntimeObservation, TaskProgressState
+
+    joint_positions = _fixed_module_joint_state_dicts(
+        module_count,
+        joint_names,
+        joint_positions_tensor,
+        split_fixed_module_name=split_fixed_module_name,
+    )
+    joint_velocities = _fixed_module_joint_state_dicts(
+        module_count,
+        joint_names,
+        joint_velocities_tensor,
+        split_fixed_module_name=split_fixed_module_name,
+    )
+    root_twist = (list(root_twist_world) + [0.0] * 6)[:6]
+    module_states = []
+    for module_id in range(module_count):
+        offset_root = (module_spacing_m * module_id, 0.0, 0.0)
+        pose_world = _fixed_module_pose(root_pose_world, offset_root)
+        twist_world = _fixed_module_twist(root_pose_world, root_twist, offset_root)
+        module_states.append(
+            ModuleRuntimeState(
+                module_id=module_id,
+                pose_world=pose_world,
+                twist_world=twist_world,
+                joint_positions=joint_positions[module_id],
+                joint_velocities=joint_velocities[module_id],
+            )
+        )
+    return RuntimeObservation(
+        time_s=time_s,
+        morphology_graph=morphology_graph,
+        module_states=module_states,
+        object_states=[],
+        contact_states=[],
+        controller_status=ControllerStatus(status="ok", qp_feasible=True),
+        task_progress=TaskProgressState(),
+    )
+
+
+def _fixed_module_joint_state_dicts(
+    module_count: int,
+    joint_names: list[str],
+    tensor,
+    *,
+    split_fixed_module_name,
+) -> list[dict[str, float]]:
+    values = tensor[0].detach().cpu().tolist()
+    states = [dict() for _ in range(module_count)]
+    for index, joint_name in enumerate(joint_names):
+        parsed = split_fixed_module_name(joint_name)
+        if parsed is None:
+            if module_count == 1:
+                states[0][joint_name] = float(values[index])
+            continue
+        module_id, local_name = parsed
+        if 0 <= module_id < module_count:
+            states[module_id][local_name] = float(values[index])
+    return states
+
+
+def _fixed_module_pose(
+    root_pose_world: tuple[float, float, float, float, float, float, float],
+    offset_root: tuple[float, float, float],
+) -> tuple[float, float, float, float, float, float, float]:
+    rotation = _quat_to_matrix(tuple(root_pose_world[3:7]))
+    offset_world = _matvec(rotation, offset_root)
+    return (
+        float(root_pose_world[0]) + offset_world[0],
+        float(root_pose_world[1]) + offset_world[1],
+        float(root_pose_world[2]) + offset_world[2],
+        float(root_pose_world[3]),
+        float(root_pose_world[4]),
+        float(root_pose_world[5]),
+        float(root_pose_world[6]),
+    )
+
+
+def _fixed_module_twist(
+    root_pose_world: tuple[float, float, float, float, float, float, float],
+    root_twist_world: list[float],
+    offset_root: tuple[float, float, float],
+) -> list[float]:
+    rotation = _quat_to_matrix(tuple(root_pose_world[3:7]))
+    offset_world = _matvec(rotation, offset_root)
+    linear = tuple(float(value) for value in root_twist_world[:3])
+    angular = tuple(float(value) for value in root_twist_world[3:6])
+    linear_at_module = _add3(linear, _cross3(angular, offset_world))
+    return [*linear_at_module, *angular]
+
+
+def _yaw_quat_xyzw(yaw_rad: float) -> tuple[float, float, float, float]:
+    half = 0.5 * float(yaw_rad)
+    return (0.0, 0.0, math.sin(half), math.cos(half))
+
+
 def _tensor_row(tensor, *, limit: int | None = None) -> list[float]:
     row = tensor[0]
     if limit is not None:
@@ -561,6 +941,35 @@ def _quat_multiply(
     )
 
 
+def _quat_to_matrix(quat_xyzw: tuple[float, float, float, float]):
+    x, y, z, w = _normalize_quat(quat_xyzw)
+    return (
+        (1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)),
+        (2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)),
+        (2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)),
+    )
+
+
+def _matvec(matrix, vector: tuple[float, float, float]) -> tuple[float, float, float]:
+    return (
+        matrix[0][0] * vector[0] + matrix[0][1] * vector[1] + matrix[0][2] * vector[2],
+        matrix[1][0] * vector[0] + matrix[1][1] * vector[1] + matrix[1][2] * vector[2],
+        matrix[2][0] * vector[0] + matrix[2][1] * vector[1] + matrix[2][2] * vector[2],
+    )
+
+
+def _add3(left: tuple[float, float, float], right: tuple[float, float, float]) -> tuple[float, float, float]:
+    return (left[0] + right[0], left[1] + right[1], left[2] + right[2])
+
+
+def _cross3(left: tuple[float, float, float], right: tuple[float, float, float]) -> tuple[float, float, float]:
+    return (
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    )
+
+
 def _is_finite(value: float) -> bool:
     return math.isfinite(value)
 
@@ -576,16 +985,19 @@ def _apply_actuator_record(robot, actuator_record, physical_model, device: str) 
 
     for target in actuator_record.actuator_targets:
         local_id = str(target.metadata.get("local_id", target.command_key))
+        module_id = int(target.metadata.get("module_id", 0))
         if target.actuator_type == "rotor_thrust":
             rotor = rotors_by_id.get(local_id)
-            if rotor is None or local_id not in robot.body_names:
+            body_name = _resolve_module_name(robot.body_names, module_id, local_id)
+            if rotor is None or body_name is None:
                 continue
-            force_body_ids.append(robot.body_names.index(local_id))
+            force_body_ids.append(robot.body_names.index(body_name))
             force_rows.append([float(axis) * target.target_value for axis in rotor.thrust_axis_local])
         elif target.actuator_type in {"vectoring_joint_position", "dock_joint_position"}:
-            if local_id not in robot.joint_names:
+            joint_name = _resolve_module_name(robot.joint_names, module_id, local_id)
+            if joint_name is None:
                 continue
-            joint_ids.append(robot.joint_names.index(local_id))
+            joint_ids.append(robot.joint_names.index(joint_name))
             joint_targets.append(target.target_value)
 
     if force_body_ids:
@@ -602,6 +1014,19 @@ def _apply_actuator_record(robot, actuator_record, physical_model, device: str) 
         target_tensor = torch.tensor([joint_targets], dtype=torch.float32, device=device)
         joint_ids_tensor = torch.tensor(joint_ids, dtype=torch.int32, device=device)
         robot.set_joint_position_target_index(target=target_tensor, joint_ids=joint_ids_tensor)
+
+
+def _resolve_module_name(names: list[str], module_id: int, local_id: str) -> str | None:
+    prefixed = f"module_{module_id}__{local_id}"
+    if prefixed in names:
+        return prefixed
+    if local_id in names:
+        return local_id
+    suffix = f"__{local_id}"
+    matches = [name for name in names if name.endswith(suffix)]
+    if len(matches) == 1:
+        return matches[0]
+    return None
 
 
 def _controller_bundle_report(controller_bundle) -> dict[str, object]:

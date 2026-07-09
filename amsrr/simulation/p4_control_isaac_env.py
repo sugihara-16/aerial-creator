@@ -25,6 +25,7 @@ class P4ControlLowLevelEnvConfig(SchemaBase):
     attitude_error_threshold_rad: float = 0.25
     max_episode_steps: int = 600
     fixed_morphology_module_count: int = 2
+    fixed_morphology_module_spacing_m: float = 0.45
     waypoint_target_position_m: tuple[float, float, float] = (0.25, 0.0, 0.2)
     waypoint_target_yaw_rad: float = 0.0
 
@@ -45,6 +46,8 @@ class P4ControlLowLevelEnvConfig(SchemaBase):
             raise SchemaValidationError("P4ControlLowLevelEnvConfig.max_episode_steps must be positive")
         if self.fixed_morphology_module_count < 1:
             raise SchemaValidationError("P4ControlLowLevelEnvConfig.fixed_morphology_module_count must be >= 1")
+        if self.fixed_morphology_module_spacing_m <= 0.0:
+            raise SchemaValidationError("P4ControlLowLevelEnvConfig.fixed_morphology_module_spacing_m must be positive")
         require_len(self.waypoint_target_position_m, 3, "P4ControlLowLevelEnvConfig.waypoint_target_position_m")
 
 
@@ -160,6 +163,8 @@ class P4ControlIsaacEnv:
         for scenario in scenarios:
             if scenario.smoke_name == "single_module_hover":
                 results.append(self._run_single_module_hover_smoke(scenario))
+            elif scenario.smoke_name == "fixed_morphology_hover":
+                results.append(self._run_fixed_morphology_hover_smoke(scenario))
             else:
                 results.append(
                     P4ControlSmokeResult(
@@ -171,7 +176,7 @@ class P4ControlIsaacEnv:
                         skip_reason="real_isaac_execution_not_implemented",
                         metrics={**_scenario_metrics(scenario), "isaac_backend_available": 1.0},
                     )
-                )
+            )
         return results
 
     def _run_single_module_hover_smoke(self, scenario: P4ControlSmokeScenario) -> P4ControlSmokeResult:
@@ -205,6 +210,42 @@ class P4ControlIsaacEnv:
             skipped=False,
             isaac_backed=bool(report.get("isaac_backed", True)),
             skip_reason=None if passed else str(report.get("error", "single_module_hover_failed")),
+            metrics=metrics,
+        )
+
+    def _run_fixed_morphology_hover_smoke(self, scenario: P4ControlSmokeScenario) -> P4ControlSmokeResult:
+        metrics = {**_scenario_metrics(scenario), "isaac_backend_available": 1.0}
+        try:
+            report = self.backend.run_holon_fixed_morphology_hover_smoke(
+                config_path=self.config.config_path,
+                force_convert=True,
+                steps=self.config.max_episode_steps,
+                module_count=scenario.module_count,
+                module_spacing_m=self.config.fixed_morphology_module_spacing_m,
+                hover_target_height=scenario.target_pose_world[2],
+                position_tolerance_m=scenario.position_error_threshold_m,
+                attitude_tolerance_rad=scenario.attitude_error_threshold_rad,
+                hold_duration_s=scenario.hold_duration_s,
+            )
+        except Exception as exc:  # pragma: no cover - real subprocess failures are environment-specific.
+            return P4ControlSmokeResult(
+                scenario.smoke_name,
+                attempted=True,
+                passed=False,
+                skipped=False,
+                isaac_backed=True,
+                skip_reason=str(exc),
+                metrics={**metrics, "runner_exception": 1.0},
+            )
+        metrics.update(_prefixed_smoke_report_metrics(report, "fixed_morphology_hover"))
+        passed = bool(report.get("fixed_morphology_hover_smoke_passed"))
+        return P4ControlSmokeResult(
+            scenario.smoke_name,
+            attempted=True,
+            passed=passed,
+            skipped=False,
+            isaac_backed=bool(report.get("isaac_backed", True)),
+            skip_reason=None if passed else str(report.get("error", "fixed_morphology_hover_failed")),
             metrics=metrics,
         )
 
@@ -273,6 +314,50 @@ def _single_module_hover_report_metrics(report: dict[str, Any]) -> dict[str, flo
     )
     metrics: dict[str, float] = {}
     for key in keys:
+        value = report.get(key)
+        if isinstance(value, bool):
+            metrics[key] = 1.0 if value else 0.0
+        elif isinstance(value, (int, float)):
+            metrics[key] = float(value)
+    return metrics
+
+
+def _prefixed_smoke_report_metrics(report: dict[str, Any], prefix: str) -> dict[str, float]:
+    suffixes = (
+        "smoke",
+        "smoke_passed",
+        "module_count",
+        "module_spacing_m",
+        "steps",
+        "requested_steps",
+        "duration_s",
+        "hold_time_s",
+        "hold_required_s",
+        "stopped_on_hold",
+        "position_tolerance_m",
+        "attitude_tolerance_rad",
+        "final_position_error_m",
+        "final_attitude_error_rad",
+        "max_position_error_m",
+        "max_attitude_error_rad",
+        "min_height_m",
+        "max_height_m",
+        "finite_state",
+        "qp_infeasible_count",
+        "controller_clipped_count",
+        "missing_actuator_count",
+        "unsupported_actuator_count",
+        "clipped_target_count",
+    )
+    metrics: dict[str, float] = {}
+    for suffix in suffixes:
+        key = f"{prefix}_{suffix}"
+        value = report.get(key)
+        if isinstance(value, bool):
+            metrics[key] = 1.0 if value else 0.0
+        elif isinstance(value, (int, float)):
+            metrics[key] = float(value)
+    for key in ("command_returncode", "spawn_passed", "command_probe_passed"):
         value = report.get(key)
         if isinstance(value, bool):
             metrics[key] = 1.0 if value else 0.0
