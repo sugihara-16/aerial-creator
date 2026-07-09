@@ -4,6 +4,13 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control PolicyCommand PID Target Builder Supplement
+
+- Context: Before implementing closed-loop hover, the controller needed a deterministic path from direct P4-control hover/waypoint targets to desired body wrench while preserving the `π_L -> PolicyCommand -> controller/QP` responsibility boundary.
+- Decision: Extended `QPIDController` so `PolicyCommand.desired_body_pose` and `PolicyCommand.desired_body_twist` activate a PID target builder. The builder uses the user-specified initial gains: xy `P=3.0/I=0.05/D=2.0`, z `P=5.0/I=1.0/D=2.5`, roll/pitch `P=22.0/I=1.0/D=14.0`, and yaw `P=5.0/I=1.0/D=4.0`. Position PID produces world-frame acceleration plus gravity compensation, then converts force to body frame. Attitude uses quaternion error in body frame, with roll/pitch and yaw gains applied by body axis. `PolicyCommand.residual_wrench_body` and any existing feedforward wrench are added to the PID wrench before QP allocation.
+- Anti-windup decision: Integral state is held inside `QPIDController` and is committed only when the allocation is feasible and unclipped; infeasible or clipped allocation freezes the integral. No fixed acceleration/torque clipping values were introduced in this order; rotor/vectoring limits and infeasible status remain enforced by the QP/hard-check layer until explicit target-wrench saturation limits are specified.
+- Compatibility impact: No persisted schema change. `InteractionKnot.centroidal_target.centroidal_wrench_preference` remains an upstream intent/reference path consumed by the existing bias builder for compatibility, but P4-control direct hover/waypoint should use `PolicyCommand.desired_body_pose`, `desired_body_twist`, and `residual_wrench_body` as the controller-facing path. This does not claim closed-loop hover or P4-control completion.
+
 ### P4-Control QP Feasibility Tuning Supplement
 
 - Context: The real controller-to-Isaac command smoke proved that controller output and bridge targets could be applied in Isaac, but the controller still reported `qp_feasible=false`. Diagnostics showed the SLSQP solve succeeded; the default previous-command smoothing pulled the first hover allocation toward a zero-thrust previous command, and the post-solve hard check counted an effectively zero-thrust rotor's undefined vectoring angle as a rate-limit clip.

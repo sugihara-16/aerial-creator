@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 from amsrr.controllers.controller_base import ControllerContext
@@ -25,6 +26,18 @@ class QPIDControllerConfig:
     control_dt_s: float = 0.005
     gravity_mps2: float = 9.80665
     default_hover_when_no_wrench: bool = True
+    xy_p_gain: float = 3.0
+    xy_i_gain: float = 0.05
+    xy_d_gain: float = 2.0
+    z_p_gain: float = 5.0
+    z_i_gain: float = 1.0
+    z_d_gain: float = 2.5
+    roll_pitch_p_gain: float = 22.0
+    roll_pitch_i_gain: float = 1.0
+    roll_pitch_d_gain: float = 14.0
+    yaw_p_gain: float = 5.0
+    yaw_i_gain: float = 1.0
+    yaw_d_gain: float = 4.0
     joint_kp: float = 4.0
     joint_kd: float = 0.4
     tracking_warning_residual_norm: float = 1.0e-3
@@ -47,21 +60,35 @@ class QPIDController:
         self.allocator = allocator or self._default_allocator(self.config)
         self.bias_builder = bias_builder or PolicyCommandBiasBuilder()
         self.rigid_body_model_builder = rigid_body_model_builder or RigidBodyControlModelBuilder()
+        self._position_error_integral_world = [0.0, 0.0, 0.0]
+        self._attitude_error_integral_body = [0.0, 0.0, 0.0]
+        self._pending_position_error_integral_world: list[float] | None = None
+        self._pending_attitude_error_integral_body: list[float] | None = None
+        self._reference_metrics: dict[str, float] = {}
 
     def compute(self, context: ControllerContext) -> ControllerCommand:
         refs = context.desired_references or self._build_references(context)
         allocation = self.allocator.allocate(self._allocation_problem(context, refs))
+        self._commit_or_freeze_integrators(allocation)
         vectoring_targets = _vectoring_joint_targets(refs, context.physical_model)
         vectoring_targets.update(allocation.vectoring_joint_targets)
         joint_torques = _pd_joint_torques(refs, context.runtime_observation, context.physical_model, self.config)
         dock_commands = _dock_mechanism_hold_commands(context.runtime_observation, context.physical_model)
+        controller_status = _controller_status(allocation, self.config)
+        controller_status.metrics.update(self._reference_metrics)
         return ControllerCommand(
             rotor_thrusts_n=allocation.rotor_thrusts_n,
             vectoring_joint_targets=vectoring_targets,
             joint_torque_commands=joint_torques,
             dock_mechanism_commands=dock_commands,
-            controller_status=_controller_status(allocation, self.config),
+            controller_status=controller_status,
         )
+
+    def reset_integrators(self) -> None:
+        self._position_error_integral_world = [0.0, 0.0, 0.0]
+        self._attitude_error_integral_body = [0.0, 0.0, 0.0]
+        self._pending_position_error_integral_world = None
+        self._pending_attitude_error_integral_body = None
 
     @staticmethod
     def _default_allocator(config: QPIDControllerConfig) -> QPAllocatorInterface:
@@ -70,6 +97,9 @@ class QPIDController:
         return BoundedVerticalRotorAllocator()
 
     def _build_references(self, context: ControllerContext) -> DesiredBiasReferences:
+        self._reference_metrics = {}
+        self._pending_position_error_integral_world = None
+        self._pending_attitude_error_integral_body = None
         current_q = _current_joint_positions(context.runtime_observation)
         current_qdot = _current_joint_velocities(context.runtime_observation)
         nominal_q = dict(current_q)
@@ -79,7 +109,7 @@ class QPIDController:
                 nominal_q.update(context.active_knot.posture_target.joint_pos_target)
             if context.active_knot.posture_target.joint_vel_target is not None:
                 nominal_qdot.update(context.active_knot.posture_target.joint_vel_target)
-        return self.bias_builder.build(
+        refs = self.bias_builder.build(
             context.policy_command,
             context.active_knot,
             nominal_joint_positions=nominal_q,
@@ -87,6 +117,104 @@ class QPIDController:
             joint_limits=_joint_position_limits(context.physical_model),
             velocity_limits=_joint_velocity_limits(context.physical_model),
         )
+        target_wrench = self._target_wrench_from_body_reference(context, refs)
+        if target_wrench is not None:
+            refs.desired_wrench_body = _sum_wrenches(target_wrench, refs.desired_wrench_body)
+        return refs
+
+    def _target_wrench_from_body_reference(
+        self,
+        context: ControllerContext,
+        refs: DesiredBiasReferences,
+    ) -> list[float] | None:
+        if refs.desired_body_pose is None and refs.desired_body_twist is None:
+            return None
+        if not context.runtime_observation.module_states:
+            return None
+        state = context.runtime_observation.module_states[0]
+        current_pose = state.pose_world
+        target_pose = refs.desired_body_pose or current_pose
+        target_twist = refs.desired_body_twist or [0.0] * 6
+        dt = max(float(context.control_dt_s or self.config.control_dt_s), 1.0e-9)
+
+        position_error_world = [
+            float(target_pose[idx]) - float(current_pose[idx])
+            for idx in range(3)
+        ]
+        current_twist = list(state.twist_world or [0.0] * 6)
+        current_twist = (current_twist + [0.0] * 6)[:6]
+        target_twist = (list(target_twist) + [0.0] * 6)[:6]
+        velocity_error_world = [
+            float(target_twist[idx]) - float(current_twist[idx])
+            for idx in range(3)
+        ]
+        position_integral = [
+            self._position_error_integral_world[idx] + position_error_world[idx] * dt
+            for idx in range(3)
+        ]
+        self._pending_position_error_integral_world = position_integral
+
+        current_quat = _normalize_quat(_pose_quat(current_pose))
+        target_quat = _normalize_quat(_pose_quat(target_pose))
+        attitude_error_body = _quat_error_vector_body(current_quat, target_quat)
+        body_from_world = _transpose(_quat_to_matrix(current_quat))
+        current_angular_velocity_body = _matvec(body_from_world, tuple(float(value) for value in current_twist[3:6]))
+        target_angular_velocity_body = tuple(float(value) for value in target_twist[3:6])
+        angular_velocity_error_body = [
+            target_angular_velocity_body[idx] - current_angular_velocity_body[idx]
+            for idx in range(3)
+        ]
+        attitude_integral = [
+            self._attitude_error_integral_body[idx] + attitude_error_body[idx] * dt
+            for idx in range(3)
+        ]
+        self._pending_attitude_error_integral_body = attitude_integral
+
+        desired_acc_world = [
+            self.config.xy_p_gain * position_error_world[0]
+            + self.config.xy_i_gain * position_integral[0]
+            + self.config.xy_d_gain * velocity_error_world[0],
+            self.config.xy_p_gain * position_error_world[1]
+            + self.config.xy_i_gain * position_integral[1]
+            + self.config.xy_d_gain * velocity_error_world[1],
+            self.config.z_p_gain * position_error_world[2]
+            + self.config.z_i_gain * position_integral[2]
+            + self.config.z_d_gain * velocity_error_world[2],
+        ]
+        desired_force_world = (
+            context.physical_model.aggregate_mass_kg * desired_acc_world[0],
+            context.physical_model.aggregate_mass_kg * desired_acc_world[1],
+            context.physical_model.aggregate_mass_kg * (self.config.gravity_mps2 + desired_acc_world[2]),
+        )
+        desired_force_body = _matvec(body_from_world, desired_force_world)
+        desired_torque_body = (
+            self.config.roll_pitch_p_gain * attitude_error_body[0]
+            + self.config.roll_pitch_i_gain * attitude_integral[0]
+            + self.config.roll_pitch_d_gain * angular_velocity_error_body[0],
+            self.config.roll_pitch_p_gain * attitude_error_body[1]
+            + self.config.roll_pitch_i_gain * attitude_integral[1]
+            + self.config.roll_pitch_d_gain * angular_velocity_error_body[1],
+            self.config.yaw_p_gain * attitude_error_body[2]
+            + self.config.yaw_i_gain * attitude_integral[2]
+            + self.config.yaw_d_gain * angular_velocity_error_body[2],
+        )
+        self._reference_metrics = {
+            "target_pos_error_m": math.sqrt(sum(value * value for value in position_error_world)),
+            "target_rot_error_rad": math.sqrt(sum(value * value for value in attitude_error_body)),
+            "target_velocity_error_norm": math.sqrt(sum(value * value for value in velocity_error_world)),
+            "target_angular_velocity_error_norm": math.sqrt(sum(value * value for value in angular_velocity_error_body)),
+            "pid_target_builder_active": 1.0,
+        }
+        return [*desired_force_body, *desired_torque_body]
+
+    def _commit_or_freeze_integrators(self, allocation: QPAllocationResult) -> None:
+        if allocation.feasible and not allocation.clipped:
+            if self._pending_position_error_integral_world is not None:
+                self._position_error_integral_world = list(self._pending_position_error_integral_world)
+            if self._pending_attitude_error_integral_body is not None:
+                self._attitude_error_integral_body = list(self._pending_attitude_error_integral_body)
+        self._pending_position_error_integral_world = None
+        self._pending_attitude_error_integral_body = None
 
     def _allocation_problem(
         self,
@@ -283,3 +411,84 @@ def _clip_symmetric(value: float, limit: float | None) -> float:
     if limit is None:
         return float(value)
     return min(max(float(value), -limit), limit)
+
+
+def _sum_wrenches(left: list[float] | None, right: list[float] | None) -> list[float] | None:
+    if left is None and right is None:
+        return None
+    left_values = left or [0.0] * 6
+    right_values = right or [0.0] * 6
+    return [float(left_values[idx]) + float(right_values[idx]) for idx in range(6)]
+
+
+def _pose_quat(pose: tuple[float, float, float, float, float, float, float]) -> tuple[float, float, float, float]:
+    return (float(pose[3]), float(pose[4]), float(pose[5]), float(pose[6]))
+
+
+def _normalize_quat(quat_xyzw: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    x, y, z, w = quat_xyzw
+    norm = math.sqrt(x * x + y * y + z * z + w * w)
+    if norm <= 0.0:
+        raise SchemaValidationError("Pose quaternion norm must be positive")
+    return x / norm, y / norm, z / norm, w / norm
+
+
+def _quat_error_vector_body(
+    current_quat_xyzw: tuple[float, float, float, float],
+    target_quat_xyzw: tuple[float, float, float, float],
+) -> list[float]:
+    error = _quat_multiply(_quat_conjugate(current_quat_xyzw), target_quat_xyzw)
+    if error[3] < 0.0:
+        error = tuple(-value for value in error)  # type: ignore[assignment]
+    vector_norm = math.sqrt(error[0] * error[0] + error[1] * error[1] + error[2] * error[2])
+    if vector_norm <= 1.0e-12:
+        return [0.0, 0.0, 0.0]
+    angle = 2.0 * math.atan2(vector_norm, max(min(error[3], 1.0), -1.0))
+    scale = angle / vector_norm
+    return [error[0] * scale, error[1] * scale, error[2] * scale]
+
+
+def _quat_conjugate(quat_xyzw: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    return (-quat_xyzw[0], -quat_xyzw[1], -quat_xyzw[2], quat_xyzw[3])
+
+
+def _quat_multiply(
+    left_xyzw: tuple[float, float, float, float],
+    right_xyzw: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    lx, ly, lz, lw = left_xyzw
+    rx, ry, rz, rw = right_xyzw
+    return (
+        lw * rx + lx * rw + ly * rz - lz * ry,
+        lw * ry - lx * rz + ly * rw + lz * rx,
+        lw * rz + lx * ry - ly * rx + lz * rw,
+        lw * rw - lx * rx - ly * ry - lz * rz,
+    )
+
+
+def _quat_to_matrix(quat_xyzw: tuple[float, float, float, float]) -> tuple[tuple[float, float, float], ...]:
+    x, y, z, w = _normalize_quat(quat_xyzw)
+    return (
+        (1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)),
+        (2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)),
+        (2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)),
+    )
+
+
+def _transpose(matrix: tuple[tuple[float, float, float], ...]) -> tuple[tuple[float, float, float], ...]:
+    return (
+        (matrix[0][0], matrix[1][0], matrix[2][0]),
+        (matrix[0][1], matrix[1][1], matrix[2][1]),
+        (matrix[0][2], matrix[1][2], matrix[2][2]),
+    )
+
+
+def _matvec(
+    matrix: tuple[tuple[float, float, float], ...],
+    vector: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    return (
+        matrix[0][0] * vector[0] + matrix[0][1] * vector[1] + matrix[0][2] * vector[2],
+        matrix[1][0] * vector[0] + matrix[1][1] * vector[1] + matrix[1][2] * vector[2],
+        matrix[2][0] * vector[0] + matrix[2][1] * vector[1] + matrix[2][2] * vector[2],
+    )

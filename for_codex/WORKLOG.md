@@ -3,6 +3,33 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control controller supplement and user-provided initial PID gains
+- Work package / Agent label: Agent I boundary: P4-control Order 12 PolicyCommand PID target builder
+- Summary: Added the deterministic controller-side PID target builder needed before closed-loop hover. `PolicyCommand.desired_body_pose` / `desired_body_twist` now generate a desired body wrench with gravity compensation, user-specified xy/z/roll-pitch/yaw PID gains, body-frame quaternion attitude error, feedforward/residual wrench addition, target tracking metrics, and integral anti-windup that commits only after feasible unclipped allocation.
+- Files changed:
+  - `amsrr/controllers/qpid_controller.py`
+  - `tests/unit/controllers/test_qpid_controller.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None.
+- Upstream dependencies used: P4-control controller supplement Section 6, user-provided PID gains, existing `PolicyCommand` body target/residual wrench fields, `RuntimeObservation` pose/twist, and Agent I QP allocator contract.
+- Downstream impact: The upcoming single-module closed-loop Isaac smoke can reuse one persistent `QPIDController` instance and feed direct hover/waypoint targets through `PolicyCommand` instead of bypassing π_L/controller ownership boundaries.
+- Tests added or run:
+  - Added `test_qpid_controller_builds_pid_wrench_from_policy_body_target_and_feedforward`.
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/controllers/test_qpid_controller.py -q`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr scripts -q`
+  - `git diff --check`
+- Commands run:
+  - `sed -n ... amsrr/controllers/qpid_controller.py`
+  - `sed -n ... tests/unit/controllers/test_qpid_controller.py`
+  - `rg -n "root_pose_w|root_quat_w|xyzw" /home/leus/IsaacLab/source/isaaclab -S` to confirm IsaacLab 3 quaternion ordering is XYZW
+- Tests run: Controller unit tests passed: 9 passed. Full unit suite passed: 122 passed, 1 skipped. Compileall and diff check passed.
+- Assumptions: No fixed acceleration or torque saturation values were introduced because the user specified gains but not wrench saturation limits; QP actuator bounds and infeasible/clipped metrics remain the safety enforcement layer for this order.
+- Blockers: None for PID target builder. Closed-loop Isaac hover is still not implemented and no P4-control completion is claimed.
+- Next steps: Commit Order 12, then implement the real single-module closed-loop smoke using a persistent controller and direct `PolicyCommand` hover target.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control Isaac environment recommendation
 - Work package / Agent label: Agent I/J boundary: P4-control Order 11 QP feasibility tuning for controller-command smoke
 - Summary: Resolved the controller smoke's false QP infeasible status. The QP solver was succeeding, but default smoothing weights pulled the first hover allocation toward the previous zero-thrust command and the post-solve hard check counted a zero-thrust vectoring angle singularity as clipping. Reduced the primary allocator regularization/previous-command weights, raised controller-level unsupported-wrench tolerance only to the small back-conversion residual scale, and held vectoring joints at current position when the back-converted rotor thrust is effectively zero.
@@ -1746,6 +1773,23 @@
 ## Work Package Logs
 
 ### P4-Control / P4a: QP/PID Controller Specification
+
+#### 2026-07-09
+- Scope: Implement Agent I Order 12 `PolicyCommand` PID target builder.
+- Files changed:
+  - `amsrr/controllers/qpid_controller.py`
+  - `tests/unit/controllers/test_qpid_controller.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: Controller supplement PID target-builder section, user-provided PID gains, `PolicyCommand` direct body target fields, runtime pose/twist, and QP allocation result status.
+- Implemented: PID gains in `QPIDControllerConfig`, body-pose/twist target wrench generation, world-frame gravity/position PID force converted to body frame, quaternion body-frame attitude PID torque, feedforward residual wrench addition, target tracking metrics, and allocation-gated integral anti-windup.
+- Not implemented: Closed-loop Isaac execution, fixed-morphology hover, waypoint smoke, explicit desired-wrench saturation limits, or P4-control completion.
+- Schema/interface changes: None.
+- Downstream impact: Agent J/K closed-loop smoke can now compute `ControllerCommand` from observed pose/twist and `PolicyCommand.desired_body_pose` without bypassing the controller boundary.
+- Tests added: `test_qpid_controller_builds_pid_wrench_from_policy_body_target_and_feedforward`.
+- Tests passed: Controller unit tests passed: 9 passed. Full unit suite passed: 122 passed, 1 skipped. Compileall and `git diff --check` passed.
+- Handoff notes: IsaacLab 3 root poses use XYZW quaternions, matching A-MSRR `Pose7D`. Integral state is held by the controller instance, so closed-loop smoke must reuse the controller across steps.
+- Open questions: None for this order.
 
 #### 2026-07-09
 - Scope: Tune Agent I/J controller-command QP feasibility after the first real controller-to-Isaac smoke.

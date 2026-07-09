@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from amsrr.controllers.controller_base import ControllerContext
 from amsrr.controllers.qp_allocator_interface import (
     BoundedVerticalRotorAllocator,
+    QPAllocationResult,
     QPAllocationProblem,
     QP_INFEASIBLE_CODE,
     QP_THRUST_CLIPPED_CODE,
@@ -132,6 +135,22 @@ def _single_vectoring_rigid_body_model(
         },
         current_joint_positions={"module_0:gimbal1": 0.0},
     )
+
+
+class _RecordingAllocator:
+    def __init__(self) -> None:
+        self.problem: QPAllocationProblem | None = None
+
+    def allocate(self, problem: QPAllocationProblem):
+        self.problem = problem
+        return QPAllocationResult(
+            rotor_thrusts_n={},
+            feasible=True,
+            residual_wrench_body=[0.0] * 6,
+            residual_norm=0.0,
+            achieved_wrench_body=list(problem.desired_wrench_body or [0.0] * 6),
+            metrics={"qp_primary_path": 1.0},
+        )
 
 
 def test_bounded_vertical_rotor_allocator_feasible_and_unsupported_residual() -> None:
@@ -306,3 +325,50 @@ def test_qpid_controller_rigid_body_qp_hover_is_feasible_with_default_tolerance(
     assert controller_command.controller_status.qp_feasible is True
     assert controller_command.controller_status.metrics["allocation_residual_norm"] < 1.0e-5
     assert controller_command.controller_status.metrics["clipped"] == 0.0
+
+
+def test_qpid_controller_builds_pid_wrench_from_policy_body_target_and_feedforward() -> None:
+    physical_model = _physical_model()
+    runtime = _runtime_observation()
+    yaw_target_rad = 0.1
+    allocator = _RecordingAllocator()
+
+    controller_command = QPIDController(
+        allocator=allocator,
+        config=QPIDControllerConfig(control_dt_s=0.005),
+    ).compute(
+        ControllerContext(
+            runtime_observation=runtime,
+            morphology_graph=runtime.morphology_graph,
+            physical_model=physical_model,
+            active_knot=InteractionKnot(t_rel_s=0.0, contact_assignments=[]),
+            policy_command=PolicyCommand(
+                desired_body_pose=(
+                    0.0,
+                    0.0,
+                    0.2,
+                    0.0,
+                    0.0,
+                    math.sin(0.5 * yaw_target_rad),
+                    math.cos(0.5 * yaw_target_rad),
+                ),
+                desired_body_twist=[0.0] * 6,
+                residual_wrench_body=[1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            ),
+        )
+    )
+
+    assert allocator.problem is not None
+    desired = allocator.problem.desired_wrench_body
+    assert desired is not None
+    expected_z_acc = 5.0 * 0.2 + 1.0 * (0.2 * 0.005)
+    expected_yaw_torque = 5.0 * yaw_target_rad + 1.0 * (yaw_target_rad * 0.005)
+    assert desired[0] == pytest.approx(1.0)
+    assert desired[1] == pytest.approx(2.0)
+    assert desired[2] == pytest.approx(physical_model.aggregate_mass_kg * (9.80665 + expected_z_acc) + 3.0)
+    assert desired[3] == pytest.approx(4.0)
+    assert desired[4] == pytest.approx(5.0)
+    assert desired[5] == pytest.approx(expected_yaw_torque + 6.0)
+    assert controller_command.controller_status.metrics["pid_target_builder_active"] == 1.0
+    assert controller_command.controller_status.metrics["target_pos_error_m"] == pytest.approx(0.2)
+    assert controller_command.controller_status.metrics["target_rot_error_rad"] == pytest.approx(yaw_target_rad)
