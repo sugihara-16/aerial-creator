@@ -4,6 +4,7 @@ runner:
   runner_version: p4_control_low_level_runner_v1
   dry_run: true
   archive_path: artifacts/p4_control/p4_control_smoke.jsonl
+  robot_model_config_path: configs/robot/robot_model.yaml
 
 env:
   config_path: configs/env/isaac_lab.yaml

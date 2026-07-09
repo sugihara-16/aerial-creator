@@ -3,6 +3,33 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control split acceptance and smoke summary archive supplement
+- Work package / Agent label: Agent K/L boundary: P4-control Order 18 smoke summary archive production
+- Summary: Implemented the P4-control fast-gate archive production path for real smoke runs. `P4ControlLowLevelRunner` now builds one `EpisodeArchive` smoke summary for each attempted non-skipped real smoke when no external archives are supplied. Each archive records a free-flight smoke task, Holon morphology graph from the configured physical model, desired body pose policy command, summary controller status, summary runtime observation, summary actuator target metrics, and explicit no-P4-full-completion labels. Dry-run still produces no archives and cannot complete.
+- Files changed:
+  - `amsrr/simulation/p4_control_isaac_env.py`
+  - `amsrr/training/p4_control_runner.py`
+  - `configs/training/p4_control_low_level.yaml`
+  - `tests/unit/training/test_p4_control_runner.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema change. Added `robot_model_config_path` to `P4ControlLowLevelRunnerConfig` with a default of `configs/robot/robot_model.yaml`. Added runner-side summary archive construction and flattened nested real-smoke controller/bridge numeric metrics into `P4ControlSmokeResult.metrics`.
+- Upstream dependencies used: P4-control acceptance split, Order 17 all-three real smoke runner, `EpisodeArchive` runtime/controller/actuator fields, Holon physical model builder, and fixed-morphology graph helper.
+- Downstream impact: When real Isaac smokes pass, `P4ControlLowLevelRunner.run()` can now produce archives that satisfy the fast gate, so `run_p4_control_acceptance` can report P4-control low-level `completion_passed=true`. This is not P4 full completion and does not cover object grasp/carry or learning.
+- Tests added or run:
+  - Added `test_p4_control_runner_real_smoke_builds_summary_archives`.
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p4_control_runner.py tests/unit/simulation/test_p4_control_isaac_env.py tests/acceptance/test_p4_control_acceptance.py -q`
+  - `python3 -m py_compile amsrr/training/p4_control_runner.py amsrr/simulation/p4_control_isaac_env.py tests/unit/training/test_p4_control_runner.py`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `git diff --check`
+- Commands run:
+  - `eval "$(~/.local/bin/micromamba shell hook -s bash)" && micromamba activate isaaclab3 && PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/leus/amsrr:$PYTHONPATH python3 -c '...'` to run `P4ControlLowLevelRunner(dry_run=False)` with real Isaac smokes, generated USD under `/tmp/amsrr_isaac_holon_runner_archive`, and summary archive output at `/tmp/amsrr_p4_control_smoke_summary.jsonl`
+- Tests run: Related runner/simulation/acceptance tests passed: 12 passed. Full unit suite passed: 127 passed, 1 skipped. Diff check passed. Real Isaac runner plus summary archive passed with archive count `3`, `fast_gate_passed=true`, `real_isaac_smoke_passed=true`, `completion_passed=true`, and no acceptance failure reasons.
+- Assumptions: Summary archives intentionally store smoke-level controller/runtime/actuator metrics, not full per-step actuator target replay. The archives use `rollout_artifacts.archive_type="smoke_summary"` and keep `is_p4_full_completion=false`, `physical_success_claim=false`, `object_grasp_carry_claim=false`, and `learning_claim=false`.
+- Blockers: None for P4-control low-level completion. Remaining work for later phases includes per-step Isaac rollout archives, object grasp/carry rollout, learned policies, checkpoints, reward curves, and P4 full completion.
+- Next steps: Commit Order 18, then pause before moving from P4-control/P4a into P4.1/P4.2/P4.3 unless the user wants the next phase started.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus approved fixed-morphology rigid assembly representation
 - Work package / Agent label: Agent J/K boundary: P4-control Order 17 fixed-morphology waypoint smoke
 - Summary: Implemented and validated the real Isaac fixed-morphology waypoint smoke for the rigid 2-module Holon assembly. The Holon probe now supports `--fixed-morphology-waypoint-smoke`, ramps the direct `PolicyCommand.desired_body_pose` target from the initial root pose to the final waypoint, applies module-prefixed rotor/vectoring/dock targets through the existing bridge path, and reports `fixed_morphology_waypoint_*` metrics. The P4-control real smoke runner now executes all three low-level real smokes: single-module hover, fixed-morphology hover, and fixed-morphology waypoint.

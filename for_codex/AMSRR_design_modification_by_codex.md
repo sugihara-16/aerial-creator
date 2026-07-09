@@ -4,6 +4,14 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Smoke Summary Archive Supplement
+
+- Context: After all three real Isaac low-level smokes could pass, the remaining split-acceptance gap was the fast gate requiring `EpisodeArchive` records with controller command, runtime observation, actuator target record, residual/clipping metrics, and explicit no-P4-full-completion labeling.
+- Decision: Extended `P4ControlLowLevelRunner` so real-smoke runs automatically build one `EpisodeArchive` smoke summary per attempted non-skipped smoke when no external archives are supplied. Each summary archive records a free-flight smoke task, Holon morphology graph from the configured physical model, desired body pose policy command, summary `ControllerCommand` status, summary `RuntimeObservation`, and summary actuator target record metrics derived from the real smoke result.
+- Scope decision: The archive type is `smoke_summary`. It preserves real smoke pass/fail, residual/clipping/missing/unsupported counts, target tolerances, and no-mislabeling fields, but it does not claim per-step actuator target replay, object grasp/carry, learned policy training, or P4 full completion.
+- Runner impact: With real Isaac smokes passing and summary archives present, `run_p4_control_acceptance` can mark `fast_gate_passed`, `real_isaac_smoke_passed`, and `completion_passed` true for the P4-control low-level validation scope only.
+- Compatibility impact: No persisted schema change. Existing `EpisodeArchive` fields are reused. Dry-run smoke results still produce no archives and cannot pass P4-control completion.
+
 ### P4-Control Fixed-Morphology Waypoint Smoke Supplement
 
 - Context: After fixed-morphology hover passed, the remaining real-smoke runner gap was a fixed-morphology waypoint case that still uses the same rigid 2-module Holon assembly, QP controller path, and Isaac bridge application surface.

@@ -362,6 +362,7 @@ def _single_module_hover_report_metrics(report: dict[str, Any]) -> dict[str, flo
             metrics[key] = 1.0 if value else 0.0
         elif isinstance(value, (int, float)):
             metrics[key] = float(value)
+    metrics.update(_nested_smoke_report_metrics(report, "single_module_hover"))
     return metrics
 
 
@@ -407,4 +408,29 @@ def _prefixed_smoke_report_metrics(report: dict[str, Any], prefix: str) -> dict[
             metrics[key] = 1.0 if value else 0.0
         elif isinstance(value, (int, float)):
             metrics[key] = float(value)
+    metrics.update(_nested_smoke_report_metrics(report, prefix))
+    return metrics
+
+
+def _nested_smoke_report_metrics(report: dict[str, Any], prefix: str) -> dict[str, float]:
+    metrics: dict[str, float] = {}
+    controller_status = report.get(f"{prefix}_last_controller_status")
+    if isinstance(controller_status, dict):
+        qp_feasible = controller_status.get("qp_feasible")
+        if isinstance(qp_feasible, bool):
+            metrics[f"{prefix}_last_controller_qp_feasible"] = 1.0 if qp_feasible else 0.0
+        status_metrics = controller_status.get("metrics")
+        if isinstance(status_metrics, dict):
+            for key, value in status_metrics.items():
+                if isinstance(value, bool):
+                    metrics[f"{prefix}_last_controller_{key}"] = 1.0 if value else 0.0
+                elif isinstance(value, (int, float)):
+                    metrics[f"{prefix}_last_controller_{key}"] = float(value)
+    bridge_metrics = report.get(f"{prefix}_last_bridge_metrics")
+    if isinstance(bridge_metrics, dict):
+        for key, value in bridge_metrics.items():
+            if isinstance(value, bool):
+                metrics[f"{prefix}_last_bridge_{key}"] = 1.0 if value else 0.0
+            elif isinstance(value, (int, float)):
+                metrics[f"{prefix}_last_bridge_{key}"] = float(value)
     return metrics
