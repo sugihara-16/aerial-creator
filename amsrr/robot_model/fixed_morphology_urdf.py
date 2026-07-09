@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from amsrr.geometry.pose_math import (
+    FACE_TO_FACE_DOCK_RELATION,
     compose_pose,
     dock_module_relative_pose,
     inverse_pose,
@@ -125,23 +126,146 @@ def fixed_morphology_module_poses(
 class _ConnectPortRecord:
     port_id: str
     port_type: str
+    connect_link: str
+    mechanism_joint_id: str | None
     pose_root: tuple[float, float, float, float, float, float, float]
+
+
+@dataclass(frozen=True)
+class ArticulatedDockConnection:
+    parent_module_id: int
+    child_module_id: int
+    parent_port_id: str
+    child_port_id: str
+    parent_connect_link: str
+    child_connect_link: str
+    parent_mechanism_joint_id: str | None
+    child_mechanism_joint_id: str | None
+    parent_connect_to_child_root_pose: tuple[float, float, float, float, float, float, float]
 
 
 def _fixed_morphology_parent_module_ids(module_count: int) -> dict[int, int]:
     return {module_id: module_id - 1 for module_id in range(1, module_count)}
 
 
+def articulated_morphology_connections(
+    source_urdf_path: str | Path,
+    *,
+    module_count: int = 2,
+) -> list[ArticulatedDockConnection]:
+    if module_count < 1:
+        raise SchemaValidationError("articulated morphology module_count must be >= 1")
+    urdf_model = load_urdf(Path(source_urdf_path).resolve())
+    port_records = _connect_port_records(urdf_model)
+    if len(port_records) < 2 and module_count > 1:
+        raise SchemaValidationError("articulated morphology requires at least two connect ports")
+    connections: list[ArticulatedDockConnection] = []
+    used_ports: set[tuple[int, str]] = set()
+    for module_id in range(1, module_count):
+        parent_module_id = module_id - 1
+        src, dst = _first_compatible_free_pair(parent_module_id, module_id, port_records, used_ports)
+        used_ports.update({(parent_module_id, src.port_id), (module_id, dst.port_id)})
+        parent_connect_to_child_root = compose_pose(FACE_TO_FACE_DOCK_RELATION, inverse_pose(dst.pose_root))
+        connections.append(
+            ArticulatedDockConnection(
+                parent_module_id=parent_module_id,
+                child_module_id=module_id,
+                parent_port_id=src.port_id,
+                child_port_id=dst.port_id,
+                parent_connect_link=src.connect_link,
+                child_connect_link=dst.connect_link,
+                parent_mechanism_joint_id=src.mechanism_joint_id,
+                child_mechanism_joint_id=dst.mechanism_joint_id,
+                parent_connect_to_child_root_pose=parent_connect_to_child_root,
+            )
+        )
+    return connections
+
+
+def write_articulated_morphology_urdf(
+    source_urdf_path: str | Path,
+    output_urdf_path: str | Path,
+    *,
+    module_count: int = 2,
+    prefix_separator: str = FIXED_MODULE_PREFIX_SEPARATOR,
+    mesh_search_dirs: list[str | Path] | None = None,
+) -> Path:
+    """Write a tree-structured articulated multi-module URDF.
+
+    Child module roots are attached to the selected parent connect dummy link, so
+    the parent dock mechanism joint moves the whole child module subtree.
+    """
+
+    if module_count < 1:
+        raise SchemaValidationError("articulated morphology module_count must be >= 1")
+    source_path = Path(source_urdf_path).resolve()
+    output_path = Path(output_urdf_path)
+    source_root = ET.parse(source_path).getroot()
+    if _tag_name(source_root) != "robot":
+        raise SchemaValidationError(f"Expected <robot> root in {source_path}")
+    source_links = _named_children(source_root, "link")
+    if "root" not in source_links:
+        raise SchemaValidationError("source Holon URDF must contain root link")
+    search_dirs = _normalise_mesh_search_dirs(mesh_search_dirs)
+    connections = articulated_morphology_connections(source_path, module_count=module_count)
+
+    output_root = ET.Element("robot", {"name": f"holon_articulated_morphology_{module_count}"})
+    ET.SubElement(output_root, "baselink", {"name": _prefixed_name(0, "fc", prefix_separator)})
+    ET.SubElement(output_root, "thrust_link", {"name": "thrust"})
+
+    for module_id in range(module_count):
+        prefix = f"module_{module_id}{prefix_separator}"
+        for child in list(source_root):
+            tag = _tag_name(child)
+            if tag in {"baselink", "thrust_link", "m_f_rate"}:
+                continue
+            copied = copy.deepcopy(child)
+            _prefix_element(copied, prefix=prefix, source_dir=source_path.parent, mesh_search_dirs=search_dirs)
+            output_root.append(copied)
+
+    for connection in connections:
+        xyz, rpy = pose_to_xyz_rpy(connection.parent_connect_to_child_root_pose)
+        joint = ET.SubElement(
+            output_root,
+            "joint",
+            {
+                "name": f"articulated_module_{connection.child_module_id}_to_module_{connection.parent_module_id}",
+                "type": "fixed",
+            },
+        )
+        ET.SubElement(joint, "origin", {"xyz": _format_vec(xyz), "rpy": _format_vec(rpy)})
+        ET.SubElement(
+            joint,
+            "parent",
+            {"link": _prefixed_name(connection.parent_module_id, connection.parent_connect_link, prefix_separator)},
+        )
+        ET.SubElement(joint, "child", {"link": _prefixed_name(connection.child_module_id, "root", prefix_separator)})
+        ET.SubElement(joint, "axis", {"xyz": "0 0 0"})
+
+    _indent(output_root)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    ET.ElementTree(output_root).write(output_path, encoding="utf-8", xml_declaration=True)
+    return output_path
+
+
 def _connect_port_records(urdf_model: URDFModel) -> list[_ConnectPortRecord]:
     link_poses_root = link_poses_in_root_frame(urdf_model)
     joints_by_name = {joint.name: joint for joint in urdf_model.joints}
+    mechanism_joint_by_child = {
+        joint.child_link: joint
+        for joint in urdf_model.joints
+        if "dock_mech_joint" in joint.name
+    }
     records: list[_ConnectPortRecord] = []
     for joint_name in urdf_model.candidate_connect_joints:
         joint = joints_by_name[joint_name]
+        mechanism_joint = mechanism_joint_by_child.get(joint.parent_link)
         records.append(
             _ConnectPortRecord(
                 port_id=joint_name,
                 port_type=_port_type_from_name(joint_name + "_" + joint.parent_link),
+                connect_link=joint.child_link,
+                mechanism_joint_id=mechanism_joint.name if mechanism_joint is not None else None,
                 pose_root=link_poses_root[joint.child_link],
             )
         )

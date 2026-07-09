@@ -3,6 +3,35 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus articulated assembly correction
+- Work package / Agent label: Agent I/J boundary: P4-control articulated multi-link assembly correction
+- Summary: Corrected the prior articulated hover smoke so the fixed-morphology articulated case is a real multi-link assembly rather than a rigid root-to-root fixed morphology with independently moving dock links. Added an articulated morphology URDF generator that attaches the child module root to the parent module's selected connect dummy frame, so the parent dock mechanism joint moves the whole child module subtree. The fixed articulated smoke now observes module poses from Isaac body poses (`module_i__fc`) and requires both real relative module motion and q-dependent control-model updates before it can pass.
+- Files changed:
+  - `amsrr/robot_model/fixed_morphology_urdf.py`
+  - `amsrr/controllers/qpid_controller.py`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - `tests/unit/robot_model/test_fixed_morphology_urdf.py`
+  - `tests/unit/controllers/test_qpid_controller.py`
+  - `tests/unit/controllers/test_rigid_body_model.py`
+  - `for_codex/WORKLOG.md`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+- Schema/interface changes: No persisted schema change. Added `write_articulated_morphology_urdf()` and `articulated_morphology_connections()` helpers. `QPIDController` can now emit module-scoped dock mechanism commands such as `module_0:pitch_dock_mech_joint1`, avoiding accidental broadcast to every module when only one structural dock joint should move.
+- Upstream dependencies used: Holon connect dummy frames, face-to-face dock relation `Rz(pi)`, Isaac body pose observations, existing QPID rigid-body model builder, and existing actuator mapping aliases for module-scoped commands.
+- Downstream impact: `--fixed-morphology-articulated-hover-smoke` now validates a tree-structured articulated assembly. Non-articulated fixed hover/waypoint smokes continue to use the rigid fixed URDF path.
+- Tests added or run:
+  - Added unit coverage for articulated URDF frame-tree generation and q=0 connect point alignment.
+  - Added unit coverage for module-scoped dock mechanism commands.
+  - Added unit coverage that module pose changes alter rigid-body rotor origins, allocation matrix, and inertia.
+  - `python3 -m py_compile amsrr/robot_model/fixed_morphology_urdf.py amsrr/controllers/qpid_controller.py scripts/p4_control_holon_spawn_probe.py tests/unit/robot_model/test_fixed_morphology_urdf.py tests/unit/controllers/test_qpid_controller.py tests/unit/controllers/test_rigid_body_model.py`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/robot_model/test_fixed_morphology_urdf.py tests/unit/controllers/test_qpid_controller.py tests/unit/controllers/test_rigid_body_model.py -q`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - Real Isaac 10 s and 20 s fixed-morphology articulated multi-link hover smokes.
+- Tests run: Targeted unit tests passed: 23 passed. Full unit suite passed: 136 passed, 1 skipped. Real Isaac 10 s smoke passed with relative module position change `0.056426 m`, relative module attitude change `0.122662 rad`, model rotor-origin change `0.047150 m`, allocation-matrix change `0.088292`, final position error `0.009462 m`, and QP infeasible count `0`. Real Isaac 20 s smoke passed with hold time `20.0 s`, final position error `0.004215 m`, max position error `0.022913 m`, relative module position change `0.056426 m`, relative module attitude change `0.122662 rad`, model rotor-origin change `0.047150 m`, allocation-matrix change `0.088292`, QP infeasible count `0`, and no missing/unsupported/clipped bridge targets.
+- Assumptions: The first articulated two-module smoke uses the selected parent-side connection mechanism (`module_0:pitch_dock_mech_joint1`) as the structural joint that moves the child module; the mating child-side dock mechanism is held at zero to keep a URDF tree rather than a closed kinematic loop.
+- Blockers: None for the corrected two-module articulated hover smoke.
+- Next steps: If closed-loop dock constraints with both mating mechanisms active are required, that should be treated as a later physics-modeling task because URDF cannot represent the closed kinematic loop directly.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control articulated hover smoke supplement
 - Work package / Agent label: Agent I/J boundary: P4-control articulated joint flight smoke
 - Summary: Added explicit articulated hover smoke paths for single-module and fixed-morphology P4-control checks. `PostureTarget.joint_pos_target` can now command dock mechanism position targets through `QPIDController.dock_mechanism_commands` while unspecified dock joints still default to nominal zero hold. The Isaac probe exposes `--single-module-articulated-hover-smoke` and `--fixed-morphology-articulated-hover-smoke`, drives selected dock mechanism joints with a bounded sinusoidal target during hover, and reports both hover stability and actual joint-motion/tracking metrics.

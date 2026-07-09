@@ -70,6 +70,12 @@ def _runtime(module_count: int = 1, *, gimbal1: float = 0.0) -> RuntimeObservati
     )
 
 
+def _runtime_with_module_pose(module1_pose) -> RuntimeObservation:
+    runtime = _runtime(module_count=2)
+    runtime.module_states[1].pose_world = module1_pose
+    return runtime
+
+
 def test_rigid_body_model_builds_single_module_allocation_matrix() -> None:
     physical_model = _physical_model()
     model = RigidBodyControlModelBuilder().build(
@@ -159,8 +165,37 @@ def test_rigid_body_model_handles_multiple_modules_with_unique_actuator_ids() ->
     assert any(key.startswith("module_1:gimbal") for key in model.active_actuator_limits)
 
 
+def test_rigid_body_model_updates_assembly_terms_from_module_pose_change() -> None:
+    physical_model = _physical_model()
+    builder = RigidBodyControlModelBuilder()
+    model_zero = builder.build(
+        _morphology(module_count=2),
+        physical_model,
+        _runtime_with_module_pose((0.4, 0.0, 0.1, 0.0, 0.0, 0.0, 1.0)),
+    )
+    model_moved = builder.build(
+        _morphology(module_count=2),
+        physical_model,
+        _runtime_with_module_pose((0.4, 0.05, 0.16, 0.0, math.sin(0.1), 0.0, math.cos(0.1))),
+    )
+
+    assert model_moved.rotor_origins_body["module_1:thrust_1"] != pytest.approx(
+        model_zero.rotor_origins_body["module_1:thrust_1"]
+    )
+    assert _max_matrix_delta(model_moved.allocation_matrix_body, model_zero.allocation_matrix_body) > 1.0e-3
+    assert _max_list_delta(model_moved.inertia_body, model_zero.inertia_body) > 1.0e-3
+
+
 def _dot(left, right) -> float:
     return sum(float(left[idx]) * float(right[idx]) for idx in range(3))
+
+
+def _max_list_delta(left, right) -> float:
+    return max(abs(float(left[idx]) - float(right[idx])) for idx in range(min(len(left), len(right))))
+
+
+def _max_matrix_delta(left, right) -> float:
+    return max(_max_list_delta(left[row_idx], right[row_idx]) for row_idx in range(min(len(left), len(right))))
 
 
 def _normalize(vector) -> tuple[float, float, float]:

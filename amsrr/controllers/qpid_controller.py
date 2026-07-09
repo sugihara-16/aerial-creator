@@ -17,7 +17,7 @@ from amsrr.controllers.qp_allocator_interface import (
 from amsrr.controllers.rigid_body_model import RigidBodyControlModelBuilder
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.physical_model import JointModel, PhysicalModel
-from amsrr.schemas.policies import ControllerCommand, ControllerStatus
+from amsrr.schemas.policies import ControllerCommand, ControllerStatus, InteractionKnot, PolicyCommand
 from amsrr.schemas.runtime import RuntimeObservation
 
 
@@ -77,6 +77,7 @@ class QPIDController:
         dock_commands = _dock_mechanism_hold_commands(
             refs,
             context.physical_model,
+            active_module_ids=sorted(module.module_id for module in context.morphology_graph.modules),
             commanded_joint_ids=_commanded_joint_position_ids(context.active_knot, context.policy_command),
         )
         controller_status = _controller_status(allocation, self.config)
@@ -355,16 +356,36 @@ def _dock_mechanism_hold_commands(
     refs: DesiredBiasReferences,
     physical_model: PhysicalModel,
     *,
+    active_module_ids: list[int],
     commanded_joint_ids: set[str],
 ) -> dict[str, float]:
     commands: dict[str, float] = {}
     joint_by_id = {joint.joint_id: joint for joint in physical_model.joints}
-    for port in physical_model.dock_ports:
-        mechanism_joint_id = port.mechanical_limits.get("mechanism_joint_id")
-        if not mechanism_joint_id:
-            continue
-        joint = joint_by_id.get(str(mechanism_joint_id))
-        joint_id = str(mechanism_joint_id)
+    mechanism_joint_ids = sorted(
+        {
+            str(port.mechanical_limits["mechanism_joint_id"])
+            for port in physical_model.dock_ports
+            if port.mechanical_limits.get("mechanism_joint_id")
+        }
+    )
+    has_global_command = any(_split_global_joint_id(joint_id) is not None for joint_id in commanded_joint_ids)
+    if has_global_command:
+        for module_id in active_module_ids:
+            for joint_id in mechanism_joint_ids:
+                joint = joint_by_id.get(joint_id)
+                global_id = _global_id(module_id, joint_id)
+                value = 0.0
+                if global_id in commanded_joint_ids:
+                    value = float(refs.joint_position_ref.get(global_id, 0.0))
+                elif joint_id in commanded_joint_ids:
+                    value = float(refs.joint_position_ref.get(joint_id, 0.0))
+                if joint is not None:
+                    value = _clip_to_limit(value, _limit_tuple(joint))
+                commands[global_id] = value
+        return commands
+
+    for joint_id in mechanism_joint_ids:
+        joint = joint_by_id.get(joint_id)
         value = float(refs.joint_position_ref.get(joint_id, 0.0)) if joint_id in commanded_joint_ids else 0.0
         if joint is not None:
             value = _clip_to_limit(value, _limit_tuple(joint))
@@ -372,11 +393,27 @@ def _dock_mechanism_hold_commands(
     return commands
 
 
-def _commanded_joint_position_ids(active_knot, policy_command) -> set[str]:
+def _commanded_joint_position_ids(active_knot: InteractionKnot, policy_command: PolicyCommand) -> set[str]:
     joint_ids: set[str] = set(policy_command.joint_position_bias)
     if active_knot.posture_target is not None and active_knot.posture_target.joint_pos_target is not None:
         joint_ids.update(str(joint_id) for joint_id in active_knot.posture_target.joint_pos_target)
     return joint_ids
+
+
+def _split_global_joint_id(joint_id: str) -> tuple[int, str] | None:
+    if not joint_id.startswith("module_"):
+        return None
+    module_text, separator, local_id = joint_id.partition(":")
+    if separator == "" or not local_id:
+        return None
+    module_id_text = module_text[len("module_") :]
+    if not module_id_text.isdigit():
+        return None
+    return int(module_id_text), local_id
+
+
+def _global_id(module_id: int, local_id: str) -> str:
+    return f"module_{module_id}:{local_id}"
 
 
 def _current_joint_positions(runtime_observation: RuntimeObservation) -> dict[str, float]:

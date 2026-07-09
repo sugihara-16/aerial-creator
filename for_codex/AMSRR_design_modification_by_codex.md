@@ -4,6 +4,14 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Articulated Assembly Correction Supplement
+
+- Context: The prior articulated hover smoke only proved that dock mechanism joints could move while the rigid fixed-morphology assembly hovered. It did not prove that connected modules moved relative to each other as a multi-link system, because the generated fixed morphology connected module roots with a fixed joint.
+- Decision: Added a separate articulated morphology URDF path for `--fixed-morphology-articulated-hover-smoke`. The child module root is attached to the selected parent connect dummy frame, so the parent dock mechanism joint moves the whole child module subtree in Isaac. The mating child-side dock mechanism is held at zero to keep the assembly representable as a URDF tree instead of a closed kinematic loop.
+- Controller/observation decision: The articulated fixed smoke now builds `RuntimeObservation` module poses from actual Isaac body poses (`module_i__fc`) rather than static precomputed module poses. The QPID controller can emit module-scoped dock mechanism commands so only the structural parent-side dock joint is commanded.
+- Validation decision: The articulated fixed smoke now requires real relative module pose motion and q-dependent control-model motion in addition to hover stability. The 20 s real Isaac smoke passed with relative module motion, rotor-origin/allocation-matrix changes, QP feasibility, and no bridge target failures.
+- Compatibility impact: Non-articulated fixed hover and waypoint smokes still use the rigid fixed morphology path. This remains a low-level P4-control/P4a validation and does not claim dynamic docking, object grasp/carry, learned policies, closed-loop dock constraint physics, or P4 full completion.
+
 ### P4-Control Articulated Hover Smoke Supplement
 
 - Context: The user asked whether flight with internal joint motion is part of the current P4-control/P4a validation scope. It is in scope as a low-level articulated-hover smoke, distinct from dynamic docking, policy learning, object grasp/carry, or P4 full completion.

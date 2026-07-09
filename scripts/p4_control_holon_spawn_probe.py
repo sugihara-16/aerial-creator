@@ -15,7 +15,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from isaaclab.app import AppLauncher
 
-from amsrr.geometry.pose_math import compose_pose
+from amsrr.geometry.pose_math import compose_pose, inverse_pose
 
 
 def parse_args() -> argparse.Namespace:
@@ -190,8 +190,10 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     import torch
 
     from amsrr.robot_model.fixed_morphology_urdf import (
+        articulated_morphology_connections,
         fixed_morphology_module_poses,
         split_fixed_module_name,
+        write_articulated_morphology_urdf,
         write_fixed_morphology_urdf,
         write_joint_velocity_override_urdf,
         write_resolved_mesh_urdf,
@@ -218,6 +220,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         or args.fixed_morphology_waypoint_smoke
     )
     fixed_module_poses = None
+    articulated_connections = []
     converted = False
 
     if args.force_convert or fixed_smoke_requested or (args.convert_if_missing and not usd_path.exists()):
@@ -228,14 +231,31 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
                 module_count=int(args.fixed_module_count),
                 module_spacing_m=float(args.fixed_module_spacing_m),
             )
-            fixed_urdf_path = usd_dir / "fixed_morphology_urdf" / f"holon_fixed_{int(args.fixed_module_count)}.urdf"
-            urdf_path = write_fixed_morphology_urdf(
-                urdf_path,
-                fixed_urdf_path,
-                module_count=int(args.fixed_module_count),
-                module_spacing_m=float(args.fixed_module_spacing_m),
-                mesh_search_dirs=mesh_search_dirs,
-            )
+            if args.fixed_morphology_articulated_hover_smoke:
+                articulated_connections = articulated_morphology_connections(
+                    urdf_path,
+                    module_count=int(args.fixed_module_count),
+                )
+                articulated_urdf_path = (
+                    usd_dir
+                    / "articulated_morphology_urdf"
+                    / f"holon_articulated_{int(args.fixed_module_count)}.urdf"
+                )
+                urdf_path = write_articulated_morphology_urdf(
+                    urdf_path,
+                    articulated_urdf_path,
+                    module_count=int(args.fixed_module_count),
+                    mesh_search_dirs=mesh_search_dirs,
+                )
+            else:
+                fixed_urdf_path = usd_dir / "fixed_morphology_urdf" / f"holon_fixed_{int(args.fixed_module_count)}.urdf"
+                urdf_path = write_fixed_morphology_urdf(
+                    urdf_path,
+                    fixed_urdf_path,
+                    module_count=int(args.fixed_module_count),
+                    module_spacing_m=float(args.fixed_module_spacing_m),
+                    mesh_search_dirs=mesh_search_dirs,
+                )
         else:
             urdf_path = write_resolved_mesh_urdf(
                 urdf_path,
@@ -410,12 +430,18 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             report_prefix = "fixed_morphology_articulated_hover"
             waypoint_ramp_duration_s = 0.0
             fixed_articulated = True
+            fixed_articulated_joint_names = args.articulated_joint_names or [
+                connection.parent_mechanism_joint_id
+                for connection in articulated_connections
+                if connection.parent_mechanism_joint_id is not None
+            ]
         else:
             target_position = (0.0, 0.0, target_height)
             target_yaw = 0.0
             report_prefix = "fixed_morphology_hover"
             waypoint_ramp_duration_s = 0.0
             fixed_articulated = False
+            fixed_articulated_joint_names = args.articulated_joint_names
         hover_smoke_report = _run_fixed_morphology_smoke(
             robot=robot,
             sim=sim,
@@ -441,11 +467,12 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             realtime_playback=bool(args.realtime_playback),
             allocation_mode=str(args.allocation_mode),
             articulated=fixed_articulated,
-            articulated_joint_names=args.articulated_joint_names,
+            articulated_joint_names=fixed_articulated_joint_names,
             articulated_joint_amplitude_rad=float(args.articulated_joint_amplitude_rad),
             articulated_joint_period_s=float(args.articulated_joint_period_s),
             articulated_joint_warmup_s=float(args.articulated_joint_warmup_s),
             articulated_joint_tracking_tolerance_rad=float(args.articulated_joint_tracking_tolerance_rad),
+            articulated_assembly=bool(args.fixed_morphology_articulated_hover_smoke),
         )
     for _ in range(0 if hover_smoke_report is not None else max(0, args.steps)):
         if controller_bundle is not None:
@@ -636,6 +663,107 @@ def _joint_position_for_module_joint(
     if joint_name is None:
         return None
     return _tensor_row(joint_positions_tensor)[joint_names.index(joint_name)]
+
+
+def _joint_positions_for_command_key(
+    joint_names: list[str],
+    joint_positions_tensor,
+    *,
+    command_key: str,
+    module_count: int,
+) -> list[float]:
+    parsed = _split_global_command_key(command_key)
+    if parsed is not None:
+        module_id, local_id = parsed
+        value = _joint_position_for_module_joint(
+            joint_names,
+            joint_positions_tensor,
+            module_id=module_id,
+            local_id=local_id,
+        )
+        return [] if value is None else [value]
+    values = []
+    for module_id in range(module_count):
+        value = _joint_position_for_module_joint(
+            joint_names,
+            joint_positions_tensor,
+            module_id=module_id,
+            local_id=command_key,
+        )
+        if value is not None:
+            values.append(value)
+    return values
+
+
+def _module_scoped_joint_targets(joint_targets: dict[str, float], *, module_id: int) -> dict[str, float]:
+    return {f"module_{module_id}:{joint_id}": float(value) for joint_id, value in joint_targets.items()}
+
+
+def _split_global_command_key(command_key: str) -> tuple[int, str] | None:
+    if not command_key.startswith("module_"):
+        return None
+    module_text, separator, local_id = command_key.partition(":")
+    if separator == "" or not local_id:
+        return None
+    module_id_text = module_text[len("module_") :]
+    if not module_id_text.isdigit():
+        return None
+    return int(module_id_text), local_id
+
+
+def _module_body_pose(robot, *, module_id: int, local_body_name: str):
+    body_name = _resolve_module_name(robot.body_names, module_id, local_body_name)
+    if body_name is None:
+        return None
+    body_id = robot.body_names.index(body_name)
+    pos = _tensor_body_row(robot.data.body_pos_w.torch, body_id)
+    quat = _tensor_body_row(robot.data.body_quat_w.torch, body_id)
+    return (pos[0], pos[1], pos[2], quat[0], quat[1], quat[2], quat[3])
+
+
+def _module_body_twist(robot, *, module_id: int, local_body_name: str):
+    body_name = _resolve_module_name(robot.body_names, module_id, local_body_name)
+    if body_name is None:
+        return None
+    body_id = robot.body_names.index(body_name)
+    if not hasattr(robot.data, "body_lin_vel_w") or not hasattr(robot.data, "body_ang_vel_w"):
+        return None
+    linear = _tensor_body_row(robot.data.body_lin_vel_w.torch, body_id)
+    angular = _tensor_body_row(robot.data.body_ang_vel_w.torch, body_id)
+    return [*linear, *angular]
+
+
+def _tensor_body_row(tensor, body_id: int) -> list[float]:
+    row = tensor[0, body_id]
+    return [float(value) for value in row.detach().cpu().tolist()]
+
+
+def _max_vector_dict_delta(
+    current: dict[str, tuple[float, float, float]],
+    initial: dict[str, tuple[float, float, float]],
+) -> float:
+    max_delta = 0.0
+    for key, current_vector in current.items():
+        initial_vector = initial.get(key)
+        if initial_vector is None:
+            continue
+        max_delta = max(
+            max_delta,
+            sum((float(current_vector[idx]) - float(initial_vector[idx])) ** 2 for idx in range(3)) ** 0.5,
+        )
+    return max_delta
+
+
+def _max_matrix_delta(current: list[list[float]], initial: list[list[float]]) -> float:
+    max_delta = 0.0
+    for row_idx, row in enumerate(current):
+        if row_idx >= len(initial):
+            continue
+        for col_idx, value in enumerate(row):
+            if col_idx >= len(initial[row_idx]):
+                continue
+            max_delta = max(max_delta, abs(float(value) - float(initial[row_idx][col_idx])))
+    return max_delta
 
 
 def _run_single_module_hover_smoke(
@@ -918,6 +1046,7 @@ def _run_fixed_morphology_smoke(
     articulated_joint_period_s: float,
     articulated_joint_warmup_s: float,
     articulated_joint_tracking_tolerance_rad: float,
+    articulated_assembly: bool,
 ) -> dict[str, object]:
     from amsrr.controllers.actuator_mapping import build_actuator_mapping
     from amsrr.controllers.controller_base import ControllerContext
@@ -951,6 +1080,21 @@ def _run_fixed_morphology_smoke(
         target_quat[3],
     )
     initial_root_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
+    tracked_initial_pose = initial_root_pose
+    if articulated_assembly:
+        initial_base_pose = _module_body_pose(robot, module_id=0, local_body_name="fc")
+        if initial_base_pose is not None:
+            height_offset = float(initial_base_pose[2]) - float(initial_root_pose[2])
+            target_pose = (
+                float(initial_base_pose[0]),
+                float(initial_base_pose[1]),
+                float(target_position[2]) + height_offset,
+                target_pose[3],
+                target_pose[4],
+                target_pose[5],
+                target_pose[6],
+            )
+            tracked_initial_pose = initial_base_pose
     target_twist = [0.0] * 6
     previous_command = None
     max_position_error = 0.0
@@ -977,6 +1121,13 @@ def _run_fixed_morphology_smoke(
     max_joint_tracking_error = 0.0
     observed_joint_count = 0
     last_joint_targets: dict[str, float] = {}
+    initial_relative_module_pose = None
+    max_relative_module_position_change = 0.0
+    max_relative_module_attitude_change = 0.0
+    initial_model_rotor_origins = None
+    initial_model_allocation_matrix = None
+    max_model_rotor_origin_change = 0.0
+    max_model_allocation_change = 0.0
 
     for step_idx in range(max(0, steps)):
         executed_steps = step_idx + 1
@@ -984,12 +1135,12 @@ def _run_fixed_morphology_smoke(
         root_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
         root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch)
         command_target_pose = _ramped_target_pose(
-            initial_root_pose,  # type: ignore[arg-type]
+            tracked_initial_pose,  # type: ignore[arg-type]
             target_pose,
             elapsed_s=time_s,
             ramp_duration_s=waypoint_ramp_duration_s,
         )
-        joint_targets = (
+        local_joint_targets = (
             _articulated_joint_targets(
                 articulated_joint_ids,
                 time_s=time_s,
@@ -1000,25 +1151,78 @@ def _run_fixed_morphology_smoke(
             if articulated
             else {}
         )
+        joint_targets = (
+            _module_scoped_joint_targets(local_joint_targets, module_id=0)
+            if articulated_assembly
+            else local_joint_targets
+        )
         last_joint_targets = dict(joint_targets)
         posture_target = (
             PostureTarget(joint_pos_target=joint_targets, joint_vel_target={joint_id: 0.0 for joint_id in joint_targets})
             if joint_targets
             else None
         )
-        runtime_observation = _build_fixed_runtime_observation(
-            morphology_graph,
-            time_s=time_s,
-            root_pose_world=root_pose,  # type: ignore[arg-type]
-            root_twist_world=root_twist,
-            joint_names=robot.joint_names,
-            joint_positions_tensor=robot.data.joint_pos.torch,
-            joint_velocities_tensor=robot.data.joint_vel.torch,
-            module_count=module_count,
-            module_spacing_m=module_spacing_m,
-            module_poses=module_poses,
-            split_fixed_module_name=split_fixed_module_name,
-        )
+        if articulated_assembly:
+            runtime_observation = _build_articulated_runtime_observation(
+                morphology_graph,
+                time_s=time_s,
+                robot=robot,
+                root_pose_world=root_pose,  # type: ignore[arg-type]
+                root_twist_world=root_twist,
+                joint_names=robot.joint_names,
+                joint_positions_tensor=robot.data.joint_pos.torch,
+                joint_velocities_tensor=robot.data.joint_vel.torch,
+                module_count=module_count,
+                split_fixed_module_name=split_fixed_module_name,
+            )
+        else:
+            runtime_observation = _build_fixed_runtime_observation(
+                morphology_graph,
+                time_s=time_s,
+                root_pose_world=root_pose,  # type: ignore[arg-type]
+                root_twist_world=root_twist,
+                joint_names=robot.joint_names,
+                joint_positions_tensor=robot.data.joint_pos.torch,
+                joint_velocities_tensor=robot.data.joint_vel.torch,
+                module_count=module_count,
+                module_spacing_m=module_spacing_m,
+                module_poses=module_poses,
+                split_fixed_module_name=split_fixed_module_name,
+            )
+        if articulated_assembly and len(runtime_observation.module_states) > 1:
+            base_pose = runtime_observation.module_states[0].pose_world
+            child_pose = runtime_observation.module_states[1].pose_world
+            relative_pose = compose_pose(inverse_pose(base_pose), child_pose)
+            if initial_relative_module_pose is None:
+                initial_relative_module_pose = relative_pose
+            max_relative_module_position_change = max(
+                max_relative_module_position_change,
+                _position_error_norm(list(relative_pose[:3]), initial_relative_module_pose[:3]),
+            )
+            max_relative_module_attitude_change = max(
+                max_relative_module_attitude_change,
+                _quat_error_norm(list(relative_pose[3:7]), initial_relative_module_pose[3:7]),
+            )
+            diagnostic_model = controller.rigid_body_model_builder.build(
+                morphology_graph,
+                physical_model,
+                runtime_observation,
+            )
+            if initial_model_rotor_origins is None:
+                initial_model_rotor_origins = dict(diagnostic_model.rotor_origins_body)
+                initial_model_allocation_matrix = [list(row) for row in diagnostic_model.allocation_matrix_body]
+            else:
+                max_model_rotor_origin_change = max(
+                    max_model_rotor_origin_change,
+                    _max_vector_dict_delta(diagnostic_model.rotor_origins_body, initial_model_rotor_origins),
+                )
+                max_model_allocation_change = max(
+                    max_model_allocation_change,
+                    _max_matrix_delta(
+                        diagnostic_model.allocation_matrix_body,
+                        initial_model_allocation_matrix or diagnostic_model.allocation_matrix_body,
+                    ),
+                )
         controller_command = controller.compute(
             ControllerContext(
                 runtime_observation=runtime_observation,
@@ -1052,9 +1256,14 @@ def _run_fixed_morphology_smoke(
             time.sleep(max(0.0, sim_dt))
 
         root_pose_after = _tensor_row(robot.data.root_pose_w.torch)
-        root_pos = root_pose_after[:3]
+        tracked_pose_after = (
+            list(_module_body_pose(robot, module_id=0, local_body_name="fc") or tuple(root_pose_after))
+            if articulated_assembly
+            else root_pose_after
+        )
+        root_pos = tracked_pose_after[:3]
         position_error = _position_error_norm(root_pos, target_pose[:3])
-        attitude_error = _quat_error_norm(root_pose_after[3:7], target_pose[3:7])
+        attitude_error = _quat_error_norm(tracked_pose_after[3:7], target_pose[3:7])
         final_position_error = position_error
         final_attitude_error = attitude_error
         max_position_error = max(max_position_error, position_error)
@@ -1063,16 +1272,14 @@ def _run_fixed_morphology_smoke(
         max_height = max(max_height, root_pos[2])
         finite_state = finite_state and all(_is_finite(value) for value in root_pose_after)
         if articulated:
-            for module_id in range(module_count):
-                for joint_id, target in joint_targets.items():
-                    actual = _joint_position_for_module_joint(
-                        robot.joint_names,
-                        robot.data.joint_pos.torch,
-                        module_id=module_id,
-                        local_id=joint_id,
-                    )
-                    if actual is None:
-                        continue
+            for command_key, target in joint_targets.items():
+                actuals = _joint_positions_for_command_key(
+                    robot.joint_names,
+                    robot.data.joint_pos.torch,
+                    command_key=command_key,
+                    module_count=module_count,
+                )
+                for actual in actuals:
                     observed_joint_count += 1
                     max_joint_target_abs = max(max_joint_target_abs, abs(float(target)))
                     max_joint_position_abs = max(max_joint_position_abs, abs(float(actual)))
@@ -1114,6 +1321,16 @@ def _run_fixed_morphology_smoke(
             and max_joint_tracking_error <= articulated_joint_tracking_tolerance_rad
         )
     )
+    module_motion_passed = (
+        not articulated_assembly
+        or max_relative_module_position_change >= 5.0e-3
+        or max_relative_module_attitude_change >= 2.0e-2
+    )
+    model_update_passed = (
+        not articulated_assembly
+        or max_model_rotor_origin_change >= 5.0e-3
+        or max_model_allocation_change >= 1.0e-3
+    )
     passed = (
         executed_steps > 0
         and finite_state
@@ -1125,6 +1342,8 @@ def _run_fixed_morphology_smoke(
         and final_attitude_error <= attitude_tolerance_rad
         and hold_time_s + 1.0e-9 >= hold_duration_s
         and joint_motion_passed
+        and module_motion_passed
+        and model_update_passed
     )
     return {
         f"{report_prefix}_smoke": True,
@@ -1162,10 +1381,21 @@ def _run_fixed_morphology_smoke(
             articulated_joint_tracking_tolerance_rad
         ),
         f"{report_prefix}_articulated_joint_motion_passed": bool(joint_motion_passed),
+        f"{report_prefix}_articulated_assembly": bool(articulated_assembly),
+        f"{report_prefix}_articulated_module_motion_passed": bool(module_motion_passed),
+        f"{report_prefix}_articulated_model_update_passed": bool(model_update_passed),
         f"{report_prefix}_articulated_joint_observed_count": int(observed_joint_count),
         f"{report_prefix}_articulated_max_joint_target_abs_rad": float(max_joint_target_abs),
         f"{report_prefix}_articulated_max_joint_position_abs_rad": float(max_joint_position_abs),
         f"{report_prefix}_articulated_max_joint_tracking_error_rad": float(max_joint_tracking_error),
+        f"{report_prefix}_articulated_max_relative_module_position_change_m": float(
+            max_relative_module_position_change
+        ),
+        f"{report_prefix}_articulated_max_relative_module_attitude_change_rad": float(
+            max_relative_module_attitude_change
+        ),
+        f"{report_prefix}_articulated_max_model_rotor_origin_change_m": float(max_model_rotor_origin_change),
+        f"{report_prefix}_articulated_max_model_allocation_change": float(max_model_allocation_change),
         f"{report_prefix}_articulated_last_joint_targets": dict(last_joint_targets),
         f"{report_prefix}_last_controller_status": last_controller_status,
         f"{report_prefix}_last_bridge_metrics": last_bridge_metrics,
@@ -1212,6 +1442,63 @@ def _build_fixed_runtime_observation(
         offset_root = tuple(float(value) for value in relative_pose[:3])
         pose_world = compose_pose(root_pose_world, relative_pose)
         twist_world = _fixed_module_twist(root_pose_world, root_twist, offset_root)
+        module_states.append(
+            ModuleRuntimeState(
+                module_id=module_id,
+                pose_world=pose_world,
+                twist_world=twist_world,
+                joint_positions=joint_positions[module_id],
+                joint_velocities=joint_velocities[module_id],
+            )
+        )
+    return RuntimeObservation(
+        time_s=time_s,
+        morphology_graph=morphology_graph,
+        module_states=module_states,
+        object_states=[],
+        contact_states=[],
+        controller_status=ControllerStatus(status="ok", qp_feasible=True),
+        task_progress=TaskProgressState(),
+    )
+
+
+def _build_articulated_runtime_observation(
+    morphology_graph,
+    *,
+    time_s: float,
+    robot,
+    root_pose_world: tuple[float, float, float, float, float, float, float],
+    root_twist_world: list[float],
+    joint_names: list[str],
+    joint_positions_tensor,
+    joint_velocities_tensor,
+    module_count: int,
+    split_fixed_module_name,
+):
+    from amsrr.schemas.policies import ControllerStatus
+    from amsrr.schemas.runtime import ModuleRuntimeState, RuntimeObservation, TaskProgressState
+
+    joint_positions = _fixed_module_joint_state_dicts(
+        module_count,
+        joint_names,
+        joint_positions_tensor,
+        split_fixed_module_name=split_fixed_module_name,
+    )
+    joint_velocities = _fixed_module_joint_state_dicts(
+        module_count,
+        joint_names,
+        joint_velocities_tensor,
+        split_fixed_module_name=split_fixed_module_name,
+    )
+    root_twist = (list(root_twist_world) + [0.0] * 6)[:6]
+    module_states = []
+    for module_id in range(module_count):
+        pose_world = _module_body_pose(robot, module_id=module_id, local_body_name="fc")
+        twist_world = _module_body_twist(robot, module_id=module_id, local_body_name="fc")
+        if pose_world is None:
+            pose_world = root_pose_world
+        if twist_world is None:
+            twist_world = root_twist
         module_states.append(
             ModuleRuntimeState(
                 module_id=module_id,

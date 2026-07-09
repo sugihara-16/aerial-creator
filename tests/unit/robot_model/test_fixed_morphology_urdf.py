@@ -6,10 +6,12 @@ import pytest
 
 from amsrr.geometry.pose_math import FACE_TO_FACE_DOCK_RELATION, compose_pose
 from amsrr.robot_model.fixed_morphology_urdf import (
+    articulated_morphology_connections,
     fixed_module_joint_name,
     fixed_module_link_name,
     fixed_morphology_module_poses,
     split_fixed_module_name,
+    write_articulated_morphology_urdf,
     write_fixed_morphology_urdf,
     write_joint_velocity_override_urdf,
     write_resolved_mesh_urdf,
@@ -59,6 +61,33 @@ def test_fixed_morphology_urdf_prefixes_modules_and_keeps_single_tree(tmp_path: 
     assert mesh_refs
     assert all(Path(ref).is_absolute() for ref in mesh_refs)
     assert all(Path(ref).exists() for ref in mesh_refs)
+
+
+def test_articulated_morphology_urdf_connects_child_root_to_parent_dock_port(tmp_path: Path) -> None:
+    output_path = write_articulated_morphology_urdf(
+        "assets/robots/holon/holon.urdf",
+        tmp_path / "holon_articulated_2.urdf",
+        module_count=2,
+        mesh_search_dirs=MESH_SEARCH_DIRS,
+    )
+
+    model = load_urdf(output_path)
+    connections = articulated_morphology_connections("assets/robots/holon/holon.urdf", module_count=2)
+
+    assert model.frame_tree_valid is True
+    assert model.root_links == [fixed_module_link_name(0, "root")]
+    assert len(connections) == 1
+    connection = connections[0]
+    parent_joint = next(joint for joint in model.joints if joint.name == "articulated_module_1_to_module_0")
+    assert parent_joint.parent_link == fixed_module_link_name(0, connection.parent_connect_link)
+    assert parent_joint.child_link == fixed_module_link_name(1, "root")
+    assert connection.parent_mechanism_joint_id == "pitch_dock_mech_joint1"
+    assert connection.child_mechanism_joint_id == "yaw_dock_mech_joint1"
+
+    link_poses = link_poses_in_root_frame(model)
+    src_port = link_poses[fixed_module_link_name(0, connection.parent_connect_link)]
+    dst_port = link_poses[fixed_module_link_name(1, connection.child_connect_link)]
+    assert dst_port == pytest.approx(compose_pose(src_port, FACE_TO_FACE_DOCK_RELATION), abs=1.0e-6)
 
 
 def test_resolved_mesh_urdf_points_asset_meshes_to_existing_files(tmp_path: Path) -> None:

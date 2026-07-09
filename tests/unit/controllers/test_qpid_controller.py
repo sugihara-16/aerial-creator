@@ -362,6 +362,35 @@ def test_qpid_controller_uses_posture_target_for_dock_mechanism_commands() -> No
     assert controller_command.dock_mechanism_commands["yaw_dock_mech_joint1"] == pytest.approx(1.5708)
 
 
+def test_qpid_controller_can_target_dock_mechanism_on_one_module() -> None:
+    physical_model = _physical_model()
+    runtime = _multi_module_runtime_observation(module_count=2)
+
+    controller_command = QPIDController(
+        config=QPIDControllerConfig(allocation_mode="rigid_body_qp")
+    ).compute(
+        ControllerContext(
+            runtime_observation=runtime,
+            morphology_graph=runtime.morphology_graph,
+            physical_model=physical_model,
+            active_knot=InteractionKnot(
+                t_rel_s=0.0,
+                contact_assignments=[],
+                posture_target=PostureTarget(
+                    joint_pos_target={
+                        "module_0:pitch_dock_mech_joint1": 0.2,
+                    }
+                ),
+            ),
+            policy_command=PolicyCommand(),
+        )
+    )
+
+    assert controller_command.dock_mechanism_commands["module_0:pitch_dock_mech_joint1"] == pytest.approx(0.2)
+    assert controller_command.dock_mechanism_commands["module_1:pitch_dock_mech_joint1"] == pytest.approx(0.0)
+    assert "pitch_dock_mech_joint1" not in controller_command.dock_mechanism_commands
+
+
 def test_qpid_controller_default_hover_uses_rigid_body_total_mass_for_multi_module() -> None:
     physical_model = _physical_model()
     runtime = _multi_module_runtime_observation(module_count=2)
