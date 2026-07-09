@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### Holon Battery2 Inertial Correction Supplement
+
+- Context: Real Isaac spawn and command probes consistently reported a PhysX warning that `/World/Holon/Geometry/root/main_body/battery2` had invalid inertia and negative mass fallback behavior. Inspection showed that both the runtime Holon URDF and reference xacro had `battery2` inertial data set to `mass=0` and all inertia components `0`.
+- Decision: Set `battery2` inertial origin, mass, and inertia to match the symmetric `battery1` component in `assets/robots/holon/holon.urdf` and `module_urdf/holon.urdf.xacro`. Added a unit test that mesh-bearing runtime URDF links must have positive mass and positive diagonal inertia entries.
+- Compatibility impact: This is a source asset correction needed for trustworthy Isaac physics. It changes Holon's aggregate mass/inertia relative to the previous zero-mass battery2 asset and removes the Isaac battery2 invalid-inertia warning after USD regeneration. It does not change schema contracts or claim hover/control completion.
+
 ### P4-Control Holon Isaac Command Probe Supplement
 
 - Context: After Holon articulation spawn was validated, P4-control needed a minimal real Isaac check that the intended command surfaces are reachable: rotor-like external wrenches through the wrench composer and vectoring-like joint position targets through Isaac Lab articulation actuators.

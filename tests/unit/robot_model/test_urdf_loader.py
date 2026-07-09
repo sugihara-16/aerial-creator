@@ -40,3 +40,20 @@ def test_asset_urdf_uses_config_thrust_link_names() -> None:
     assert model.candidate_rotor_links == ["thrust_1", "thrust_2", "thrust_3", "thrust_4"]
     assert model.candidate_rotor_joints == ["rotor1", "rotor2", "rotor3", "rotor4"]
     assert not any(link.name in {"thrust1", "thrust2", "thrust3", "thrust4"} for link in model.links)
+
+
+def test_asset_urdf_inertials_are_positive_for_physics_import() -> None:
+    model = load_urdf("assets/robots/holon/holon.urdf")
+
+    invalid_links = [
+        link.name
+        for link in model.links
+        if (link.visual_mesh_refs or link.collision_mesh_refs)
+        and (
+            link.mass_kg <= 0.0
+            or link.inertia_kgm2[0] <= 0.0
+            or link.inertia_kgm2[3] <= 0.0
+            or link.inertia_kgm2[5] <= 0.0
+        )
+    ]
+    assert invalid_links == []

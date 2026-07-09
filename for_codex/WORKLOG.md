@@ -4,6 +4,36 @@
 
 ### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control Isaac environment recommendation
+- Work package / Agent label: Agent B/J boundary: P4-control Order 9 Holon battery2 inertial correction
+- Summary: Investigated the recurring real Isaac PhysX warning for `battery2`. The runtime Holon URDF and reference xacro had `battery2` inertial data set to zero mass and zero inertia. Copied the symmetric `battery1` inertial origin/mass/inertia to `battery2`, added a unit guard for mesh-bearing runtime URDF links, regenerated USD under `/tmp`, and verified the battery2 warning is gone in a real Isaac command probe.
+- Files changed:
+  - `assets/robots/holon/holon.urdf`
+  - `module_urdf/holon.urdf.xacro`
+  - `tests/unit/robot_model/test_urdf_loader.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None.
+- Upstream dependencies used: Real Isaac probe logs from Orders 7/8; Holon URDF/xacro inertial data; `battery1` symmetric inertial values.
+- Downstream impact: Real Isaac smoke should regenerate USD from the corrected URDF before physical tests. Holon's aggregate mass/inertia changes from the previous zero-mass battery2 asset, so controller mass/gravity compensation and QP allocation should use the corrected physical model.
+- Tests added or run:
+  - Added `test_asset_urdf_inertials_are_positive_for_physics_import`.
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/robot_model -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr scripts -q`
+  - `git diff --check`
+- Commands run:
+  - `rg -n "battery2|battery1|inertial|mass|ixx|iyy|izz" assets/robots/holon module_urdf configs/robot tests/unit/robot_model`
+  - `sed -n ... assets/robots/holon/holon.urdf`
+  - `sed -n ... module_urdf/holon.urdf.xacro`
+  - `eval "$(~/.local/bin/micromamba shell hook -s bash)" && micromamba activate isaaclab3 && PYTHONPATH=/home/leus/amsrr:$PYTHONPATH /home/leus/IsaacLab/isaaclab.sh -p /home/leus/amsrr/scripts/p4_control_holon_spawn_probe.py --config /home/leus/amsrr/configs/env/isaac_lab.yaml --force-convert --generated-usd-dir /tmp/amsrr_isaac_holon_inertial --generated-usd-path /tmp/amsrr_isaac_holon_inertial/holon/holon.usda --steps 20 --hover-force-scale 0.5 --gimbal-target-rad 0.1`
+  - `find amsrr scripts tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: Robot model unit tests passed: 8 passed, 1 skipped. Full unit suite passed: 119 passed, 1 skipped. Compileall and diff check passed. Real Isaac command probe with regenerated USD passed with `command_probe_passed=true`, `robot_mass_kg=1.8667402267456055`, `num_bodies=25`, `num_joints=12`, max gimbal target error `0.014317 rad`, and no battery2 invalid inertia/negative mass warning in the log.
+- Assumptions: `battery2` is the symmetric counterpart of `battery1`; until a CAD-exported inertial override is provided, mirroring `battery1` inertial properties is the most conservative correction.
+- Blockers: None for the inertial correction. Remaining Isaac warnings are general extension/USD/TGS notices, not the prior battery2 invalid-mass warning.
+- Next steps: Commit Order 9, then wire corrected physical model/controller output into real Isaac single-module closed-loop smoke.
+
+### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control Isaac environment recommendation
 - Work package / Agent label: Agent J/K boundary: P4-control Order 8 Holon Isaac wrench and joint command probe
 - Summary: Extended the real Isaac Holon probe from spawn-only to command-path validation. The probe now applies world-frame `+z` wrenches to the four `thrust_.*` bodies and position targets to `gimbal.*` joints, then reports command ids, force totals, root-state deltas, gimbal actual/target positions, and a tolerance-based command pass flag.
 - Files changed:
