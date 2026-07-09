@@ -281,6 +281,57 @@ class IsaacLabBackend:
         )
         return command
 
+    def holon_fixed_morphology_waypoint_smoke_command(
+        self,
+        *,
+        config_path: str | Path = "configs/env/isaac_lab.yaml",
+        convert_if_missing: bool = True,
+        force_convert: bool = False,
+        steps: int = 600,
+        module_count: int = 2,
+        module_spacing_m: float = 0.45,
+        waypoint_target_position_m: tuple[float, float, float] = (0.05, 0.0, 0.5),
+        waypoint_target_yaw_rad: float = 0.0,
+        waypoint_ramp_duration_s: float = 0.1,
+        position_tolerance_m: float = 0.20,
+        attitude_tolerance_rad: float = 0.25,
+        hold_duration_s: float = 1.0,
+        generated_usd_dir: str | Path | None = None,
+        generated_usd_path: str | Path | None = None,
+    ) -> list[str]:
+        command = self.holon_spawn_probe_command(
+            config_path=config_path,
+            convert_if_missing=convert_if_missing,
+            force_convert=force_convert,
+            steps=steps,
+            generated_usd_dir=generated_usd_dir,
+            generated_usd_path=generated_usd_path,
+        )
+        command.extend(
+            [
+                "--fixed-morphology-waypoint-smoke",
+                "--fixed-module-count",
+                str(module_count),
+                "--fixed-module-spacing-m",
+                str(module_spacing_m),
+                "--waypoint-target-position-m",
+                str(waypoint_target_position_m[0]),
+                str(waypoint_target_position_m[1]),
+                str(waypoint_target_position_m[2]),
+                "--waypoint-target-yaw-rad",
+                str(waypoint_target_yaw_rad),
+                "--waypoint-ramp-duration-s",
+                str(waypoint_ramp_duration_s),
+                "--hover-position-tolerance-m",
+                str(position_tolerance_m),
+                "--hover-attitude-tolerance-rad",
+                str(attitude_tolerance_rad),
+                "--hover-hold-duration-s",
+                str(hold_duration_s),
+            ]
+        )
+        return command
+
     def run_holon_single_module_hover_smoke(
         self,
         *,
@@ -329,6 +380,40 @@ class IsaacLabBackend:
             module_count=module_count,
             module_spacing_m=module_spacing_m,
             hover_target_height=hover_target_height,
+            position_tolerance_m=position_tolerance_m,
+            attitude_tolerance_rad=attitude_tolerance_rad,
+            hold_duration_s=hold_duration_s,
+            generated_usd_dir=self.config.generated_usd_dir,
+            generated_usd_path=self.config.generated_usd_path,
+        )
+        return _run_json_command(command, timeout_s=timeout_s)
+
+    def run_holon_fixed_morphology_waypoint_smoke(
+        self,
+        *,
+        config_path: str | Path = "configs/env/isaac_lab.yaml",
+        force_convert: bool = True,
+        steps: int = 600,
+        module_count: int = 2,
+        module_spacing_m: float = 0.45,
+        waypoint_target_position_m: tuple[float, float, float] = (0.05, 0.0, 0.5),
+        waypoint_target_yaw_rad: float = 0.0,
+        waypoint_ramp_duration_s: float = 0.1,
+        position_tolerance_m: float = 0.20,
+        attitude_tolerance_rad: float = 0.25,
+        hold_duration_s: float = 1.0,
+        timeout_s: float | None = None,
+    ) -> dict[str, Any]:
+        command = self.holon_fixed_morphology_waypoint_smoke_command(
+            config_path=config_path,
+            convert_if_missing=not force_convert,
+            force_convert=force_convert,
+            steps=steps,
+            module_count=module_count,
+            module_spacing_m=module_spacing_m,
+            waypoint_target_position_m=waypoint_target_position_m,
+            waypoint_target_yaw_rad=waypoint_target_yaw_rad,
+            waypoint_ramp_duration_s=waypoint_ramp_duration_s,
             position_tolerance_m=position_tolerance_m,
             attitude_tolerance_rad=attitude_tolerance_rad,
             hold_duration_s=hold_duration_s,

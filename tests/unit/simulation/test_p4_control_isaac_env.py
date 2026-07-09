@@ -22,6 +22,8 @@ def test_p4_control_low_level_config_loader() -> None:
     assert env_config.hover_target_height_m == 0.5
     assert env_config.fixed_morphology_module_count == 2
     assert env_config.fixed_morphology_module_spacing_m == 0.45
+    assert env_config.waypoint_target_position_m == (0.05, 0.0, 0.5)
+    assert env_config.waypoint_ramp_duration_s == 0.1
 
 
 def test_isaac_backend_probe_and_conversion_command_are_config_driven() -> None:
@@ -79,6 +81,21 @@ def test_isaac_backend_probe_and_conversion_command_are_config_driven() -> None:
         attitude_tolerance_rad=0.25,
         hold_duration_s=1.0,
     )
+    fixed_morphology_waypoint_smoke = backend.holon_fixed_morphology_waypoint_smoke_command(
+        config_path="configs/env/isaac_lab.yaml",
+        generated_usd_dir="/tmp/amsrr_isaac_holon_fixed",
+        generated_usd_path="/tmp/amsrr_isaac_holon_fixed/holon_fixed_2/holon_fixed_2.usda",
+        force_convert=True,
+        steps=600,
+        module_count=2,
+        module_spacing_m=0.45,
+        waypoint_target_position_m=(0.05, 0.0, 0.5),
+        waypoint_target_yaw_rad=0.0,
+        waypoint_ramp_duration_s=0.1,
+        position_tolerance_m=0.20,
+        attitude_tolerance_rad=0.25,
+        hold_duration_s=1.0,
+    )
 
     assert availability.metadata["backend_version"] == "isaac_lab_backend_v1"
     assert availability.urdf_exists is True
@@ -110,6 +127,12 @@ def test_isaac_backend_probe_and_conversion_command_are_config_driven() -> None:
     assert "2" in fixed_morphology_hover_smoke
     assert "--fixed-module-spacing-m" in fixed_morphology_hover_smoke
     assert "0.45" in fixed_morphology_hover_smoke
+    assert "--fixed-morphology-waypoint-smoke" in fixed_morphology_waypoint_smoke
+    assert "--waypoint-target-position-m" in fixed_morphology_waypoint_smoke
+    assert "0.05" in fixed_morphology_waypoint_smoke
+    assert "--waypoint-ramp-duration-s" in fixed_morphology_waypoint_smoke
+    assert "0.1" in fixed_morphology_waypoint_smoke
+    assert "--waypoint-target-yaw-rad" in fixed_morphology_waypoint_smoke
 
 
 def test_p4_control_smoke_scenarios_are_deterministic() -> None:
@@ -156,7 +179,7 @@ def test_p4_control_real_smokes_skip_when_backend_missing() -> None:
     assert all("isaaclab_path_missing" in str(result.skip_reason) for result in results)
 
 
-def test_p4_control_real_smokes_run_single_and_fixed_hover_then_skip_waypoint() -> None:
+def test_p4_control_real_smokes_run_all_required_smokes() -> None:
     backend = _SingleModuleHoverBackend(
         single_report={
             "isaac_backed": True,
@@ -189,6 +212,23 @@ def test_p4_control_real_smokes_run_single_and_fixed_hover_then_skip_waypoint() 
             "fixed_morphology_hover_final_attitude_error_rad": 0.006,
             "fixed_morphology_hover_qp_infeasible_count": 0,
             "fixed_morphology_hover_clipped_target_count": 0,
+        },
+        fixed_waypoint_report={
+            "isaac_backed": True,
+            "spawn_passed": True,
+            "command_probe_passed": True,
+            "fixed_morphology_waypoint_smoke": True,
+            "fixed_morphology_waypoint_smoke_passed": True,
+            "fixed_morphology_waypoint_module_count": 2,
+            "fixed_morphology_waypoint_module_spacing_m": 0.45,
+            "fixed_morphology_waypoint_steps": 260,
+            "fixed_morphology_waypoint_requested_steps": 600,
+            "fixed_morphology_waypoint_duration_s": 1.3,
+            "fixed_morphology_waypoint_hold_time_s": 1.0,
+            "fixed_morphology_waypoint_final_position_error_m": 0.031,
+            "fixed_morphology_waypoint_final_attitude_error_rad": 0.007,
+            "fixed_morphology_waypoint_qp_infeasible_count": 0,
+            "fixed_morphology_waypoint_clipped_target_count": 0,
         }
     )
     env = P4ControlIsaacEnv(config=P4ControlLowLevelEnvConfig(), backend=backend)  # type: ignore[arg-type]
@@ -209,21 +249,33 @@ def test_p4_control_real_smokes_run_single_and_fixed_hover_then_skip_waypoint() 
     assert results[1].isaac_backed is True
     assert results[1].metrics["fixed_morphology_hover_final_position_error_m"] == 0.018
     assert results[1].metrics["fixed_morphology_hover_module_count"] == 2.0
-    assert results[2].skipped is True
-    assert results[2].skip_reason == "real_isaac_execution_not_implemented"
+    assert results[2].attempted is True
+    assert results[2].passed is True
+    assert results[2].isaac_backed is True
+    assert results[2].metrics["fixed_morphology_waypoint_final_position_error_m"] == 0.031
     assert backend.single_calls[0]["force_convert"] is True
     assert backend.single_calls[0]["steps"] == 600
     assert backend.single_calls[0]["hover_target_height"] == 0.5
     assert backend.fixed_hover_calls[0]["module_count"] == 2
     assert backend.fixed_hover_calls[0]["module_spacing_m"] == 0.45
+    assert backend.fixed_waypoint_calls[0]["waypoint_target_position_m"] == (0.05, 0.0, 0.5)
+    assert backend.fixed_waypoint_calls[0]["waypoint_ramp_duration_s"] == 0.1
 
 
 class _SingleModuleHoverBackend:
-    def __init__(self, *, single_report: dict[str, object], fixed_hover_report: dict[str, object]) -> None:
+    def __init__(
+        self,
+        *,
+        single_report: dict[str, object],
+        fixed_hover_report: dict[str, object],
+        fixed_waypoint_report: dict[str, object],
+    ) -> None:
         self.single_report = single_report
         self.fixed_hover_report = fixed_hover_report
+        self.fixed_waypoint_report = fixed_waypoint_report
         self.single_calls: list[dict[str, object]] = []
         self.fixed_hover_calls: list[dict[str, object]] = []
+        self.fixed_waypoint_calls: list[dict[str, object]] = []
 
     def availability(self) -> IsaacLabAvailability:
         return IsaacLabAvailability(
@@ -243,3 +295,7 @@ class _SingleModuleHoverBackend:
     def run_holon_fixed_morphology_hover_smoke(self, **kwargs: object) -> dict[str, object]:
         self.fixed_hover_calls.append(kwargs)
         return dict(self.fixed_hover_report)
+
+    def run_holon_fixed_morphology_waypoint_smoke(self, **kwargs: object) -> dict[str, object]:
+        self.fixed_waypoint_calls.append(kwargs)
+        return dict(self.fixed_waypoint_report)

@@ -26,8 +26,9 @@ class P4ControlLowLevelEnvConfig(SchemaBase):
     max_episode_steps: int = 600
     fixed_morphology_module_count: int = 2
     fixed_morphology_module_spacing_m: float = 0.45
-    waypoint_target_position_m: tuple[float, float, float] = (0.25, 0.0, 0.2)
+    waypoint_target_position_m: tuple[float, float, float] = (0.05, 0.0, 0.5)
     waypoint_target_yaw_rad: float = 0.0
+    waypoint_ramp_duration_s: float = 0.1
 
     def validate(self) -> None:
         require_non_empty(self.config_path, "P4ControlLowLevelEnvConfig.config_path")
@@ -48,6 +49,8 @@ class P4ControlLowLevelEnvConfig(SchemaBase):
             raise SchemaValidationError("P4ControlLowLevelEnvConfig.fixed_morphology_module_count must be >= 1")
         if self.fixed_morphology_module_spacing_m <= 0.0:
             raise SchemaValidationError("P4ControlLowLevelEnvConfig.fixed_morphology_module_spacing_m must be positive")
+        if self.waypoint_ramp_duration_s < 0.0:
+            raise SchemaValidationError("P4ControlLowLevelEnvConfig.waypoint_ramp_duration_s must be non-negative")
         require_len(self.waypoint_target_position_m, 3, "P4ControlLowLevelEnvConfig.waypoint_target_position_m")
 
 
@@ -165,6 +168,8 @@ class P4ControlIsaacEnv:
                 results.append(self._run_single_module_hover_smoke(scenario))
             elif scenario.smoke_name == "fixed_morphology_hover":
                 results.append(self._run_fixed_morphology_hover_smoke(scenario))
+            elif scenario.smoke_name == "fixed_morphology_waypoint":
+                results.append(self._run_fixed_morphology_waypoint_smoke(scenario))
             else:
                 results.append(
                     P4ControlSmokeResult(
@@ -249,6 +254,44 @@ class P4ControlIsaacEnv:
             metrics=metrics,
         )
 
+    def _run_fixed_morphology_waypoint_smoke(self, scenario: P4ControlSmokeScenario) -> P4ControlSmokeResult:
+        metrics = {**_scenario_metrics(scenario), "isaac_backend_available": 1.0}
+        try:
+            report = self.backend.run_holon_fixed_morphology_waypoint_smoke(
+                config_path=self.config.config_path,
+                force_convert=True,
+                steps=self.config.max_episode_steps,
+                module_count=scenario.module_count,
+                module_spacing_m=self.config.fixed_morphology_module_spacing_m,
+                waypoint_target_position_m=scenario.target_pose_world[:3],
+                waypoint_target_yaw_rad=self.config.waypoint_target_yaw_rad,
+                waypoint_ramp_duration_s=self.config.waypoint_ramp_duration_s,
+                position_tolerance_m=scenario.position_error_threshold_m,
+                attitude_tolerance_rad=scenario.attitude_error_threshold_rad,
+                hold_duration_s=scenario.hold_duration_s,
+            )
+        except Exception as exc:  # pragma: no cover - real subprocess failures are environment-specific.
+            return P4ControlSmokeResult(
+                scenario.smoke_name,
+                attempted=True,
+                passed=False,
+                skipped=False,
+                isaac_backed=True,
+                skip_reason=str(exc),
+                metrics={**metrics, "runner_exception": 1.0},
+            )
+        metrics.update(_prefixed_smoke_report_metrics(report, "fixed_morphology_waypoint"))
+        passed = bool(report.get("fixed_morphology_waypoint_smoke_passed"))
+        return P4ControlSmokeResult(
+            scenario.smoke_name,
+            attempted=True,
+            passed=passed,
+            skipped=False,
+            isaac_backed=bool(report.get("isaac_backed", True)),
+            skip_reason=None if passed else str(report.get("error", "fixed_morphology_waypoint_failed")),
+            metrics=metrics,
+        )
+
     def _scenario(
         self,
         smoke_name: str,
@@ -328,6 +371,7 @@ def _prefixed_smoke_report_metrics(report: dict[str, Any], prefix: str) -> dict[
         "smoke_passed",
         "module_count",
         "module_spacing_m",
+        "ramp_duration_s",
         "steps",
         "requested_steps",
         "duration_s",

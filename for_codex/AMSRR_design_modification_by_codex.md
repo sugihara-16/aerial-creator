@@ -4,6 +4,14 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Fixed-Morphology Waypoint Smoke Supplement
+
+- Context: After fixed-morphology hover passed, the remaining real-smoke runner gap was a fixed-morphology waypoint case that still uses the same rigid 2-module Holon assembly, QP controller path, and Isaac bridge application surface.
+- Decision: Extended the Holon Isaac probe, backend, and `P4ControlIsaacEnv.run_smokes(dry_run=False)` with `--fixed-morphology-waypoint-smoke`. The waypoint smoke sends `PolicyCommand.desired_body_pose` through the controller each step, ramps the commanded target from the initial root pose to the final target, and reports `fixed_morphology_waypoint_*` metrics including ramp duration, tracking error, QP infeasible count, clipping count, and bridge target health.
+- Waypoint-scope decision: The current default fixed-morphology waypoint smoke is intentionally small: world target position `(0.05, 0.0, 0.5)`, yaw `0.0 rad`, `0.1 s` target ramp, `0.20 m` position tolerance, `0.25 rad` attitude tolerance, and `1.0 s` hold. Larger exploratory lateral/z targets were not stable enough to treat as an acceptance default in this order.
+- Runner decision: The real smoke runner now attempts all three P4-control low-level smokes: `single_module_hover`, `fixed_morphology_hover`, and `fixed_morphology_waypoint`. This can satisfy the real Isaac smoke side of the split acceptance gate when all three pass, but P4-control completion still also requires the fast archive/interface gate.
+- Compatibility impact: This validates only a small real Isaac-backed waypoint smoke for the rigid fixed-morphology asset. It does not claim robust waypoint tracking, object grasp/carry, learned policies, archive completeness, P4-control completion, or P4 full completion.
+
 ### P4-Control Fixed-Morphology Hover Smoke Supplement
 
 - Context: After the fixed assembly URDF generator was available, P4-control needed to validate that a rigid 2-module Holon asset can be converted, spawned, controlled, and reported through the same QP/controller/bridge path as the single-module smoke.

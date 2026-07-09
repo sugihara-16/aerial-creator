@@ -17,5 +17,6 @@ env:
   max_episode_steps: 600
   fixed_morphology_module_count: 2
   fixed_morphology_module_spacing_m: 0.45
-  waypoint_target_position_m: [0.25, 0.0, 0.2]
+  waypoint_target_position_m: [0.05, 0.0, 0.5]
   waypoint_target_yaw_rad: 0.0
+  waypoint_ramp_duration_s: 0.1

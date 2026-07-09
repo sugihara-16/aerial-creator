@@ -70,6 +70,7 @@ def parse_args() -> argparse.Namespace:
         help="Fixed-morphology waypoint target position in meters.",
     )
     parser.add_argument("--waypoint-target-yaw-rad", type=float, default=0.0, help="Fixed-morphology waypoint target yaw.")
+    parser.add_argument("--waypoint-ramp-duration-s", type=float, default=0.1, help="Ramp duration for waypoint targets.")
     parser.add_argument("--hover-position-tolerance-m", type=float, default=0.20, help="Closed-loop hover position tolerance.")
     parser.add_argument("--hover-attitude-tolerance-rad", type=float, default=0.25, help="Closed-loop hover attitude tolerance.")
     parser.add_argument("--hover-hold-duration-s", type=float, default=1.0, help="Required final hold duration for hover pass.")
@@ -286,10 +287,12 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             target_position = tuple(float(value) for value in waypoint_position)
             target_yaw = float(args.waypoint_target_yaw_rad)
             report_prefix = "fixed_morphology_waypoint"
+            waypoint_ramp_duration_s = float(args.waypoint_ramp_duration_s)
         else:
             target_position = (0.0, 0.0, target_height)
             target_yaw = 0.0
             report_prefix = "fixed_morphology_hover"
+            waypoint_ramp_duration_s = 0.0
         hover_smoke_report = _run_fixed_morphology_smoke(
             robot=robot,
             sim=sim,
@@ -310,6 +313,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             bridge_supported_controller_command=bridge_supported_controller_command,
             split_fixed_module_name=split_fixed_module_name,
             report_prefix=report_prefix,
+            waypoint_ramp_duration_s=waypoint_ramp_duration_s,
         )
     for _ in range(0 if hover_smoke_report is not None else max(0, args.steps)):
         if controller_bundle is not None:
@@ -607,6 +611,7 @@ def _run_fixed_morphology_smoke(
     bridge_supported_controller_command,
     split_fixed_module_name,
     report_prefix: str,
+    waypoint_ramp_duration_s: float,
 ) -> dict[str, object]:
     from amsrr.controllers.actuator_mapping import build_actuator_mapping
     from amsrr.controllers.controller_base import ControllerContext
@@ -638,6 +643,7 @@ def _run_fixed_morphology_smoke(
         target_quat[2],
         target_quat[3],
     )
+    initial_root_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
     target_twist = [0.0] * 6
     previous_command = None
     max_position_error = 0.0
@@ -663,6 +669,12 @@ def _run_fixed_morphology_smoke(
         executed_steps = step_idx + 1
         root_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
         root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch)
+        command_target_pose = _ramped_target_pose(
+            initial_root_pose,  # type: ignore[arg-type]
+            target_pose,
+            elapsed_s=step_idx * sim_dt,
+            ramp_duration_s=waypoint_ramp_duration_s,
+        )
         runtime_observation = _build_fixed_runtime_observation(
             morphology_graph,
             time_s=step_idx * sim_dt,
@@ -682,7 +694,7 @@ def _run_fixed_morphology_smoke(
                 physical_model=physical_model,
                 active_knot=InteractionKnot(t_rel_s=step_idx * sim_dt, contact_assignments=[]),
                 policy_command=PolicyCommand(
-                    desired_body_pose=target_pose,
+                    desired_body_pose=command_target_pose,
                     desired_body_twist=target_twist,
                 ),
                 previous_command=previous_command,
@@ -712,7 +724,8 @@ def _run_fixed_morphology_smoke(
         min_height = min(min_height, root_pos[2])
         max_height = max(max_height, root_pos[2])
         finite_state = finite_state and all(_is_finite(value) for value in root_pose_after)
-        if position_error <= position_tolerance_m and attitude_error <= attitude_tolerance_rad:
+        ramp_complete = step_idx * sim_dt + 1.0e-9 >= waypoint_ramp_duration_s
+        if ramp_complete and position_error <= position_tolerance_m and attitude_error <= attitude_tolerance_rad:
             hold_steps += 1
         else:
             hold_steps = 0
@@ -748,6 +761,7 @@ def _run_fixed_morphology_smoke(
         f"{report_prefix}_smoke": True,
         f"{report_prefix}_smoke_passed": passed,
         f"{report_prefix}_target_pose": list(target_pose),
+        f"{report_prefix}_ramp_duration_s": float(waypoint_ramp_duration_s),
         f"{report_prefix}_module_count": int(module_count),
         f"{report_prefix}_module_spacing_m": float(module_spacing_m),
         f"{report_prefix}_steps": int(executed_steps),
@@ -826,6 +840,32 @@ def _build_fixed_runtime_observation(
         contact_states=[],
         controller_status=ControllerStatus(status="ok", qp_feasible=True),
         task_progress=TaskProgressState(),
+    )
+
+
+def _ramped_target_pose(
+    start_pose: tuple[float, float, float, float, float, float, float],
+    final_pose: tuple[float, float, float, float, float, float, float],
+    *,
+    elapsed_s: float,
+    ramp_duration_s: float,
+) -> tuple[float, float, float, float, float, float, float]:
+    if ramp_duration_s <= 0.0:
+        return final_pose
+    ratio = min(max(float(elapsed_s) / float(ramp_duration_s), 0.0), 1.0)
+    smooth = ratio * ratio * (3.0 - 2.0 * ratio)
+    position = tuple(
+        float(start_pose[idx]) + (float(final_pose[idx]) - float(start_pose[idx])) * smooth
+        for idx in range(3)
+    )
+    return (
+        position[0],
+        position[1],
+        position[2],
+        final_pose[3],
+        final_pose[4],
+        final_pose[5],
+        final_pose[6],
     )
 
 
