@@ -27,12 +27,23 @@ def test_isaac_backend_probe_and_conversion_command_are_config_driven() -> None:
 
     availability = backend.availability()
     command = backend.urdf_conversion_command()
+    spawn_command = backend.holon_spawn_probe_command(
+        config_path="configs/env/isaac_lab.yaml",
+        generated_usd_dir="/tmp/amsrr_isaac_holon_spawn",
+        generated_usd_path="/tmp/amsrr_isaac_holon_spawn/holon/holon.usda",
+        steps=3,
+    )
 
     assert availability.metadata["backend_version"] == "isaac_lab_backend_v1"
     assert availability.urdf_exists is True
     assert "convert_urdf.py" in command[2]
     assert command[-2].endswith("assets/robots/holon/holon.urdf")
     assert command[-1].endswith("artifacts/isaac/robots/holon")
+    assert spawn_command[:2] == command[:2]
+    assert spawn_command[2].endswith("scripts/p4_control_holon_spawn_probe.py")
+    assert "--convert-if-missing" in spawn_command
+    assert "--headless" not in spawn_command
+    assert "/tmp/amsrr_isaac_holon_spawn/holon/holon.usda" in spawn_command
 
 
 def test_p4_control_smoke_scenarios_are_deterministic() -> None:

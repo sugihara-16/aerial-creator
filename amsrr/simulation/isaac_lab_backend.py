@@ -116,6 +116,34 @@ class IsaacLabBackend:
             str(self._expanded_path(self.config.generated_usd_dir)),
         ]
 
+    def holon_spawn_probe_command(
+        self,
+        *,
+        config_path: str | Path = "configs/env/isaac_lab.yaml",
+        convert_if_missing: bool = True,
+        steps: int = 5,
+        generated_usd_dir: str | Path | None = None,
+        generated_usd_path: str | Path | None = None,
+    ) -> list[str]:
+        isaaclab_path = self._expanded_path(self.config.isaaclab_path)
+        repo_root = Path(__file__).resolve().parents[2]
+        command = [
+            str(isaaclab_path / self.config.launch_script),
+            "-p",
+            str(repo_root / "scripts" / "p4_control_holon_spawn_probe.py"),
+            "--config",
+            str(config_path),
+            "--steps",
+            str(steps),
+        ]
+        if convert_if_missing:
+            command.append("--convert-if-missing")
+        if generated_usd_dir is not None:
+            command.extend(["--generated-usd-dir", str(generated_usd_dir)])
+        if generated_usd_path is not None:
+            command.extend(["--generated-usd-path", str(generated_usd_path)])
+        return command
+
     @staticmethod
     def _expanded_path(path: str) -> Path:
         return Path(os.path.expandvars(os.path.expanduser(path)))

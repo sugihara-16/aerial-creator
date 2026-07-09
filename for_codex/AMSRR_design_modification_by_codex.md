@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Holon Isaac Spawn Probe Supplement
+
+- Context: After validating URDF-to-USD conversion, the next P4-control Isaac smoke prerequisite was to verify that the generated Holon USD can be spawned as an Isaac Lab articulation and stepped in the approved `isaaclab3` / `isaaclab.sh -p` runtime.
+- Decision: Added `scripts/p4_control_holon_spawn_probe.py` and a backend command helper for launching it. The probe converts the Holon URDF if needed, creates a fresh Isaac stage, spawns `/World/Holon` through `ArticulationCfg` / `UsdFileCfg`, steps a few physics frames, and emits a JSON summary with `spawn_passed`, body/joint names, root state, USD path, and Isaac-backed metadata. The CLI intentionally avoids the deprecated `--headless` flag; IsaacLab's default no-visualizer path is used for headless execution.
+- Compatibility impact: This validates single-module Holon articulation spawn only. It does not apply rotor wrenches, command vectoring joints, run hover/waypoint control, assemble multi-module morphologies, claim object grasp/carry success, or satisfy the P4-control real smoke completion gate. Real probe logs currently include a PhysX warning for the `battery2` rigid body inertia/mass properties; this should be investigated before treating physical hover results as final.
+
 ### P4-Control Isaac URDF Conversion Probe Supplement
 
 - Context: Before implementing real P4-control Isaac smoke execution, the Holon URDF import path needed validation in the approved `isaaclab3` / `isaaclab.sh -p` environment.

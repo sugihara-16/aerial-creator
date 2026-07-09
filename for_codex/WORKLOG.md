@@ -4,6 +4,38 @@
 
 ### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control Isaac environment recommendation
+- Work package / Agent label: Agent J boundary: P4-control Order 7 Holon Isaac articulation spawn probe
+- Summary: Added a real Isaac Lab spawn probe for the generated Holon USD. The probe runs under `isaaclab3` / `isaaclab.sh -p`, optionally converts the URDF, creates a fresh stage, spawns `/World/Holon` as an `Articulation`, steps a few frames, and emits JSON metadata. Real execution passed with Holon reported as 25 bodies and 12 joints.
+- Files changed:
+  - `amsrr/simulation/isaac_lab_backend.py`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - `tests/unit/simulation/test_p4_control_isaac_env.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema change. Added an Isaac backend helper method for constructing the Holon spawn probe command.
+- Upstream dependencies used: AGENTS.md micromamba/IsaacLab instructions; IsaacLab `AppLauncher`, `SimulationContext`, `ArticulationCfg`, `UsdFileCfg`, `UrdfConverter`; Holon URDF from Agent B.
+- Downstream impact: Later real-smoke code can rely on the generated Holon USD being spawnable as an Isaac articulation and can consume the body/joint names from the probe. The next real-smoke order still needs wrench/force application, joint target application, and controller observation extraction.
+- Tests added or run:
+  - Updated `tests/unit/simulation/test_p4_control_isaac_env.py` to assert the spawn probe command contract and avoid deprecated `--headless`.
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_control_isaac_env.py tests/unit/training/test_p4_control_runner.py -q`
+  - `python3 -m py_compile scripts/p4_control_holon_spawn_probe.py amsrr/simulation/isaac_lab_backend.py tests/unit/simulation/test_p4_control_isaac_env.py`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr scripts -q`
+  - `git diff --check`
+- Commands run:
+  - `sed -n ... /home/leus/IsaacLab/scripts/tutorials/01_assets/add_new_robot.py`
+  - `sed -n ... /home/leus/IsaacLab/source/isaaclab_assets/isaaclab_assets/robots/quadcopter.py`
+  - `sed -n ... /home/leus/IsaacLab/scripts/tools/convert_urdf.py`
+  - `sed -n ... /home/leus/IsaacLab/source/isaaclab/isaaclab/assets/asset_base.py`
+  - `eval "$(~/.local/bin/micromamba shell hook -s bash)" && micromamba activate isaaclab3 && PYTHONPATH=/home/leus/amsrr:$PYTHONPATH /home/leus/IsaacLab/isaaclab.sh -p /home/leus/amsrr/scripts/p4_control_holon_spawn_probe.py --config /home/leus/amsrr/configs/env/isaac_lab.yaml --force-convert --generated-usd-dir /tmp/amsrr_isaac_holon_spawn --generated-usd-path /tmp/amsrr_isaac_holon_spawn/holon/holon.usda --steps 3`
+  - `find amsrr scripts tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: Related P4-control env/runner tests passed: 8 passed. Full unit suite passed: 118 passed, 1 skipped. Compileall, py_compile, and diff check passed. Real Isaac spawn probe passed with `spawn_passed=true`, `isaac_backed=true`, `converted=true`, `num_bodies=25`, `num_joints=12`, and root pose near `[0, 0, 0.496]` after 3 steps.
+- Assumptions: Generated USD artifacts are reproducible outputs and were written under `/tmp/amsrr_isaac_holon_spawn` for the real probe, not committed. The spawn probe is a prerequisite smoke and not a hover/control result.
+- Blockers: None for single-module articulation spawn. Real Isaac logs still warn about `battery2` invalid inertia/negative mass fallback; investigate or correct URDF inertial data before trusting physical hover performance.
+- Next steps: Commit Order 7, then implement a minimal Isaac wrench/joint-command probe using the spawned Holon articulation and the existing controller bridge records.
+
+### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control Isaac environment recommendation
 - Work package / Agent label: Agent J boundary: P4-control Order 6 Isaac URDF conversion probe
 - Summary: Probed the real IsaacLab URDF converter path for Holon. The `isaaclab3` environment exposes `isaaclab` and `torch`; `isaaclab.sh -p scripts/p4_control_smoke.py --probe` reports the backend available in Isaac Python; `convert_urdf.py` successfully converted `assets/robots/holon/holon.urdf` to `/tmp/amsrr_isaac_holon/holon/holon.usda`. Updated generated USD config/default path to match Isaac importer's output layout.
 - Files changed:
