@@ -4,6 +4,14 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4.1 Full-Scene Backend Smoke Contract Supplement
+
+- Context: The user approved starting P4.1 with the clarification that it is not another P4-control hover validation. P4.1 must smoke-test the Isaac backend as a full-scene path with robot, object, and floor in the same stage, and it must verify reset / step / RuntimeObservation / EpisodeArchive logging before P4.2 contact-rich rollout.
+- Decision: Added a P4.1 backend smoke contract with required real smoke name `p2_p3_full_scene_backend`, config defaults, result records for per-step runtime observations, controller commands, actuator target records, and object pose history, plus a RuntimeObservation joint-state checker.
+- RuntimeObservation decision: P4.1 observations must preserve module/root pose and twist plus joint positions and available joint velocities. Acceptance must verify vectoring/gimbal and dock mechanism joint position keys exist. For fixed/rigid cases, zero or nominal values are acceptable. For articulated cases, P4.1 must also prove the observed joint state can drive `RigidBodyControlModel` B(q)-style updates through nonzero model-update metrics.
+- Scope decision: P4.1 completion must require a real Isaac smoke gate in addition to fake-backend/unit gates. P4.1 must not claim object grasp/carry success, learned policy success, P4.2 rollout, or P4 full completion.
+- Compatibility impact: No persisted schema fields were changed. The new contract is additive under `amsrr/simulation` and uses existing `RuntimeObservation`, `ControllerCommand`, and `EpisodeArchive` schemas.
+
 ### P4-Control Articulated Assembly Correction Supplement
 
 - Context: The prior articulated hover smoke only proved that dock mechanism joints could move while the rigid fixed-morphology assembly hovered. It did not prove that connected modules moved relative to each other as a multi-link system, because the generated fixed morphology connected module roots with a fixed joint.

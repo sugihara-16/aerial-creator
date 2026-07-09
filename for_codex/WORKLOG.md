@@ -3,6 +3,29 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.1 full-scene backend smoke user clarifications
+- Work package / Agent label: Agent J/K/L boundary: P4.1 full-scene backend smoke Order 1 contract
+- Summary: Added the initial P4.1 backend smoke contract. P4.1 is scoped as a full-scene Isaac backend smoke, not a P4-control hover rerun. The new contract records the required real smoke name, config defaults for robot/object/floor full-scene smoke, per-step runtime/controller/actuator/object-history result fields, and a RuntimeObservation joint-state checker that requires module pose/twist plus vectoring/gimbal and dock mechanism joint positions. Articulated P4.1 observations must additionally prove RigidBodyControlModel B(q)-style update metrics when the articulated flag is set.
+- Files changed:
+  - `amsrr/simulation/p4_1_backend_smoke.py`
+  - `amsrr/simulation/__init__.py`
+  - `configs/training/p4_1_backend_smoke.yaml`
+  - `tests/unit/simulation/test_p4_1_backend_smoke.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added P4.1 simulation-side dataclasses and helper exports only.
+- Upstream dependencies used: v0.4 Sections 23.5, 24.5.3, 25, 26.10, 27.1; user P4.1 clarifications; existing `RuntimeObservation`, `ControllerCommand`, and P4-control bridge/archive contracts.
+- Downstream impact: Later P4.1 orders can implement fake/real backend runners and acceptance against the new smoke result and joint-observation contract. Completion must still require a real Isaac full-scene smoke.
+- Tests added or run:
+  - Added unit coverage for P4.1 config loading, vectoring/dock joint position checks, empty joint-state rejection, and articulated B(q) update metric checks.
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_1_backend_smoke.py -q`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_1_backend_smoke.py tests/unit/simulation/test_p4_control_isaac_env.py -q`
+- Tests run: P4.1 unit contract tests passed: 4 passed. Related simulation tests passed: 10 passed.
+- Assumptions: P4.1 full-scene smoke records object pose history as observation/logging evidence only; it does not claim object grasp/carry success.
+- Blockers: None for Order 1.
+- Next steps: Commit Order 1, then implement the P4.1 backend/env fake contract and real command path.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control/P4a closeout after articulated multi-link correction
 - Work package / Agent label: Agent I/J/K/L boundary: P4-control / P4a final closeout
 - Summary: Re-ran the P4-control/P4a fast gates and real Isaac smoke gates after the articulated multi-link correction. The first real runner rerun exposed a probe branching bug where `--fixed-morphology-waypoint-smoke` referenced `fixed_articulated_joint_names` without initializing it; fixed the non-articulated waypoint branch to pass `None`. The corrected runner then passed all required real Isaac smokes (`single_module_hover`, `fixed_morphology_hover`, `fixed_morphology_waypoint`) and produced a passing P4-control/P4a acceptance report. Re-ran the articulated multi-link hover smoke as a separate correction-specific regression and confirmed 20 s hover with real module motion and q-dependent model updates.
@@ -2164,6 +2187,27 @@
 ---
 
 ## Work Package Logs
+
+### P4.1 Implementation: Isaac Full-Scene Backend Smoke
+
+#### 2026-07-09
+- Scope: Order 1 P4.1 smoke contract, config, and RuntimeObservation joint-state checks.
+- Files changed:
+  - `amsrr/simulation/p4_1_backend_smoke.py`
+  - `amsrr/simulation/__init__.py`
+  - `configs/training/p4_1_backend_smoke.yaml`
+  - `tests/unit/simulation/test_p4_1_backend_smoke.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: v0.4 P4.1 backend smoke requirements, user clarifications on full-scene robot/object/floor scope, P2/P3 usage, real-smoke completion gate, per-step archive logging, and joint-state preservation.
+- Implemented: `P4_1FullSceneBackendConfig`, `P4_1BackendSmokeResult`, `P4_1RuntimeJointStateMetrics`, required real smoke name `p2_p3_full_scene_backend`, P4.1 config file, and `evaluate_runtime_observation_joint_state` for vectoring/dock joint checks and articulated B(q) update evidence.
+- Not implemented: Real Isaac full-scene probe, P2/P3 runner integration, per-step archive writer, P4.1 acceptance gate, or real Isaac smoke execution.
+- Schema/interface changes: None to persisted schemas.
+- Downstream impact: Agent J/K/L P4.1 orders can now share a stable fake/real smoke result contract. Fake unit gates can pass contract checks, but P4.1 completion remains impossible without real Isaac smoke evidence.
+- Tests added: `test_p4_1_backend_smoke_config_loader_contract`, `test_p4_1_runtime_observation_joint_state_requires_vectoring_and_dock_joints`, `test_p4_1_runtime_observation_joint_state_rejects_empty_joint_positions`, and `test_p4_1_articulated_joint_state_requires_model_update_metric`.
+- Tests passed: P4.1 contract tests passed: 4 passed. Related simulation tests passed: 10 passed.
+- Handoff notes: P4.1 must not be reported as object grasp/carry success, learned policy success, P4.2 rollout, or P4 full completion.
+- Open questions: None for Order 1.
 
 ### P4-Control / P4a: QP/PID Controller Specification
 

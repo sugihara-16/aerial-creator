@@ -1,0 +1,24 @@
+runner:
+  seed: 0
+  source_hash: p4_1_backend_smoke
+  runner_version: p4_1_backend_smoke_runner_v1
+  dry_run: true
+  archive_path: artifacts/p4_1/p4_1_backend_smoke.jsonl
+  robot_model_config_path: configs/robot/robot_model.yaml
+  p3_config_path: configs/training/p3_assembly_grasp_carry.yaml
+
+env:
+  config_path: configs/env/isaac_lab.yaml
+  robot_model_config_path: configs/robot/robot_model.yaml
+  p3_config_path: configs/training/p3_assembly_grasp_carry.yaml
+  control_dt_s: 0.005
+  max_episode_steps: 80
+  smoke_name: p2_p3_full_scene_backend
+  object_id: box_01
+  object_size_m: [0.30, 0.20, 0.15]
+  object_mass_kg: 1.0
+  object_initial_pose_world: [0.8, 0.0, 0.4, 0.0, 0.0, 0.0, 1.0]
+  floor_prim_path: /World/defaultGroundPlane
+  require_p2_p3_design: true
+  require_joint_positions: true
+  require_joint_velocities_when_available: true
