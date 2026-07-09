@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control GUI Observation Smoke Supplement
+
+- Context: Real P4-control hover smokes ran correctly in Isaac, but IsaacLab 3 defaults to headless unless the Kit visualizer is explicitly requested with `--viz kit`, and smoke pass runs close the app immediately after the hold criterion is satisfied.
+- Decision: Added GUI-observation-only probe options: `--realtime-playback` sleeps one physics `dt` per step for watchable playback, and `--keep-open-after-smoke-s` keeps the Kit app pumping for a fixed duration after the smoke finishes. These options do not change acceptance thresholds or controller behavior.
+- Compatibility impact: P4-control acceptance remains based on the same real smoke pass/fail metrics. Long-duration hover is still not claimed; the GUI options are for inspection of the existing smoke behavior.
+
 ### P4-Control Smoke Summary Archive Supplement
 
 - Context: After all three real Isaac low-level smokes could pass, the remaining split-acceptance gap was the fast gate requiring `EpisodeArchive` records with controller command, runtime observation, actuator target record, residual/clipping metrics, and explicit no-P4-full-completion labeling.

@@ -5,6 +5,7 @@ import json
 import math
 import os
 import sys
+import time
 from pathlib import Path
 
 
@@ -79,6 +80,17 @@ def parse_args() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Stop closed-loop hover smoke once the required hold duration is achieved.",
+    )
+    parser.add_argument(
+        "--realtime-playback",
+        action="store_true",
+        help="Sleep one physics dt after each step so GUI playback is easier to inspect.",
+    )
+    parser.add_argument(
+        "--keep-open-after-smoke-s",
+        type=float,
+        default=0.0,
+        help="Keep the Kit app open for this many seconds after the smoke finishes.",
     )
     AppLauncher.add_app_launcher_args(parser)
     return parser.parse_args()
@@ -277,6 +289,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             build_runtime_observation=build_runtime_observation,
             build_single_module_morphology=build_single_module_morphology,
             bridge_supported_controller_command=bridge_supported_controller_command,
+            realtime_playback=bool(args.realtime_playback),
         )
     if fixed_smoke_requested:
         waypoint_position = args.waypoint_target_position_m
@@ -314,6 +327,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             split_fixed_module_name=split_fixed_module_name,
             report_prefix=report_prefix,
             waypoint_ramp_duration_s=waypoint_ramp_duration_s,
+            realtime_playback=bool(args.realtime_playback),
         )
     for _ in range(0 if hover_smoke_report is not None else max(0, args.steps)):
         if controller_bundle is not None:
@@ -339,6 +353,8 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         robot.write_data_to_sim()
         sim.step()
         robot.update(sim_dt)
+        if args.realtime_playback:
+            time.sleep(max(0.0, sim_dt))
     final_root_pos_w = _tensor_row(robot.data.root_pos_w.torch)
     gimbal_joint_pos = _tensor_indices(robot.data.joint_pos.torch, gimbal_joint_ids)
     gimbal_joint_pos_target = _tensor_indices(robot.data.joint_pos_target.torch, gimbal_joint_ids)
@@ -415,6 +431,10 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         report.update(_controller_bundle_report(controller_bundle))
     if hover_smoke_report is not None:
         report.update(hover_smoke_report)
+    report["realtime_playback"] = bool(args.realtime_playback)
+    report["keep_open_after_smoke_s"] = float(args.keep_open_after_smoke_s)
+    if args.keep_open_after_smoke_s > 0.0:
+        _keep_viewer_open(float(args.keep_open_after_smoke_s))
     sim.stop()
     sim.clear_instance()
     return report
@@ -441,6 +461,7 @@ def _run_single_module_hover_smoke(
     build_runtime_observation,
     build_single_module_morphology,
     bridge_supported_controller_command,
+    realtime_playback: bool,
 ) -> dict[str, object]:
     from amsrr.controllers.actuator_mapping import build_actuator_mapping
     from amsrr.controllers.controller_base import ControllerContext
@@ -517,6 +538,8 @@ def _run_single_module_hover_smoke(
         robot.write_data_to_sim()
         sim.step()
         robot.update(sim_dt)
+        if realtime_playback:
+            time.sleep(max(0.0, sim_dt))
 
         root_pose = _tensor_row(robot.data.root_pose_w.torch)
         root_pos = root_pose[:3]
@@ -612,6 +635,7 @@ def _run_fixed_morphology_smoke(
     split_fixed_module_name,
     report_prefix: str,
     waypoint_ramp_duration_s: float,
+    realtime_playback: bool,
 ) -> dict[str, object]:
     from amsrr.controllers.actuator_mapping import build_actuator_mapping
     from amsrr.controllers.controller_base import ControllerContext
@@ -712,6 +736,8 @@ def _run_fixed_morphology_smoke(
         robot.write_data_to_sim()
         sim.step()
         robot.update(sim_dt)
+        if realtime_playback:
+            time.sleep(max(0.0, sim_dt))
 
         root_pose_after = _tensor_row(robot.data.root_pose_w.torch)
         root_pos = root_pose_after[:3]
@@ -942,6 +968,13 @@ def _tensor_indices(tensor, indices: list[int]) -> list[float]:
 def _joint_state_dict(joint_names: list[str], tensor) -> dict[str, float]:
     values = tensor[0].detach().cpu().tolist()
     return {name: float(values[index]) for index, name in enumerate(joint_names)}
+
+
+def _keep_viewer_open(duration_s: float) -> None:
+    deadline = time.monotonic() + max(0.0, duration_s)
+    while time.monotonic() < deadline and simulation_app.is_running():
+        simulation_app.update()
+        time.sleep(1.0 / 60.0)
 
 
 def _position_error_norm(position: list[float], target: tuple[float, float, float]) -> float:

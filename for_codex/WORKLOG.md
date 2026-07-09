@@ -3,6 +3,25 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control GUI observation smoke supplement
+- Work package / Agent label: Agent K/J boundary: P4-control GUI observation support
+- Summary: Investigated why the user-facing GUI hover command did not open a visible window. IsaacLab 3 forces headless mode when no visualizer is selected, so `HEADLESS=0` alone is insufficient; the command must include `--viz kit`. Also fixed the earlier command guidance by adding GUI-observation probe options: `--realtime-playback` and `--keep-open-after-smoke-s`.
+- Files changed:
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema change. Added CLI-only probe options for watchable GUI playback and post-smoke Kit hold-open.
+- Tests added or run:
+  - `python3 -m py_compile scripts/p4_control_holon_spawn_probe.py`
+  - `eval "$(~/.local/bin/micromamba shell hook -s bash)" && micromamba activate isaaclab3 && PYTHONPATH=/home/leus/amsrr:$PYTHONPATH python3 scripts/p4_control_holon_spawn_probe.py --help`
+  - Real Isaac GUI smoke with `--viz kit --realtime-playback --keep-open-after-smoke-s 0.2`
+  - `git diff --check`
+- Tests run: Help output showed `--realtime-playback` and `--keep-open-after-smoke-s`. Real Isaac GUI single-module hover smoke launched the Kit visualizer backend, passed with `single_module_hover_smoke_passed=true`, `single_module_hover_steps=200`, final position error `0.014463 m`, final attitude error `0.004510 rad`, QP infeasible count `0`, and report fields `realtime_playback=true`, `keep_open_after_smoke_s=0.2`.
+- Assumptions: GUI observation is for human inspection only and does not expand acceptance. Long-duration hover remains unclaimed; earlier `--no-hover-stop-on-hold` 30 s exploratory run was observed to fail after initially holding within tolerance.
+- Blockers: None for GUI observation of the existing smoke.
+- Next steps: Use `--viz kit`, `--realtime-playback`, and a positive `--keep-open-after-smoke-s` for user-visible inspection commands.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control split acceptance and smoke summary archive supplement
 - Work package / Agent label: Agent K/L boundary: P4-control Order 18 smoke summary archive production
 - Summary: Implemented the P4-control fast-gate archive production path for real smoke runs. `P4ControlLowLevelRunner` now builds one `EpisodeArchive` smoke summary for each attempted non-skipped real smoke when no external archives are supplied. Each archive records a free-flight smoke task, Holon morphology graph from the configured physical model, desired body pose policy command, summary controller status, summary runtime observation, summary actuator target metrics, and explicit no-P4-full-completion labels. Dry-run still produces no archives and cannot complete.
