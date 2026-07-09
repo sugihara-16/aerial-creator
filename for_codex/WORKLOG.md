@@ -3,6 +3,34 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control Holon USD visual mesh resolution supplement
+- Work package / Agent label: Agent J/K boundary: P4-control Isaac/GUI asset visibility support
+- Summary: Fixed the GUI case where Kit opened and `/World/Holon` existed but the aircraft body was invisible. The runtime Holon URDF referenced `mesh/*.STL` relative to `assets/robots/holon`, but the STL files live under `module_urdf/mesh`; Isaac conversion therefore produced articulation/link Xforms without visible mesh payloads. Added a conversion-only mesh resolver that writes a temporary URDF with existing absolute STL paths before single-module conversion and also resolves mesh paths for fixed-morphology URDF generation.
+- Files changed:
+  - `amsrr/robot_model/fixed_morphology_urdf.py`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - `tests/unit/robot_model/test_fixed_morphology_urdf.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None. Added a Python helper and probe-side conversion preparation only; no persisted schema or controller contract changed.
+- Upstream dependencies used: Existing runtime Holon URDF, `module_urdf/mesh` STL assets, IsaacLab URDF converter, and previously added GUI observation options.
+- Downstream impact: Users should regenerate Holon USDs with `--force-convert` to see visual geometry. Existing controller/QP smoke metrics are unchanged; generated USD artifacts remain reproducible and uncommitted.
+- Tests added or run:
+  - Added `test_resolved_mesh_urdf_points_asset_meshes_to_existing_files`.
+  - Updated fixed-morphology URDF test to require resolved mesh paths to exist.
+  - `python3 -m py_compile amsrr/robot_model/fixed_morphology_urdf.py scripts/p4_control_holon_spawn_probe.py`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/robot_model/test_fixed_morphology_urdf.py tests/unit/robot_model/test_urdf_loader.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_control_isaac_env.py -q`
+  - Real Isaac conversion under `micromamba run -n isaaclab3` with output `/tmp/amsrr_visible_mesh_probe`
+  - `pxr.Usd` instance-proxy mesh count check on `/tmp/amsrr_visible_mesh_probe/holon/holon.usda`
+  - Real Isaac GUI spawn with `--viz kit --keep-open-after-smoke-s 10` and output `/tmp/amsrr_visible_mesh_gui`
+  - Real Isaac GUI single-module hover smoke with `--viz kit --realtime-playback --keep-open-after-smoke-s 5` and output `/tmp/amsrr_visible_mesh_gui_hover`
+- Commands run: Real Isaac conversion/spawn/hover used `/home/leus/.local/bin/micromamba run -n isaaclab3 /home/leus/IsaacLab/isaaclab.sh -p /home/leus/amsrr/scripts/p4_control_holon_spawn_probe.py ... --force-convert`. The mesh-count check found 38 mesh prims when traversing USD instance proxies. The GUI hover run passed with `single_module_hover_smoke_passed=true`, `single_module_hover_steps=200`, final position error `0.014463 m`, final attitude error `0.004510 rad`, and QP infeasible count `0`.
+- Assumptions: The asset mesh source of truth remains `module_urdf/mesh`; the converted USD is a generated artifact and should not be committed.
+- Blockers: None for visible Holon geometry after regeneration. Kit's Stage tree may still show instanceable Xforms unless instance proxies are expanded, which is normal USD composition behavior.
+- Next steps: Use the updated GUI command with `--force-convert` for inspection, then continue P4-control work only if the user requests the next phase.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control GUI observation smoke supplement
 - Work package / Agent label: Agent K/J boundary: P4-control GUI observation support
 - Summary: Investigated why the user-facing GUI hover command did not open a visible window. IsaacLab 3 forces headless mode when no visualizer is selected, so `HEADLESS=0` alone is insufficient; the command must include `--viz kit`. Also fixed the earlier command guidance by adding GUI-observation probe options: `--realtime-playback` and `--keep-open-after-smoke-s`.
@@ -1971,6 +1999,24 @@
 ## Work Package Logs
 
 ### P4-Control / P4a: QP/PID Controller Specification
+
+#### 2026-07-09
+- Scope: Fix Agent J/K Isaac GUI asset visibility for Holon generated USDs.
+- Files changed:
+  - `amsrr/robot_model/fixed_morphology_urdf.py`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - `tests/unit/robot_model/test_fixed_morphology_urdf.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: Runtime Holon URDF, `module_urdf/mesh` STL assets, IsaacLab URDF converter, and GUI observation probe options.
+- Implemented: Added `write_resolved_mesh_urdf`, added mesh-search support to fixed-morphology URDF generation, routed P4-control probe conversion through resolved mesh URDFs, and validated that regenerated USDs contain instance-proxy mesh prims.
+- Not implemented: No change to controller dynamics, QP allocation, hover thresholds, physical docking, object grasp/carry, learning, or P4 full completion.
+- Schema/interface changes: None.
+- Downstream impact: Regenerate USDs with `--force-convert` before GUI inspection; old generated USDs may still be invisible because they were produced from unresolved relative mesh paths.
+- Tests added: `test_resolved_mesh_urdf_points_asset_meshes_to_existing_files`; fixed-morphology mesh refs now must exist.
+- Tests passed: Focused robot-model tests passed: 5 passed, 1 skipped. Simulation env tests passed: 6 passed. `py_compile` passed. Real Isaac conversion, GUI spawn, and GUI single-module hover passed; USD instance-proxy traversal found 38 mesh prims.
+- Handoff notes: Kit's Stage tree may show instanceable Xforms rather than expanded mesh children unless instance proxies are inspected; that is normal after conversion.
+- Open questions: None for asset visibility.
 
 #### 2026-07-09
 - Scope: Implement Agent I Order 12 `PolicyCommand` PID target builder.

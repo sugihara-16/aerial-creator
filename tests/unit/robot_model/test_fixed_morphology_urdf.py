@@ -7,8 +7,12 @@ from amsrr.robot_model.fixed_morphology_urdf import (
     fixed_module_link_name,
     split_fixed_module_name,
     write_fixed_morphology_urdf,
+    write_resolved_mesh_urdf,
 )
 from amsrr.robot_model.urdf_loader import load_urdf
+
+
+MESH_SEARCH_DIRS = [Path("module_urdf"), Path("module_urdf/mesh")]
 
 
 def test_fixed_morphology_urdf_prefixes_modules_and_keeps_single_tree(tmp_path: Path) -> None:
@@ -17,6 +21,7 @@ def test_fixed_morphology_urdf_prefixes_modules_and_keeps_single_tree(tmp_path: 
         tmp_path / "holon_fixed_2.urdf",
         module_count=2,
         module_spacing_m=0.45,
+        mesh_search_dirs=MESH_SEARCH_DIRS,
     )
 
     model = load_urdf(output_path)
@@ -36,3 +41,19 @@ def test_fixed_morphology_urdf_prefixes_modules_and_keeps_single_tree(tmp_path: 
     mesh_refs = [ref for link in model.links for ref in link.visual_mesh_refs + link.collision_mesh_refs]
     assert mesh_refs
     assert all(Path(ref).is_absolute() for ref in mesh_refs)
+    assert all(Path(ref).exists() for ref in mesh_refs)
+
+
+def test_resolved_mesh_urdf_points_asset_meshes_to_existing_files(tmp_path: Path) -> None:
+    output_path = write_resolved_mesh_urdf(
+        "assets/robots/holon/holon.urdf",
+        tmp_path / "holon_resolved.urdf",
+        mesh_search_dirs=MESH_SEARCH_DIRS,
+    )
+
+    model = load_urdf(output_path)
+    mesh_refs = [ref for link in model.links for ref in link.visual_mesh_refs + link.collision_mesh_refs]
+
+    assert mesh_refs
+    assert all(Path(ref).is_absolute() for ref in mesh_refs)
+    assert all(Path(ref).exists() for ref in mesh_refs)

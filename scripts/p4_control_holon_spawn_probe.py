@@ -133,7 +133,11 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     from isaaclab.sim.converters import UrdfConverter, UrdfConverterCfg
     import torch
 
-    from amsrr.robot_model.fixed_morphology_urdf import split_fixed_module_name, write_fixed_morphology_urdf
+    from amsrr.robot_model.fixed_morphology_urdf import (
+        split_fixed_module_name,
+        write_fixed_morphology_urdf,
+        write_resolved_mesh_urdf,
+    )
     from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
     from amsrr.simulation.isaac_lab_backend import IsaacLabBackend, load_isaac_lab_backend_config
     from amsrr.simulation.p4_control_controller_smoke import (
@@ -151,17 +155,25 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     usd_dir = _expand_path(args.generated_usd_dir or backend_config.generated_usd_dir)
     usd_path = _expand_path(args.generated_usd_path or backend_config.generated_usd_path)
     fixed_smoke_requested = bool(args.fixed_morphology_hover_smoke or args.fixed_morphology_waypoint_smoke)
-    if fixed_smoke_requested:
-        fixed_urdf_path = usd_dir / "fixed_morphology_urdf" / f"holon_fixed_{int(args.fixed_module_count)}.urdf"
-        urdf_path = write_fixed_morphology_urdf(
-            urdf_path,
-            fixed_urdf_path,
-            module_count=int(args.fixed_module_count),
-            module_spacing_m=float(args.fixed_module_spacing_m),
-        )
     converted = False
 
     if args.force_convert or fixed_smoke_requested or (args.convert_if_missing and not usd_path.exists()):
+        mesh_search_dirs = _holon_mesh_search_dirs()
+        if fixed_smoke_requested:
+            fixed_urdf_path = usd_dir / "fixed_morphology_urdf" / f"holon_fixed_{int(args.fixed_module_count)}.urdf"
+            urdf_path = write_fixed_morphology_urdf(
+                urdf_path,
+                fixed_urdf_path,
+                module_count=int(args.fixed_module_count),
+                module_spacing_m=float(args.fixed_module_spacing_m),
+                mesh_search_dirs=mesh_search_dirs,
+            )
+        else:
+            urdf_path = write_resolved_mesh_urdf(
+                urdf_path,
+                usd_dir / "resolved_urdf" / "holon.urdf",
+                mesh_search_dirs=mesh_search_dirs,
+            )
         converter_cfg = UrdfConverterCfg(
             asset_path=str(urdf_path),
             usd_dir=str(usd_dir),
@@ -442,6 +454,13 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
 
 def _expand_path(path: str | Path) -> Path:
     return Path(os.path.expandvars(os.path.expanduser(str(path)))).resolve()
+
+
+def _holon_mesh_search_dirs() -> list[Path]:
+    return [
+        REPO_ROOT / "module_urdf",
+        REPO_ROOT / "module_urdf" / "mesh",
+    ]
 
 
 def _run_single_module_hover_smoke(

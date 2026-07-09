@@ -17,6 +17,7 @@ def write_fixed_morphology_urdf(
     module_count: int = 2,
     module_spacing_m: float = 0.45,
     prefix_separator: str = FIXED_MODULE_PREFIX_SEPARATOR,
+    mesh_search_dirs: list[str | Path] | None = None,
 ) -> Path:
     """Write a deterministic rigid multi-module URDF for P4-control smoke tests."""
 
@@ -29,6 +30,7 @@ def write_fixed_morphology_urdf(
     source_root = ET.parse(source_path).getroot()
     if _tag_name(source_root) != "robot":
         raise SchemaValidationError(f"Expected <robot> root in {source_path}")
+    search_dirs = _normalise_mesh_search_dirs(mesh_search_dirs)
 
     source_links = _named_children(source_root, "link")
     if "root" not in source_links:
@@ -45,7 +47,7 @@ def write_fixed_morphology_urdf(
             if tag in {"baselink", "thrust_link", "m_f_rate"}:
                 continue
             copied = copy.deepcopy(child)
-            _prefix_element(copied, prefix=prefix, source_dir=source_path.parent)
+            _prefix_element(copied, prefix=prefix, source_dir=source_path.parent, mesh_search_dirs=search_dirs)
             output_root.append(copied)
         if module_id > 0:
             joint = ET.SubElement(
@@ -64,6 +66,26 @@ def write_fixed_morphology_urdf(
     _indent(output_root)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     ET.ElementTree(output_root).write(output_path, encoding="utf-8", xml_declaration=True)
+    return output_path
+
+
+def write_resolved_mesh_urdf(
+    source_urdf_path: str | Path,
+    output_urdf_path: str | Path,
+    *,
+    mesh_search_dirs: list[str | Path] | None = None,
+) -> Path:
+    """Write a URDF copy with relative mesh references resolved to existing absolute paths."""
+
+    source_path = Path(source_urdf_path).resolve()
+    output_path = Path(output_urdf_path)
+    source_root = ET.parse(source_path).getroot()
+    if _tag_name(source_root) != "robot":
+        raise SchemaValidationError(f"Expected <robot> root in {source_path}")
+    _resolve_mesh_refs(source_root, source_dir=source_path.parent, mesh_search_dirs=_normalise_mesh_search_dirs(mesh_search_dirs))
+    _indent(source_root)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    ET.ElementTree(source_root).write(output_path, encoding="utf-8", xml_declaration=True)
     return output_path
 
 
@@ -88,7 +110,13 @@ def split_fixed_module_name(name: str, *, prefix_separator: str = FIXED_MODULE_P
     return int(module_id_text), local_name
 
 
-def _prefix_element(element: ET.Element, *, prefix: str, source_dir: Path) -> None:
+def _prefix_element(
+    element: ET.Element,
+    *,
+    prefix: str,
+    source_dir: Path,
+    mesh_search_dirs: list[Path],
+) -> None:
     tag = _tag_name(element)
     if tag in {"link", "joint", "transmission"} and "name" in element.attrib:
         element.attrib["name"] = prefix + element.attrib["name"]
@@ -103,12 +131,44 @@ def _prefix_element(element: ET.Element, *, prefix: str, source_dir: Path) -> No
     if tag == "actuator" and "name" in element.attrib:
         element.attrib["name"] = prefix + element.attrib["name"]
     if tag == "mesh" and "filename" in element.attrib:
-        filename = element.attrib["filename"]
-        if not _is_absolute_mesh_ref(filename):
-            element.attrib["filename"] = str((source_dir / filename).resolve())
+        element.attrib["filename"] = _resolve_mesh_filename(
+            element.attrib["filename"],
+            source_dir=source_dir,
+            mesh_search_dirs=mesh_search_dirs,
+        )
 
     for child in list(element):
-        _prefix_element(child, prefix=prefix, source_dir=source_dir)
+        _prefix_element(child, prefix=prefix, source_dir=source_dir, mesh_search_dirs=mesh_search_dirs)
+
+
+def _resolve_mesh_refs(element: ET.Element, *, source_dir: Path, mesh_search_dirs: list[Path]) -> None:
+    if _tag_name(element) == "mesh" and "filename" in element.attrib:
+        element.attrib["filename"] = _resolve_mesh_filename(
+            element.attrib["filename"],
+            source_dir=source_dir,
+            mesh_search_dirs=mesh_search_dirs,
+        )
+    for child in list(element):
+        _resolve_mesh_refs(child, source_dir=source_dir, mesh_search_dirs=mesh_search_dirs)
+
+
+def _resolve_mesh_filename(filename: str, *, source_dir: Path, mesh_search_dirs: list[Path]) -> str:
+    if _is_absolute_mesh_ref(filename):
+        return filename
+
+    relative_path = Path(filename)
+    candidates = [source_dir / relative_path]
+    for search_dir in mesh_search_dirs:
+        candidates.append(search_dir / relative_path)
+        candidates.append(search_dir / relative_path.name)
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate.resolve())
+    return str((source_dir / relative_path).resolve())
+
+
+def _normalise_mesh_search_dirs(mesh_search_dirs: list[str | Path] | None) -> list[Path]:
+    return [Path(search_dir).resolve() for search_dir in mesh_search_dirs or []]
 
 
 def _prefixed_name(module_id: int, local_name: str, separator: str) -> str:

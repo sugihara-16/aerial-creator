@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Holon USD Visual Mesh Resolution Supplement
+
+- Context: The Kit GUI could open and `/World/Holon` existed in the stage, but only link frames/axes were visible. Inspection showed `assets/robots/holon/holon.urdf` references relative `mesh/*.STL` paths while the STL files live under `module_urdf/mesh`; the previous generated USD therefore contained articulation/link transforms but no visible mesh payload.
+- Decision: The P4-control Holon probe now writes a conversion-only URDF copy with mesh references resolved to existing absolute STL paths before Isaac URDF-to-USD conversion. The same resolver is used for fixed-morphology URDF generation so single-module and rigid fixed-morphology GUI assets share the visual-mesh fix.
+- Compatibility impact: This changes only the reproducible URDF-to-USD conversion input used by the probe. Runtime schemas, controller commands, QP allocation, acceptance thresholds, and physical success claims are unchanged. Previously generated USDs should be regenerated with `--force-convert` to pick up visible geometry.
+
 ### P4-Control GUI Observation Smoke Supplement
 
 - Context: Real P4-control hover smokes ran correctly in Isaac, but IsaacLab 3 defaults to headless unless the Kit visualizer is explicitly requested with `--viz kit`, and smoke pass runs close the app immediately after the hold criterion is satisfied.
