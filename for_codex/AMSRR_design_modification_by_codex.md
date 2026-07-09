@@ -4,6 +4,13 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Fixed-Morphology Assembly Asset Preparation Supplement
+
+- Context: The user approved treating the first fixed-morphology smoke as a pre-generated rigid combined URDF/USD asset, with dock connection represented as a fixed joint equivalent. Before running Isaac, the repository needed a deterministic way to generate that asset and the controller needed correct multi-module gravity compensation.
+- Decision: Added a fixed-morphology URDF generator that prefixes every copied Holon link/joint/transmission/gazebo reference with `module_<id>__`, rewrites relative mesh paths to absolute paths, and connects additional module roots to `module_0__root` with fixed joints at a configurable spacing. This produces a single URDF frame tree suitable for Isaac conversion while preserving per-module local names for controller-side mapping.
+- Controller decision: Updated `QPIDController` default hover and body-target PID force generation to use `RigidBodyControlModel.total_mass_kg` when the rigid-body QP path is active. Single-module behavior is unchanged, but fixed-morphology hover now requests gravity compensation for the full assembled rigid body instead of one Holon module.
+- Compatibility impact: This prepares the fixed-morphology smoke asset path but does not yet run fixed-morphology hover or waypoint in Isaac. The connected morphology is a rigid asset-level approximation for low-level controller validation, not a physical docking success claim and not P3/P4 object grasp/carry completion.
+
 ### P4-Control Single-Module Real Smoke Runner Supplement
 
 - Context: The standalone Holon probe could pass the real single-module closed-loop hover smoke, but the P4-control runner still returned placeholder real-smoke failures for every required smoke. The next bounded step was to connect the completed single-module smoke into the runner without inventing fixed-morphology spawn/docking semantics.

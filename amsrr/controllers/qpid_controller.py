@@ -181,10 +181,16 @@ class QPIDController:
             + self.config.z_i_gain * position_integral[2]
             + self.config.z_d_gain * velocity_error_world[2],
         ]
+        rigid_body_model = self.rigid_body_model_builder.build(
+            context.morphology_graph,
+            context.physical_model,
+            context.runtime_observation,
+        )
+        control_mass_kg = rigid_body_model.total_mass_kg
         desired_force_world = (
-            context.physical_model.aggregate_mass_kg * desired_acc_world[0],
-            context.physical_model.aggregate_mass_kg * desired_acc_world[1],
-            context.physical_model.aggregate_mass_kg * (self.config.gravity_mps2 + desired_acc_world[2]),
+            control_mass_kg * desired_acc_world[0],
+            control_mass_kg * desired_acc_world[1],
+            control_mass_kg * (self.config.gravity_mps2 + desired_acc_world[2]),
         )
         desired_force_body = _matvec(body_from_world, desired_force_world)
         desired_ang_acc_body = (
@@ -197,11 +203,6 @@ class QPIDController:
             self.config.yaw_p_gain * attitude_error_body[2]
             + self.config.yaw_i_gain * attitude_integral[2]
             + self.config.yaw_d_gain * angular_velocity_error_body[2],
-        )
-        rigid_body_model = self.rigid_body_model_builder.build(
-            context.morphology_graph,
-            context.physical_model,
-            context.runtime_observation,
         )
         desired_torque_body = _matvec(_inertia_matrix_from_inertia6(rigid_body_model.inertia_body), desired_ang_acc_body)
         self._reference_metrics = {
@@ -227,9 +228,6 @@ class QPIDController:
         context: ControllerContext,
         refs: DesiredBiasReferences,
     ) -> QPAllocationProblem:
-        desired_wrench = refs.desired_wrench_body
-        if desired_wrench is None and self.config.default_hover_when_no_wrench:
-            desired_wrench = [0.0, 0.0, context.physical_model.aggregate_mass_kg * self.config.gravity_mps2, 0.0, 0.0, 0.0]
         rigid_body_model = None
         if self._uses_rigid_body_qp():
             rigid_body_model = self.rigid_body_model_builder.build(
@@ -237,6 +235,10 @@ class QPIDController:
                 context.physical_model,
                 context.runtime_observation,
             )
+        desired_wrench = refs.desired_wrench_body
+        if desired_wrench is None and self.config.default_hover_when_no_wrench:
+            hover_mass_kg = rigid_body_model.total_mass_kg if rigid_body_model is not None else context.physical_model.aggregate_mass_kg
+            desired_wrench = [0.0, 0.0, hover_mass_kg * self.config.gravity_mps2, 0.0, 0.0, 0.0]
         return QPAllocationProblem(
             desired_wrench_body=desired_wrench,
             rotors=[

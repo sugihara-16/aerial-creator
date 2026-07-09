@@ -3,6 +3,32 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus approved fixed-morphology rigid assembly representation
+- Work package / Agent label: Agent I/J boundary: P4-control Order 15 fixed-morphology assembly asset preparation
+- Summary: Prepared the fixed-morphology path without running Isaac yet. Added a deterministic URDF generator for rigid multi-module Holon assemblies and corrected `QPIDController` multi-module gravity compensation so hover/body-target wrench generation uses the current `RigidBodyControlModel.total_mass_kg` rather than single-module `PhysicalModel.aggregate_mass_kg`.
+- Files changed:
+  - `amsrr/robot_model/fixed_morphology_urdf.py`
+  - `amsrr/controllers/qpid_controller.py`
+  - `tests/unit/robot_model/test_fixed_morphology_urdf.py`
+  - `tests/unit/controllers/test_qpid_controller.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema change. Added a robot-model utility for generating fixed-morphology URDF assets with `module_<id>__` link/joint prefixes.
+- Upstream dependencies used: User approval that the first fixed-morphology smoke may use a pre-generated combined URDF/USD with fixed-joint-equivalent dock connection; existing `RigidBodyControlModelBuilder` multi-module support; existing `QPIDController` rigid-body QP path.
+- Downstream impact: The next order can convert/spawn a 2-module fixed assembly in Isaac and map prefixed Isaac body/joint names back to module-local controller actuator ids. Controller hover force generation is now physically scaled for multi-module rigid assemblies.
+- Tests added or run:
+  - Added `test_fixed_morphology_urdf_prefixes_modules_and_keeps_single_tree`.
+  - Added `test_qpid_controller_default_hover_uses_rigid_body_total_mass_for_multi_module`.
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/robot_model/test_fixed_morphology_urdf.py tests/unit/controllers/test_qpid_controller.py -q`
+  - `python3 -m py_compile amsrr/robot_model/fixed_morphology_urdf.py amsrr/controllers/qpid_controller.py tests/unit/robot_model/test_fixed_morphology_urdf.py tests/unit/controllers/test_qpid_controller.py`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `git diff --check`
+- Tests run: Related controller/robot-model tests passed: 11 passed. Full unit suite passed: 125 passed, 1 skipped. Diff check passed.
+- Assumptions: Initial fixed assembly uses two Holon modules separated along the module-0 x axis by a configurable spacing, with additional module roots fixed to `module_0__root`. This is an asset-level rigid approximation for low-level controller validation, not a physical docking/detach implementation.
+- Blockers: None for asset preparation. Real fixed-morphology hover/waypoint still need Isaac probe integration and prefixed actuator/body mapping.
+- Next steps: Commit Order 15, then implement the real fixed-morphology hover smoke using the generated combined URDF/USD.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control controller supplement and split real-smoke acceptance
 - Work package / Agent label: Agent J/K boundary: P4-control Order 14 single-module real smoke runner integration
 - Summary: Connected the validated real single-module hover smoke into the P4-control runner path. `P4ControlIsaacEnv.run_smokes(dry_run=False)` now executes `single_module_hover` through `IsaacLabBackend.run_holon_single_module_hover_smoke`, parses the probe JSON, and converts the closed-loop smoke result into `P4ControlSmokeResult` metrics. Fixed-morphology hover and waypoint results remain explicit skipped entries until their Isaac semantics are implemented.

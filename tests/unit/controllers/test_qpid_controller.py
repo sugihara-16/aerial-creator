@@ -52,6 +52,31 @@ def _morphology_graph():
     )
 
 
+def _multi_module_morphology(module_count: int = 2) -> MorphologyGraph:
+    physical_model = _physical_model()
+    capability = build_module_capability_token(physical_model)
+    return MorphologyGraph(
+        graph_id=f"controller-test-{module_count}-module",
+        modules=[
+            ModuleNode(
+                module_id=module_id,
+                module_type="holon",
+                pose_in_design_frame=(0.45 * module_id, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+                role_id="base" if module_id == 0 else "fixed_attached",
+                is_base=module_id == 0,
+                capability_token=capability,
+            )
+            for module_id in range(module_count)
+        ],
+        ports=[],
+        dock_edges=[],
+        robot_anchors=[],
+        control_groups=[],
+        base_module_id=0,
+        is_closed_loop=False,
+    )
+
+
 def _runtime_observation():
     return RuntimeObservation(
         time_s=0.0,
@@ -64,6 +89,37 @@ def _runtime_observation():
                 joint_positions={"gimbal1": 0.0, "payload_joint": 0.0, "pitch_dock_mech_joint1": 0.1},
                 joint_velocities={"gimbal1": 0.0, "payload_joint": 0.0},
             )
+        ],
+        object_states=[],
+        contact_states=[],
+        controller_status=ControllerStatus(status="ok", qp_feasible=True),
+        task_progress=TaskProgressState(),
+    )
+
+
+def _multi_module_runtime_observation(module_count: int = 2) -> RuntimeObservation:
+    morphology = _multi_module_morphology(module_count)
+    return RuntimeObservation(
+        time_s=0.0,
+        morphology_graph=morphology,
+        module_states=[
+            ModuleRuntimeState(
+                module_id=module_id,
+                pose_world=(0.45 * module_id, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+                twist_world=[0.0] * 6,
+                joint_positions={
+                    "gimbal1": 0.0,
+                    "gimbal2": 0.0,
+                    "gimbal3": 0.0,
+                    "gimbal4": 0.0,
+                    "pitch_dock_mech_joint1": 0.0,
+                    "pitch_dock_mech_joint2": 0.0,
+                    "yaw_dock_mech_joint1": 0.0,
+                    "yaw_dock_mech_joint2": 0.0,
+                },
+                joint_velocities={},
+            )
+            for module_id in range(module_count)
         ],
         object_states=[],
         contact_states=[],
@@ -258,6 +314,32 @@ def test_qpid_controller_outputs_controller_command() -> None:
     assert controller_command.joint_torque_commands["payload_joint"] == pytest.approx(8.4)
     assert controller_command.dock_mechanism_commands["pitch_dock_mech_joint1"] == pytest.approx(0.1)
     assert type(controller_command).from_json(controller_command.to_json()).to_dict() == controller_command.to_dict()
+
+
+def test_qpid_controller_default_hover_uses_rigid_body_total_mass_for_multi_module() -> None:
+    physical_model = _physical_model()
+    runtime = _multi_module_runtime_observation(module_count=2)
+    allocator = _RecordingAllocator()
+
+    QPIDController(
+        allocator=allocator,
+        config=QPIDControllerConfig(allocation_mode="rigid_body_qp"),
+    ).compute(
+        ControllerContext(
+            runtime_observation=runtime,
+            morphology_graph=runtime.morphology_graph,
+            physical_model=physical_model,
+            active_knot=InteractionKnot(t_rel_s=0.0, contact_assignments=[]),
+            policy_command=PolicyCommand(),
+        )
+    )
+
+    assert allocator.problem is not None
+    assert allocator.problem.rigid_body_model is not None
+    assert allocator.problem.rigid_body_model.total_mass_kg == pytest.approx(2.0 * physical_model.aggregate_mass_kg)
+    assert allocator.problem.desired_wrench_body[2] == pytest.approx(
+        2.0 * physical_model.aggregate_mass_kg * QPIDControllerConfig().gravity_mps2
+    )
 
 
 def test_qpid_controller_reports_infeasible_vertical_wrench() -> None:
