@@ -1,0 +1,35 @@
+runner:
+  seed: 0
+  sample_index: 0
+  source_hash: p4_2_deterministic_rollout
+  runner_version: p4_2_deterministic_rollout_runner_v1
+  dry_run: true
+  archive_path: artifacts/p4_2/p4_2_deterministic_rollout.jsonl
+  robot_model_config_path: configs/robot/robot_model.yaml
+  p3_config_path: configs/training/p3_assembly_grasp_carry.yaml
+
+env:
+  config_path: configs/env/isaac_lab.yaml
+  robot_model_config_path: configs/robot/robot_model.yaml
+  p3_config_path: configs/training/p3_assembly_grasp_carry.yaml
+  control_dt_s: 0.005
+  max_episode_steps: 1200
+  rollout_name: p2_p3_deterministic_grasp_carry
+  object_id: box_01
+  object_size_m: [0.30, 0.20, 0.15]
+  object_mass_kg: 1.0
+  object_initial_pose_world: [0.8, 0.0, 0.4, 0.0, 0.0, 0.0, 1.0]
+  contact_model: kinematic_fixed_joint_attach_v1
+  attach_distance_threshold_m: 0.06
+  attach_relative_velocity_threshold_mps: 0.20
+  pregrasp_alignment_distance_m: 0.12
+  object_drop_distance_threshold_m: 0.35
+  controller_failure_consecutive_steps: 20
+  phase_timeouts_s:
+    reset: 0.5
+    approach: 4.0
+    pregrasp_align: 3.0
+    attach_attempt: 2.0
+    attached_maintain: 1.0
+    transport: 6.0
+    release: 2.0

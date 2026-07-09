@@ -2,6 +2,18 @@
 
 This file records implementation-time supplements or deviations from `A-MSRR_codex_ready_spec_v0_4_ja.md`.
 
+## 2026-07-10
+
+### P4.2 Deterministic Rollout Contract Supplement
+
+- Context: P4.2 must not be treated as an extension of the P4.1 full-scene smoke. It is an Isaac-backed deterministic grasp/carry rollout with explicit approach / attach / maintain / transport / release behavior, while still avoiding any P4.3 learning or P4 full-completion claim.
+- Decision: Added the P4.2 contract with rollout phase enum `reset`, `approach`, `pregrasp_align`, `attach_attempt`, `attached_maintain`, `transport`, `release`, `success`, `drop_failure`, `collision_failure`, `controller_failure`, and `timeout_failure`. Each phase has entry/exit condition text and configured timeout metadata.
+- Attach decision: P4.2 v1 uses `contact_model="kinematic_fixed_joint_attach_v1"`, but attach is gated. A successful attach event requires selected contact candidate / RobotAnchor proximity, relative velocity threshold, assignment feasibility, and controller/QP-safe status. Unconditional attach is invalid.
+- Metrics decision: `success_rate` is scoped to Isaac-backed deterministic rollout success under the P4.2 v1 kinematic attach model. It is not high-fidelity natural grasp success, learned policy success, P4.3 learning bootstrap, or P4 full completion. `object_drop`, `hard_collision`, and `controller_qp_infeasible_terminal` definitions are contract fields; intended grasp contacts and kinematic attach contacts are excluded from hard-collision counting.
+- Morphology decision: A successful P4.2 result must reflect the P2 selected `DesignOutput` and P3 assembled `MorphologyGraph` into the Isaac asset, module placement, and actuator mapping. Fixed 2-module or module-count-only provenance is insufficient for a passing P4.2 result.
+- Acceptance impact: This order only defines the contract. Later P4.2 acceptance must split a fast fake-backend/archive gate from a real Isaac rollout gate, and completion must remain false without a real Isaac rollout.
+- Compatibility impact: No persisted schema change. The contract is additive under `amsrr/simulation` and does not alter P4.1 or P4-control results.
+
 ## 2026-07-09
 
 ### P4.1 Split Acceptance Gate Supplement

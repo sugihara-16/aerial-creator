@@ -2,6 +2,29 @@
 
 ## Global Worklog
 
+### 2026-07-10
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.2 deterministic rollout user clarifications
+- Work package / Agent label: Agent J/K/L boundary: P4.2 deterministic rollout Order 1 contract/state-machine
+- Summary: Added the initial P4.2 deterministic grasp/carry rollout contract. P4.2 is now explicitly a deterministic rollout with `reset`, `approach`, `pregrasp_align`, `attach_attempt`, `attached_maintain`, `transport`, `release`, and terminal success/failure phases, not a P4.1 full-scene smoke extension. The contract defines `contact_model="kinematic_fixed_joint_attach_v1"`, gated attach conditions, attach event records, metric definitions for success/drop/collision/controller failure, P2/P3 morphology-reflection requirements, and no-mislabeling artifacts that reject P4.3 learning and P4 full-completion claims.
+- Files changed:
+  - `amsrr/simulation/p4_2_rollout.py`
+  - `amsrr/simulation/__init__.py`
+  - `configs/training/p4_2_deterministic_rollout.yaml`
+  - `tests/unit/simulation/test_p4_2_rollout.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added additive P4.2 simulation-side dataclasses, config loader, constants, helper contracts, and package exports.
+- Upstream dependencies used: v0.4 Sections 23.3, 23.5, 24.5.4, 25, 26.10, 27.1; P4.2 user clarifications on state machine, gated kinematic attach, P2/P3 morphology reflection, metric definitions, split acceptance, and no P4.3/P4-full claims.
+- Downstream impact: Agent J can implement a fake/real P4.2 Isaac env against the phase/attach/metric contract. Agent K can build a runner/archive path that must include P2 selected `DesignOutput`, P3 assembled `MorphologyGraph`, per-step logs, attach events, and no-mislabeling artifacts. Agent L can later implement split fast/real P4.2 acceptance.
+- Tests added or run:
+  - Added unit coverage for P4.2 config loading, phase state-machine definitions, gated attach conditions, metric definitions, no-mislabeling artifacts, success-result morphology requirements, and terminal failure metrics.
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_2_rollout.py -q`
+  - `python3 -m compileall amsrr/simulation tests/unit/simulation/test_p4_2_rollout.py -q`
+- Tests run: P4.2 contract tests passed: 6 passed. Compileall passed.
+- Assumptions: Order 1 is a contract-only order. It does not run Isaac, create rollout archives, claim object grasp/carry completion evidence, claim high-fidelity natural grasp success, claim learned policy success, claim P4.3, or claim P4 full completion.
+- Blockers: None for Order 1.
+- Next steps: Commit Order 1, then assess Order 2 deterministic π_H/π_L rollout target adaptation for any method-level undefined items before implementation.
+
 ### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.1 full-scene backend smoke user clarifications
 - Work package / Agent label: Agent L boundary: P4.1 real Isaac backend smoke
@@ -2296,6 +2319,29 @@
 ---
 
 ## Work Package Logs
+
+### P4.2 Implementation: Isaac Deterministic Grasp-Carry Rollout
+
+#### 2026-07-10
+- Scope: Order 1 P4.2 rollout contract, phase state machine, gated attach, metric definitions, no-mislabeling artifacts, config, and unit tests.
+- Files changed:
+  - `amsrr/simulation/p4_2_rollout.py`
+  - `amsrr/simulation/__init__.py`
+  - `configs/training/p4_2_deterministic_rollout.yaml`
+  - `tests/unit/simulation/test_p4_2_rollout.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: v0.4 P4.2 deterministic rollout requirements and user clarifications for explicit phases, gated kinematic attach, P2/P3 morphology reflection, drop/collision/controller failure definitions, split acceptance, and no learning/full-completion claims.
+- Implemented: `P4_2RolloutPhase`, default phase definitions with entry/exit/timeout metadata, `P4_2DeterministicRolloutConfig`, attach condition and attach event contracts, metric definition contract, no-mislabeling helper, terminal failure metrics, config file, package exports, and unit tests.
+- Not implemented: P4.2 Isaac env/probe, P2/P3 graph-to-asset/module placement execution, per-step rollout runner/archive generation, split P4.2 acceptance, or real Isaac rollout execution.
+- Schema/interface changes: No persisted schema changes. Additive P4.2 simulation-side contracts only.
+- Downstream impact: Later P4.2 env/runner/acceptance orders must use this contract and cannot pass completion with unconditional attach, module-count-only provenance, fake backend only, or learning/P4-full claims.
+- Tests added: `tests/unit/simulation/test_p4_2_rollout.py`
+- Tests passed:
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_2_rollout.py -q` -> 6 passed.
+  - `python3 -m compileall amsrr/simulation tests/unit/simulation/test_p4_2_rollout.py -q` -> passed.
+- Handoff notes: P4.2 success rate must be labeled as Isaac-backed deterministic rollout success under `contact_model="kinematic_fixed_joint_attach_v1"`, not high-fidelity natural grasp success, learned policy success, P4.3, or P4 full completion.
+- Open questions: None for Order 1.
 
 ### P4.1 Implementation: Isaac Full-Scene Backend Smoke
 
