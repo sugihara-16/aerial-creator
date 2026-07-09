@@ -4,7 +4,7 @@ import math
 
 import pytest
 
-from amsrr.controllers.controller_base import ControllerContext
+from amsrr.controllers.controller_base import ControllerContext, PayloadCoupling
 from amsrr.controllers.qp_allocator_interface import (
     BoundedVerticalRotorAllocator,
     QPAllocationResult,
@@ -558,6 +558,51 @@ def test_qpid_controller_builds_pid_wrench_from_policy_body_target_and_feedforwa
     assert desired[3] == pytest.approx(expected_torque[0] + 4.0)
     assert desired[4] == pytest.approx(expected_torque[1] + 5.0)
     assert desired[5] == pytest.approx(expected_torque[2] + 6.0)
+
+
+def test_qpid_controller_payload_coupling_changes_target_wrench_and_metrics() -> None:
+    physical_model = _physical_model()
+    runtime = _runtime_observation()
+    allocator = _RecordingAllocator()
+    controller = QPIDController(
+        allocator=allocator,
+        config=QPIDControllerConfig(control_dt_s=0.005),
+    )
+
+    controller_command = controller.compute(
+        ControllerContext(
+            runtime_observation=runtime,
+            morphology_graph=runtime.morphology_graph,
+            physical_model=physical_model,
+            active_knot=InteractionKnot(t_rel_s=0.0, contact_assignments=[]),
+            policy_command=PolicyCommand(
+                desired_body_pose=runtime.module_states[0].pose_world,
+                desired_body_twist=[0.0] * 6,
+            ),
+            payload_coupling=PayloadCoupling(
+                payload_id="box_01",
+                contact_model="kinematic_payload_coupled_attach_v1",
+                mass_kg=1.0,
+                inertia_body=[0.01, 0.0, 0.0, 0.02, 0.0, 0.03],
+                com_offset_body=(0.1, 0.0, 0.0),
+            ),
+        )
+    )
+
+    assert allocator.problem is not None
+    desired = allocator.problem.desired_wrench_body
+    assert desired is not None
+    metrics = controller_command.controller_status.metrics
+    payload_fz = QPIDControllerConfig().gravity_mps2
+    assert metrics["payload_coupled"] == 1.0
+    assert metrics["payload_mass_kg"] == pytest.approx(1.0)
+    assert metrics["payload_inertia_body_ixx"] == pytest.approx(0.01)
+    assert metrics["payload_com_offset_body_x"] == pytest.approx(0.1)
+    assert metrics["payload_gravity_wrench_body_fz"] == pytest.approx(payload_fz)
+    assert metrics["payload_gravity_wrench_body_ty"] == pytest.approx(-0.1 * payload_fz)
+    assert metrics["target_wrench_body_after_payload_fz"] - metrics["target_wrench_body_before_payload_fz"] == pytest.approx(payload_fz)
+    assert desired[2] == pytest.approx(metrics["target_wrench_body_after_payload_fz"])
+    assert metrics["achieved_wrench_body_fz"] == pytest.approx(desired[2])
     assert controller_command.controller_status.metrics["pid_target_builder_active"] == 1.0
-    assert controller_command.controller_status.metrics["target_pos_error_m"] == pytest.approx(0.2)
-    assert controller_command.controller_status.metrics["target_rot_error_rad"] == pytest.approx(yaw_target_rad)
+    assert controller_command.controller_status.metrics["target_pos_error_m"] == pytest.approx(0.0)
+    assert controller_command.controller_status.metrics["target_rot_error_rad"] == pytest.approx(0.0)

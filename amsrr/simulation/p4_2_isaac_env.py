@@ -13,6 +13,7 @@ from amsrr.simulation.p4_2_rollout import (
     P4_2DeterministicRolloutConfig,
     P4_2DeterministicRolloutResult,
     P4_2PhaseTransitionRecord,
+    P4_2ReleaseEvent,
     P4_2RolloutPhase,
 )
 from amsrr.utils.config import load_config
@@ -115,6 +116,7 @@ class P4_2IsaacEnv:
                 contact_model=self.config.contact_model,
                 attach_distance_threshold_m=self.config.attach_distance_threshold_m,
                 attach_relative_velocity_threshold_mps=self.config.attach_relative_velocity_threshold_mps,
+                attach_snap_distance_threshold_m=self.config.attach_snap_distance_threshold_m,
                 uses_p2_p3_design=uses_p2_selected_design and uses_p3_assembled_morphology,
             )
         except Exception as exc:  # pragma: no cover - real subprocess failures are environment-specific.
@@ -172,10 +174,18 @@ def p4_2_result_from_report(
         for item in report.get("p4_2_attach_events", [])
         if isinstance(item, dict)
     ]
+    release_events = [
+        P4_2ReleaseEvent.from_dict(item)
+        for item in report.get("p4_2_release_events", [])
+        if isinstance(item, dict)
+    ]
     final_phase = _final_phase(report)
     metrics = _numeric_report_metrics(report)
     metrics.setdefault("p4_full_completion", 0.0)
     metrics.setdefault("p4_3_learning_bootstrap", 0.0)
+    metrics.setdefault("learned_policy_success_claim", 0.0)
+    metrics.setdefault("high_fidelity_natural_grasp_success_claim", 0.0)
+    metrics.setdefault("true_fixed_joint_dynamics_success_claim", 0.0)
     morphology_asset_reflected = bool(report.get("p4_2_morphology_asset_reflected", False))
     module_placement_reflected = bool(report.get("p4_2_module_placement_reflected", False))
     actuator_mapping_reflected = bool(report.get("p4_2_actuator_mapping_reflected", False))
@@ -184,6 +194,7 @@ def p4_2_result_from_report(
         bool(report.get("p4_2_deterministic_rollout_passed", False))
         and final_phase == P4_2RolloutPhase.SUCCESS
         and bool(attach_events)
+        and bool(release_events)
         and morphology_asset_reflected
         and module_placement_reflected
         and actuator_mapping_reflected
@@ -204,6 +215,7 @@ def p4_2_result_from_report(
         skip_reason=None if passed else str(report.get("error", "p4_2_rollout_failed")),
         phase_transitions=phase_transitions,
         attach_events=attach_events,
+        release_events=release_events,
         runtime_observations=runtime_observations,
         policy_commands=policy_commands,
         controller_commands=controller_commands,
@@ -227,6 +239,12 @@ def p4_2_result_from_report(
             "is_p4_full_completion": False,
             "p4_3_learning_bootstrap": False,
             "learning_claim": False,
+            "learned_policy_success_claim": False,
+            "high_fidelity_natural_grasp_success_claim": False,
+            "true_fixed_joint_dynamics_success_claim": False,
+            "checkpoint_claim": False,
+            "reward_curve_training_claim": False,
+            "p4_4_natural_contact_grasp_remaining": True,
         },
     )
 

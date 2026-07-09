@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from amsrr.controllers.controller_base import ControllerContext
+from amsrr.controllers.controller_base import ControllerContext, PayloadCoupling
 from amsrr.controllers.policy_command_builder import DesiredBiasReferences, PolicyCommandBiasBuilder
 from amsrr.controllers.qp_allocator_interface import (
     BoundedVerticalRotorAllocator,
@@ -213,14 +213,43 @@ class QPIDController:
             + self.config.yaw_d_gain * angular_velocity_error_body[2],
         )
         desired_torque_body = _matvec(_inertia_matrix_from_inertia6(rigid_body_model.inertia_body), desired_ang_acc_body)
+        target_wrench_before_payload = [*desired_force_body, *desired_torque_body]
+        target_wrench_after_payload = list(target_wrench_before_payload)
+        payload_wrench_body: list[float] | None = None
+        payload_gravity_wrench_body: list[float] | None = None
+        if context.payload_coupling is not None:
+            payload_wrench_body = _payload_effective_wrench_body(
+                context.payload_coupling,
+                desired_acc_world=desired_acc_world,
+                desired_ang_acc_body=desired_ang_acc_body,
+                body_from_world=body_from_world,
+            )
+            payload_gravity_wrench_body = _payload_gravity_wrench_body(
+                context.payload_coupling,
+                body_from_world=body_from_world,
+            )
+            target_wrench_after_payload = (
+                _sum_wrenches(target_wrench_before_payload, payload_wrench_body)
+                or target_wrench_before_payload
+            )
         self._reference_metrics = {
             "target_pos_error_m": math.sqrt(sum(value * value for value in position_error_world)),
             "target_rot_error_rad": math.sqrt(sum(value * value for value in attitude_error_body)),
             "target_velocity_error_norm": math.sqrt(sum(value * value for value in velocity_error_world)),
             "target_angular_velocity_error_norm": math.sqrt(sum(value * value for value in angular_velocity_error_body)),
             "pid_target_builder_active": 1.0,
+            **_wrench_metrics("target_wrench_body_before_payload", target_wrench_before_payload),
+            **_wrench_metrics("target_wrench_body_after_payload", target_wrench_after_payload),
         }
-        return [*desired_force_body, *desired_torque_body]
+        if context.payload_coupling is not None:
+            self._reference_metrics.update(
+                _payload_metrics(
+                    context.payload_coupling,
+                    payload_wrench_body=payload_wrench_body or [0.0] * 6,
+                    payload_gravity_wrench_body=payload_gravity_wrench_body or [0.0] * 6,
+                )
+            )
+        return target_wrench_after_payload
 
     def _commit_or_freeze_integrators(self, allocation: QPAllocationResult) -> None:
         if allocation.feasible and not allocation.clipped:
@@ -294,6 +323,7 @@ def _controller_status(allocation: QPAllocationResult, config: QPIDControllerCon
             "residual_norm": allocation.residual_norm,
             "clipped": 1.0 if allocation.clipped else 0.0,
             "violation_count": float(len(allocation.violation_codes)),
+            **_wrench_metrics("achieved_wrench_body", allocation.achieved_wrench_body),
         },
     )
 
@@ -487,6 +517,69 @@ def _sum_wrenches(left: list[float] | None, right: list[float] | None) -> list[f
     return [float(left_values[idx]) + float(right_values[idx]) for idx in range(6)]
 
 
+def _payload_effective_wrench_body(
+    payload: PayloadCoupling,
+    *,
+    desired_acc_world: list[float],
+    desired_ang_acc_body: tuple[float, float, float],
+    body_from_world: tuple[tuple[float, float, float], ...],
+) -> list[float]:
+    force_world = (
+        payload.mass_kg * float(desired_acc_world[0]),
+        payload.mass_kg * float(desired_acc_world[1]),
+        payload.mass_kg * (float(payload.gravity_mps2) + float(desired_acc_world[2])),
+    )
+    force_body = _matvec(body_from_world, force_world)
+    torque_from_offset = _cross(payload.com_offset_body, force_body)
+    inertia_torque = _matvec(_inertia_matrix_from_inertia6(payload.inertia_body), desired_ang_acc_body)
+    torque_body = (
+        torque_from_offset[0] + inertia_torque[0],
+        torque_from_offset[1] + inertia_torque[1],
+        torque_from_offset[2] + inertia_torque[2],
+    )
+    return [*force_body, *torque_body]
+
+
+def _payload_gravity_wrench_body(
+    payload: PayloadCoupling,
+    *,
+    body_from_world: tuple[tuple[float, float, float], ...],
+) -> list[float]:
+    gravity_force_world = (0.0, 0.0, payload.mass_kg * payload.gravity_mps2)
+    gravity_force_body = _matvec(body_from_world, gravity_force_world)
+    gravity_torque_body = _cross(payload.com_offset_body, gravity_force_body)
+    return [*gravity_force_body, *gravity_torque_body]
+
+
+def _payload_metrics(
+    payload: PayloadCoupling,
+    *,
+    payload_wrench_body: list[float],
+    payload_gravity_wrench_body: list[float],
+) -> dict[str, float]:
+    return {
+        "payload_coupled": 1.0,
+        "payload_mass_kg": float(payload.mass_kg),
+        "payload_com_offset_body_x": float(payload.com_offset_body[0]),
+        "payload_com_offset_body_y": float(payload.com_offset_body[1]),
+        "payload_com_offset_body_z": float(payload.com_offset_body[2]),
+        "payload_inertia_body_ixx": float(payload.inertia_body[0]),
+        "payload_inertia_body_ixy": float(payload.inertia_body[1]),
+        "payload_inertia_body_ixz": float(payload.inertia_body[2]),
+        "payload_inertia_body_iyy": float(payload.inertia_body[3]),
+        "payload_inertia_body_iyz": float(payload.inertia_body[4]),
+        "payload_inertia_body_izz": float(payload.inertia_body[5]),
+        **_wrench_metrics("payload_wrench_body", payload_wrench_body),
+        **_wrench_metrics("payload_gravity_wrench_body", payload_gravity_wrench_body),
+    }
+
+
+def _wrench_metrics(prefix: str, wrench: list[float]) -> dict[str, float]:
+    values = (list(wrench) + [0.0] * 6)[:6]
+    labels = ("fx", "fy", "fz", "tx", "ty", "tz")
+    return {f"{prefix}_{label}": float(values[idx]) for idx, label in enumerate(labels)}
+
+
 def _pose_quat(pose: tuple[float, float, float, float, float, float, float]) -> tuple[float, float, float, float]:
     return (float(pose[3]), float(pose[4]), float(pose[5]), float(pose[6]))
 
@@ -557,6 +650,17 @@ def _matvec(
         matrix[0][0] * vector[0] + matrix[0][1] * vector[1] + matrix[0][2] * vector[2],
         matrix[1][0] * vector[0] + matrix[1][1] * vector[1] + matrix[1][2] * vector[2],
         matrix[2][0] * vector[0] + matrix[2][1] * vector[1] + matrix[2][2] * vector[2],
+    )
+
+
+def _cross(
+    left: tuple[float, float, float],
+    right: tuple[float, float, float],
+) -> tuple[float, float, float]:
+    return (
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
     )
 
 

@@ -6,7 +6,7 @@ from amsrr.controllers.actuator_mapping import (
     ActuatorMappingBuilder,
     build_actuator_mapping,
 )
-from amsrr.controllers.controller_base import ControllerBase, ControllerContext
+from amsrr.controllers.controller_base import ControllerBase, ControllerContext, PayloadCoupling
 from amsrr.controllers.isaac_controller_bridge import (
     IsaacActuatorTarget,
     IsaacActuatorTargetRecord,
@@ -50,6 +50,7 @@ __all__ = [
     "IsaacControllerBridge",
     "IsaacControllerBridgeConfig",
     "PolicyCommandBiasBuilder",
+    "PayloadCoupling",
     "QPAllocationProblem",
     "QPAllocationResult",
     "QPAllocatorInterface",

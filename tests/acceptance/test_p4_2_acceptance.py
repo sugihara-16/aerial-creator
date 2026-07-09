@@ -13,6 +13,7 @@ from amsrr.simulation import (
     P4_2DeterministicRolloutConfig,
     P4_2IsaacEnv,
     P4_2PhaseTransitionRecord,
+    P4_2ReleaseEvent,
     P4_2RolloutPhase,
 )
 from amsrr.training import P4_2DeterministicRolloutRunner, P4_2DeterministicRolloutRunnerConfig
@@ -36,6 +37,8 @@ def test_p4_2_fast_gate_does_not_complete_without_real_isaac_rollout() -> None:
     assert report.per_step_controller_commands_saved is True
     assert report.per_step_actuator_target_records_saved is True
     assert report.attach_events_saved is True
+    assert report.release_events_saved is True
+    assert report.payload_coupling_saved is True
     assert report.morphology_reflection_saved is True
     assert "P4.2 real Isaac rollout gate has not passed" in report.failure_reasons
     assert "P4.2 rollout was not Isaac-backed: p2_p3_deterministic_grasp_carry" in report.failure_reasons
@@ -67,6 +70,19 @@ def test_p4_2_fast_gate_rejects_missing_attach_event() -> None:
     assert report.fast_gate_passed is False
     assert report.completion_passed is False
     assert "P4.2 archives are missing gated object attach events" in report.failure_reasons
+
+
+def test_p4_2_fast_gate_rejects_missing_payload_coupling() -> None:
+    runner_result = _fake_runner_result()
+    archive = runner_result.archives[0]
+    for command in archive.controller_commands:
+        command.controller_status.metrics = {}
+
+    report = run_p4_2_acceptance([archive], rollout_results=[runner_result.rollout_result])
+
+    assert report.fast_gate_passed is False
+    assert report.completion_passed is False
+    assert "P4.2 archives do not prove payload-coupled controller computation" in report.failure_reasons
 
 
 def _fake_runner_result():
@@ -121,7 +137,11 @@ def _p4_2_report(*, morphology, step_count: int) -> dict[str, Any]:
             dock_mechanism_commands={
                 f"module_{module.module_id}:pitch_dock_mech_joint1": 0.0 for module in morphology.modules
             },
-            controller_status=ControllerStatus(status="ok", qp_feasible=True),
+            controller_status=ControllerStatus(
+                status="ok",
+                qp_feasible=True,
+                metrics=_payload_controller_metrics(),
+            ),
         ).to_dict()
         for _ in range(step_count)
     ]
@@ -137,7 +157,12 @@ def _p4_2_report(*, morphology, step_count: int) -> dict[str, Any]:
             "unsupported_actuators": [],
             "allocation_residual_norm": 0.0,
             "qp_status": "ok",
-            "metrics": {},
+            "metrics": {
+                "allocation_residual_norm": 0.0,
+                "missing_actuator_count": 0.0,
+                "unsupported_actuator_count": 0.0,
+                "clipped_target_count": 0.0,
+            },
             "metadata": {},
         }
         for step_idx in range(step_count)
@@ -146,7 +171,7 @@ def _p4_2_report(*, morphology, step_count: int) -> dict[str, Any]:
         "isaac_backed": False,
         "p4_2_deterministic_rollout": True,
         "p4_2_deterministic_rollout_passed": True,
-        "p4_2_contact_model": "kinematic_fixed_joint_attach_v1",
+        "p4_2_contact_model": "kinematic_payload_coupled_attach_v1",
         "p4_2_final_phase": "success",
         "p4_2_uses_p2_p3": True,
         "p4_2_morphology_asset_reflected": True,
@@ -177,6 +202,7 @@ def _p4_2_report(*, morphology, step_count: int) -> dict[str, Any]:
             ).to_dict(),
         ],
         "p4_2_attach_events": [_attach_event().to_dict()],
+        "p4_2_release_events": [_release_event().to_dict()],
         "p4_2_runtime_observation_count": step_count,
         "p4_2_policy_command_count": step_count,
         "p4_2_controller_command_count": step_count,
@@ -226,17 +252,21 @@ def _attach_event() -> P4_2AttachEvent:
         object_id="box_01",
         distance_m=0.02,
         relative_velocity_mps=0.01,
+        attach_snap_distance_m=0.01,
+        relative_pose_error_m=0.01,
         assignment_feasible=True,
         controller_ok=True,
         within_distance=True,
         within_relative_velocity=True,
+        within_attach_snap_distance=True,
+        within_attach_phase_timeout=True,
         passed=True,
     )
     return P4_2AttachEvent(
         time_s=0.01,
         phase=P4_2RolloutPhase.ATTACH_ATTEMPT,
         event_type="attach",
-        contact_model="kinematic_fixed_joint_attach_v1",
+        contact_model="kinematic_payload_coupled_attach_v1",
         object_id="box_01",
         candidate_id=1,
         anchor_id=2,
@@ -246,7 +276,57 @@ def _attach_event() -> P4_2AttachEvent:
         object_pose_world=(0.8, 0.0, 0.4, 0.0, 0.0, 0.0, 1.0),
         distance_m=0.02,
         relative_velocity_mps=0.01,
+        attach_snap_distance_m=0.01,
+        relative_pose_error_m=0.01,
         assignment_feasible=True,
         controller_ok=True,
         condition_report=report,
+        candidate_ids=[1],
+        anchor_ids=[2],
+        slot_ids=[0],
+        contact_region_ids=["box_01:region_0"],
+        distance_margins={"anchor_candidate_distance_margin_m": 0.04},
+        assignment_feasibility={"feasible": True},
     )
+
+
+def _release_event() -> P4_2ReleaseEvent:
+    return P4_2ReleaseEvent(
+        release_time_s=0.02,
+        phase=P4_2RolloutPhase.RELEASE,
+        event_type="release",
+        contact_model="kinematic_payload_coupled_attach_v1",
+        object_id="box_01",
+        object_pose_world=(2.0, 0.0, 0.4, 0.0, 0.0, 0.0, 1.0),
+        robot_pose_world=(2.0, 0.0, 0.6, 0.0, 0.0, 0.0, 1.0),
+        intended_release=True,
+        post_release_object_pose_error_m=0.02,
+    )
+
+
+def _payload_controller_metrics() -> dict[str, float]:
+    return {
+        "payload_coupled": 1.0,
+        "payload_mass_kg": 1.0,
+        "payload_inertia_body_ixx": 0.01,
+        "payload_inertia_body_ixy": 0.0,
+        "payload_inertia_body_ixz": 0.0,
+        "payload_inertia_body_iyy": 0.02,
+        "payload_inertia_body_iyz": 0.0,
+        "payload_inertia_body_izz": 0.03,
+        "payload_com_offset_body_x": 0.1,
+        "payload_com_offset_body_y": 0.0,
+        "payload_com_offset_body_z": 0.0,
+        "payload_gravity_wrench_body_fx": 0.0,
+        "payload_gravity_wrench_body_fy": 0.0,
+        "payload_gravity_wrench_body_fz": 9.80665,
+        "payload_gravity_wrench_body_tx": 0.0,
+        "payload_gravity_wrench_body_ty": -0.980665,
+        "payload_gravity_wrench_body_tz": 0.0,
+        "target_wrench_body_before_payload_fz": 100.0,
+        "target_wrench_body_after_payload_fz": 109.80665,
+        "achieved_wrench_body_fz": 109.80665,
+        "allocation_residual_norm": 0.0,
+        "clipped": 0.0,
+        "clipped_target_count": 0.0,
+    }

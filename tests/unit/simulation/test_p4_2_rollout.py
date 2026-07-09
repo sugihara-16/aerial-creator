@@ -45,7 +45,7 @@ def test_p4_2_config_loader_and_phase_state_machine_contract() -> None:
     assert by_phase[P4_2RolloutPhase.ATTACH_ATTEMPT].timeout_transition == P4_2RolloutPhase.DROP_FAILURE
     assert by_phase[P4_2RolloutPhase.SUCCESS].terminal is True
     assert by_phase[P4_2RolloutPhase.COLLISION_FAILURE].terminal is True
-    assert "attach condition report passes" in by_phase[P4_2RolloutPhase.ATTACH_ATTEMPT].exit_conditions[0]
+    assert "snap distance" in by_phase[P4_2RolloutPhase.ATTACH_ATTEMPT].exit_conditions[0]
 
 
 def test_p4_2_attach_conditions_require_distance_velocity_feasibility_and_controller_status() -> None:
@@ -84,6 +84,7 @@ def test_p4_2_attach_conditions_require_distance_velocity_feasibility_and_contro
     assert failed.failure_reasons == [
         "anchor_candidate_distance_above_threshold",
         "relative_velocity_above_threshold",
+        "attach_snap_distance_above_threshold",
         "assignment_feasibility_failed",
         "controller_status_not_attach_safe",
     ]
@@ -108,8 +109,10 @@ def test_p4_2_no_mislabeling_contract_rejects_learning_and_full_completion_claim
     assert artifacts["is_p4_full_completion"] is False
     assert artifacts["p4_3_learning_bootstrap"] is False
     assert artifacts["learned_policy_success_claim"] is False
+    assert artifacts["true_fixed_joint_dynamics_success_claim"] is False
     assert artifacts["checkpoint_claim"] is False
     assert artifacts["reward_curve_training_claim"] is False
+    assert artifacts["p4_4_natural_contact_grasp_remaining"] is True
 
 
 def test_p4_2_success_result_requires_attach_event_and_reflected_p2_p3_morphology() -> None:
@@ -134,3 +137,5 @@ def test_p4_2_failure_metrics_define_terminal_rates_without_learning_claims() ->
     assert metrics["p4_full_completion"] == 0.0
     assert metrics["p4_3_learning_bootstrap"] == 0.0
     assert metrics["learned_policy_success_claim"] == 0.0
+    assert metrics["high_fidelity_natural_grasp_success_claim"] == 0.0
+    assert metrics["true_fixed_joint_dynamics_success_claim"] == 0.0

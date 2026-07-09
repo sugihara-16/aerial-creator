@@ -38,6 +38,8 @@ class P4_2AcceptanceReport(SchemaBase):
     per_step_controller_commands_saved: bool
     per_step_actuator_target_records_saved: bool
     attach_events_saved: bool
+    release_events_saved: bool
+    payload_coupling_saved: bool
     morphology_reflection_saved: bool
     no_mislabeling_passed: bool
     required_rollout_names: list[str]
@@ -73,6 +75,8 @@ def run_p4_2_acceptance(
     per_step_controller_commands_saved = _all_archives(archives, _controller_commands_saved)
     per_step_actuator_target_records_saved = _all_archives(archives, _actuator_target_records_saved)
     attach_events_saved = _all_archives(archives, _attach_events_saved)
+    release_events_saved = _all_archives(archives, _release_events_saved)
+    payload_coupling_saved = _all_archives(archives, _payload_coupling_saved)
     morphology_reflection_saved = _all_archives(archives, _morphology_reflection_saved)
     no_mislabeling_passed = _all_archives(archives, _no_mislabeling_passed)
     fast_failure_reasons = _fast_failure_reasons(
@@ -87,6 +91,8 @@ def run_p4_2_acceptance(
         per_step_controller_commands_saved=per_step_controller_commands_saved,
         per_step_actuator_target_records_saved=per_step_actuator_target_records_saved,
         attach_events_saved=attach_events_saved,
+        release_events_saved=release_events_saved,
+        payload_coupling_saved=payload_coupling_saved,
         morphology_reflection_saved=morphology_reflection_saved,
         no_mislabeling_passed=no_mislabeling_passed,
     )
@@ -120,6 +126,8 @@ def run_p4_2_acceptance(
         per_step_controller_commands_saved=per_step_controller_commands_saved,
         per_step_actuator_target_records_saved=per_step_actuator_target_records_saved,
         attach_events_saved=attach_events_saved,
+        release_events_saved=release_events_saved,
+        payload_coupling_saved=payload_coupling_saved,
         morphology_reflection_saved=morphology_reflection_saved,
         no_mislabeling_passed=no_mislabeling_passed,
         required_rollout_names=list(P4_2_REQUIRED_REAL_ROLLOUTS),
@@ -213,6 +221,52 @@ def _attach_events_saved(archive: EpisodeArchive) -> bool:
     return isinstance(events, list) and bool(events) and archive.metrics.get("attach_event_count", 0.0) > 0.0
 
 
+def _release_events_saved(archive: EpisodeArchive) -> bool:
+    events = archive.rollout_artifacts.get("p4_2_release_events")
+    return isinstance(events, list) and bool(events) and archive.metrics.get("release_event_count", 0.0) > 0.0
+
+
+def _payload_coupling_saved(archive: EpisodeArchive) -> bool:
+    before_after_delta_found = False
+    for command in archive.controller_commands:
+        metrics = command.controller_status.metrics
+        if metrics.get("payload_coupled", 0.0) != 1.0:
+            continue
+        required = (
+            "payload_mass_kg",
+            "payload_inertia_body_ixx",
+            "payload_inertia_body_iyy",
+            "payload_inertia_body_izz",
+            "payload_com_offset_body_x",
+            "payload_com_offset_body_y",
+            "payload_com_offset_body_z",
+            "payload_gravity_wrench_body_fz",
+            "target_wrench_body_before_payload_fz",
+            "target_wrench_body_after_payload_fz",
+            "achieved_wrench_body_fz",
+            "allocation_residual_norm",
+            "clipped",
+            "clipped_target_count",
+        )
+        if any(key not in metrics for key in required):
+            continue
+        if metrics["payload_mass_kg"] <= 0.0:
+            continue
+        before = float(metrics["target_wrench_body_before_payload_fz"])
+        after = float(metrics["target_wrench_body_after_payload_fz"])
+        if abs(after - before) > 1.0e-6:
+            before_after_delta_found = True
+    actuator_records_ok = bool(archive.actuator_target_records) and all(
+        isinstance(record.get("metrics"), dict)
+        and "allocation_residual_norm" in record.get("metrics", {})
+        and "missing_actuator_count" in record.get("metrics", {})
+        and "unsupported_actuator_count" in record.get("metrics", {})
+        and "clipped_target_count" in record.get("metrics", {})
+        for record in archive.actuator_target_records
+    )
+    return before_after_delta_found and actuator_records_ok
+
+
 def _morphology_reflection_saved(archive: EpisodeArchive) -> bool:
     artifacts = archive.rollout_artifacts
     return (
@@ -236,12 +290,14 @@ def _no_mislabeling_passed(archive: EpisodeArchive) -> bool:
         and artifacts.get("learning_claim") is False
         and artifacts.get("learned_policy_success_claim") is False
         and artifacts.get("high_fidelity_natural_grasp_success_claim") is False
+        and artifacts.get("true_fixed_joint_dynamics_success_claim") is False
         and artifacts.get("checkpoint_claim") is False
         and artifacts.get("reward_curve_training_claim") is False
         and archive.metrics.get("p4_full_completion", 0.0) == 0.0
         and archive.metrics.get("p4_3_learning_bootstrap", 0.0) == 0.0
         and archive.metrics.get("learned_policy_success_claim", 0.0) == 0.0
         and archive.metrics.get("high_fidelity_natural_grasp_success_claim", 0.0) == 0.0
+        and archive.metrics.get("true_fixed_joint_dynamics_success_claim", 0.0) == 0.0
         and archive.metrics.get("checkpoint_claim", 0.0) == 0.0
         and archive.metrics.get("reward_curve_training_claim", 0.0) == 0.0
         and archive.metrics.get("module_attach_detach_claim", 0.0) == 0.0
@@ -267,6 +323,7 @@ def _real_isaac_rollout_passed(rollout_results: list[P4_2DeterministicRolloutRes
             and result.actuator_mapping_reflected
             and result.final_phase == P4_2RolloutPhase.SUCCESS
             and bool(result.attach_events)
+            and bool(result.release_events)
             and bool(result.runtime_observations)
             and bool(result.policy_commands)
             and bool(result.controller_commands)
@@ -289,6 +346,8 @@ def _fast_failure_reasons(
     per_step_controller_commands_saved: bool,
     per_step_actuator_target_records_saved: bool,
     attach_events_saved: bool,
+    release_events_saved: bool,
+    payload_coupling_saved: bool,
     morphology_reflection_saved: bool,
     no_mislabeling_passed: bool,
 ) -> list[str]:
@@ -315,6 +374,10 @@ def _fast_failure_reasons(
         reasons.append("P4.2 archives are missing per-step actuator target records")
     if not attach_events_saved:
         reasons.append("P4.2 archives are missing gated object attach events")
+    if not release_events_saved:
+        reasons.append("P4.2 archives are missing intended object release events")
+    if not payload_coupling_saved:
+        reasons.append("P4.2 archives do not prove payload-coupled controller computation")
     if not morphology_reflection_saved:
         reasons.append("P4.2 archives do not prove graph-specific asset/module/mapping reflection")
     if not no_mislabeling_passed:
@@ -348,4 +411,6 @@ def _rollout_failure_reasons(rollout_results: list[P4_2DeterministicRolloutResul
             reasons.append(f"P4.2 real Isaac rollout did not reflect graph-specific morphology: {rollout_name}")
         elif not result.attach_events:
             reasons.append(f"P4.2 real Isaac rollout has no gated attach event: {rollout_name}")
+        elif not result.release_events:
+            reasons.append(f"P4.2 real Isaac rollout has no release event: {rollout_name}")
     return reasons

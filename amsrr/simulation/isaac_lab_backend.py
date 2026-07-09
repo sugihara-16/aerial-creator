@@ -505,9 +505,10 @@ class IsaacLabBackend:
             0.0,
             1.0,
         ),
-        contact_model: str = "kinematic_fixed_joint_attach_v1",
+        contact_model: str = "kinematic_payload_coupled_attach_v1",
         attach_distance_threshold_m: float = 0.06,
         attach_relative_velocity_threshold_mps: float = 0.20,
+        attach_snap_distance_threshold_m: float = 0.03,
         uses_p2_p3_design: bool = True,
         generated_usd_dir: str | Path | None = None,
         generated_usd_path: str | Path | None = None,
@@ -545,6 +546,8 @@ class IsaacLabBackend:
                 str(attach_distance_threshold_m),
                 "--p4-2-attach-relative-velocity-threshold-mps",
                 str(attach_relative_velocity_threshold_mps),
+                "--p4-2-attach-snap-distance-threshold-m",
+                str(attach_snap_distance_threshold_m),
             ]
         )
         if uses_p2_p3_design:
@@ -769,9 +772,10 @@ class IsaacLabBackend:
             0.0,
             1.0,
         ),
-        contact_model: str = "kinematic_fixed_joint_attach_v1",
+        contact_model: str = "kinematic_payload_coupled_attach_v1",
         attach_distance_threshold_m: float = 0.06,
         attach_relative_velocity_threshold_mps: float = 0.20,
+        attach_snap_distance_threshold_m: float = 0.03,
         uses_p2_p3_design: bool = True,
         timeout_s: float | None = None,
     ) -> dict[str, Any]:
@@ -787,6 +791,7 @@ class IsaacLabBackend:
             contact_model=contact_model,
             attach_distance_threshold_m=attach_distance_threshold_m,
             attach_relative_velocity_threshold_mps=attach_relative_velocity_threshold_mps,
+            attach_snap_distance_threshold_m=attach_snap_distance_threshold_m,
             uses_p2_p3_design=uses_p2_p3_design,
             generated_usd_dir=self.config.generated_usd_dir,
             generated_usd_path=self.config.generated_usd_path,

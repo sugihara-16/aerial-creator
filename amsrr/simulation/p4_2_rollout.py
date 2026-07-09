@@ -18,12 +18,13 @@ from amsrr.utils.config import load_config
 
 
 P4_2_ROLLOUT_VERSION = "p4_2_deterministic_rollout_v1"
-P4_2_CONTACT_MODEL = "kinematic_fixed_joint_attach_v1"
+P4_2_CONTACT_MODEL = "kinematic_payload_coupled_attach_v1"
 P4_2_REQUIRED_REAL_ROLLOUTS = ("p2_p3_deterministic_grasp_carry",)
 P4_2_SUCCESS_SCOPE_NOTE = (
-    "P4.2 success_rate is Isaac-backed deterministic rollout success under "
-    "contact_model=kinematic_fixed_joint_attach_v1. It is not high-fidelity natural "
-    "grasp success, learned policy success, P4.3 learning bootstrap, or P4 full completion."
+    "P4.2 success_rate is deterministic payload-carry rollout success under "
+    "contact_model=kinematic_payload_coupled_attach_v1. It is not high-fidelity natural "
+    "grasp success, true fixed-joint dynamics success, learned policy success, "
+    "P4.3 learning bootstrap, or P4 full completion."
 )
 
 
@@ -107,6 +108,7 @@ class P4_2DeterministicRolloutConfig(SchemaBase):
     contact_model: str = P4_2_CONTACT_MODEL
     attach_distance_threshold_m: float = 0.06
     attach_relative_velocity_threshold_mps: float = 0.20
+    attach_snap_distance_threshold_m: float = 0.03
     pregrasp_alignment_distance_m: float = 0.12
     object_drop_distance_threshold_m: float = 0.35
     controller_failure_consecutive_steps: int = 20
@@ -147,6 +149,7 @@ class P4_2DeterministicRolloutConfig(SchemaBase):
         for name in (
             "attach_distance_threshold_m",
             "attach_relative_velocity_threshold_mps",
+            "attach_snap_distance_threshold_m",
             "pregrasp_alignment_distance_m",
             "object_drop_distance_threshold_m",
         ):
@@ -178,11 +181,17 @@ class P4_2AttachConditionReport(SchemaBase):
     object_id: str
     distance_m: float
     relative_velocity_mps: float
+    attach_snap_distance_m: float
+    relative_pose_error_m: float
     assignment_feasible: bool
     controller_ok: bool
     within_distance: bool
     within_relative_velocity: bool
+    within_attach_snap_distance: bool
+    within_attach_phase_timeout: bool
     passed: bool
+    attach_phase_elapsed_s: float = 0.0
+    attach_phase_timeout_s: float | None = None
     failure_reasons: list[str] = field(default_factory=list)
     metrics: dict[str, float] = field(default_factory=dict)
 
@@ -192,9 +201,19 @@ class P4_2AttachConditionReport(SchemaBase):
             raise SchemaValidationError("P4_2AttachConditionReport.distance_m must be non-negative")
         if self.relative_velocity_mps < 0.0:
             raise SchemaValidationError("P4_2AttachConditionReport.relative_velocity_mps must be non-negative")
+        if self.attach_snap_distance_m < 0.0:
+            raise SchemaValidationError("P4_2AttachConditionReport.attach_snap_distance_m must be non-negative")
+        if self.relative_pose_error_m < 0.0:
+            raise SchemaValidationError("P4_2AttachConditionReport.relative_pose_error_m must be non-negative")
+        if self.attach_phase_elapsed_s < 0.0:
+            raise SchemaValidationError("P4_2AttachConditionReport.attach_phase_elapsed_s must be non-negative")
+        if self.attach_phase_timeout_s is not None and self.attach_phase_timeout_s <= 0.0:
+            raise SchemaValidationError("P4_2AttachConditionReport.attach_phase_timeout_s must be positive")
         expected = (
             self.within_distance
             and self.within_relative_velocity
+            and self.within_attach_snap_distance
+            and self.within_attach_phase_timeout
             and self.assignment_feasible
             and self.controller_ok
         )
@@ -219,9 +238,17 @@ class P4_2AttachEvent(SchemaBase):
     object_pose_world: Pose7D
     distance_m: float
     relative_velocity_mps: float
+    attach_snap_distance_m: float
+    relative_pose_error_m: float
     assignment_feasible: bool
     controller_ok: bool
     condition_report: P4_2AttachConditionReport
+    candidate_ids: list[int] = field(default_factory=list)
+    anchor_ids: list[int] = field(default_factory=list)
+    slot_ids: list[int] = field(default_factory=list)
+    contact_region_ids: list[str] = field(default_factory=list)
+    distance_margins: dict[str, float] = field(default_factory=dict)
+    assignment_feasibility: dict[str, Any] = field(default_factory=dict)
 
     def validate(self) -> None:
         if self.time_s < 0.0:
@@ -236,8 +263,48 @@ class P4_2AttachEvent(SchemaBase):
         require_len(self.contact_pose_world, 7, "P4_2AttachEvent.contact_pose_world")
         require_len(self.anchor_pose_world, 7, "P4_2AttachEvent.anchor_pose_world")
         require_len(self.object_pose_world, 7, "P4_2AttachEvent.object_pose_world")
+        if not self.candidate_ids:
+            raise SchemaValidationError("P4_2AttachEvent.candidate_ids must be non-empty")
+        if not self.anchor_ids:
+            raise SchemaValidationError("P4_2AttachEvent.anchor_ids must be non-empty")
+        if not self.slot_ids:
+            raise SchemaValidationError("P4_2AttachEvent.slot_ids must be non-empty")
+        if not self.contact_region_ids:
+            raise SchemaValidationError("P4_2AttachEvent.contact_region_ids must be non-empty")
+        if self.attach_snap_distance_m < 0.0:
+            raise SchemaValidationError("P4_2AttachEvent.attach_snap_distance_m must be non-negative")
+        if self.relative_pose_error_m < 0.0:
+            raise SchemaValidationError("P4_2AttachEvent.relative_pose_error_m must be non-negative")
         if not self.condition_report.passed:
             raise SchemaValidationError("P4_2AttachEvent requires a passed condition_report")
+
+
+@dataclass
+class P4_2ReleaseEvent(SchemaBase):
+    release_time_s: float
+    phase: P4_2RolloutPhase
+    event_type: str
+    contact_model: str
+    object_id: str
+    object_pose_world: Pose7D
+    robot_pose_world: Pose7D
+    intended_release: bool
+    post_release_object_pose_error_m: float
+
+    def validate(self) -> None:
+        if self.release_time_s < 0.0:
+            raise SchemaValidationError("P4_2ReleaseEvent.release_time_s must be non-negative")
+        if self.phase != P4_2RolloutPhase.RELEASE:
+            raise SchemaValidationError("P4_2ReleaseEvent.phase must be release")
+        if self.event_type != "release":
+            raise SchemaValidationError("P4_2ReleaseEvent.event_type must be 'release'")
+        if self.contact_model != P4_2_CONTACT_MODEL:
+            raise SchemaValidationError(f"P4_2ReleaseEvent.contact_model must be {P4_2_CONTACT_MODEL!r}")
+        require_non_empty(self.object_id, "P4_2ReleaseEvent.object_id")
+        require_len(self.object_pose_world, 7, "P4_2ReleaseEvent.object_pose_world")
+        require_len(self.robot_pose_world, 7, "P4_2ReleaseEvent.robot_pose_world")
+        if self.post_release_object_pose_error_m < 0.0:
+            raise SchemaValidationError("P4_2ReleaseEvent.post_release_object_pose_error_m must be non-negative")
 
 
 @dataclass
@@ -258,7 +325,7 @@ class P4_2MetricDefinitions(SchemaBase):
         "ControllerStatus is infeasible/fault."
     )
     intended_contact_exclusion: str = (
-        "selected grasp contacts, selected support contacts, and kinematic_fixed_joint_attach_v1 contacts are not "
+        "selected grasp contacts, selected support contacts, and kinematic_payload_coupled_attach_v1 contacts are not "
         "counted as hard_collision."
     )
 
@@ -293,6 +360,7 @@ class P4_2DeterministicRolloutResult(SchemaBase):
     skip_reason: str | None = None
     phase_transitions: list[P4_2PhaseTransitionRecord] = field(default_factory=list)
     attach_events: list[P4_2AttachEvent] = field(default_factory=list)
+    release_events: list[P4_2ReleaseEvent] = field(default_factory=list)
     runtime_observations: list[RuntimeObservation] = field(default_factory=list)
     policy_commands: list[PolicyCommand] = field(default_factory=list)
     controller_commands: list[ControllerCommand] = field(default_factory=list)
@@ -312,6 +380,8 @@ class P4_2DeterministicRolloutResult(SchemaBase):
             raise SchemaValidationError("P4_2DeterministicRolloutResult.passed requires final_phase=success")
         if self.passed and not self.attach_events:
             raise SchemaValidationError("P4.2 successful rollout requires at least one attach event")
+        if self.passed and not self.release_events:
+            raise SchemaValidationError("P4.2 successful rollout requires at least one release event")
         if self.passed and not (
             self.uses_p2_selected_design
             and self.uses_p3_assembled_morphology
@@ -362,7 +432,7 @@ def default_p4_2_phase_definitions(
             terminal=False,
             entry_conditions=["selected assignment feasibility and controller status are acceptable"],
             exit_conditions=[
-                "attach condition report passes distance, relative velocity, feasibility, and controller gates"
+                "attach condition report passes distance, relative velocity, snap distance, timeout, feasibility, and controller gates"
             ],
             timeout_s=timeout["attach_attempt"],
             timeout_transition=P4_2RolloutPhase.DROP_FAILURE,
@@ -370,7 +440,7 @@ def default_p4_2_phase_definitions(
         P4_2PhaseDefinition(
             phase=P4_2RolloutPhase.ATTACHED_MAINTAIN,
             terminal=False,
-            entry_conditions=["kinematic/fixed-joint attach event was recorded"],
+            entry_conditions=["kinematic payload-coupled attach event was recorded"],
             exit_conditions=["attached object remains stable for the maintain dwell time"],
             timeout_s=timeout["attached_maintain"],
             timeout_transition=P4_2RolloutPhase.DROP_FAILURE,
@@ -434,22 +504,46 @@ def evaluate_p4_2_attach_conditions(
     relative_velocity_mps: float,
     assignment_feasible: bool,
     controller_status: ControllerStatus,
+    attach_snap_distance_m: float | None = None,
+    relative_pose_error_m: float | None = None,
+    attach_phase_elapsed_s: float = 0.0,
+    attach_phase_timeout_s: float | None = None,
     config: P4_2DeterministicRolloutConfig | None = None,
 ) -> P4_2AttachConditionReport:
     config = config or P4_2DeterministicRolloutConfig()
     controller_ok = controller_status.qp_feasible and controller_status.status not in {"infeasible", "fault"}
     within_distance = distance_m <= config.attach_distance_threshold_m
     within_relative_velocity = relative_velocity_mps <= config.attach_relative_velocity_threshold_mps
+    snap_distance = distance_m if attach_snap_distance_m is None else float(attach_snap_distance_m)
+    pose_error = snap_distance if relative_pose_error_m is None else float(relative_pose_error_m)
+    within_attach_snap_distance = snap_distance <= config.attach_snap_distance_threshold_m
+    timeout_s = (
+        config.phase_timeouts_s.get(P4_2RolloutPhase.ATTACH_ATTEMPT.value)
+        if attach_phase_timeout_s is None
+        else float(attach_phase_timeout_s)
+    )
+    within_attach_phase_timeout = timeout_s is None or float(attach_phase_elapsed_s) <= timeout_s
     failure_reasons: list[str] = []
     if not within_distance:
         failure_reasons.append("anchor_candidate_distance_above_threshold")
     if not within_relative_velocity:
         failure_reasons.append("relative_velocity_above_threshold")
+    if not within_attach_snap_distance:
+        failure_reasons.append("attach_snap_distance_above_threshold")
+    if not within_attach_phase_timeout:
+        failure_reasons.append("attach_phase_timeout_exceeded")
     if not assignment_feasible:
         failure_reasons.append("assignment_feasibility_failed")
     if not controller_ok:
         failure_reasons.append("controller_status_not_attach_safe")
-    passed = within_distance and within_relative_velocity and assignment_feasible and controller_ok
+    passed = (
+        within_distance
+        and within_relative_velocity
+        and within_attach_snap_distance
+        and within_attach_phase_timeout
+        and assignment_feasible
+        and controller_ok
+    )
     return P4_2AttachConditionReport(
         candidate_id=candidate_id,
         anchor_id=anchor_id,
@@ -457,15 +551,25 @@ def evaluate_p4_2_attach_conditions(
         object_id=object_id,
         distance_m=float(distance_m),
         relative_velocity_mps=float(relative_velocity_mps),
+        attach_snap_distance_m=snap_distance,
+        relative_pose_error_m=pose_error,
         assignment_feasible=assignment_feasible,
         controller_ok=controller_ok,
         within_distance=within_distance,
         within_relative_velocity=within_relative_velocity,
+        within_attach_snap_distance=within_attach_snap_distance,
+        within_attach_phase_timeout=within_attach_phase_timeout,
         passed=passed,
+        attach_phase_elapsed_s=float(attach_phase_elapsed_s),
+        attach_phase_timeout_s=timeout_s,
         failure_reasons=failure_reasons,
         metrics={
             "attach_distance_m": float(distance_m),
             "attach_relative_velocity_mps": float(relative_velocity_mps),
+            "attach_snap_distance_m": snap_distance,
+            "attach_relative_pose_error_m": pose_error,
+            "attach_phase_elapsed_s": float(attach_phase_elapsed_s),
+            "attach_phase_timeout_s": float(timeout_s or 0.0),
             "attach_assignment_feasible": 1.0 if assignment_feasible else 0.0,
             "attach_controller_ok": 1.0 if controller_ok else 0.0,
             "attach_condition_passed": 1.0 if passed else 0.0,
@@ -488,8 +592,10 @@ def p4_2_no_mislabeling_artifacts(*, backend: str = "isaac_lab") -> dict[str, An
         "learning_claim": False,
         "learned_policy_success_claim": False,
         "high_fidelity_natural_grasp_success_claim": False,
+        "true_fixed_joint_dynamics_success_claim": False,
         "checkpoint_claim": False,
         "reward_curve_training_claim": False,
+        "p4_4_natural_contact_grasp_remaining": True,
     }
 
 
@@ -512,4 +618,6 @@ def p4_2_failure_metrics(
         "p4_full_completion": 0.0,
         "p4_3_learning_bootstrap": 0.0,
         "learned_policy_success_claim": 0.0,
+        "high_fidelity_natural_grasp_success_claim": 0.0,
+        "true_fixed_joint_dynamics_success_claim": 0.0,
     }

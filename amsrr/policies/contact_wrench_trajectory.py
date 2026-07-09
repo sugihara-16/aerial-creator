@@ -419,7 +419,7 @@ def _p4_2_guards(phase: str) -> list[dict[str, str]]:
         {
             "type": "p4_2_phase",
             "phase": phase,
-            "contact_model": "kinematic_fixed_joint_attach_v1",
+            "contact_model": "kinematic_payload_coupled_attach_v1",
         }
     ]
 

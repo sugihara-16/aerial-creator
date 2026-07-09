@@ -132,7 +132,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--p4-2-contact-model",
-        default="kinematic_fixed_joint_attach_v1",
+        default="kinematic_payload_coupled_attach_v1",
         help="P4.2 contact model label.",
     )
     parser.add_argument(
@@ -146,6 +146,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.20,
         help="P4.2 object attach relative velocity threshold.",
+    )
+    parser.add_argument(
+        "--p4-2-attach-snap-distance-threshold-m",
+        type=float,
+        default=0.03,
+        help="P4.2 object attach snap distance threshold.",
     )
     parser.add_argument("--fixed-module-count", type=int, default=2, help="Module count for fixed-morphology smokes.")
     parser.add_argument("--fixed-module-spacing-m", type=float, default=0.45, help="Rigid spacing between fixed modules.")
@@ -661,6 +667,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             allocation_mode=str(args.allocation_mode),
             uses_p2_p3=bool(args.p4_2_uses_p2_p3),
             contact_model=str(args.p4_2_contact_model),
+            attach_snap_distance_threshold_m=float(args.p4_2_attach_snap_distance_threshold_m),
         )
     for _ in range(
         0
@@ -1835,6 +1842,7 @@ def _run_p4_2_deterministic_rollout_probe(
     allocation_mode: str,
     uses_p2_p3: bool,
     contact_model: str,
+    attach_snap_distance_threshold_m: float,
 ) -> dict[str, object]:
     from amsrr.controllers.actuator_mapping import build_actuator_mapping
     from amsrr.controllers.controller_base import ControllerContext
@@ -1960,6 +1968,7 @@ def _run_p4_2_deterministic_rollout_probe(
                     "selected_contact_candidates_available": False,
                     "robot_anchors_available": len(morphology_graph.robot_anchors) > 0,
                     "unconditional_attach_allowed": False,
+                    "attach_snap_distance_threshold_m": float(attach_snap_distance_threshold_m),
                 },
             ],
         )
@@ -2061,6 +2070,7 @@ def _run_p4_2_deterministic_rollout_probe(
             "p4_2_actuator_target_record_count": float(len(actuator_target_records)),
             "p4_2_selected_contact_candidates_available": 0.0,
             "p4_2_unconditional_attach_allowed": 0.0,
+            "p4_2_attach_snap_distance_threshold_m": float(attach_snap_distance_threshold_m),
             "p4_2_attach_event_count": 0.0,
             "p4_2_actuator_channel_count": float(len(actuator_mapping.channels)),
         }

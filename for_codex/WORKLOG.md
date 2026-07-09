@@ -3,6 +3,40 @@
 ## Global Worklog
 
 ### 2026-07-10
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus approved P4.2 payload-coupled kinematic attach clarification
+- Work package / Agent label: Agent J/K/L boundary: P4.2 Order 6a contact-model contract, payload coupling, release/archive acceptance
+- Summary: Updated P4.2 v1 from fixed-joint wording to `contact_model="kinematic_payload_coupled_attach_v1"`. The rollout contract now requires gated attach evidence with snap distance / relative pose / phase-timeout checks, release event archives, and controller-side payload coupling evidence. The QPID controller now applies payload mass/inertia/CoM gravity/effective wrench to the target wrench before allocation and archives before/after target wrench, payload wrench, achieved wrench, residual, QP, clipped, missing, and unsupported actuator metrics. Acceptance now rejects archives that lack release events or fail to prove payload-coupled controller computation.
+- Files changed:
+  - `amsrr/controllers/controller_base.py`
+  - `amsrr/controllers/qpid_controller.py`
+  - `amsrr/controllers/__init__.py`
+  - `amsrr/simulation/p4_2_rollout.py`
+  - `amsrr/simulation/p4_2_isaac_env.py`
+  - `amsrr/simulation/isaac_lab_backend.py`
+  - `amsrr/simulation/__init__.py`
+  - `amsrr/training/p4_2_deterministic_rollout_runner.py`
+  - `amsrr/acceptance/p4_2_acceptance.py`
+  - `amsrr/policies/contact_wrench_trajectory.py`
+  - `configs/training/p4_2_deterministic_rollout.yaml`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - P4.2 unit/acceptance tests
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No base persisted schema change. Added `PayloadCoupling` to controller context, `P4_2ReleaseEvent`, stricter P4.2 attach event fields, snap-distance config, release-event archive fields, and acceptance-report payload/release booleans.
+- Upstream dependencies used: User-approved P4.2 v1 payload-coupled kinematic attach requirements, prior P4.2 state-machine/runner/split-acceptance contracts, P2 selected design, P3 assembled morphology, existing controller/QP allocation APIs, and Isaac backend command boundary.
+- Downstream impact: P4.2 fake-backend tests can still exercise the archive fast gate, but P4.2 completion still requires a real Isaac-backed deterministic rollout. A successful archive must prove payload load changed controller computation, not merely log payload metadata.
+- Tests added or run:
+  - Added unit coverage that `PayloadCoupling` changes QPID target wrench and archives payload/achieved wrench metrics.
+  - Added P4.2 contract/env/runner/acceptance coverage for release events, snap-distance attach fields, no true fixed-joint success claim, and payload-coupling fast-gate rejection.
+  - `python3 -m py_compile amsrr/simulation/p4_2_rollout.py amsrr/simulation/p4_2_isaac_env.py amsrr/simulation/isaac_lab_backend.py amsrr/training/p4_2_deterministic_rollout_runner.py amsrr/acceptance/p4_2_acceptance.py amsrr/controllers/controller_base.py amsrr/controllers/qpid_controller.py scripts/p4_control_holon_spawn_probe.py tests/unit/simulation/test_p4_2_rollout.py tests/unit/simulation/test_p4_2_isaac_env.py tests/unit/training/test_p4_2_deterministic_rollout_runner.py tests/acceptance/test_p4_2_acceptance.py tests/unit/controllers/test_qpid_controller.py`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q tests/unit/simulation/test_p4_2_rollout.py tests/unit/simulation/test_p4_2_isaac_env.py tests/unit/training/test_p4_2_deterministic_rollout_runner.py tests/acceptance/test_p4_2_acceptance.py tests/unit/controllers/test_qpid_controller.py`
+  - `git diff --check`
+- Tests run: Targeted P4.2/controller tests passed: 34 passed. Py compile and diff check passed. Plain pytest without disabling external plugin autoload failed before collecting tests because the installed `launch_testing` pytest plugin has an incompatible hook signature; rerun with `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` passed.
+- Assumptions: Order 6a updates contracts, controller computation, archive fields, fake-gate acceptance, and command surfaces only. The real Isaac probe still needs Order 6b to execute gated attach/release and payload-coupled rollout behavior in the simulator.
+- Blockers: None for Order 6a.
+- Next steps / handoff: Commit Order 6a, then implement Order 6b real Isaac gated attach/release rollout. Keep `P4.4 / P4-natural-contact-grasp validation` explicitly open for later; P4.4 should compare `kinematic_payload_coupled_attach_v1` with `natural_contact_grasp_v1` using a free rigid-body object, real contact/friction/contact maintenance, slip/contact-break/drop/unintended-collision/penetration/contact-force logging, and no kinematic object constraint.
+
+### 2026-07-10
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.2 deterministic rollout user clarifications
 - Work package / Agent label: Agent L boundary: P4.2 split acceptance
 - Summary: Added P4.2 split acceptance. The fast gate checks archives for P2 selected design, P3 assembled morphology, deterministic phase trajectory, selected contact candidates/assignments, per-step runtime/policy/controller/actuator logs, gated object attach events, graph-specific morphology reflection, and no-mislabeling artifacts. The real gate separately requires the named rollout `p2_p3_deterministic_grasp_carry` to be attempted, passed, Isaac-backed, P2/P3-sourced, graph-reflected, final `success`, and backed by attach/per-step records.
@@ -114,7 +148,7 @@
 ### 2026-07-10
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.2 deterministic rollout user clarifications
 - Work package / Agent label: Agent J/K/L boundary: P4.2 deterministic rollout Order 1 contract/state-machine
-- Summary: Added the initial P4.2 deterministic grasp/carry rollout contract. P4.2 is now explicitly a deterministic rollout with `reset`, `approach`, `pregrasp_align`, `attach_attempt`, `attached_maintain`, `transport`, `release`, and terminal success/failure phases, not a P4.1 full-scene smoke extension. The contract defines `contact_model="kinematic_fixed_joint_attach_v1"`, gated attach conditions, attach event records, metric definitions for success/drop/collision/controller failure, P2/P3 morphology-reflection requirements, and no-mislabeling artifacts that reject P4.3 learning and P4 full-completion claims.
+- Summary: Added the initial P4.2 deterministic grasp/carry rollout contract. P4.2 is now explicitly a deterministic rollout with `reset`, `approach`, `pregrasp_align`, `attach_attempt`, `attached_maintain`, `transport`, `release`, and terminal success/failure phases, not a P4.1 full-scene smoke extension. The contract now uses `contact_model="kinematic_payload_coupled_attach_v1"` after the Order 6a supplement, gated attach conditions, attach event records, metric definitions for success/drop/collision/controller failure, P2/P3 morphology-reflection requirements, and no-mislabeling artifacts that reject P4.3 learning and P4 full-completion claims.
 - Files changed:
   - `amsrr/simulation/p4_2_rollout.py`
   - `amsrr/simulation/__init__.py`
@@ -2471,7 +2505,7 @@
 - Tests passed:
   - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_2_rollout.py -q` -> 6 passed.
   - `python3 -m compileall amsrr/simulation tests/unit/simulation/test_p4_2_rollout.py -q` -> passed.
-- Handoff notes: P4.2 success rate must be labeled as Isaac-backed deterministic rollout success under `contact_model="kinematic_fixed_joint_attach_v1"`, not high-fidelity natural grasp success, learned policy success, P4.3, or P4 full completion.
+- Handoff notes: P4.2 success rate must be labeled as deterministic payload-carry rollout success under `contact_model="kinematic_payload_coupled_attach_v1"`, not high-fidelity natural grasp success, true fixed-joint dynamics success, learned policy success, P4.3, or P4 full completion.
 - Open questions: None for Order 1.
 
 ### P4.1 Implementation: Isaac Full-Scene Backend Smoke
