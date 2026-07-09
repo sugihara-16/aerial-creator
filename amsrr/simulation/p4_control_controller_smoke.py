@@ -62,7 +62,7 @@ def build_single_module_controller_command_smoke(
             control_dt_s=control_dt_s,
         )
     )
-    bridged_command = _bridge_supported_command(controller_command)
+    bridged_command = bridge_supported_controller_command(controller_command)
     actuator_mapping = build_actuator_mapping(morphology_graph, physical_model)
     actuator_target_record = IsaacControllerBridge().convert(
         bridged_command,
@@ -142,7 +142,7 @@ def build_runtime_observation(
     )
 
 
-def _bridge_supported_command(controller_command: ControllerCommand) -> ControllerCommand:
+def bridge_supported_controller_command(controller_command: ControllerCommand) -> ControllerCommand:
     vectoring_targets = dict(controller_command.vectoring_joint_targets)
     for command_key in list(vectoring_targets):
         if command_key.startswith("module_"):

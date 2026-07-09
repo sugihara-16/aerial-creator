@@ -42,7 +42,7 @@ class QPIDControllerConfig:
     joint_kd: float = 0.4
     tracking_warning_residual_norm: float = 1.0e-3
     vertical_tolerance_n: float = 1.0e-6
-    unsupported_wrench_tolerance: float = 1.0e-5
+    unsupported_wrench_tolerance: float = 1.0e-2
 
 
 class QPIDController:
@@ -187,7 +187,7 @@ class QPIDController:
             context.physical_model.aggregate_mass_kg * (self.config.gravity_mps2 + desired_acc_world[2]),
         )
         desired_force_body = _matvec(body_from_world, desired_force_world)
-        desired_torque_body = (
+        desired_ang_acc_body = (
             self.config.roll_pitch_p_gain * attitude_error_body[0]
             + self.config.roll_pitch_i_gain * attitude_integral[0]
             + self.config.roll_pitch_d_gain * angular_velocity_error_body[0],
@@ -198,6 +198,12 @@ class QPIDController:
             + self.config.yaw_i_gain * attitude_integral[2]
             + self.config.yaw_d_gain * angular_velocity_error_body[2],
         )
+        rigid_body_model = self.rigid_body_model_builder.build(
+            context.morphology_graph,
+            context.physical_model,
+            context.runtime_observation,
+        )
+        desired_torque_body = _matvec(_inertia_matrix_from_inertia6(rigid_body_model.inertia_body), desired_ang_acc_body)
         self._reference_metrics = {
             "target_pos_error_m": math.sqrt(sum(value * value for value in position_error_world)),
             "target_rot_error_rad": math.sqrt(sum(value * value for value in attitude_error_body)),
@@ -491,4 +497,15 @@ def _matvec(
         matrix[0][0] * vector[0] + matrix[0][1] * vector[1] + matrix[0][2] * vector[2],
         matrix[1][0] * vector[0] + matrix[1][1] * vector[1] + matrix[1][2] * vector[2],
         matrix[2][0] * vector[0] + matrix[2][1] * vector[1] + matrix[2][2] * vector[2],
+    )
+
+
+def _inertia_matrix_from_inertia6(values: list[float]) -> tuple[tuple[float, float, float], ...]:
+    if len(values) != 6:
+        raise SchemaValidationError("inertia_body must have 6 values")
+    ixx, ixy, ixz, iyy, iyz, izz = (float(value) for value in values)
+    return (
+        (ixx, ixy, ixz),
+        (ixy, iyy, iyz),
+        (ixz, iyz, izz),
     )

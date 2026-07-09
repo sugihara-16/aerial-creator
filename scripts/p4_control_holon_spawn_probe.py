@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -35,10 +36,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gimbal-tolerance-rad", type=float, default=0.02, help="Probe pass tolerance for gimbal joints.")
     parser.add_argument("--gimbal-stiffness", type=float, default=20.0, help="Implicit actuator stiffness.")
     parser.add_argument("--gimbal-damping", type=float, default=1.0, help="Implicit actuator damping.")
+    parser.add_argument("--dock-stiffness", type=float, default=20.0, help="Implicit dock mechanism hold stiffness.")
+    parser.add_argument("--dock-damping", type=float, default=1.0, help="Implicit dock mechanism hold damping.")
     parser.add_argument(
         "--controller-command-smoke",
         action="store_true",
         help="Use A-MSRR QPIDController and IsaacControllerBridge outputs as the command source.",
+    )
+    parser.add_argument(
+        "--single-module-hover-smoke",
+        action="store_true",
+        help="Run a closed-loop single-module hover smoke with QPIDController commands.",
+    )
+    parser.add_argument("--hover-target-height", type=float, default=None, help="Closed-loop hover target z in meters.")
+    parser.add_argument("--hover-position-tolerance-m", type=float, default=0.20, help="Closed-loop hover position tolerance.")
+    parser.add_argument("--hover-attitude-tolerance-rad", type=float, default=0.25, help="Closed-loop hover attitude tolerance.")
+    parser.add_argument("--hover-hold-duration-s", type=float, default=1.0, help="Required final hold duration for hover pass.")
+    parser.add_argument(
+        "--hover-stop-on-hold",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Stop closed-loop hover smoke once the required hold duration is achieved.",
     )
     AppLauncher.add_app_launcher_args(parser)
     return parser.parse_args()
@@ -59,7 +77,12 @@ def main() -> int:
             "error": str(exc),
         }
     print(json.dumps(report, sort_keys=True))
-    return 0 if report.get("spawn_passed") else 1
+    if not report.get("spawn_passed"):
+        return 1
+    for key in ("command_probe_passed", "single_module_hover_smoke_passed"):
+        if report.get(key) is False:
+            return 1
+    return 0
 
 
 def run_probe(args: argparse.Namespace) -> dict[str, object]:
@@ -73,7 +96,12 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
 
     from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
     from amsrr.simulation.isaac_lab_backend import IsaacLabBackend, load_isaac_lab_backend_config
-    from amsrr.simulation.p4_control_controller_smoke import build_single_module_controller_command_smoke
+    from amsrr.simulation.p4_control_controller_smoke import (
+        bridge_supported_controller_command,
+        build_runtime_observation,
+        build_single_module_controller_command_smoke,
+        build_single_module_morphology,
+    )
 
     backend_config = load_isaac_lab_backend_config(args.config)
     backend = IsaacLabBackend(backend_config)
@@ -145,8 +173,8 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             ),
             "dock_joints": ImplicitActuatorCfg(
                 joint_names_expr=[".*dock_mech.*"],
-                stiffness=0.0,
-                damping=0.0,
+                stiffness=args.dock_stiffness,
+                damping=args.dock_damping,
             ),
             "rotor_spinner_joints": ImplicitActuatorCfg(
                 joint_names_expr=["rotor.*"],
@@ -178,6 +206,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     gimbal_joint_ids_tensor = torch.tensor(gimbal_joint_ids, dtype=torch.int32, device=sim.device)
     initial_root_pos_w = _tensor_row(robot.data.root_pos_w.torch)
     controller_bundle = None
+    hover_smoke_report = None
     if args.controller_command_smoke:
         controller_bundle = build_single_module_controller_command_smoke(
             physical_model,
@@ -190,7 +219,25 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             joint_velocities=_joint_state_dict(robot.joint_names, robot.data.joint_vel.torch),
         )
         _apply_actuator_record(robot, controller_bundle.actuator_target_record, physical_model, sim.device)
-    for _ in range(max(0, args.steps)):
+    if args.single_module_hover_smoke:
+        hover_smoke_report = _run_single_module_hover_smoke(
+            robot=robot,
+            sim=sim,
+            sim_dt=sim_dt,
+            physical_model=physical_model,
+            device=sim.device,
+            steps=max(0, args.steps),
+            target_height=float(args.hover_target_height if args.hover_target_height is not None else args.spawn_height),
+            position_tolerance_m=float(args.hover_position_tolerance_m),
+            attitude_tolerance_rad=float(args.hover_attitude_tolerance_rad),
+            hold_duration_s=float(args.hover_hold_duration_s),
+            stop_on_hold=bool(args.hover_stop_on_hold),
+            control_dt_s=float(args.dt),
+            build_runtime_observation=build_runtime_observation,
+            build_single_module_morphology=build_single_module_morphology,
+            bridge_supported_controller_command=bridge_supported_controller_command,
+        )
+    for _ in range(0 if hover_smoke_report is not None else max(0, args.steps)):
         if controller_bundle is not None:
             _apply_actuator_record(robot, controller_bundle.actuator_target_record, physical_model, sim.device)
         elif force_per_rotor_n != 0.0:
@@ -232,14 +279,17 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             and controller_bundle.actuator_target_record.metrics["unsupported_actuator_count"] == 0.0
             and controller_bundle.controller_command.controller_status.metrics.get("qp_primary_path", 0.0) == 1.0
         )
+    hover_command_ok = True
+    if hover_smoke_report is not None:
+        hover_command_ok = bool(hover_smoke_report.get("single_module_hover_smoke_passed"))
 
     report = {
         "spawn_passed": True,
         "isaac_backed": True,
-        "command_applied": command_applied or controller_bundle is not None,
+        "command_applied": command_applied or controller_bundle is not None or hover_smoke_report is not None,
         "command_probe_passed": (
-            force_command_ok and gimbal_command_ok and controller_command_ok
-            if command_applied or controller_bundle is not None
+            force_command_ok and gimbal_command_ok and controller_command_ok and hover_command_ok
+            if command_applied or controller_bundle is not None or hover_smoke_report is not None
             else None
         ),
         "controller_command_smoke": controller_bundle is not None,
@@ -278,6 +328,8 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     }
     if controller_bundle is not None:
         report.update(_controller_bundle_report(controller_bundle))
+    if hover_smoke_report is not None:
+        report.update(hover_smoke_report)
     sim.stop()
     sim.clear_instance()
     return report
@@ -285,6 +337,172 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
 
 def _expand_path(path: str | Path) -> Path:
     return Path(os.path.expandvars(os.path.expanduser(str(path)))).resolve()
+
+
+def _run_single_module_hover_smoke(
+    *,
+    robot,
+    sim,
+    sim_dt: float,
+    physical_model,
+    device: str,
+    steps: int,
+    target_height: float,
+    position_tolerance_m: float,
+    attitude_tolerance_rad: float,
+    hold_duration_s: float,
+    stop_on_hold: bool,
+    control_dt_s: float,
+    build_runtime_observation,
+    build_single_module_morphology,
+    bridge_supported_controller_command,
+) -> dict[str, object]:
+    from amsrr.controllers.actuator_mapping import build_actuator_mapping
+    from amsrr.controllers.controller_base import ControllerContext
+    from amsrr.controllers.isaac_controller_bridge import IsaacControllerBridge
+    from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
+    from amsrr.schemas.policies import InteractionKnot, PolicyCommand
+
+    morphology_graph = build_single_module_morphology(
+        physical_model,
+        graph_id="single-module-hover-smoke",
+    )
+    actuator_mapping = build_actuator_mapping(morphology_graph, physical_model)
+    bridge = IsaacControllerBridge()
+    controller = QPIDController(
+        config=QPIDControllerConfig(
+            allocation_mode="rigid_body_qp",
+            control_dt_s=control_dt_s,
+        )
+    )
+    target_pose = (0.0, 0.0, target_height, 0.0, 0.0, 0.0, 1.0)
+    target_twist = [0.0] * 6
+    previous_command = None
+    max_position_error = 0.0
+    max_attitude_error = 0.0
+    final_position_error = 0.0
+    final_attitude_error = 0.0
+    qp_infeasible_count = 0
+    clipped_count = 0
+    missing_actuator_count = 0
+    unsupported_actuator_count = 0
+    clipped_target_count = 0
+    finite_state = True
+    hold_steps = 0
+    max_hold_steps = 0
+    hold_steps_required = max(1, int(round(hold_duration_s / max(sim_dt, 1.0e-9))))
+    min_height = float("inf")
+    max_height = float("-inf")
+    last_controller_status = None
+    last_bridge_metrics: dict[str, float] = {}
+    executed_steps = 0
+
+    for step_idx in range(max(0, steps)):
+        executed_steps = step_idx + 1
+        runtime_observation = build_runtime_observation(
+            morphology_graph,
+            time_s=step_idx * sim_dt,
+            pose_world=tuple(_tensor_row(robot.data.root_pose_w.torch)),
+            twist_world=_tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch),
+            joint_positions=_joint_state_dict(robot.joint_names, robot.data.joint_pos.torch),
+            joint_velocities=_joint_state_dict(robot.joint_names, robot.data.joint_vel.torch),
+        )
+        controller_command = controller.compute(
+            ControllerContext(
+                runtime_observation=runtime_observation,
+                morphology_graph=morphology_graph,
+                physical_model=physical_model,
+                active_knot=InteractionKnot(t_rel_s=step_idx * sim_dt, contact_assignments=[]),
+                policy_command=PolicyCommand(
+                    desired_body_pose=target_pose,
+                    desired_body_twist=target_twist,
+                ),
+                previous_command=previous_command,
+                control_dt_s=control_dt_s,
+            )
+        )
+        bridged_command = bridge_supported_controller_command(controller_command)
+        actuator_record = bridge.convert(
+            bridged_command,
+            actuator_mapping,
+            time_s=step_idx * sim_dt,
+            command_index=step_idx,
+        )
+        _apply_actuator_record(robot, actuator_record, physical_model, device)
+        robot.write_data_to_sim()
+        sim.step()
+        robot.update(sim_dt)
+
+        root_pose = _tensor_row(robot.data.root_pose_w.torch)
+        root_pos = root_pose[:3]
+        position_error = _position_error_norm(root_pos, target_pose[:3])
+        attitude_error = _quat_error_norm(root_pose[3:7], target_pose[3:7])
+        final_position_error = position_error
+        final_attitude_error = attitude_error
+        max_position_error = max(max_position_error, position_error)
+        max_attitude_error = max(max_attitude_error, attitude_error)
+        min_height = min(min_height, root_pos[2])
+        max_height = max(max_height, root_pos[2])
+        finite_state = finite_state and all(_is_finite(value) for value in root_pose)
+        if position_error <= position_tolerance_m and attitude_error <= attitude_tolerance_rad:
+            hold_steps += 1
+        else:
+            hold_steps = 0
+        max_hold_steps = max(max_hold_steps, hold_steps)
+
+        status = bridged_command.controller_status
+        last_controller_status = status.to_dict()
+        last_bridge_metrics = dict(actuator_record.metrics)
+        if not status.qp_feasible:
+            qp_infeasible_count += 1
+        if status.metrics.get("clipped", 0.0) > 0.0:
+            clipped_count += 1
+        missing_actuator_count += len(actuator_record.missing_actuators)
+        unsupported_actuator_count += len(actuator_record.unsupported_actuators)
+        clipped_target_count += len(actuator_record.clipped_targets)
+        previous_command = bridged_command
+        if stop_on_hold and hold_steps >= hold_steps_required:
+            break
+
+    hold_time_s = max_hold_steps * sim_dt
+    passed = (
+        executed_steps > 0
+        and finite_state
+        and qp_infeasible_count == 0
+        and missing_actuator_count == 0
+        and unsupported_actuator_count == 0
+        and clipped_target_count == 0
+        and final_position_error <= position_tolerance_m
+        and final_attitude_error <= attitude_tolerance_rad
+        and hold_time_s + 1.0e-9 >= hold_duration_s
+    )
+    return {
+        "single_module_hover_smoke": True,
+        "single_module_hover_smoke_passed": passed,
+        "single_module_hover_target_pose": list(target_pose),
+        "single_module_hover_steps": int(executed_steps),
+        "single_module_hover_requested_steps": int(max(0, steps)),
+        "single_module_hover_duration_s": float(executed_steps * sim_dt),
+        "single_module_hover_hold_time_s": hold_time_s,
+        "single_module_hover_hold_required_s": hold_duration_s,
+        "single_module_hover_stopped_on_hold": bool(stop_on_hold and executed_steps < max(0, steps)),
+        "single_module_hover_position_tolerance_m": position_tolerance_m,
+        "single_module_hover_attitude_tolerance_rad": attitude_tolerance_rad,
+        "single_module_hover_final_position_error_m": final_position_error,
+        "single_module_hover_final_attitude_error_rad": final_attitude_error,
+        "single_module_hover_max_position_error_m": max_position_error,
+        "single_module_hover_max_attitude_error_rad": max_attitude_error,
+        "single_module_hover_min_height_m": min_height if executed_steps > 0 else None,
+        "single_module_hover_max_height_m": max_height if executed_steps > 0 else None,
+        "single_module_hover_finite_state": finite_state,
+        "single_module_hover_qp_infeasible_count": qp_infeasible_count,
+        "single_module_hover_controller_clipped_count": clipped_count,
+        "single_module_hover_missing_actuator_count": missing_actuator_count,
+        "single_module_hover_unsupported_actuator_count": unsupported_actuator_count,
+        "single_module_hover_clipped_target_count": clipped_target_count,
+        "single_module_hover_last_controller_status": last_controller_status,
+        "single_module_hover_last_bridge_metrics": last_bridge_metrics,
+    }
 
 
 def _tensor_row(tensor, *, limit: int | None = None) -> list[float]:
@@ -304,6 +522,47 @@ def _tensor_indices(tensor, indices: list[int]) -> list[float]:
 def _joint_state_dict(joint_names: list[str], tensor) -> dict[str, float]:
     values = tensor[0].detach().cpu().tolist()
     return {name: float(values[index]) for index, name in enumerate(joint_names)}
+
+
+def _position_error_norm(position: list[float], target: tuple[float, float, float]) -> float:
+    return sum((float(position[idx]) - float(target[idx])) ** 2 for idx in range(3)) ** 0.5
+
+
+def _quat_error_norm(current_xyzw: list[float], target_xyzw: tuple[float, float, float, float]) -> float:
+    cx, cy, cz, cw = _normalize_quat(tuple(float(value) for value in current_xyzw))
+    tx, ty, tz, tw = _normalize_quat(target_xyzw)
+    ex, ey, ez, ew = _quat_multiply((-cx, -cy, -cz, cw), (tx, ty, tz, tw))
+    if ew < 0.0:
+        ex, ey, ez, ew = -ex, -ey, -ez, -ew
+    vector_norm = (ex * ex + ey * ey + ez * ez) ** 0.5
+    if vector_norm <= 1.0e-12:
+        return 0.0
+    return 2.0 * math.atan2(vector_norm, max(min(ew, 1.0), -1.0))
+
+
+def _normalize_quat(quat_xyzw: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    norm = sum(value * value for value in quat_xyzw) ** 0.5
+    if norm <= 0.0:
+        raise RuntimeError("Cannot normalize zero quaternion")
+    return tuple(float(value) / norm for value in quat_xyzw)  # type: ignore[return-value]
+
+
+def _quat_multiply(
+    left_xyzw: tuple[float, float, float, float],
+    right_xyzw: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    lx, ly, lz, lw = left_xyzw
+    rx, ry, rz, rw = right_xyzw
+    return (
+        lw * rx + lx * rw + ly * rz - lz * ry,
+        lw * ry - lx * rz + ly * rw + lz * rx,
+        lw * rz + lx * ry - ly * rx + lz * rw,
+        lw * rw - lx * rx - ly * ry - lz * rz,
+    )
+
+
+def _is_finite(value: float) -> bool:
+    return math.isfinite(value)
 
 
 def _apply_actuator_record(robot, actuator_record, physical_model, device: str) -> None:

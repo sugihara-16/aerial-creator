@@ -332,11 +332,12 @@ def test_qpid_controller_builds_pid_wrench_from_policy_body_target_and_feedforwa
     runtime = _runtime_observation()
     yaw_target_rad = 0.1
     allocator = _RecordingAllocator()
-
-    controller_command = QPIDController(
+    controller = QPIDController(
         allocator=allocator,
         config=QPIDControllerConfig(control_dt_s=0.005),
-    ).compute(
+    )
+
+    controller_command = controller.compute(
         ControllerContext(
             runtime_observation=runtime,
             morphology_graph=runtime.morphology_graph,
@@ -361,14 +362,20 @@ def test_qpid_controller_builds_pid_wrench_from_policy_body_target_and_feedforwa
     assert allocator.problem is not None
     desired = allocator.problem.desired_wrench_body
     assert desired is not None
+    rigid_model = controller.rigid_body_model_builder.build(runtime.morphology_graph, physical_model, runtime)
     expected_z_acc = 5.0 * 0.2 + 1.0 * (0.2 * 0.005)
-    expected_yaw_torque = 5.0 * yaw_target_rad + 1.0 * (yaw_target_rad * 0.005)
+    expected_yaw_ang_acc = 5.0 * yaw_target_rad + 1.0 * (yaw_target_rad * 0.005)
+    expected_torque = (
+        rigid_model.inertia_body[2] * expected_yaw_ang_acc,
+        rigid_model.inertia_body[4] * expected_yaw_ang_acc,
+        rigid_model.inertia_body[5] * expected_yaw_ang_acc,
+    )
     assert desired[0] == pytest.approx(1.0)
     assert desired[1] == pytest.approx(2.0)
     assert desired[2] == pytest.approx(physical_model.aggregate_mass_kg * (9.80665 + expected_z_acc) + 3.0)
-    assert desired[3] == pytest.approx(4.0)
-    assert desired[4] == pytest.approx(5.0)
-    assert desired[5] == pytest.approx(expected_yaw_torque + 6.0)
+    assert desired[3] == pytest.approx(expected_torque[0] + 4.0)
+    assert desired[4] == pytest.approx(expected_torque[1] + 5.0)
+    assert desired[5] == pytest.approx(expected_torque[2] + 6.0)
     assert controller_command.controller_status.metrics["pid_target_builder_active"] == 1.0
     assert controller_command.controller_status.metrics["target_pos_error_m"] == pytest.approx(0.2)
     assert controller_command.controller_status.metrics["target_rot_error_rad"] == pytest.approx(yaw_target_rad)

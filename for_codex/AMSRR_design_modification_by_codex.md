@@ -4,6 +4,14 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Single-Module Closed-Loop Hover Smoke Supplement
+
+- Context: After the `PolicyCommand` PID target builder and controller-to-Isaac command path were validated, P4-control needed a real Isaac closed-loop smoke that repeatedly observes Holon state, recomputes the rigid-body QP allocation, and applies bridge-supported actuator targets rather than a single open-loop command.
+- Decision: Extended `scripts/p4_control_holon_spawn_probe.py` and `IsaacLabBackend` with `--single-module-hover-smoke`. The smoke keeps one persistent `QPIDController(allocation_mode="rigid_body_qp")`, sends a direct hover `PolicyCommand.desired_body_pose` / `desired_body_twist` target each control step, converts the resulting command through `IsaacControllerBridge`, and applies rotor thrust plus vectoring/dock joint position targets in Isaac. The smoke reports final/max position and attitude errors, hold time, QP infeasible count, bridge clipping/missing/unsupported counts, and the last controller/bridge status. The default pass threshold remains the controller supplement's initial waypoint tolerance: `0.20 m`, `0.25 rad`, and `1.0 s` hold.
+- Controller numerics decision: The attitude PID output is treated as desired body angular acceleration and converted to body torque using the current composite inertia from `RigidBodyControlModelBuilder`; it is not interpreted directly as Nm. Controller feasibility now separates a warning scale from hard infeasibility: residuals above `tracking_warning_residual_norm=1e-3` are reported as tracking warnings, while `unsupported_wrench_tolerance=1e-2` is the controller-local infeasibility cutoff used to tolerate small QP/back-conversion residuals seen in real closed-loop smoke.
+- Isaac articulation decision: Dock mechanism joints use nonzero implicit hold stiffness/damping in the probe so passive dock joints do not drift to limits and destabilize a single-module hover. The closed-loop smoke can stop early once the configured hold duration is achieved, and records both requested and executed step counts.
+- Compatibility impact: This validates a real Isaac-backed single-module hover smoke only. It does not validate fixed-morphology hover, waypoint tracking, object grasp/carry, learned `π_D` / `π_H` / `π_L`, P4-control completion, or P4 full completion. The QP allocator remains the primary path; `BoundedVerticalRotorAllocator` remains degraded fallback only.
+
 ### P4-Control PolicyCommand PID Target Builder Supplement
 
 - Context: Before implementing closed-loop hover, the controller needed a deterministic path from direct P4-control hover/waypoint targets to desired body wrench while preserving the `π_L -> PolicyCommand -> controller/QP` responsibility boundary.

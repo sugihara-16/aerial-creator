@@ -191,6 +191,41 @@ class IsaacLabBackend:
         command.append("--controller-command-smoke")
         return command
 
+    def holon_single_module_hover_smoke_command(
+        self,
+        *,
+        config_path: str | Path = "configs/env/isaac_lab.yaml",
+        convert_if_missing: bool = True,
+        steps: int = 600,
+        hover_target_height: float = 0.5,
+        position_tolerance_m: float = 0.20,
+        attitude_tolerance_rad: float = 0.25,
+        hold_duration_s: float = 1.0,
+        generated_usd_dir: str | Path | None = None,
+        generated_usd_path: str | Path | None = None,
+    ) -> list[str]:
+        command = self.holon_spawn_probe_command(
+            config_path=config_path,
+            convert_if_missing=convert_if_missing,
+            steps=steps,
+            generated_usd_dir=generated_usd_dir,
+            generated_usd_path=generated_usd_path,
+        )
+        command.extend(
+            [
+                "--single-module-hover-smoke",
+                "--hover-target-height",
+                str(hover_target_height),
+                "--hover-position-tolerance-m",
+                str(position_tolerance_m),
+                "--hover-attitude-tolerance-rad",
+                str(attitude_tolerance_rad),
+                "--hover-hold-duration-s",
+                str(hold_duration_s),
+            ]
+        )
+        return command
+
     @staticmethod
     def _expanded_path(path: str) -> Path:
         return Path(os.path.expandvars(os.path.expanduser(path)))

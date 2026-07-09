@@ -4,6 +4,40 @@
 
 ### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control controller supplement and user-provided initial PID gains
+- Work package / Agent label: Agent I/J/K boundary: P4-control Order 13 single-module closed-loop hover smoke
+- Summary: Added a real Isaac-backed closed-loop single-module hover smoke. The probe now keeps one persistent `QPIDController(allocation_mode="rigid_body_qp")`, rebuilds runtime observation from Isaac root/joint state every step, sends a direct `PolicyCommand.desired_body_pose` / `desired_body_twist` hover target, converts the bridge-supported `ControllerCommand` through `IsaacControllerBridge`, and applies rotor thrust plus vectoring/dock joint position targets in Isaac until the configured hold duration is achieved.
+- Files changed:
+  - `amsrr/controllers/qpid_controller.py`
+  - `amsrr/simulation/isaac_lab_backend.py`
+  - `amsrr/simulation/p4_control_controller_smoke.py`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - `tests/unit/controllers/test_qpid_controller.py`
+  - `tests/unit/simulation/test_p4_control_isaac_env.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema change. Added `IsaacLabBackend.holon_single_module_hover_smoke_command`, a public `bridge_supported_controller_command` helper, and Isaac probe CLI/report fields for `--single-module-hover-smoke`.
+- Upstream dependencies used: PolicyCommand PID target builder, Agent I rigid-body/QP allocation path, Agent J controller-to-Isaac bridge path, Holon corrected URDF/USD, and user-approved normal Isaac Lab launch in the `isaaclab3` environment.
+- Downstream impact: P4-control runner/acceptance can now consume a real single-module hover smoke artifact. Fixed-morphology hover and fixed-morphology waypoint smoke gates remain outstanding and must still fail P4-control completion until implemented and passed.
+- Tests added or run:
+  - Extended `tests/unit/simulation/test_p4_control_isaac_env.py` for the single-module hover command-line contract.
+  - Updated `test_qpid_controller_builds_pid_wrench_from_policy_body_target_and_feedforward` because attitude PID output is now angular acceleration converted through the current composite inertia.
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_control_isaac_env.py tests/unit/simulation/test_p4_control_controller_smoke.py tests/unit/controllers/test_qpid_controller.py -q`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr scripts -q`
+  - `git diff --check`
+- Commands run:
+  - `sed -n ... scripts/p4_control_holon_spawn_probe.py`
+  - `sed -n ... amsrr/simulation/p4_control_controller_smoke.py`
+  - `sed -n ... amsrr/controllers/qpid_controller.py`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/leus/amsrr python3 - <<'PY' ...` for hover/controller diagnostics
+  - `eval "$(~/.local/bin/micromamba shell hook -s bash)" && micromamba activate isaaclab3 && PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/leus/amsrr:$PYTHONPATH /home/leus/IsaacLab/isaaclab.sh -p /home/leus/amsrr/scripts/p4_control_holon_spawn_probe.py --config /home/leus/amsrr/configs/env/isaac_lab.yaml --force-convert --generated-usd-dir /tmp/amsrr_isaac_holon_hover --generated-usd-path /tmp/amsrr_isaac_holon_hover/holon/holon.usda --steps 600 --single-module-hover-smoke --hover-target-height 0.5 --hover-position-tolerance-m 0.20 --hover-attitude-tolerance-rad 0.25 --hover-hold-duration-s 1.0`
+- Tests run: Related unit tests passed: 15 passed. Full unit suite passed: 122 passed, 1 skipped. Compileall and diff check passed. Real Isaac single-module closed-loop hover smoke passed with `single_module_hover_smoke_passed=true`, `single_module_hover_steps=200`, `single_module_hover_requested_steps=600`, `single_module_hover_duration_s=1.0`, `single_module_hover_hold_time_s=1.0`, final position error `0.014463 m`, final attitude error `0.004510 rad`, max position error `0.022829 m`, max attitude error `0.004510 rad`, `single_module_hover_qp_infeasible_count=0`, no controller clipping, and no missing/unsupported/clipped bridge targets.
+- Assumptions: The smoke stops early after the configured 1.0 s hold by default; this is a smoke gate, not a long-duration hover claim. `unsupported_wrench_tolerance=1e-2` is a controller-local infeasibility cutoff for small QP/back-conversion residuals, while residuals above `1e-3` still report tracking warnings. Dock mechanism hold stiffness/damping are probe settings to keep passive dock joints from drifting during single-module hover.
+- Blockers: None for single-module hover smoke. Fixed-morphology hover, fixed-morphology waypoint tracking, object grasp/carry, learned policies, P4-control completion, and P4 full completion are still not implemented or claimed.
+- Next steps: Commit Order 13, then wire the real smoke result into the P4-control runner/acceptance path or proceed to fixed-morphology hover once multi-module spawn/docking semantics are defined.
+
+### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control controller supplement and user-provided initial PID gains
 - Work package / Agent label: Agent I boundary: P4-control Order 12 PolicyCommand PID target builder
 - Summary: Added the deterministic controller-side PID target builder needed before closed-loop hover. `PolicyCommand.desired_body_pose` / `desired_body_twist` now generate a desired body wrench with gravity compensation, user-specified xy/z/roll-pitch/yaw PID gains, body-frame quaternion attitude error, feedforward/residual wrench addition, target tracking metrics, and integral anti-windup that commits only after feasible unclipped allocation.
 - Files changed:

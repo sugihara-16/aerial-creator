@@ -47,6 +47,16 @@ def test_isaac_backend_probe_and_conversion_command_are_config_driven() -> None:
         generated_usd_path="/tmp/amsrr_isaac_holon_spawn/holon/holon.usda",
         steps=20,
     )
+    single_module_hover_smoke = backend.holon_single_module_hover_smoke_command(
+        config_path="configs/env/isaac_lab.yaml",
+        generated_usd_dir="/tmp/amsrr_isaac_holon_spawn",
+        generated_usd_path="/tmp/amsrr_isaac_holon_spawn/holon/holon.usda",
+        steps=600,
+        hover_target_height=0.5,
+        position_tolerance_m=0.20,
+        attitude_tolerance_rad=0.25,
+        hold_duration_s=1.0,
+    )
 
     assert availability.metadata["backend_version"] == "isaac_lab_backend_v1"
     assert availability.urdf_exists is True
@@ -65,6 +75,12 @@ def test_isaac_backend_probe_and_conversion_command_are_config_driven() -> None:
     assert "0.05" in command_probe
     assert controller_command_probe[:3] == spawn_command[:3]
     assert "--controller-command-smoke" in controller_command_probe
+    assert single_module_hover_smoke[:3] == spawn_command[:3]
+    assert "--single-module-hover-smoke" in single_module_hover_smoke
+    assert "--hover-target-height" in single_module_hover_smoke
+    assert "0.5" in single_module_hover_smoke
+    assert "--hover-position-tolerance-m" in single_module_hover_smoke
+    assert "0.2" in single_module_hover_smoke
 
 
 def test_p4_control_smoke_scenarios_are_deterministic() -> None:
