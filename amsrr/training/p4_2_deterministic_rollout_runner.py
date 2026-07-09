@@ -117,9 +117,18 @@ class P4_2DeterministicRolloutRunner:
         from amsrr.acceptance.p4_2_acceptance import run_p4_2_acceptance
 
         case = self.build_p2_p3_rollout_case()
+        object_pose_world, object_size_m, object_mass_kg = _p4_2_rollout_object_params(
+            case.sample.task_spec,
+            self.env_config,
+        )
         rollout_result = self.env.run_rollout(
             dry_run=self.runner_config.dry_run,
             morphology_graph=case.assembled_morphology,
+            contact_candidate_set=case.contact_candidate_set,
+            contact_wrench_trajectory=case.trajectory,
+            object_pose_world=object_pose_world,
+            object_size_m=object_size_m,
+            object_mass_kg=object_mass_kg,
             uses_p2_selected_design=True,
             uses_p3_assembled_morphology=bool(case.assembly_report.success),
         )
@@ -370,6 +379,41 @@ def _selected_contact_assignments(trajectory: ContactWrenchTrajectory) -> list[C
 
 def _selected_candidate_ids(trajectory: ContactWrenchTrajectory) -> list[int]:
     return sorted({assignment.candidate_id for assignment in _selected_contact_assignments(trajectory)})
+
+
+def _p4_2_rollout_object_params(
+    task_spec: TaskSpec,
+    env_config: P4_2DeterministicRolloutConfig,
+) -> tuple[
+    tuple[float, float, float, float, float, float, float],
+    tuple[float, float, float],
+    float,
+]:
+    target_object = None
+    for obj in task_spec.scene.objects:
+        if obj.object_id == env_config.object_id:
+            target_object = obj
+            break
+    if target_object is None:
+        raise SchemaValidationError(f"P4.2 object {env_config.object_id!r} not found in sampled TaskSpec")
+
+    geometry_size = env_config.object_size_m
+    for geometry in task_spec.scene.geometry_library:
+        if geometry.geometry_id != target_object.geometry_id:
+            continue
+        primitive_params = getattr(geometry, "primitive_params", {}) or {}
+        if "size_m" in primitive_params:
+            size_values = primitive_params["size_m"]
+            if len(size_values) == 3:
+                geometry_size = tuple(float(value) for value in size_values)  # type: ignore[assignment]
+        break
+
+    object_mass = float(target_object.mass_kg if target_object.mass_kg is not None else env_config.object_mass_kg)
+    return (
+        tuple(float(value) for value in target_object.pose_world),  # type: ignore[return-value]
+        tuple(float(value) for value in geometry_size),  # type: ignore[return-value]
+        object_mass,
+    )
 
 
 def _case_metrics(

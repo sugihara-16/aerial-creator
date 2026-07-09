@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from amsrr.simulation import (
     IsaacLabBackend,
     IsaacLabBackendConfig,
@@ -9,6 +11,7 @@ from amsrr.simulation import (
     load_isaac_lab_backend_config,
     load_p4_control_low_level_env_config,
 )
+from amsrr.simulation import isaac_lab_backend
 
 
 def test_p4_control_low_level_config_loader() -> None:
@@ -163,6 +166,28 @@ def test_isaac_backend_probe_and_conversion_command_are_config_driven() -> None:
     assert "--waypoint-ramp-duration-s" in fixed_morphology_waypoint_smoke
     assert "0.1" in fixed_morphology_waypoint_smoke
     assert "--waypoint-target-yaw-rad" in fixed_morphology_waypoint_smoke
+
+
+def test_isaac_json_command_sets_writable_warp_cache(monkeypatch) -> None:
+    call: dict[str, Any] = {}
+
+    class Completed:
+        stdout = '{"spawn_passed": true, "isaac_backed": true}\n'
+        stderr = ""
+        returncode = 0
+
+    def fake_run(command: list[str], **kwargs: Any) -> Completed:
+        call["command"] = command
+        call["kwargs"] = kwargs
+        return Completed()
+
+    monkeypatch.delenv("WARP_CACHE_PATH", raising=False)
+    monkeypatch.setattr(isaac_lab_backend.subprocess, "run", fake_run)
+
+    report = isaac_lab_backend._run_json_command(["isaaclab.sh"], timeout_s=1.0)
+
+    assert report["spawn_passed"] is True
+    assert call["kwargs"]["env"]["WARP_CACHE_PATH"] == isaac_lab_backend.DEFAULT_WARP_CACHE_PATH
 
 
 def test_p4_control_smoke_scenarios_are_deterministic() -> None:

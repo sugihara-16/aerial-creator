@@ -3,8 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from amsrr.schemas.contact_candidates import ContactCandidateSet
 from amsrr.schemas.morphology import MorphologyGraph
-from amsrr.schemas.policies import ControllerCommand, PolicyCommand
+from amsrr.schemas.policies import ContactWrenchTrajectory, ControllerCommand, PolicyCommand
 from amsrr.schemas.runtime import RuntimeObservation
 from amsrr.simulation.isaac_lab_backend import IsaacLabBackend, IsaacLabBackendConfig, load_isaac_lab_backend_config
 from amsrr.simulation.p4_2_rollout import (
@@ -53,6 +54,11 @@ class P4_2IsaacEnv:
         *,
         dry_run: bool = True,
         morphology_graph: MorphologyGraph | None = None,
+        contact_candidate_set: ContactCandidateSet | None = None,
+        contact_wrench_trajectory: ContactWrenchTrajectory | None = None,
+        object_pose_world: tuple[float, float, float, float, float, float, float] | None = None,
+        object_size_m: tuple[float, float, float] | None = None,
+        object_mass_kg: float | None = None,
         uses_p2_selected_design: bool = True,
         uses_p3_assembled_morphology: bool = True,
     ) -> P4_2DeterministicRolloutResult:
@@ -110,13 +116,20 @@ class P4_2IsaacEnv:
                 force_convert=True,
                 steps=self.config.max_episode_steps,
                 morphology_graph=morphology_graph,
-                object_size_m=self.config.object_size_m,
-                object_mass_kg=self.config.object_mass_kg,
-                object_pose_world=self.config.object_initial_pose_world,
+                contact_candidate_set_json=(
+                    contact_candidate_set.to_json() if contact_candidate_set is not None else None
+                ),
+                contact_wrench_trajectory_json=(
+                    contact_wrench_trajectory.to_json() if contact_wrench_trajectory is not None else None
+                ),
+                object_size_m=object_size_m or self.config.object_size_m,
+                object_mass_kg=float(object_mass_kg or self.config.object_mass_kg),
+                object_pose_world=object_pose_world or self.config.object_initial_pose_world,
                 contact_model=self.config.contact_model,
                 attach_distance_threshold_m=self.config.attach_distance_threshold_m,
                 attach_relative_velocity_threshold_mps=self.config.attach_relative_velocity_threshold_mps,
                 attach_snap_distance_threshold_m=self.config.attach_snap_distance_threshold_m,
+                pregrasp_alignment_distance_m=self.config.pregrasp_alignment_distance_m,
                 uses_p2_p3_design=uses_p2_selected_design and uses_p3_assembled_morphology,
             )
         except Exception as exc:  # pragma: no cover - real subprocess failures are environment-specific.

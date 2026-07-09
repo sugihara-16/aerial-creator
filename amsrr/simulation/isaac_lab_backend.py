@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from importlib.util import find_spec
 from pathlib import Path
@@ -14,6 +15,7 @@ from amsrr.utils.config import load_config
 
 
 ISAAC_LAB_BACKEND_VERSION = "isaac_lab_backend_v1"
+DEFAULT_WARP_CACHE_PATH = "/tmp/amsrr_warp_cache"
 
 
 @dataclass
@@ -78,6 +80,7 @@ class IsaacLabBackend:
         urdf_path = self._expanded_path(self.config.holon_urdf_path)
         generated_usd_path = self._expanded_path(self.config.generated_usd_path)
         python_modules_available = _isaac_python_modules_available()
+        effective_device = self._effective_device()
         missing_reasons: list[str] = []
         if not isaaclab_path.exists():
             missing_reasons.append("isaaclab_path_missing")
@@ -102,6 +105,8 @@ class IsaacLabBackend:
                 "holon_urdf_path": str(urdf_path),
                 "generated_usd_path": str(generated_usd_path),
                 "rotor_force_application": self.config.rotor_force_application,
+                "configured_device": self.config.device,
+                "effective_device": effective_device,
             },
         )
 
@@ -132,6 +137,7 @@ class IsaacLabBackend:
     ) -> list[str]:
         isaaclab_path = self._expanded_path(self.config.isaaclab_path)
         repo_root = Path(__file__).resolve().parents[2]
+        device = self._effective_device()
         command = [
             str(isaaclab_path / self.config.launch_script),
             "-p",
@@ -140,6 +146,8 @@ class IsaacLabBackend:
             str(config_path),
             "--steps",
             str(steps),
+            "--device",
+            device,
         ]
         if force_convert:
             command.append("--force-convert")
@@ -494,6 +502,10 @@ class IsaacLabBackend:
         force_convert: bool = False,
         steps: int = 1200,
         morphology_graph: MorphologyGraph,
+        contact_candidate_set_json: str | None = None,
+        contact_candidate_set_json_path: str | Path | None = None,
+        contact_wrench_trajectory_json: str | None = None,
+        contact_wrench_trajectory_json_path: str | Path | None = None,
         object_size_m: tuple[float, float, float] = (0.30, 0.20, 0.15),
         object_mass_kg: float = 1.0,
         object_pose_world: tuple[float, float, float, float, float, float, float] = (
@@ -509,6 +521,7 @@ class IsaacLabBackend:
         attach_distance_threshold_m: float = 0.06,
         attach_relative_velocity_threshold_mps: float = 0.20,
         attach_snap_distance_threshold_m: float = 0.03,
+        pregrasp_alignment_distance_m: float = 0.12,
         uses_p2_p3_design: bool = True,
         generated_usd_dir: str | Path | None = None,
         generated_usd_path: str | Path | None = None,
@@ -548,10 +561,20 @@ class IsaacLabBackend:
                 str(attach_relative_velocity_threshold_mps),
                 "--p4-2-attach-snap-distance-threshold-m",
                 str(attach_snap_distance_threshold_m),
+                "--p4-2-pregrasp-alignment-distance-m",
+                str(pregrasp_alignment_distance_m),
             ]
         )
         if uses_p2_p3_design:
             command.append("--p4-2-uses-p2-p3")
+        if contact_candidate_set_json is not None:
+            command.extend(["--p4-2-contact-candidate-set-json", contact_candidate_set_json])
+        if contact_candidate_set_json_path is not None:
+            command.extend(["--p4-2-contact-candidate-set-json-path", str(contact_candidate_set_json_path)])
+        if contact_wrench_trajectory_json is not None:
+            command.extend(["--p4-2-contact-wrench-trajectory-json", contact_wrench_trajectory_json])
+        if contact_wrench_trajectory_json_path is not None:
+            command.extend(["--p4-2-contact-wrench-trajectory-json-path", str(contact_wrench_trajectory_json_path)])
         return command
 
     def run_holon_single_module_hover_smoke(
@@ -761,6 +784,8 @@ class IsaacLabBackend:
         force_convert: bool = True,
         steps: int = 1200,
         morphology_graph: MorphologyGraph,
+        contact_candidate_set_json: str | None = None,
+        contact_wrench_trajectory_json: str | None = None,
         object_size_m: tuple[float, float, float] = (0.30, 0.20, 0.15),
         object_mass_kg: float = 1.0,
         object_pose_world: tuple[float, float, float, float, float, float, float] = (
@@ -776,31 +801,49 @@ class IsaacLabBackend:
         attach_distance_threshold_m: float = 0.06,
         attach_relative_velocity_threshold_mps: float = 0.20,
         attach_snap_distance_threshold_m: float = 0.03,
+        pregrasp_alignment_distance_m: float = 0.12,
         uses_p2_p3_design: bool = True,
         timeout_s: float | None = None,
     ) -> dict[str, Any]:
-        command = self.p4_2_deterministic_rollout_command(
-            config_path=config_path,
-            convert_if_missing=not force_convert,
-            force_convert=force_convert,
-            steps=steps,
-            morphology_graph=morphology_graph,
-            object_size_m=object_size_m,
-            object_mass_kg=object_mass_kg,
-            object_pose_world=object_pose_world,
-            contact_model=contact_model,
-            attach_distance_threshold_m=attach_distance_threshold_m,
-            attach_relative_velocity_threshold_mps=attach_relative_velocity_threshold_mps,
-            attach_snap_distance_threshold_m=attach_snap_distance_threshold_m,
-            uses_p2_p3_design=uses_p2_p3_design,
-            generated_usd_dir=self.config.generated_usd_dir,
-            generated_usd_path=self.config.generated_usd_path,
-        )
-        return _run_json_command(command, timeout_s=timeout_s)
+        with tempfile.TemporaryDirectory(prefix="amsrr_p4_2_inputs_") as input_dir:
+            candidate_path = None
+            trajectory_path = None
+            if contact_candidate_set_json is not None:
+                candidate_path = Path(input_dir) / "contact_candidate_set.json"
+                candidate_path.write_text(contact_candidate_set_json, encoding="utf-8")
+            if contact_wrench_trajectory_json is not None:
+                trajectory_path = Path(input_dir) / "contact_wrench_trajectory.json"
+                trajectory_path.write_text(contact_wrench_trajectory_json, encoding="utf-8")
+            command = self.p4_2_deterministic_rollout_command(
+                config_path=config_path,
+                convert_if_missing=not force_convert,
+                force_convert=force_convert,
+                steps=steps,
+                morphology_graph=morphology_graph,
+                contact_candidate_set_json_path=candidate_path,
+                contact_wrench_trajectory_json_path=trajectory_path,
+                object_size_m=object_size_m,
+                object_mass_kg=object_mass_kg,
+                object_pose_world=object_pose_world,
+                contact_model=contact_model,
+                attach_distance_threshold_m=attach_distance_threshold_m,
+                attach_relative_velocity_threshold_mps=attach_relative_velocity_threshold_mps,
+                attach_snap_distance_threshold_m=attach_snap_distance_threshold_m,
+                pregrasp_alignment_distance_m=pregrasp_alignment_distance_m,
+                uses_p2_p3_design=uses_p2_p3_design,
+                generated_usd_dir=self.config.generated_usd_dir,
+                generated_usd_path=self.config.generated_usd_path,
+            )
+            return _run_json_command(command, timeout_s=timeout_s)
 
     @staticmethod
     def _expanded_path(path: str) -> Path:
         return Path(os.path.expandvars(os.path.expanduser(path)))
+
+    def _effective_device(self) -> str:
+        if self.config.device.startswith("cuda") and not _torch_cuda_available():
+            return "cpu"
+        return self.config.device
 
 
 def _isaac_python_modules_available() -> bool:
@@ -813,13 +856,26 @@ def _isaac_python_modules_available() -> bool:
     return False
 
 
+def _torch_cuda_available() -> bool:
+    try:
+        import torch
+
+        return bool(torch.cuda.is_available())
+    except Exception:
+        return False
+
+
 def _run_json_command(command: list[str], *, timeout_s: float | None = None) -> dict[str, Any]:
+    env = os.environ.copy()
+    env["WARP_CACHE_PATH"] = env.get("WARP_CACHE_PATH", DEFAULT_WARP_CACHE_PATH)
+    Path(env["WARP_CACHE_PATH"]).mkdir(parents=True, exist_ok=True)
     completed = subprocess.run(
         command,
         check=False,
         capture_output=True,
         text=True,
         timeout=timeout_s,
+        env=env,
     )
     report = _parse_last_json_line(completed.stdout)
     if report is None:
@@ -828,6 +884,8 @@ def _run_json_command(command: list[str], *, timeout_s: float | None = None) -> 
             "isaac_backed": True,
             "error": "isaac_command_did_not_emit_json",
         }
+        if completed.stdout:
+            report["stdout_tail"] = completed.stdout[-2000:]
     report["command_returncode"] = completed.returncode
     if completed.stderr:
         report["stderr_tail"] = completed.stderr[-2000:]

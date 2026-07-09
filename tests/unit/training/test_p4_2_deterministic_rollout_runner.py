@@ -89,6 +89,12 @@ def test_p4_2_runner_archives_fake_backend_rollout_without_real_completion_claim
         "assembled_morphology_graph_id"
     ]
     assert backend.calls[0]["uses_p2_p3_design"] is True
+    assert "contact_candidate_set_json" in backend.calls[0]
+    assert '"candidates"' in backend.calls[0]["contact_candidate_set_json"]
+    assert "p4_2_deterministic_grasp_carry" in backend.calls[0]["contact_wrench_trajectory_json"]
+    assert backend.calls[0]["object_pose_world"] != env_config.object_initial_pose_world
+    assert backend.calls[0]["object_size_m"] != env_config.object_size_m
+    assert backend.calls[0]["object_mass_kg"] != env_config.object_mass_kg
 
     assert len(result.archives) == 1
     archive = result.archives[0]

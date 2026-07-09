@@ -13,6 +13,7 @@ from amsrr.simulation import (
     default_p4_2_phase_definitions,
     evaluate_p4_2_attach_conditions,
     load_p4_2_deterministic_rollout_config,
+    p4_2_controller_status_is_fatal,
     p4_2_failure_metrics,
     p4_2_metric_definitions,
     p4_2_no_mislabeling_artifacts,
@@ -76,6 +77,21 @@ def test_p4_2_attach_conditions_require_distance_velocity_feasibility_and_contro
         controller_status=ControllerStatus(status="infeasible", qp_feasible=False),
         config=config,
     )
+    degraded = evaluate_p4_2_attach_conditions(
+        candidate_id=3,
+        anchor_id=2,
+        slot_id=1,
+        object_id="box_01",
+        distance_m=0.03,
+        relative_velocity_mps=0.04,
+        assignment_feasible=True,
+        controller_status=ControllerStatus(
+            status="infeasible",
+            qp_feasible=False,
+            metrics={"qp_solver_success": 1.0, "clipped": 1.0},
+        ),
+        config=config,
+    )
 
     assert passed.passed is True
     assert passed.failure_reasons == []
@@ -89,6 +105,9 @@ def test_p4_2_attach_conditions_require_distance_velocity_feasibility_and_contro
         "controller_status_not_attach_safe",
     ]
     assert failed.metrics["attach_condition_passed"] == 0.0
+    assert p4_2_controller_status_is_fatal(ControllerStatus(status="infeasible", qp_feasible=False))
+    assert degraded.passed is True
+    assert degraded.metrics["attach_controller_ok"] == 1.0
 
 
 def test_p4_2_metric_contract_excludes_intended_grasp_contacts_from_hard_collision() -> None:

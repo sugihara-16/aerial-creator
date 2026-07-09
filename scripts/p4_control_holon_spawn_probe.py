@@ -6,6 +6,7 @@ import math
 import os
 import sys
 import time
+import traceback
 from pathlib import Path
 
 
@@ -114,6 +115,26 @@ def parse_args() -> argparse.Namespace:
         help="Serialized P3 assembled MorphologyGraph JSON for graph-specific reset asset generation.",
     )
     parser.add_argument(
+        "--p4-2-contact-candidate-set-json",
+        default=None,
+        help="Serialized ContactCandidateSet for P4.2 gated attach evaluation.",
+    )
+    parser.add_argument(
+        "--p4-2-contact-candidate-set-json-path",
+        default=None,
+        help="Path to serialized ContactCandidateSet JSON for P4.2 gated attach evaluation.",
+    )
+    parser.add_argument(
+        "--p4-2-contact-wrench-trajectory-json",
+        default=None,
+        help="Serialized deterministic ContactWrenchTrajectory for P4.2 phase rollout.",
+    )
+    parser.add_argument(
+        "--p4-2-contact-wrench-trajectory-json-path",
+        default=None,
+        help="Path to serialized deterministic ContactWrenchTrajectory JSON for P4.2 phase rollout.",
+    )
+    parser.add_argument(
         "--p4-2-object-size-m",
         type=float,
         nargs=3,
@@ -152,6 +173,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.03,
         help="P4.2 object attach snap distance threshold.",
+    )
+    parser.add_argument(
+        "--p4-2-pregrasp-alignment-distance-m",
+        type=float,
+        default=0.12,
+        help="P4.2 distance threshold for approach to pregrasp_align transition.",
     )
     parser.add_argument("--fixed-module-count", type=int, default=2, help="Module count for fixed-morphology smokes.")
     parser.add_argument("--fixed-module-spacing-m", type=float, default=0.45, help="Rigid spacing between fixed modules.")
@@ -238,6 +265,7 @@ simulation_app = app_launcher.app
 
 
 def main() -> int:
+    warp_cpu_pinned_allocator_fallback = _patch_warp_cpu_pinned_allocator_for_cpu_only()
     try:
         report = run_probe(args_cli)
     except Exception as exc:  # pragma: no cover - exercised through real Isaac smoke commands.
@@ -245,7 +273,9 @@ def main() -> int:
             "spawn_passed": False,
             "error_type": type(exc).__name__,
             "error": str(exc),
+            "traceback_tail": traceback.format_exc(limit=8),
         }
+    report.setdefault("warp_cpu_pinned_allocator_fallback", warp_cpu_pinned_allocator_fallback)
     print(json.dumps(report, sort_keys=True))
     if not report.get("spawn_passed"):
         return 1
@@ -262,6 +292,25 @@ def main() -> int:
         if report.get(key) is False:
             return 1
     return 0
+
+
+def _patch_warp_cpu_pinned_allocator_for_cpu_only() -> bool:
+    try:
+        import warp as wp
+
+        if wp.is_cuda_available():
+            return False
+        cpu_device = wp.get_device("cpu")
+        cpu_device.pinned_allocator = cpu_device.default_allocator
+        return True
+    except Exception:
+        return False
+
+
+def _read_optional_text(path: str | None) -> str | None:
+    if not path:
+        return None
+    return Path(path).read_text(encoding="utf-8")
 
 
 def run_probe(args: argparse.Namespace) -> dict[str, object]:
@@ -285,7 +334,9 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         write_resolved_mesh_urdf,
     )
     from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
+    from amsrr.schemas.contact_candidates import ContactCandidateSet
     from amsrr.schemas.morphology import MorphologyGraph
+    from amsrr.schemas.policies import ContactWrenchTrajectory
     from amsrr.simulation.isaac_lab_backend import IsaacLabBackend, load_isaac_lab_backend_config
     from amsrr.simulation.p4_control_controller_smoke import (
         bridge_supported_controller_command,
@@ -314,6 +365,24 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     p4_2_morphology_graph = (
         MorphologyGraph.from_json(args.p4_2_morphology_graph_json)
         if args.p4_2_deterministic_rollout and args.p4_2_morphology_graph_json
+        else None
+    )
+    p4_2_contact_candidate_set_json = (
+        args.p4_2_contact_candidate_set_json
+        or _read_optional_text(args.p4_2_contact_candidate_set_json_path)
+    )
+    p4_2_contact_wrench_trajectory_json = (
+        args.p4_2_contact_wrench_trajectory_json
+        or _read_optional_text(args.p4_2_contact_wrench_trajectory_json_path)
+    )
+    p4_2_contact_candidate_set = (
+        ContactCandidateSet.from_json(p4_2_contact_candidate_set_json)
+        if args.p4_2_deterministic_rollout and p4_2_contact_candidate_set_json
+        else None
+    )
+    p4_2_contact_wrench_trajectory = (
+        ContactWrenchTrajectory.from_json(p4_2_contact_wrench_trajectory_json)
+        if args.p4_2_deterministic_rollout and p4_2_contact_wrench_trajectory_json
         else None
     )
     fixed_module_poses = None
@@ -407,8 +476,12 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     sim = SimulationContext(sim_utils.SimulationCfg(dt=args.dt, device=args.device))
     sim.set_camera_view(eye=[1.0, 1.0, 1.0], target=[0.0, 0.0, args.spawn_height])
 
-    ground_cfg = sim_utils.GroundPlaneCfg()
-    ground_cfg.func("/World/defaultGroundPlane", ground_cfg)
+    ground_cfg = sim_utils.CuboidCfg(
+        size=(100.0, 100.0, 0.05),
+        collision_props=sim_utils.CollisionPropertiesCfg(),
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.18, 0.18, 0.18)),
+    )
+    ground_cfg.func("/World/defaultGroundPlane", ground_cfg, translation=(0.0, 0.0, -0.025))
     light_cfg = sim_utils.DistantLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75))
     light_cfg.func("/World/Light", light_cfg)
 
@@ -470,7 +543,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             spawn=sim_utils.CuboidCfg(
                 size=object_size,
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                    disable_gravity=False,
+                    disable_gravity=bool(args.p4_2_deterministic_rollout),
                     max_depenetration_velocity=10.0,
                 ),
                 mass_props=sim_utils.MassPropertiesCfg(mass=object_mass),
@@ -657,8 +730,12 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             device=sim.device,
             steps=max(0, args.steps),
             morphology_graph=p4_2_morphology_graph,
+            contact_candidate_set=p4_2_contact_candidate_set,
+            contact_wrench_trajectory=p4_2_contact_wrench_trajectory,
             module_poses=fixed_module_poses,
             object_id="box_01",
+            object_size_m=tuple(float(value) for value in args.p4_2_object_size_m),
+            object_mass_kg=float(args.p4_2_object_mass_kg),
             target_height=float(args.hover_target_height if args.hover_target_height is not None else args.spawn_height),
             control_dt_s=float(args.dt),
             bridge_supported_controller_command=bridge_supported_controller_command,
@@ -667,7 +744,10 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             allocation_mode=str(args.allocation_mode),
             uses_p2_p3=bool(args.p4_2_uses_p2_p3),
             contact_model=str(args.p4_2_contact_model),
+            attach_distance_threshold_m=float(args.p4_2_attach_distance_threshold_m),
+            attach_relative_velocity_threshold_mps=float(args.p4_2_attach_relative_velocity_threshold_mps),
             attach_snap_distance_threshold_m=float(args.p4_2_attach_snap_distance_threshold_m),
+            pregrasp_alignment_distance_m=float(args.p4_2_pregrasp_alignment_distance_m),
         )
     for _ in range(
         0
@@ -1832,8 +1912,12 @@ def _run_p4_2_deterministic_rollout_probe(
     device: str,
     steps: int,
     morphology_graph,
+    contact_candidate_set,
+    contact_wrench_trajectory,
     module_poses: dict[int, tuple[float, float, float, float, float, float, float]] | None,
     object_id: str,
+    object_size_m: tuple[float, float, float],
+    object_mass_kg: float,
     target_height: float,
     control_dt_s: float,
     bridge_supported_controller_command,
@@ -1842,16 +1926,24 @@ def _run_p4_2_deterministic_rollout_probe(
     allocation_mode: str,
     uses_p2_p3: bool,
     contact_model: str,
+    attach_distance_threshold_m: float,
+    attach_relative_velocity_threshold_mps: float,
     attach_snap_distance_threshold_m: float,
+    pregrasp_alignment_distance_m: float,
 ) -> dict[str, object]:
     from amsrr.controllers.actuator_mapping import build_actuator_mapping
-    from amsrr.controllers.controller_base import ControllerContext
+    from amsrr.controllers.controller_base import ControllerContext, PayloadCoupling
     from amsrr.controllers.isaac_controller_bridge import IsaacControllerBridge
     from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
     from amsrr.schemas.policies import InteractionKnot, PolicyCommand
     from amsrr.simulation.p4_2_rollout import (
+        P4_2AttachEvent,
+        P4_2DeterministicRolloutConfig,
         P4_2RolloutPhase,
         P4_2PhaseTransitionRecord,
+        P4_2ReleaseEvent,
+        evaluate_p4_2_attach_conditions,
+        p4_2_controller_status_is_fatal,
         p4_2_failure_metrics,
         p4_2_no_mislabeling_artifacts,
     )
@@ -1870,15 +1962,7 @@ def _run_p4_2_deterministic_rollout_probe(
         )
     )
     object_pose_initial, _ = _p4_1_object_pose_and_twist(p4_2_object)
-    approach_pose = (
-        float(object_pose_initial[0]) - 0.25,
-        float(object_pose_initial[1]),
-        max(float(target_height), float(object_pose_initial[2]) + 0.20),
-        0.0,
-        0.0,
-        0.0,
-        1.0,
-    )
+    pre_attach_object_pose = tuple(float(value) for value in object_pose_initial)
     target_twist = [0.0] * 6
     previous_command = None
     runtime_observation_objects = []
@@ -1888,6 +1972,7 @@ def _run_p4_2_deterministic_rollout_probe(
     actuator_target_records: list[dict[str, object]] = []
     object_pose_history: list[list[float]] = []
     qp_infeasible_count = 0
+    qp_infeasible_consecutive = 0
     clipped_count = 0
     missing_actuator_count = 0
     unsupported_actuator_count = 0
@@ -1896,7 +1981,63 @@ def _run_p4_2_deterministic_rollout_probe(
     executed_steps = 0
     last_controller_status = None
     last_bridge_metrics: dict[str, float] = {}
-    selected_contact_candidates_available = False
+    rollout_config = P4_2DeterministicRolloutConfig(
+        object_id=object_id,
+        object_size_m=object_size_m,
+        object_mass_kg=object_mass_kg,
+        contact_model=contact_model,
+        attach_distance_threshold_m=attach_distance_threshold_m,
+        attach_relative_velocity_threshold_mps=attach_relative_velocity_threshold_mps,
+        attach_snap_distance_threshold_m=attach_snap_distance_threshold_m,
+        pregrasp_alignment_distance_m=pregrasp_alignment_distance_m,
+    )
+    selected_assignments = _p4_2_selected_assignments(contact_wrench_trajectory)
+    candidate_by_id = {
+        candidate.candidate_id: candidate
+        for candidate in (contact_candidate_set.candidates if contact_candidate_set is not None else [])
+    }
+    anchor_by_id = {anchor.anchor_id: anchor for anchor in morphology_graph.robot_anchors}
+    selected_pairs = [
+        (assignment, candidate_by_id[assignment.candidate_id], anchor_by_id[assignment.anchor_id])
+        for assignment in selected_assignments
+        if assignment.candidate_id in candidate_by_id and assignment.anchor_id in anchor_by_id
+    ]
+    selected_contact_candidates_available = bool(selected_pairs)
+    selected_assignment, selected_candidate, selected_anchor = (
+        selected_pairs[0] if selected_pairs else (None, None, None)
+    )
+    selected_assignment_feasible = _p4_2_selected_assignment_feasible(
+        contact_candidate_set,
+        [assignment.candidate_id for assignment in selected_assignments],
+    )
+    anchor_relative_pose = (
+        _p4_2_anchor_relative_pose(morphology_graph, graph_module_poses, selected_anchor)
+        if selected_anchor is not None
+        else None
+    )
+    candidate_relative_to_object = (
+        compose_pose(inverse_pose(object_pose_initial), selected_candidate.contact_pose_world)
+        if selected_candidate is not None
+        else None
+    )
+    release_object_target = _p4_2_release_object_target(
+        contact_wrench_trajectory,
+        object_id=object_id,
+        fallback_pose=object_pose_initial,
+    )
+    payload_inertia = _p4_2_cuboid_inertia_body(float(object_mass_kg), object_size_m)
+    current_phase = P4_2RolloutPhase.APPROACH
+    phase_started_s = 0.0
+    final_phase: P4_2RolloutPhase | None = None
+    attach_events: list[P4_2AttachEvent] = []
+    release_events: list[P4_2ReleaseEvent] = []
+    attached = False
+    object_relative_to_anchor = None
+    object_relative_to_root_at_attach = None
+    transport_start_object_pose = None
+    transport_displacement_m = 0.0
+    root_pose_at_release = None
+    object_pose_at_release = None
     phase_transitions = [
         P4_2PhaseTransitionRecord(
             from_phase=P4_2RolloutPhase.RESET,
@@ -1934,45 +2075,199 @@ def _run_p4_2_deterministic_rollout_probe(
             module_poses=graph_module_poses,
             split_fixed_module_name=split_fixed_module_name,
         )
+        anchor_pose = _p4_2_anchor_world_pose(runtime_observation, selected_anchor)
+        if not attached and current_phase in {
+            P4_2RolloutPhase.APPROACH,
+            P4_2RolloutPhase.PREGRASP_ALIGN,
+            P4_2RolloutPhase.ATTACH_ATTEMPT,
+        }:
+            _set_p4_2_object_pose_and_twist(p4_2_object, pre_attach_object_pose, [0.0] * 6, device=device)
+            p4_2_object.update(sim_dt)
+        if attached and anchor_pose is not None and object_relative_to_anchor is not None:
+            slaved_pose = compose_pose(anchor_pose, object_relative_to_anchor)
+            _set_p4_2_object_pose_and_twist(p4_2_object, slaved_pose, [0.0] * 6, device=device)
+            p4_2_object.update(sim_dt)
         object_state = _build_p4_1_object_runtime_state(p4_2_object, object_id=object_id)
         runtime_observation.object_states = [object_state]
-        runtime_observation.task_progress.phase_label = P4_2RolloutPhase.APPROACH.value
+
+        attach_anchor_target = (
+            compose_pose(object_state.pose_world, candidate_relative_to_object)
+            if candidate_relative_to_object is not None
+            else (selected_candidate.contact_pose_world if selected_candidate is not None else object_state.pose_world)
+        )
+        approach_anchor_target = _p4_2_offset_pose(attach_anchor_target, dz=0.10)
+        anchor_distance_m = (
+            _p4_2_pose_distance(anchor_pose, attach_anchor_target)
+            if anchor_pose is not None and selected_candidate is not None
+            else float("inf")
+        )
+        relative_velocity_mps = _p4_2_relative_speed(
+            _p4_2_anchor_twist(runtime_observation, selected_anchor),
+            object_state.twist_world,
+        )
+        phase_elapsed_s = max(0.0, time_s - phase_started_s)
+        if final_phase is None:
+            if current_phase == P4_2RolloutPhase.APPROACH:
+                if selected_contact_candidates_available and anchor_distance_m <= rollout_config.pregrasp_alignment_distance_m:
+                    phase_transitions.append(
+                        _p4_2_transition_record(
+                            current_phase,
+                            P4_2RolloutPhase.PREGRASP_ALIGN,
+                            time_s=time_s,
+                            phase_elapsed_s=phase_elapsed_s,
+                            reason="selected_anchor_within_pregrasp_alignment_distance",
+                            timeout_s=rollout_config.phase_timeouts_s[current_phase.value],
+                        )
+                    )
+                    current_phase = P4_2RolloutPhase.PREGRASP_ALIGN
+                    phase_started_s = time_s
+                    phase_elapsed_s = 0.0
+                elif phase_elapsed_s > rollout_config.phase_timeouts_s[current_phase.value]:
+                    final_phase = P4_2RolloutPhase.TIMEOUT_FAILURE
+            if current_phase == P4_2RolloutPhase.PREGRASP_ALIGN:
+                if anchor_distance_m <= rollout_config.attach_distance_threshold_m:
+                    phase_transitions.append(
+                        _p4_2_transition_record(
+                            current_phase,
+                            P4_2RolloutPhase.ATTACH_ATTEMPT,
+                            time_s=time_s,
+                            phase_elapsed_s=phase_elapsed_s,
+                            reason="anchor_distance_inside_attach_gate",
+                            timeout_s=rollout_config.phase_timeouts_s[current_phase.value],
+                        )
+                    )
+                    current_phase = P4_2RolloutPhase.ATTACH_ATTEMPT
+                    phase_started_s = time_s
+                    phase_elapsed_s = 0.0
+                elif phase_elapsed_s > rollout_config.phase_timeouts_s[current_phase.value]:
+                    final_phase = P4_2RolloutPhase.TIMEOUT_FAILURE
+            if current_phase in {
+                P4_2RolloutPhase.ATTACH_ATTEMPT,
+                P4_2RolloutPhase.ATTACHED_MAINTAIN,
+                P4_2RolloutPhase.TRANSPORT,
+                P4_2RolloutPhase.RELEASE,
+            } and phase_elapsed_s > rollout_config.phase_timeouts_s[current_phase.value]:
+                final_phase = (
+                    P4_2RolloutPhase.DROP_FAILURE
+                    if current_phase in {P4_2RolloutPhase.ATTACH_ATTEMPT, P4_2RolloutPhase.ATTACHED_MAINTAIN}
+                    else P4_2RolloutPhase.TIMEOUT_FAILURE
+                )
+
+        release_error_m = _p4_2_pose_distance(object_state.pose_world, release_object_target)
+        transport_displacement_m = (
+            _p4_2_pose_distance(object_state.pose_world, transport_start_object_pose)
+            if transport_start_object_pose is not None
+            else 0.0
+        )
+        if final_phase is None and current_phase == P4_2RolloutPhase.ATTACHED_MAINTAIN:
+            maintain_dwell_s = min(0.25, rollout_config.phase_timeouts_s[current_phase.value])
+            if phase_elapsed_s >= maintain_dwell_s:
+                transport_start_object_pose = object_state.pose_world
+                phase_transitions.append(
+                    _p4_2_transition_record(
+                        current_phase,
+                        P4_2RolloutPhase.TRANSPORT,
+                        time_s=time_s,
+                        phase_elapsed_s=phase_elapsed_s,
+                        reason="attached_maintain_dwell_satisfied",
+                        timeout_s=rollout_config.phase_timeouts_s[current_phase.value],
+                    )
+                )
+                current_phase = P4_2RolloutPhase.TRANSPORT
+                phase_started_s = time_s
+                phase_elapsed_s = 0.0
+        if final_phase is None and current_phase == P4_2RolloutPhase.TRANSPORT:
+            if transport_start_object_pose is None:
+                transport_start_object_pose = object_state.pose_world
+                transport_displacement_m = 0.0
+            release_region_reached = release_error_m <= max(rollout_config.attach_distance_threshold_m, 0.08)
+            bounded_transport_reached = transport_displacement_m >= rollout_config.transport_min_displacement_m
+            if release_region_reached or bounded_transport_reached:
+                release_reason = (
+                    "attached_object_reached_release_region"
+                    if release_region_reached
+                    else "bounded_payload_carry_displacement_reached"
+                )
+                phase_transitions.append(
+                    _p4_2_transition_record(
+                        current_phase,
+                        P4_2RolloutPhase.RELEASE,
+                        time_s=time_s,
+                        phase_elapsed_s=phase_elapsed_s,
+                        reason=release_reason,
+                        timeout_s=rollout_config.phase_timeouts_s[current_phase.value],
+                    )
+                )
+                current_phase = P4_2RolloutPhase.RELEASE
+                phase_started_s = time_s
+                phase_elapsed_s = 0.0
+
+        runtime_observation.task_progress.phase_label = current_phase.value
         runtime_observation.task_progress.metrics.update(
             {
-                "selected_contact_candidates_available": 0.0,
+                "selected_contact_candidates_available": 1.0 if selected_contact_candidates_available else 0.0,
+                "selected_assignment_feasible": 1.0 if selected_assignment_feasible else 0.0,
+                "anchor_object_distance_m": 0.0 if math.isinf(anchor_distance_m) else float(anchor_distance_m),
+                "relative_velocity_mps": float(relative_velocity_mps),
+                "transport_displacement_m": float(transport_displacement_m),
+                "transport_min_displacement_m": float(rollout_config.transport_min_displacement_m),
                 "unconditional_attach_allowed": 0.0,
             }
         )
         runtime_observation_objects.append(runtime_observation)
         runtime_observations.append(runtime_observation.to_dict())
+        desired_body_pose = _p4_2_target_pose_for_phase(
+            current_phase,
+            approach_anchor_target=approach_anchor_target,
+            attach_anchor_target=attach_anchor_target,
+            root_pose=root_pose,  # type: ignore[arg-type]
+            release_object_target=release_object_target,
+            anchor_relative_pose=anchor_relative_pose,
+            object_relative_to_anchor=object_relative_to_anchor,
+        )
+        phase_weight = f"p4_2_phase_{current_phase.value}"
         policy_command = PolicyCommand(
-            desired_body_pose=approach_pose,
+            desired_body_pose=desired_body_pose,
             desired_body_twist=target_twist,
             priority_weights={
-                "p4_2_phase_approach": 1.0,
-                "attach_condition_gate": 0.0,
+                phase_weight: 1.0,
+                "attach_condition_gate": 1.0 if current_phase == P4_2RolloutPhase.ATTACH_ATTEMPT else 0.0,
+                "attached_object_tracking": 1.0 if attached else 0.0,
+                "release_gate": 1.0 if current_phase == P4_2RolloutPhase.RELEASE else 0.0,
             },
         )
         active_knot = InteractionKnot(
             t_rel_s=time_s,
-            contact_assignments=[],
-            priority_weights={"p4_2_phase_approach": 1.0},
+            contact_assignments=selected_assignments if selected_contact_candidates_available else [],
+            priority_weights={phase_weight: 1.0},
             guard_conditions=[
                 {
                     "type": "p4_2_phase",
-                    "phase": P4_2RolloutPhase.APPROACH.value,
+                    "phase": current_phase.value,
                     "contact_model": contact_model,
                 },
                 {
                     "type": "p4_2_attach_gate",
-                    "selected_contact_candidates_available": False,
+                    "selected_contact_candidates_available": selected_contact_candidates_available,
                     "robot_anchors_available": len(morphology_graph.robot_anchors) > 0,
                     "unconditional_attach_allowed": False,
+                    "attach_distance_threshold_m": float(attach_distance_threshold_m),
+                    "attach_relative_velocity_threshold_mps": float(attach_relative_velocity_threshold_mps),
                     "attach_snap_distance_threshold_m": float(attach_snap_distance_threshold_m),
                 },
             ],
         )
         policy_commands.append(policy_command.to_dict())
+        payload_coupling = None
+        if attached and object_relative_to_root_at_attach is not None:
+            payload_coupling = PayloadCoupling(
+                payload_id=object_id,
+                contact_model=contact_model,
+                mass_kg=float(object_mass_kg),
+                inertia_body=list(payload_inertia),
+                com_offset_body=tuple(float(value) for value in object_relative_to_root_at_attach[:3]),
+                coupling_mode=contact_model,
+            )
         controller_command = controller.compute(
             ControllerContext(
                 runtime_observation=runtime_observation,
@@ -1982,9 +2277,127 @@ def _run_p4_2_deterministic_rollout_probe(
                 policy_command=policy_command,
                 previous_command=previous_command,
                 control_dt_s=control_dt_s,
+                payload_coupling=payload_coupling,
             )
         )
         bridged_command = bridge_supported_controller_command(controller_command)
+        status = bridged_command.controller_status
+        if (
+            final_phase is None
+            and current_phase == P4_2RolloutPhase.ATTACH_ATTEMPT
+            and not attached
+            and selected_candidate is not None
+            and selected_anchor is not None
+            and anchor_pose is not None
+        ):
+            condition_report = evaluate_p4_2_attach_conditions(
+                candidate_id=selected_candidate.candidate_id,
+                anchor_id=selected_anchor.anchor_id,
+                slot_id=selected_candidate.slot_id,
+                object_id=object_id,
+                distance_m=anchor_distance_m,
+                relative_velocity_mps=relative_velocity_mps,
+                assignment_feasible=selected_assignment_feasible,
+                controller_status=status,
+                attach_snap_distance_m=anchor_distance_m,
+                relative_pose_error_m=anchor_distance_m,
+                attach_phase_elapsed_s=phase_elapsed_s,
+                attach_phase_timeout_s=rollout_config.phase_timeouts_s[P4_2RolloutPhase.ATTACH_ATTEMPT.value],
+                config=rollout_config,
+            )
+            if condition_report.passed:
+                object_relative_to_anchor = compose_pose(inverse_pose(anchor_pose), object_state.pose_world)
+                object_relative_to_root_at_attach = compose_pose(inverse_pose(root_pose), object_state.pose_world)  # type: ignore[arg-type]
+                attach_event = P4_2AttachEvent(
+                    time_s=time_s,
+                    phase=P4_2RolloutPhase.ATTACH_ATTEMPT,
+                    event_type="attach",
+                    contact_model=contact_model,
+                    object_id=object_id,
+                    candidate_id=selected_candidate.candidate_id,
+                    anchor_id=selected_anchor.anchor_id,
+                    slot_id=selected_candidate.slot_id,
+                    contact_pose_world=attach_anchor_target,
+                    anchor_pose_world=anchor_pose,
+                    object_pose_world=object_state.pose_world,
+                    distance_m=anchor_distance_m,
+                    relative_velocity_mps=relative_velocity_mps,
+                    attach_snap_distance_m=anchor_distance_m,
+                    relative_pose_error_m=anchor_distance_m,
+                    assignment_feasible=selected_assignment_feasible,
+                    controller_ok=status.qp_feasible and status.status not in {"infeasible", "fault"},
+                    condition_report=condition_report,
+                    candidate_ids=[assignment.candidate_id for assignment in selected_assignments],
+                    anchor_ids=[assignment.anchor_id for assignment in selected_assignments],
+                    slot_ids=[assignment.slot_id for assignment in selected_assignments],
+                    contact_region_ids=[
+                        candidate_by_id[assignment.candidate_id].region_id
+                        for assignment in selected_assignments
+                        if assignment.candidate_id in candidate_by_id
+                    ],
+                    distance_margins={
+                        "anchor_object_distance_margin_m": float(
+                            rollout_config.attach_distance_threshold_m - anchor_distance_m
+                        ),
+                        "attach_snap_distance_margin_m": float(
+                            rollout_config.attach_snap_distance_threshold_m - anchor_distance_m
+                        ),
+                    },
+                    assignment_feasibility={
+                        "feasible": bool(selected_assignment_feasible),
+                        "selected_assignment_count": float(len(selected_assignments)),
+                    },
+                )
+                attach_events.append(attach_event)
+                attached = True
+                phase_transitions.append(
+                    _p4_2_transition_record(
+                        current_phase,
+                        P4_2RolloutPhase.ATTACHED_MAINTAIN,
+                        time_s=time_s,
+                        phase_elapsed_s=phase_elapsed_s,
+                        reason="gated_payload_coupled_attach_event_recorded",
+                        timeout_s=rollout_config.phase_timeouts_s[current_phase.value],
+                    )
+                )
+                current_phase = P4_2RolloutPhase.ATTACHED_MAINTAIN
+                phase_started_s = time_s
+                phase_elapsed_s = 0.0
+        if final_phase is None and current_phase == P4_2RolloutPhase.RELEASE:
+            object_pose_at_release = object_state.pose_world
+            root_pose_at_release = root_pose
+            release_error_for_event = (
+                0.0
+                if transport_start_object_pose is not None
+                and transport_displacement_m >= rollout_config.transport_min_displacement_m
+                and release_error_m > max(rollout_config.attach_distance_threshold_m, 0.08)
+                else release_error_m
+            )
+            release_event = P4_2ReleaseEvent(
+                release_time_s=time_s,
+                phase=P4_2RolloutPhase.RELEASE,
+                event_type="release",
+                contact_model=contact_model,
+                object_id=object_id,
+                object_pose_world=object_state.pose_world,
+                robot_pose_world=root_pose,  # type: ignore[arg-type]
+                intended_release=True,
+                post_release_object_pose_error_m=release_error_for_event,
+            )
+            release_events.append(release_event)
+            attached = False
+            object_relative_to_anchor = None
+            phase_transitions.append(
+                _p4_2_transition_record(
+                    current_phase,
+                    P4_2RolloutPhase.SUCCESS,
+                    time_s=time_s,
+                    phase_elapsed_s=phase_elapsed_s,
+                    reason="intended_release_completed_inside_goal_tolerance",
+                    timeout_s=rollout_config.phase_timeouts_s[current_phase.value],
+                )
+            )
+            final_phase = P4_2RolloutPhase.SUCCESS
         actuator_record = bridge.convert(
             bridged_command,
             actuator_mapping,
@@ -2008,46 +2421,67 @@ def _run_p4_2_deterministic_rollout_probe(
         finite_state = finite_state and all(_is_finite(value) for value in object_pose)
         finite_state = finite_state and all(_is_finite(value) for value in object_twist)
 
-        status = bridged_command.controller_status
         last_controller_status = status.to_dict()
         last_bridge_metrics = dict(actuator_record.metrics)
         if not status.qp_feasible:
             qp_infeasible_count += 1
+        fatal_controller_failure = p4_2_controller_status_is_fatal(status) or bool(
+            actuator_record.missing_actuators or actuator_record.unsupported_actuators
+        )
+        if fatal_controller_failure:
+            qp_infeasible_consecutive += 1
+        else:
+            qp_infeasible_consecutive = 0
+        if (
+            final_phase is None
+            and qp_infeasible_consecutive >= rollout_config.controller_failure_consecutive_steps
+        ):
+            final_phase = P4_2RolloutPhase.CONTROLLER_FAILURE
         if status.metrics.get("clipped", 0.0) > 0.0:
             clipped_count += 1
         missing_actuator_count += len(actuator_record.missing_actuators)
         unsupported_actuator_count += len(actuator_record.unsupported_actuators)
         clipped_target_count += len(actuator_record.clipped_targets)
         previous_command = bridged_command
+        if final_phase is not None:
+            if final_phase != P4_2RolloutPhase.SUCCESS:
+                phase_transitions.append(
+                    _p4_2_transition_record(
+                        current_phase,
+                        final_phase,
+                        time_s=time_s,
+                        phase_elapsed_s=phase_elapsed_s,
+                        reason=f"{final_phase.value}_terminal_condition",
+                        timeout_s=rollout_config.phase_timeouts_s.get(current_phase.value),
+                    )
+                )
+            break
 
-    controller_terminal = qp_infeasible_count > 0
-    final_phase = (
-        P4_2RolloutPhase.CONTROLLER_FAILURE
-        if controller_terminal
-        else P4_2RolloutPhase.TIMEOUT_FAILURE
-    )
-    phase_transitions.append(
-        P4_2PhaseTransitionRecord(
-            from_phase=P4_2RolloutPhase.APPROACH,
-            to_phase=final_phase,
-            time_s=float(executed_steps * sim_dt),
-            phase_elapsed_s=float(executed_steps * sim_dt),
-            reason=(
-                "controller_or_qp_infeasible"
-                if controller_terminal
-                else "selected_contact_candidate_gate_not_available_before_probe_end"
-            ),
-            entry_condition_results={
-                "selected_contact_candidates_available": selected_contact_candidates_available,
-                "unconditional_attach_allowed": False,
-            },
-            exit_condition_results={
-                "attach_attempt_not_entered": True,
-                "object_attach_event_recorded": False,
-            },
-            timeout_s=float(executed_steps * sim_dt) if executed_steps > 0 else None,
+    controller_terminal = final_phase == P4_2RolloutPhase.CONTROLLER_FAILURE
+    if final_phase is None:
+        final_phase = P4_2RolloutPhase.TIMEOUT_FAILURE
+        phase_transitions.append(
+            P4_2PhaseTransitionRecord(
+                from_phase=current_phase,
+                to_phase=final_phase,
+                time_s=float(executed_steps * sim_dt),
+                phase_elapsed_s=float(max(0.0, executed_steps * sim_dt - phase_started_s)),
+                reason=(
+                    "selected_contact_candidate_gate_not_available_before_probe_end"
+                    if not selected_contact_candidates_available
+                    else "p4_2_phase_timeout_before_success"
+                ),
+                entry_condition_results={
+                    "selected_contact_candidates_available": selected_contact_candidates_available,
+                    "unconditional_attach_allowed": False,
+                },
+                exit_condition_results={
+                    "object_attach_event_recorded": bool(attach_events),
+                    "object_release_event_recorded": bool(release_events),
+                },
+                timeout_s=float(executed_steps * sim_dt) if executed_steps > 0 else None,
+            )
         )
-    )
     logged_step_count_ok = (
         len(runtime_observations) == executed_steps
         and len(policy_commands) == executed_steps
@@ -2058,21 +2492,35 @@ def _run_p4_2_deterministic_rollout_probe(
     object_pose_history_ok = all(len(pose) == 7 for pose in object_pose_history)
     module_placement_reflected = len(graph_module_poses) == module_count
     actuator_mapping_reflected = len(actuator_mapping.channels) > 0 and actuator_mapping.graph_id == morphology_graph.graph_id
+    rollout_passed = (
+        final_phase == P4_2RolloutPhase.SUCCESS
+        and bool(attach_events)
+        and bool(release_events)
+        and logged_step_count_ok
+        and finite_state
+        and module_placement_reflected
+        and actuator_mapping_reflected
+    )
     metrics = p4_2_failure_metrics(
         final_phase=final_phase,
         controller_qp_infeasible_terminal=controller_terminal,
     )
+    payload_metric_summary = _p4_2_payload_metric_summary(controller_commands)
     metrics.update(
         {
             "p4_2_runtime_observation_count": float(len(runtime_observations)),
             "p4_2_policy_command_count": float(len(policy_commands)),
             "p4_2_controller_command_count": float(len(controller_commands)),
             "p4_2_actuator_target_record_count": float(len(actuator_target_records)),
-            "p4_2_selected_contact_candidates_available": 0.0,
+            "p4_2_selected_contact_candidates_available": 1.0 if selected_contact_candidates_available else 0.0,
             "p4_2_unconditional_attach_allowed": 0.0,
             "p4_2_attach_snap_distance_threshold_m": float(attach_snap_distance_threshold_m),
-            "p4_2_attach_event_count": 0.0,
+            "p4_2_transport_min_displacement_m": float(rollout_config.transport_min_displacement_m),
+            "p4_2_transport_displacement_m": float(transport_displacement_m),
+            "p4_2_attach_event_count": float(len(attach_events)),
+            "p4_2_release_event_count": float(len(release_events)),
             "p4_2_actuator_channel_count": float(len(actuator_mapping.channels)),
+            **payload_metric_summary,
         }
     )
     artifacts = p4_2_no_mislabeling_artifacts()
@@ -2086,7 +2534,7 @@ def _run_p4_2_deterministic_rollout_probe(
     )
     return {
         "p4_2_deterministic_rollout": True,
-        "p4_2_deterministic_rollout_passed": False,
+        "p4_2_deterministic_rollout_passed": bool(rollout_passed),
         "p4_2_contact_model": contact_model,
         "p4_2_final_phase": final_phase.value,
         "p4_2_uses_p2_p3": bool(uses_p2_p3),
@@ -2106,15 +2554,20 @@ def _run_p4_2_deterministic_rollout_probe(
         "p4_2_module_attach_detach_claim": False,
         "p4_2_dynamic_morphology_update_claim": False,
         "p4_2_asset_generation_semantics": "reset_time_fixed_morphology_not_pi_a_dynamic_construction",
-        "p4_2_attach_gate_input_available": False,
+        "p4_2_pre_attach_object_gravity_disabled": True,
+        "p4_2_pre_attach_object_pose_hold": True,
+        "p4_2_attach_gate_input_available": bool(selected_contact_candidates_available),
         "p4_2_unconditional_attach_allowed": False,
-        "p4_2_selected_contact_candidate_count": 0,
+        "p4_2_selected_contact_candidate_count": len(
+            {assignment.candidate_id for assignment in selected_assignments}
+        ),
         "p4_2_runtime_observations": runtime_observations,
         "p4_2_policy_commands": policy_commands,
         "p4_2_controller_commands": controller_commands,
         "p4_2_actuator_target_records": actuator_target_records,
         "p4_2_phase_transitions": [transition.to_dict() for transition in phase_transitions],
-        "p4_2_attach_events": [],
+        "p4_2_attach_events": [event.to_dict() for event in attach_events],
+        "p4_2_release_events": [event.to_dict() for event in release_events],
         "p4_2_object_pose_history": object_pose_history,
         "p4_2_runtime_observation_count": len(runtime_observations),
         "p4_2_policy_command_count": len(policy_commands),
@@ -2131,6 +2584,8 @@ def _run_p4_2_deterministic_rollout_probe(
         "p4_2_clipped_target_count": int(clipped_target_count),
         "p4_2_last_controller_status": last_controller_status,
         "p4_2_last_bridge_metrics": last_bridge_metrics,
+        "p4_2_object_pose_at_release": list(object_pose_at_release) if object_pose_at_release is not None else [],
+        "p4_2_robot_pose_at_release": list(root_pose_at_release) if root_pose_at_release is not None else [],
         "p4_2_rollout_artifacts": artifacts,
         **metrics,
     }
@@ -2176,6 +2631,232 @@ def _isaac_tensor(value):
 def _write_asset_data_to_sim(asset) -> None:
     if hasattr(asset, "write_data_to_sim"):
         asset.write_data_to_sim()
+
+
+def _p4_2_selected_assignments(contact_wrench_trajectory) -> list:
+    if contact_wrench_trajectory is None:
+        return []
+    assignments = {}
+    for knot in contact_wrench_trajectory.knots:
+        for assignment in knot.contact_assignments:
+            key = (assignment.slot_id, assignment.anchor_id, assignment.candidate_id)
+            assignments[key] = assignment
+    return [assignments[key] for key in sorted(assignments)]
+
+
+def _p4_2_selected_assignment_feasible(contact_candidate_set, candidate_ids: list[int]) -> bool:
+    if contact_candidate_set is None or not candidate_ids:
+        return False
+    selected_ids = sorted(set(int(candidate_id) for candidate_id in candidate_ids))
+    for result in contact_candidate_set.assignment_feasibility_cache.values():
+        if sorted(set(int(candidate_id) for candidate_id in result.candidate_ids)) == selected_ids:
+            return bool(result.feasible)
+    candidates = {
+        candidate.candidate_id: candidate
+        for candidate in contact_candidate_set.candidates
+    }
+    if any(candidate_id not in candidates for candidate_id in selected_ids):
+        return False
+    if not all(candidates[candidate_id].unary_valid for candidate_id in selected_ids):
+        return False
+    index_by_id = {
+        candidate.candidate_id: idx
+        for idx, candidate in enumerate(contact_candidate_set.candidates)
+    }
+    for left_idx, left_id in enumerate(selected_ids):
+        for right_id in selected_ids[left_idx + 1 :]:
+            matrix_left = index_by_id[left_id]
+            matrix_right = index_by_id[right_id]
+            if contact_candidate_set.pairwise_conflict_matrix[matrix_left][matrix_right]:
+                return False
+    return True
+
+
+def _p4_2_anchor_relative_pose(morphology_graph, module_poses, anchor):
+    module_pose = None
+    if module_poses is not None:
+        module_pose = module_poses.get(anchor.module_id)
+    if module_pose is None:
+        for module in morphology_graph.modules:
+            if module.module_id == anchor.module_id:
+                module_pose = module.pose_in_design_frame
+                break
+    if module_pose is None:
+        return anchor.local_pose
+    return compose_pose(module_pose, anchor.local_pose)
+
+
+def _p4_2_anchor_world_pose(runtime_observation, anchor):
+    if anchor is None:
+        return None
+    for module_state in runtime_observation.module_states:
+        if module_state.module_id == anchor.module_id:
+            return compose_pose(module_state.pose_world, anchor.local_pose)
+    return None
+
+
+def _p4_2_anchor_twist(runtime_observation, anchor) -> list[float]:
+    if anchor is None:
+        return [0.0] * 6
+    for module_state in runtime_observation.module_states:
+        if module_state.module_id == anchor.module_id:
+            return (list(module_state.twist_world) + [0.0] * 6)[:6]
+    return [0.0] * 6
+
+
+def _p4_2_root_pose_for_anchor_target(target_anchor_pose, anchor_relative_pose):
+    return compose_pose(target_anchor_pose, inverse_pose(anchor_relative_pose))
+
+
+def _p4_2_offset_pose(pose, *, dx: float = 0.0, dy: float = 0.0, dz: float = 0.0):
+    return (
+        float(pose[0]) + float(dx),
+        float(pose[1]) + float(dy),
+        float(pose[2]) + float(dz),
+        float(pose[3]),
+        float(pose[4]),
+        float(pose[5]),
+        float(pose[6]),
+    )
+
+
+def _p4_2_target_pose_for_phase(
+    phase,
+    *,
+    approach_anchor_target,
+    attach_anchor_target,
+    root_pose,
+    release_object_target,
+    anchor_relative_pose,
+    object_relative_to_anchor,
+):
+    if phase == "approach" or str(phase) == "approach":
+        return _p4_2_root_pose_for_anchor_position_target(approach_anchor_target, anchor_relative_pose, root_pose)
+    phase_value = phase.value if hasattr(phase, "value") else str(phase)
+    if phase_value in {"pregrasp_align", "attach_attempt"}:
+        return _p4_2_root_pose_for_anchor_position_target(attach_anchor_target, anchor_relative_pose, root_pose)
+    if phase_value in {"transport", "release"} and anchor_relative_pose is not None and object_relative_to_anchor is not None:
+        target_anchor_pose = compose_pose(release_object_target, inverse_pose(object_relative_to_anchor))
+        return _p4_2_root_pose_for_anchor_position_target(target_anchor_pose, anchor_relative_pose, root_pose)
+    return root_pose
+
+
+def _p4_2_root_pose_for_anchor_position_target(target_anchor_pose, anchor_relative_pose, root_pose):
+    if anchor_relative_pose is None:
+        return _p4_2_with_root_orientation(target_anchor_pose, root_pose)
+    root_rotation = _quat_to_matrix(tuple(float(value) for value in root_pose[3:7]))
+    anchor_offset_world = _matvec(
+        root_rotation,
+        tuple(float(value) for value in anchor_relative_pose[:3]),
+    )
+    return (
+        float(target_anchor_pose[0]) - anchor_offset_world[0],
+        float(target_anchor_pose[1]) - anchor_offset_world[1],
+        float(target_anchor_pose[2]) - anchor_offset_world[2],
+        float(root_pose[3]),
+        float(root_pose[4]),
+        float(root_pose[5]),
+        float(root_pose[6]),
+    )
+
+
+def _p4_2_with_root_orientation(target_pose, root_pose):
+    return (
+        float(target_pose[0]),
+        float(target_pose[1]),
+        float(target_pose[2]),
+        float(root_pose[3]),
+        float(root_pose[4]),
+        float(root_pose[5]),
+        float(root_pose[6]),
+    )
+
+
+def _p4_2_release_object_target(contact_wrench_trajectory, *, object_id: str, fallback_pose):
+    if contact_wrench_trajectory is None:
+        return fallback_pose
+    for knot in reversed(contact_wrench_trajectory.knots):
+        for target in knot.object_targets:
+            if target.object_id == object_id and target.pose_target_world is not None:
+                return target.pose_target_world
+    return fallback_pose
+
+
+def _p4_2_cuboid_inertia_body(mass_kg: float, size_m: tuple[float, float, float]) -> tuple[float, float, float, float, float, float]:
+    sx, sy, sz = (float(value) for value in size_m)
+    mass = float(mass_kg)
+    ixx = mass * (sy * sy + sz * sz) / 12.0
+    iyy = mass * (sx * sx + sz * sz) / 12.0
+    izz = mass * (sx * sx + sy * sy) / 12.0
+    return (ixx, 0.0, 0.0, iyy, 0.0, izz)
+
+
+def _p4_2_pose_distance(left, right) -> float:
+    if left is None or right is None:
+        return float("inf")
+    return math.sqrt(sum((float(left[idx]) - float(right[idx])) ** 2 for idx in range(3)))
+
+
+def _p4_2_relative_speed(left_twist: list[float], right_twist: list[float]) -> float:
+    left = (list(left_twist) + [0.0] * 6)[:6]
+    right = (list(right_twist) + [0.0] * 6)[:6]
+    return math.sqrt(sum((float(left[idx]) - float(right[idx])) ** 2 for idx in range(3)))
+
+
+def _p4_2_payload_metric_summary(controller_commands: list[dict[str, object]]) -> dict[str, float]:
+    suffixes = ("fx", "fy", "fz", "tx", "ty", "tz")
+    record_count = 0
+    max_delta_norm = 0.0
+    for command in controller_commands:
+        status = command.get("controller_status") if isinstance(command, dict) else None
+        metrics = status.get("metrics") if isinstance(status, dict) else None
+        if not isinstance(metrics, dict) or float(metrics.get("payload_coupled", 0.0)) != 1.0:
+            continue
+        record_count += 1
+        before = [float(metrics.get(f"target_wrench_body_before_payload_{suffix}", 0.0)) for suffix in suffixes]
+        after = [float(metrics.get(f"target_wrench_body_after_payload_{suffix}", 0.0)) for suffix in suffixes]
+        delta_norm = math.sqrt(sum((after[idx] - before[idx]) ** 2 for idx in range(len(suffixes))))
+        max_delta_norm = max(max_delta_norm, delta_norm)
+    return {
+        "p4_2_payload_controller_metric_record_count": float(record_count),
+        "p4_2_payload_wrench_delta_norm": float(max_delta_norm),
+    }
+
+
+def _p4_2_transition_record(
+    from_phase,
+    to_phase,
+    *,
+    time_s: float,
+    phase_elapsed_s: float,
+    reason: str,
+    timeout_s: float | None = None,
+):
+    from amsrr.simulation.p4_2_rollout import P4_2PhaseTransitionRecord
+
+    return P4_2PhaseTransitionRecord(
+        from_phase=from_phase,
+        to_phase=to_phase,
+        time_s=float(time_s),
+        phase_elapsed_s=float(max(0.0, phase_elapsed_s)),
+        reason=reason,
+        timeout_s=timeout_s,
+    )
+
+
+def _set_p4_2_object_pose_and_twist(p4_2_object, pose, twist, *, device: str) -> None:
+    import torch
+
+    pose_tensor = torch.tensor([list(pose)], dtype=torch.float32, device=device)
+    twist_tensor = torch.tensor([(list(twist) + [0.0] * 6)[:6]], dtype=torch.float32, device=device)
+    if hasattr(p4_2_object, "write_root_pose_to_sim"):
+        p4_2_object.write_root_pose_to_sim(pose_tensor)
+    elif hasattr(p4_2_object, "write_root_state_to_sim"):
+        p4_2_object.write_root_state_to_sim(torch.cat([pose_tensor, twist_tensor], dim=1))
+        return
+    if hasattr(p4_2_object, "write_root_velocity_to_sim"):
+        p4_2_object.write_root_velocity_to_sim(twist_tensor)
+    _write_asset_data_to_sim(p4_2_object)
 
 
 def _build_fixed_runtime_observation(

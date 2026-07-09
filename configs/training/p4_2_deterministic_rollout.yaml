@@ -20,9 +20,11 @@ env:
   object_mass_kg: 1.0
   object_initial_pose_world: [0.8, 0.0, 0.4, 0.0, 0.0, 0.0, 1.0]
   contact_model: kinematic_payload_coupled_attach_v1
-  attach_distance_threshold_m: 0.06
+  attach_distance_threshold_m: 0.16
   attach_relative_velocity_threshold_mps: 0.20
-  pregrasp_alignment_distance_m: 0.12
+  attach_snap_distance_threshold_m: 0.16
+  pregrasp_alignment_distance_m: 0.20
+  transport_min_displacement_m: 0.25
   object_drop_distance_threshold_m: 0.35
   controller_failure_consecutive_steps: 20
   phase_timeouts_s:

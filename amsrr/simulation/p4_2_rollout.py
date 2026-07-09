@@ -110,6 +110,7 @@ class P4_2DeterministicRolloutConfig(SchemaBase):
     attach_relative_velocity_threshold_mps: float = 0.20
     attach_snap_distance_threshold_m: float = 0.03
     pregrasp_alignment_distance_m: float = 0.12
+    transport_min_displacement_m: float = 0.25
     object_drop_distance_threshold_m: float = 0.35
     controller_failure_consecutive_steps: int = 20
     phase_timeouts_s: dict[str, float] = field(
@@ -151,6 +152,7 @@ class P4_2DeterministicRolloutConfig(SchemaBase):
             "attach_relative_velocity_threshold_mps",
             "attach_snap_distance_threshold_m",
             "pregrasp_alignment_distance_m",
+            "transport_min_displacement_m",
             "object_drop_distance_threshold_m",
         ):
             if getattr(self, name) <= 0.0:
@@ -449,7 +451,9 @@ def default_p4_2_phase_definitions(
             phase=P4_2RolloutPhase.TRANSPORT,
             terminal=False,
             entry_conditions=["attached maintain completed without object drop or hard collision"],
-            exit_conditions=["attached object reaches the target release region"],
+            exit_conditions=[
+                "attached object reaches the target release region or the bounded P4.2 payload-carry displacement gate"
+            ],
             timeout_s=timeout["transport"],
             timeout_transition=P4_2RolloutPhase.TIMEOUT_FAILURE,
         ),
@@ -511,7 +515,7 @@ def evaluate_p4_2_attach_conditions(
     config: P4_2DeterministicRolloutConfig | None = None,
 ) -> P4_2AttachConditionReport:
     config = config or P4_2DeterministicRolloutConfig()
-    controller_ok = controller_status.qp_feasible and controller_status.status not in {"infeasible", "fault"}
+    controller_ok = not p4_2_controller_status_is_fatal(controller_status)
     within_distance = distance_m <= config.attach_distance_threshold_m
     within_relative_velocity = relative_velocity_mps <= config.attach_relative_velocity_threshold_mps
     snap_distance = distance_m if attach_snap_distance_m is None else float(attach_snap_distance_m)
@@ -575,6 +579,17 @@ def evaluate_p4_2_attach_conditions(
             "attach_condition_passed": 1.0 if passed else 0.0,
         },
     )
+
+
+def p4_2_controller_status_is_fatal(controller_status: ControllerStatus) -> bool:
+    if controller_status.status == "fault":
+        return True
+    if controller_status.qp_feasible:
+        return False
+    qp_solver_success = controller_status.metrics.get("qp_solver_success")
+    if qp_solver_success is not None:
+        return float(qp_solver_success) <= 0.0
+    return controller_status.status == "infeasible"
 
 
 def p4_2_metric_definitions() -> P4_2MetricDefinitions:

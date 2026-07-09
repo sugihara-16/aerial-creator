@@ -44,6 +44,8 @@ def test_p4_2_backend_command_uses_morphology_graph_json_not_module_count_only()
         force_convert=True,
         steps=20,
         morphology_graph=morphology,
+        contact_candidate_set_json='{"set_id":"candidate-set"}',
+        contact_wrench_trajectory_json='{"derived_mode_label":"p4_2_deterministic_grasp_carry"}',
         object_size_m=(0.4, 0.2, 0.1),
         object_mass_kg=1.5,
         object_pose_world=(0.7, 0.1, 0.35, 0.0, 0.0, 0.0, 1.0),
@@ -54,11 +56,19 @@ def test_p4_2_backend_command_uses_morphology_graph_json_not_module_count_only()
     assert "--p4-2-morphology-graph-json" in command
     graph_json = command[command.index("--p4-2-morphology-graph-json") + 1]
     assert "fixed-morphology-controller-command-smoke" in graph_json
+    assert "--p4-2-contact-candidate-set-json" in command
+    assert command[command.index("--p4-2-contact-candidate-set-json") + 1] == '{"set_id":"candidate-set"}'
+    assert "--p4-2-contact-wrench-trajectory-json" in command
+    assert (
+        command[command.index("--p4-2-contact-wrench-trajectory-json") + 1]
+        == '{"derived_mode_label":"p4_2_deterministic_grasp_carry"}'
+    )
     assert "--fixed-module-count" not in command
     assert "--p4-2-uses-p2-p3" in command
     assert "--p4-2-object-size-m" in command
     assert "0.4" in command
     assert "--p4-2-attach-snap-distance-threshold-m" in command
+    assert "--p4-2-pregrasp-alignment-distance-m" in command
     assert "--force-convert" in command
     assert "--convert-if-missing" not in command
 

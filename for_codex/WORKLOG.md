@@ -3,6 +3,36 @@
 ## Global Worklog
 
 ### 2026-07-10
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus approved P4.2 payload-coupled deterministic rollout clarification
+- Work package / Agent label: Agent J/K/L boundary: P4.2 Order 6b real Isaac gated attach / payload transport / release
+- Summary: Completed the real Isaac-backed P4.2 v1 rollout for `contact_model="kinematic_payload_coupled_attach_v1"`. The P4.2 probe now consumes P2/P3-selected `ContactCandidateSet` and `ContactWrenchTrajectory`, reflects the P3 assembled graph into the reset-time Isaac morphology asset, evaluates gated attach against selected candidates/anchors/slots/contact regions, applies controller-side payload coupling after attach, transports the slaved payload through a bounded P4.2 v1 payload-carry segment, emits an intended release event, and returns terminal `success` without claiming natural grasp, true fixed-joint dynamics, learned policy success, P4.3 bootstrap, or P4 full completion.
+- Files changed:
+  - `amsrr/simulation/p4_2_rollout.py`
+  - `amsrr/simulation/p4_2_isaac_env.py`
+  - `amsrr/simulation/isaac_lab_backend.py`
+  - `amsrr/simulation/__init__.py`
+  - `amsrr/training/p4_2_deterministic_rollout_runner.py`
+  - `configs/training/p4_2_deterministic_rollout.yaml`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - P4.2 / Isaac backend unit tests
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted base schema change. Additive runtime/config changes include P4.2 `transport_min_displacement_m`, optional P4.2 env object pose/size/mass overrides from the sampled P2 TaskSpec, backend/CLI propagation of pregrasp distance, real-probe candidate/trajectory JSON path inputs, CPU-only Isaac/Warp environment fallbacks, and P4.2 metrics for payload controller record count, payload wrench delta, bounded transport displacement, and pre-attach pose hold.
+- Upstream dependencies used: P2 selected `DesignOutput`, P3 assembled `MorphologyGraph`, selected ContactCandidate / RobotAnchor assignments from the P4.2 deterministic trajectory, QPID payload coupling from Order 6a, split acceptance from Order 5, and IsaacLab backend command surface.
+- Implementation notes: The sampled P2 object pose/size/mass now drive Isaac object spawning instead of static env defaults. Before attach, the probe holds the object at the deterministic TaskSpec-derived pose so selected contact regions do not drift from gravity before the attach gate; this is not an attach and does not constrain the object to the robot. After gated attach, the object is slaved to the selected anchor-relative pose and the payload gravity/effective wrench is added exactly once in the controller. Transport release uses a bounded P4.2 v1 displacement gate (`transport_min_displacement_m=0.25`) so this rollout validates payload-carry/release behavior without claiming full object-goal completion.
+- Real Isaac result: `PYTHONPATH=/home/leus/amsrr python3 scripts/p4_2_deterministic_rollout.py --config configs/training/p4_2_deterministic_rollout.yaml --real` exited 0 with `completion_passed=true`, `real_isaac_rollout_passed=true`, one attach event, one release event, 1047 per-step records, graph asset/module/actuator reflection true, `p4_2_payload_controller_metric_record_count=109`, `p4_2_payload_wrench_delta_norm=12.721902086272879`, `p4_2_transport_displacement_m=0.25349208644967913`, and no object_drop / hard_collision / controller_qp_infeasible_terminal / timeout_failure.
+- Tests added or run:
+  - Added/updated coverage for P4.2 backend command candidate/trajectory/pregrasp arguments, runner propagation of P2 sampled object pose/size/mass, non-fatal QP/controller attach status semantics, and writable Warp cache setup.
+  - `python3 -m py_compile scripts/p4_control_holon_spawn_probe.py amsrr/simulation/isaac_lab_backend.py amsrr/simulation/p4_2_isaac_env.py amsrr/simulation/p4_2_rollout.py amsrr/training/p4_2_deterministic_rollout_runner.py`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q tests/unit/simulation/test_p4_2_rollout.py tests/unit/simulation/test_p4_2_isaac_env.py tests/unit/training/test_p4_2_deterministic_rollout_runner.py tests/acceptance/test_p4_2_acceptance.py`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q tests/unit tests/acceptance`
+  - `PYTHONPATH=/home/leus/amsrr python3 scripts/p4_2_deterministic_rollout.py --config configs/training/p4_2_deterministic_rollout.yaml --real`
+- Tests run: Targeted P4.2 tests passed: 19 passed. Full unit/acceptance suite passed: 184 passed, 1 skipped. Real CLI gate passed and wrote `artifacts/p4_2/p4_2_deterministic_rollout.jsonl`.
+- Assumptions: P4.2 v1 completion is success under `kinematic_payload_coupled_attach_v1` and the bounded payload-carry displacement gate only. It is not natural contact grasp success, not true fixed-joint dynamics success, not learned policy success, not P4.3 bootstrap, and not P4 full completion.
+- Blockers: None for P4.2 v1 real gate.
+- Next steps / handoff: Keep `P4.4 / P4-natural-contact-grasp validation` open. P4.4 should remove the pre-attach pose hold and kinematic/slaved object constraint, treat the object as a free rigid body, evaluate real contact/friction/contact maintenance from the selected anchors/candidates/assignments, log slip/contact break/drop/unintended collision/excess penetration/contact force, and compare `kinematic_payload_coupled_attach_v1` with `natural_contact_grasp_v1`.
+
+### 2026-07-10
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus approved P4.2 payload-coupled kinematic attach clarification
 - Work package / Agent label: Agent J/K/L boundary: P4.2 Order 6a contact-model contract, payload coupling, release/archive acceptance
 - Summary: Updated P4.2 v1 from fixed-joint wording to `contact_model="kinematic_payload_coupled_attach_v1"`. The rollout contract now requires gated attach evidence with snap distance / relative pose / phase-timeout checks, release event archives, and controller-side payload coupling evidence. The QPID controller now applies payload mass/inertia/CoM gravity/effective wrench to the target wrench before allocation and archives before/after target wrench, payload wrench, achieved wrench, residual, QP, clipped, missing, and unsupported actuator metrics. Acceptance now rejects archives that lack release events or fail to prove payload-coupled controller computation.
