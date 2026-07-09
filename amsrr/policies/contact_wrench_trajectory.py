@@ -26,6 +26,17 @@ class BaselineTrajectoryPlannerConfig:
     max_group_attempts: int = 8
 
 
+@dataclass(frozen=True)
+class P4_2DeterministicPlannerConfig:
+    horizon_s: float = 2.0
+    dt_s: float = 0.25
+    grasp_force_n: float = 5.0
+    support_force_n: float = 5.0
+    max_group_attempts: int = 8
+    approach_height_offset_m: float = 0.15
+    min_body_target_height_m: float = 0.35
+
+
 class GraspCarryBaselinePlanner:
     """Deterministic P1 pi_H baseline for fixed/simple grasp-carry experiments."""
 
@@ -101,6 +112,144 @@ class GraspCarryBaselinePlanner:
             dt_s=self.config.dt_s,
             knots=knots,
             derived_mode_label="grasp_carry_baseline",
+        )
+
+
+class P4_2DeterministicGraspCarryPlanner:
+    """P4.2 deterministic pi_H plan with explicit rollout-phase guard labels."""
+
+    def __init__(self, config: P4_2DeterministicPlannerConfig | None = None) -> None:
+        self.config = config or P4_2DeterministicPlannerConfig()
+
+    def plan(self, context: HighLevelPolicyContext) -> ContactWrenchTrajectory:
+        slot_min_counts, slot_max_counts = _slot_count_requirements(context)
+        maintain_assignments = select_feasible_assignments(
+            context.contact_candidate_set,
+            slot_min_counts=slot_min_counts,
+            slot_max_counts=slot_max_counts,
+            max_group_attempts=self.config.max_group_attempts,
+        )
+        baseline_config = BaselineTrajectoryPlannerConfig(
+            horizon_s=self.config.horizon_s,
+            dt_s=self.config.dt_s,
+            grasp_force_n=self.config.grasp_force_n,
+            support_force_n=self.config.support_force_n,
+            max_group_attempts=self.config.max_group_attempts,
+        )
+        approach = _assignments_with_state(maintain_assignments, context.contact_candidate_set, "approach", baseline_config)
+        attach = _assignments_with_state(maintain_assignments, context.contact_candidate_set, "attach", baseline_config)
+        maintain = _assignments_with_state(maintain_assignments, context.contact_candidate_set, "maintain", baseline_config)
+        release = _assignments_with_state(maintain_assignments, context.contact_candidate_set, "release", baseline_config)
+        goal_pose = _object_goal_pose(context)
+        object_id = _object_id_for_assignments(maintain_assignments, context.contact_candidate_set)
+        lift_pose = _lift_pose(context, object_id)
+        contact_centroid = _selected_contact_centroid(context.contact_candidate_set, maintain_assignments)
+        approach_body_pose = _p4_2_body_target_pose(
+            context,
+            contact_centroid=contact_centroid,
+            object_goal_pose=goal_pose,
+            phase="approach",
+            config=self.config,
+        )
+        pregrasp_body_pose = _p4_2_body_target_pose(
+            context,
+            contact_centroid=contact_centroid,
+            object_goal_pose=goal_pose,
+            phase="pregrasp_align",
+            config=self.config,
+        )
+        transport_body_pose = _p4_2_body_target_pose(
+            context,
+            contact_centroid=contact_centroid,
+            object_goal_pose=goal_pose,
+            phase="transport",
+            config=self.config,
+        )
+        knots = [
+            InteractionKnot(
+                t_rel_s=0.0,
+                contact_assignments=approach,
+                centroidal_target=CentroidalTarget(
+                    com_pos_world=approach_body_pose[:3],
+                    body_orientation_world=approach_body_pose[3:7],
+                    centroidal_wrench_preference=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                ),
+                posture_target=PostureTarget(free_anchor_pose_targets=_anchor_pose_targets(context.contact_candidate_set, approach)),
+                object_targets=[],
+                priority_weights={"approach": 1.0, "contact": 0.2, "p4_2_deterministic": 1.0},
+                guard_conditions=_p4_2_guards("approach"),
+            ),
+            InteractionKnot(
+                t_rel_s=self.config.dt_s,
+                contact_assignments=approach,
+                centroidal_target=CentroidalTarget(
+                    com_pos_world=pregrasp_body_pose[:3],
+                    body_orientation_world=pregrasp_body_pose[3:7],
+                    centroidal_wrench_preference=[0.0, 0.0, self.config.support_force_n, 0.0, 0.0, 0.0],
+                ),
+                posture_target=PostureTarget(free_anchor_pose_targets=_anchor_pose_targets(context.contact_candidate_set, approach)),
+                object_targets=[],
+                priority_weights={"pregrasp_align": 1.0, "contact": 0.6, "p4_2_deterministic": 1.0},
+                guard_conditions=_p4_2_guards("pregrasp_align"),
+            ),
+            InteractionKnot(
+                t_rel_s=2.0 * self.config.dt_s,
+                contact_assignments=attach,
+                centroidal_target=CentroidalTarget(
+                    com_pos_world=pregrasp_body_pose[:3],
+                    body_orientation_world=pregrasp_body_pose[3:7],
+                    centroidal_wrench_preference=[0.0, 0.0, self.config.support_force_n, 0.0, 0.0, 0.0],
+                ),
+                posture_target=PostureTarget(free_anchor_pose_targets=_anchor_pose_targets(context.contact_candidate_set, attach)),
+                object_targets=[],
+                priority_weights={"attach_attempt": 1.0, "contact": 1.0, "p4_2_deterministic": 1.0},
+                guard_conditions=_p4_2_guards("attach_attempt"),
+            ),
+            InteractionKnot(
+                t_rel_s=3.0 * self.config.dt_s,
+                contact_assignments=maintain,
+                centroidal_target=CentroidalTarget(
+                    com_pos_world=pregrasp_body_pose[:3],
+                    body_orientation_world=pregrasp_body_pose[3:7],
+                    centroidal_wrench_preference=[0.0, 0.0, self.config.support_force_n, 0.0, 0.0, 0.0],
+                ),
+                posture_target=PostureTarget(free_anchor_pose_targets=_anchor_pose_targets(context.contact_candidate_set, maintain)),
+                object_targets=[ObjectTarget(object_id=object_id, pose_target_world=lift_pose)] if lift_pose is not None else [],
+                priority_weights={"attached_maintain": 1.0, "object_lift": 1.0, "p4_2_deterministic": 1.0},
+                guard_conditions=_p4_2_guards("attached_maintain"),
+            ),
+            InteractionKnot(
+                t_rel_s=4.0 * self.config.dt_s,
+                contact_assignments=maintain,
+                centroidal_target=CentroidalTarget(
+                    com_pos_world=transport_body_pose[:3],
+                    body_orientation_world=transport_body_pose[3:7],
+                    centroidal_wrench_preference=[0.0, 0.0, self.config.support_force_n, 0.0, 0.0, 0.0],
+                ),
+                posture_target=PostureTarget(free_anchor_pose_targets=_anchor_pose_targets(context.contact_candidate_set, maintain)),
+                object_targets=[ObjectTarget(object_id=object_id, pose_target_world=goal_pose)] if goal_pose is not None else [],
+                priority_weights={"transport": 1.0, "object_goal": 1.0, "p4_2_deterministic": 1.0},
+                guard_conditions=_p4_2_guards("transport"),
+            ),
+            InteractionKnot(
+                t_rel_s=max(5.0 * self.config.dt_s, self.config.horizon_s),
+                contact_assignments=release,
+                centroidal_target=CentroidalTarget(
+                    com_pos_world=transport_body_pose[:3],
+                    body_orientation_world=transport_body_pose[3:7],
+                    centroidal_wrench_preference=[0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                ),
+                posture_target=PostureTarget(free_anchor_pose_targets={}),
+                object_targets=[ObjectTarget(object_id=object_id, pose_target_world=goal_pose)] if goal_pose is not None else [],
+                priority_weights={"release": 1.0, "object_goal": 0.8, "p4_2_deterministic": 1.0},
+                guard_conditions=_p4_2_guards("release"),
+            ),
+        ]
+        return ContactWrenchTrajectory(
+            horizon_s=max(self.config.horizon_s, knots[-1].t_rel_s),
+            dt_s=self.config.dt_s,
+            knots=knots,
+            derived_mode_label="p4_2_deterministic_grasp_carry",
         )
 
 
@@ -263,3 +412,91 @@ def _anchor_pose_targets(candidate_set: ContactCandidateSet, assignments: list[C
         if candidate is not None:
             refs[assignment.anchor_id] = candidate.contact_pose_world
     return refs
+
+
+def _p4_2_guards(phase: str) -> list[dict[str, str]]:
+    return [
+        {
+            "type": "p4_2_phase",
+            "phase": phase,
+            "contact_model": "kinematic_fixed_joint_attach_v1",
+        }
+    ]
+
+
+def p4_2_phase_from_knot(knot: InteractionKnot) -> str | None:
+    for guard in knot.guard_conditions:
+        if guard.get("type") == "p4_2_phase":
+            phase = guard.get("phase")
+            return str(phase) if phase is not None else None
+    return None
+
+
+def _selected_contact_centroid(
+    candidate_set: ContactCandidateSet,
+    assignments: list[ContactAssignment],
+) -> tuple[float, float, float]:
+    candidate_by_id = {candidate.candidate_id: candidate for candidate in candidate_set.candidates}
+    poses = [
+        candidate_by_id[assignment.candidate_id].contact_pose_world
+        for assignment in assignments
+        if assignment.candidate_id in candidate_by_id
+    ]
+    if not poses:
+        return (0.0, 0.0, 0.0)
+    inv = 1.0 / float(len(poses))
+    return (
+        sum(pose[0] for pose in poses) * inv,
+        sum(pose[1] for pose in poses) * inv,
+        sum(pose[2] for pose in poses) * inv,
+    )
+
+
+def _p4_2_body_target_pose(
+    context: HighLevelPolicyContext,
+    *,
+    contact_centroid: tuple[float, float, float],
+    object_goal_pose: Pose7D | None,
+    phase: str,
+    config: P4_2DeterministicPlannerConfig,
+) -> Pose7D:
+    current_body_pose = _runtime_body_pose(context)
+    orientation = current_body_pose[3:7] if current_body_pose is not None else (0.0, 0.0, 0.0, 1.0)
+    if phase in {"transport", "release"} and object_goal_pose is not None:
+        offset = _runtime_body_object_offset(context)
+        return (
+            object_goal_pose[0] + offset[0],
+            object_goal_pose[1] + offset[1],
+            max(object_goal_pose[2] + offset[2], config.min_body_target_height_m),
+            orientation[0],
+            orientation[1],
+            orientation[2],
+            orientation[3],
+        )
+    return (
+        contact_centroid[0],
+        contact_centroid[1],
+        max(contact_centroid[2] + config.approach_height_offset_m, config.min_body_target_height_m),
+        orientation[0],
+        orientation[1],
+        orientation[2],
+        orientation[3],
+    )
+
+
+def _runtime_body_pose(context: HighLevelPolicyContext) -> Pose7D | None:
+    if context.runtime_observation is None or not context.runtime_observation.module_states:
+        return None
+    return context.runtime_observation.module_states[0].pose_world
+
+
+def _runtime_body_object_offset(context: HighLevelPolicyContext) -> tuple[float, float, float]:
+    body_pose = _runtime_body_pose(context)
+    if body_pose is None or context.runtime_observation is None or not context.runtime_observation.object_states:
+        return (0.0, 0.0, 0.0)
+    object_pose = context.runtime_observation.object_states[0].pose_world
+    return (
+        body_pose[0] - object_pose[0],
+        body_pose[1] - object_pose[1],
+        body_pose[2] - object_pose[2],
+    )

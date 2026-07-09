@@ -17,6 +17,7 @@ from amsrr.schemas.runtime import ObjectRuntimeState, RuntimeObservation
 
 
 IDENTITY_POSE: Pose7D = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+P4_2_PHASE_WEIGHT_PREFIX = "p4_2_phase_"
 
 
 @dataclass(frozen=True)
@@ -222,6 +223,15 @@ def _low_level_priority_weights(
             "controller_safety": safety_weight,
         }
     )
+    phase = p4_2_phase_from_knot(active_knot)
+    if phase is not None:
+        weights[f"{P4_2_PHASE_WEIGHT_PREFIX}{phase}"] = 1.0
+        if phase == "attach_attempt":
+            weights["attach_condition_gate"] = 1.0
+        if phase in {"attached_maintain", "transport"}:
+            weights["attached_object_tracking"] = 1.0
+        if phase == "release":
+            weights["release_gate"] = 1.0
     return weights
 
 
@@ -229,3 +239,11 @@ def _clip(value: float, limit: float) -> float:
     if limit < 0.0:
         raise SchemaValidationError("BaselineLowLevelPolicyConfig limits must be non-negative")
     return min(max(value, -limit), limit)
+
+
+def p4_2_phase_from_knot(knot: InteractionKnot) -> str | None:
+    for guard in knot.guard_conditions:
+        if guard.get("type") == "p4_2_phase":
+            phase = guard.get("phase")
+            return str(phase) if phase is not None else None
+    return None

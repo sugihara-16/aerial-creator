@@ -4,6 +4,31 @@
 
 ### 2026-07-10
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.2 deterministic rollout user clarifications
+- Work package / Agent label: Agent H/I boundary: P4.2 deterministic π_H/π_L phase adaptation
+- Summary: Added a P4.2-specific deterministic grasp/carry planner that emits explicit phase-labeled knots for `approach`, `pregrasp_align`, `attach_attempt`, `attached_maintain`, `transport`, and `release`. The planner reuses selected assignment feasibility and stores P4.2 phase/contact-model guard metadata without changing policy schemas. Updated baseline `π_L` so P4.2 phase guards are reflected as numeric `PolicyCommand.priority_weights` intent fields, keeping final actuator authority in the controller/bridge layer.
+- Files changed:
+  - `amsrr/policies/contact_wrench_trajectory.py`
+  - `amsrr/policies/low_level_policy_base.py`
+  - `amsrr/policies/__init__.py`
+  - `tests/unit/policies/test_p4_2_deterministic_policies.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added policy-side classes/helpers and package exports only.
+- Upstream dependencies used: v0.4 Sections 19, 20, 24.5.4; P4.2 Order 1 phase/contact model contract; existing `ContactCandidateSet`, assignment feasibility, `ContactWrenchTrajectory`, `InteractionKnot`, `PolicyCommand`, and baseline low-level policy contracts.
+- Downstream impact: P4.2 env/runner can now request a deterministic phase-aware π_H trajectory and per-step π_L `PolicyCommand` intent. Attach gating remains the later env/runner responsibility; this order does not perform attach or claim P4.2 completion.
+- Tests added or run:
+  - Added unit coverage for P4.2 phase-labeled trajectory output, schedule-state mapping, object/centroidal targets, and `π_L` phase priority intent without actuator commands.
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/policies/test_p4_2_deterministic_policies.py tests/unit/policies/test_high_level_baseline.py tests/unit/policies/test_low_level_baseline.py -q`
+  - `python3 -m compileall amsrr/policies tests/unit/policies/test_p4_2_deterministic_policies.py -q`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/policies -q`
+  - `git diff --check`
+- Tests run: P4.2/related high-low baseline tests passed: 8 passed. Full policy unit tests passed: 22 passed. Compileall and diff check passed.
+- Assumptions: Approach/pregrasp body targets use the selected contact-candidate centroid with a conservative height offset; transport/release preserve current body-object offset when runtime observation is available. This is deterministic rollout targeting metadata and not a high-fidelity grasp controller.
+- Blockers: None for Order 2.
+- Next steps: Commit Order 2, then assess Order 3 P4.2 Isaac env/probe for method-level undefined items before implementation.
+
+### 2026-07-10
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.2 deterministic rollout user clarifications
 - Work package / Agent label: Agent J/K/L boundary: P4.2 deterministic rollout Order 1 contract/state-machine
 - Summary: Added the initial P4.2 deterministic grasp/carry rollout contract. P4.2 is now explicitly a deterministic rollout with `reset`, `approach`, `pregrasp_align`, `attach_attempt`, `attached_maintain`, `transport`, `release`, and terminal success/failure phases, not a P4.1 full-scene smoke extension. The contract defines `contact_model="kinematic_fixed_joint_attach_v1"`, gated attach conditions, attach event records, metric definitions for success/drop/collision/controller failure, P2/P3 morphology-reflection requirements, and no-mislabeling artifacts that reject P4.3 learning and P4 full-completion claims.
 - Files changed:
@@ -2321,6 +2346,28 @@
 ## Work Package Logs
 
 ### P4.2 Implementation: Isaac Deterministic Grasp-Carry Rollout
+
+#### 2026-07-10
+- Scope: Order 2 deterministic `π_H` / `π_L` P4.2 phase adaptation.
+- Files changed:
+  - `amsrr/policies/contact_wrench_trajectory.py`
+  - `amsrr/policies/low_level_policy_base.py`
+  - `amsrr/policies/__init__.py`
+  - `tests/unit/policies/test_p4_2_deterministic_policies.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: v0.4 π_H/π_L role split, P4.2 rollout contract, existing deterministic assignment feasibility and baseline low-level policy.
+- Implemented: `P4_2DeterministicGraspCarryPlanner`, `P4_2DeterministicPlannerConfig`, phase guard helper, contact-centroid/body-target helpers, and P4.2 phase priority weights in `BaselineLowLevelPolicy`.
+- Not implemented: Isaac-side attach gating, contact state updates, object kinematic attach/release, real rollout execution, archive generation, or split acceptance.
+- Schema/interface changes: None. `ContactWrenchTrajectory`, `InteractionKnot`, and `PolicyCommand` schemas are unchanged.
+- Downstream impact: Agent J/K can use the P4.2 planner in rollout env/runner code and can inspect `InteractionKnot.guard_conditions` / `PolicyCommand.priority_weights` for phase intent.
+- Tests added: `tests/unit/policies/test_p4_2_deterministic_policies.py`
+- Tests passed:
+  - P4.2/related high-low baseline tests: 8 passed.
+  - Full policy unit tests: 22 passed.
+  - Compileall and `git diff --check` passed.
+- Handoff notes: This order does not attach objects by itself. Later P4.2 env code must still enforce the gated attach contract from Order 1.
+- Open questions: None for Order 2.
 
 #### 2026-07-10
 - Scope: Order 1 P4.2 rollout contract, phase state machine, gated attach, metric definitions, no-mislabeling artifacts, config, and unit tests.

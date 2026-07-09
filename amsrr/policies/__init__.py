@@ -26,6 +26,9 @@ from amsrr.policies.contact_candidate_sampler import (
 from amsrr.policies.contact_wrench_trajectory import (
     BaselineTrajectoryPlannerConfig,
     GraspCarryBaselinePlanner,
+    P4_2DeterministicGraspCarryPlanner,
+    P4_2DeterministicPlannerConfig,
+    p4_2_phase_from_knot,
     select_feasible_assignments,
 )
 from amsrr.policies.design_candidate_generator import DesignActionCandidate, DesignCandidateGenerator, DesignCandidateStep
@@ -44,6 +47,7 @@ from amsrr.policies.low_level_policy_base import (
     BaselineLowLevelPolicyConfig,
     LowLevelPolicyBase,
     LowLevelPolicyContext,
+    P4_2_PHASE_WEIGHT_PREFIX,
     select_active_knot,
 )
 
@@ -62,6 +66,9 @@ __all__ = [
     "BaselineLowLevelPolicy",
     "BaselineLowLevelPolicyConfig",
     "P2_DESIGN_POLICY_VERSION",
+    "P4_2DeterministicGraspCarryPlanner",
+    "P4_2DeterministicPlannerConfig",
+    "P4_2_PHASE_WEIGHT_PREFIX",
     "P2DesignCandidateEvaluation",
     "P2DesignPolicy",
     "P2DesignPolicyConfig",
@@ -87,6 +94,7 @@ __all__ = [
     "build_pairwise_conflict_matrix",
     "evaluate_assignment_level_qp",
     "evaluate_selected_assignment_feasibility",
+    "p4_2_phase_from_knot",
     "select_feasible_assignments",
     "select_active_knot",
 ]

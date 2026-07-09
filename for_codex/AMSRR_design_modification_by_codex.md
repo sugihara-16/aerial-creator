@@ -4,6 +4,14 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-10
 
+### P4.2 Deterministic Policy Phase Adaptation Supplement
+
+- Context: P4.2 requires a deterministic grasp/carry rollout with explicit approach / pregrasp / attach / maintain / transport / release behavior, while preserving the rule that `π_L` emits `PolicyCommand` only and never final actuator commands.
+- Decision: Added `P4_2DeterministicGraspCarryPlanner` as a P4.2-specific deterministic `π_H` planner. It reuses the existing selected assignment feasibility path and emits six phase-labeled knots: `approach`, `pregrasp_align`, `attach_attempt`, `attached_maintain`, `transport`, and `release`. Phase labels are stored in `InteractionKnot.guard_conditions` with `contact_model="kinematic_fixed_joint_attach_v1"`.
+- Target decision: The P4.2 planner supplies centroidal body pose targets and object targets where appropriate. Approach/pregrasp/attach target the selected contact-candidate centroid with a conservative height offset; transport/release target the object goal while preserving the current body-object offset when runtime observation is available.
+- π_L decision: `BaselineLowLevelPolicy` now translates P4.2 phase guards into numeric `PolicyCommand.priority_weights` such as `p4_2_phase_attach_attempt`, `attach_condition_gate`, `attached_object_tracking`, and `release_gate`. This keeps phase intent visible to the controller layer without adding actuator authority to `π_L`.
+- Compatibility impact: No persisted schema change. The existing `GraspCarryBaselinePlanner` and baseline `π_L` behavior remain available. P4.2 real attach gating is still owned by the later Isaac env/runner order, not by this policy adaptation alone.
+
 ### P4.2 Deterministic Rollout Contract Supplement
 
 - Context: P4.2 must not be treated as an extension of the P4.1 full-scene smoke. It is an Isaac-backed deterministic grasp/carry rollout with explicit approach / attach / maintain / transport / release behavior, while still avoiding any P4.3 learning or P4 full-completion claim.
