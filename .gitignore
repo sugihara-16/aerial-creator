@@ -5,3 +5,4 @@ __pycache__/
 
 # Local/generated install artifacts
 /install/
+/artifacts/

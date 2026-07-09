@@ -4,6 +4,22 @@
 
 ### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.1 full-scene backend smoke user clarifications
+- Work package / Agent label: Agent L boundary: P4.1 real Isaac backend smoke
+- Summary: Ran the real P4.1 Isaac full-scene backend smoke through `micromamba run -n isaaclab3`. The split acceptance report passed both fast and real gates for P4.1: `fast_gate_passed=true`, `real_isaac_smoke_passed=true`, `completion_passed=true`. The smoke used the P2 selected / P3 assembled 3-module case, spawned robot + object + floor, stepped 80 frames, and saved per-step runtime observations, controller commands, actuator target records, and object pose history. Added `/artifacts/` to `.gitignore` because Isaac USD conversion generated local artifacts.
+- Files changed:
+  - `.gitignore`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None.
+- Tests added or run:
+  - `/home/leus/.local/bin/micromamba run -n isaaclab3 python scripts/p4_1_backend_smoke.py --real --archive-path /tmp/amsrr_p4_1_backend_smoke.jsonl`
+  - `PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY' ... read_episode_archives_jsonl('/tmp/amsrr_p4_1_backend_smoke.jsonl') ...`
+- Tests run: Real P4.1 smoke passed with one archive. Archive summary: success `true`, 80 runtime observations, 80 controller commands, 80 actuator target records, 80 object poses, assembled module count `3`, `fixed_two_module_only=0`, `p2_selected_design_used=1`, `p3_assembly_result_used=1`, `isaac_backed=1`, `p4_1_backend_smoke_passed=1`, `p4_1_full_scene_spawned=1`, vectoring joint key count `960`, dock joint key count `960`, `p4_full_completion=0`, and `object_grasp_carry_success_claim=0`.
+- Assumptions: This completes the P4.1 full-scene backend smoke scope only. It does not claim object grasp/carry success, learned policy success, P4.2 rollout, or P4 full completion.
+- Blockers: None for P4.1 backend smoke.
+- Next steps: Future work should proceed to P4.2 contact-rich rollout/trajectory work, keeping the no-mislabeling boundary intact.
+
+### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.1 full-scene backend smoke user clarifications
 - Work package / Agent label: Agent L boundary: P4.1 CLI probe fix before real smoke
 - Summary: Fixed `scripts/p4_1_backend_smoke.py` so direct script execution adds the repository root to `sys.path`, matching the existing Isaac probe script pattern. Verified normal Python probe reports missing current-interpreter Isaac modules, and micromamba `isaaclab3` probe reports the real backend as available.
 - Files changed:
