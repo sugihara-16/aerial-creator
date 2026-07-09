@@ -4,6 +4,14 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4.1 Runner and Per-Step Archive Supplement
+
+- Context: P4.1 must include at least one case sourced from P2 selected `DesignOutput` and P3 assembled morphology, and it must not be completed using only a fixed 2-module morphology.
+- Decision: Added `P4_1BackendSmokeRunner`. Before invoking the backend smoke, the runner builds the deterministic P2/P3 case using the P3 assembly config, P2 design distribution/policy, and `AssemblyRunner`. With the default seed, the selected accepted variant is `tri_anchor_support_grasp` and the P3 assembled morphology contains 3 modules.
+- Archive decision: The runner writes one `EpisodeArchive` per attempted non-skipped backend smoke. The archive stores the selected `DesignOutput`, feasibility result, P3 assembly plan, per-step `RuntimeObservation`, per-step `ControllerCommand`, per-step actuator target records, and `p4_1_object_pose_history` in `rollout_artifacts`.
+- Scope decision: Fake-backend unit tests can pass the archive/logging gate, but the archive explicitly records `isaac_backed=false` for fake reports and sets no-mislabeling fields for no object grasp/carry success, no learned policy claim, no P4.2 rollout claim, and no P4 full completion claim.
+- Compatibility impact: No persisted schema change. The current backend command surface still maps the P3 assembled case to the Isaac probe via module count/provenance because arbitrary P2/P3 graph-to-USD generation is not yet part of the P4.1 backend smoke surface.
+
 ### P4.1 Backend Command and Probe Supplement
 
 - Context: After the P4.1 contract was added, the backend needed a real Isaac command surface and a fake-backend-testable env boundary without treating P4.1 as another hover acceptance loop.

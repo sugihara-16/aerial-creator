@@ -4,6 +4,31 @@
 
 ### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.1 full-scene backend smoke user clarifications
+- Work package / Agent label: Agent K/L boundary: P4.1 full-scene backend smoke Order 3 runner/archive
+- Summary: Added the P4.1 backend smoke runner and CLI. The runner deterministically builds a P2-selected design and P3 assembled morphology before calling the backend smoke. The default seed selects the accepted `tri_anchor_support_grasp` case and the P3 assembled morphology has 3 modules, so the runner is not a fixed 2-module-only case. The runner stores per-step runtime observations, controller commands, actuator target records, and object pose history inside `EpisodeArchive` artifacts.
+- Files changed:
+  - `amsrr/training/p4_1_backend_smoke_runner.py`
+  - `amsrr/training/__init__.py`
+  - `scripts/p4_1_backend_smoke.py`
+  - `tests/unit/training/test_p4_1_backend_smoke_runner.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added P4.1 runner dataclasses, training exports, and a CLI wrapper only.
+- Upstream dependencies used: P3 assembly runner config, P2 design distribution and deterministic `P2DesignPolicy`, `AssemblyRunner` with `SimplifiedAssemblyExecutor`, P4.1 backend/env result contract, and existing `EpisodeArchive`.
+- Downstream impact: P4.1 acceptance can now inspect archive evidence that the backend smoke used P2 selected design and P3 assembled morphology and saved per-step logs. This still does not satisfy P4.1 completion without the later real Isaac gate.
+- Tests added or run:
+  - Added unit coverage for P4.1 runner config loading, P2/P3 case materialization, non-2-module module count, fake-backend per-step archive writing, archive roundtrip, and no-mislabeling fields.
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p4_1_backend_smoke_runner.py tests/unit/simulation/test_p4_1_backend_smoke.py tests/unit/simulation/test_p4_1_isaac_env.py -q`
+  - `python3 -m compileall amsrr/training amsrr/simulation scripts -q`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p3_assembly_runner.py tests/unit/training/test_p4_0_full_pipeline_runner.py tests/unit/training/test_p4_control_runner.py -q`
+  - `git diff --check`
+- Tests run: P4.1 targeted tests passed: 12 passed. Related runner tests passed: 8 passed. Compileall and diff check passed.
+- Assumptions: The Order 3 backend command surface still passes assembled morphology to Isaac through module count/provenance because the current probe does not yet accept arbitrary P2/P3 graph geometry. The archive preserves the actual P3 assembled graph and plan as the source of truth.
+- Blockers: None for Order 3.
+- Next steps: Commit Order 3, then implement split P4.1 acceptance with a fast fake-backend archive gate and a real Isaac smoke gate.
+
+### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.1 full-scene backend smoke user clarifications
 - Work package / Agent label: Agent J/K/L boundary: P4.1 full-scene backend smoke Order 2 backend/probe boundary
 - Summary: Added the P4.1 backend command/env path and extended the Isaac Holon probe with a separate full-scene smoke mode. The probe can spawn robot, object, and floor in the same stage, run a short QPID/bridge step loop, and emit per-step `RuntimeObservation`, `ControllerCommand`, actuator target record, and object pose history fields under `p4_1_*` report keys. This path is intentionally separate from P4-control hover pass/fail metrics.
 - Files changed:

@@ -48,6 +48,14 @@ from amsrr.training.p4_control_runner import (
     ensure_real_smoke_requested,
     load_p4_control_low_level_runner_config,
 )
+from amsrr.training.p4_1_backend_smoke_runner import (
+    P4_1_BACKEND_SMOKE_RUNNER_VERSION,
+    P4_1BackendSmokeRunner,
+    P4_1BackendSmokeRunnerConfig,
+    P4_1BackendSmokeRunnerResult,
+    P4_1P2P3Case,
+    load_p4_1_backend_smoke_runner_config,
+)
 
 __all__ = [
     "P1GraspCarryTaskDistribution",
@@ -76,7 +84,13 @@ __all__ = [
     "P4ControlLowLevelRunner",
     "P4ControlLowLevelRunnerConfig",
     "P4ControlLowLevelRunnerResult",
+    "P4_1_BACKEND_SMOKE_RUNNER_VERSION",
+    "P4_1BackendSmokeRunner",
+    "P4_1BackendSmokeRunnerConfig",
+    "P4_1BackendSmokeRunnerResult",
+    "P4_1P2P3Case",
     "ensure_real_smoke_requested",
+    "load_p4_1_backend_smoke_runner_config",
     "load_p1_runner_config",
     "load_p1_task_distribution_config",
     "load_p2_design_distribution_config",
