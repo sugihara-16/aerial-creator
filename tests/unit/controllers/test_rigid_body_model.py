@@ -117,6 +117,31 @@ def test_rigid_body_model_updates_rotor_axis_from_joint_position() -> None:
     assert model_tilted.allocation_matrix_body[1][0] != pytest.approx(model_zero.allocation_matrix_body[1][0])
 
 
+def test_rigid_body_model_vectoring_virtual_axis_matches_positive_joint_motion() -> None:
+    physical_model = _physical_model()
+    builder = RigidBodyControlModelBuilder()
+    delta = 1.0e-4
+
+    model_zero = builder.build(_morphology(), physical_model, _runtime(gimbal1=0.0))
+    model_plus = builder.build(_morphology(), physical_model, _runtime(gimbal1=delta))
+    model_minus = builder.build(_morphology(), physical_model, _runtime(gimbal1=-delta))
+
+    rotor = model_zero.rotor_elements[0]
+    assert rotor.virtual_x_axis_body is not None
+    assert rotor.virtual_z_axis_body is not None
+    axis_zero = model_zero.rotor_axes_body["module_0:thrust_1"]
+    axis_plus = model_plus.rotor_axes_body["module_0:thrust_1"]
+    axis_minus = model_minus.rotor_axes_body["module_0:thrust_1"]
+    finite_difference = _normalize(
+        tuple((axis_plus[idx] - axis_minus[idx]) / (2.0 * delta) for idx in range(3))
+    )
+
+    assert rotor.virtual_z_axis_body == pytest.approx(axis_zero)
+    assert rotor.virtual_x_axis_body == pytest.approx(finite_difference)
+    assert _dot(rotor.virtual_x_axis_body, model_zero.vectoring_joint_axes_body["module_0:gimbal1"]) == pytest.approx(0.0)
+    assert _dot(rotor.virtual_x_axis_body, axis_zero) == pytest.approx(0.0)
+
+
 def test_rigid_body_model_handles_multiple_modules_with_unique_actuator_ids() -> None:
     physical_model = _physical_model()
     model = RigidBodyControlModelBuilder().build(
@@ -132,3 +157,13 @@ def test_rigid_body_model_handles_multiple_modules_with_unique_actuator_ids() ->
     assert len(set(model.rotor_origins_body)) == 8
     assert model.metadata["active_module_count"] == 2
     assert any(key.startswith("module_1:gimbal") for key in model.active_actuator_limits)
+
+
+def _dot(left, right) -> float:
+    return sum(float(left[idx]) * float(right[idx]) for idx in range(3))
+
+
+def _normalize(vector) -> tuple[float, float, float]:
+    norm = math.sqrt(_dot(vector, vector))
+    assert norm > 0.0
+    return tuple(float(value) / norm for value in vector)

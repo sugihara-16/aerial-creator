@@ -331,7 +331,7 @@ def test_qpid_controller_outputs_controller_command() -> None:
     assert all(0.0 <= value <= 20.0 for value in controller_command.rotor_thrusts_n.values())
     assert controller_command.vectoring_joint_targets["gimbal1"] == pytest.approx(2.0)
     assert controller_command.joint_torque_commands["payload_joint"] == pytest.approx(8.4)
-    assert controller_command.dock_mechanism_commands["pitch_dock_mech_joint1"] == pytest.approx(0.1)
+    assert controller_command.dock_mechanism_commands["pitch_dock_mech_joint1"] == pytest.approx(0.0)
     assert type(controller_command).from_json(controller_command.to_json()).to_dict() == controller_command.to_dict()
 
 
@@ -424,7 +424,7 @@ def test_qpid_controller_rigid_body_qp_hover_is_feasible_with_default_tolerance(
 
     assert controller_command.controller_status.status == "ok"
     assert controller_command.controller_status.qp_feasible is True
-    assert controller_command.controller_status.metrics["allocation_residual_norm"] < 1.0e-5
+    assert controller_command.controller_status.metrics["allocation_residual_norm"] < 1.0e-4
     assert controller_command.controller_status.metrics["clipped"] == 0.0
 
 

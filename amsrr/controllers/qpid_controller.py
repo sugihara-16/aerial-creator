@@ -351,7 +351,6 @@ def _dock_mechanism_hold_commands(
     runtime_observation: RuntimeObservation,
     physical_model: PhysicalModel,
 ) -> dict[str, float]:
-    current_q = _current_joint_positions(runtime_observation)
     commands: dict[str, float] = {}
     joint_by_id = {joint.joint_id: joint for joint in physical_model.joints}
     for port in physical_model.dock_ports:
@@ -359,7 +358,7 @@ def _dock_mechanism_hold_commands(
         if not mechanism_joint_id:
             continue
         joint = joint_by_id.get(str(mechanism_joint_id))
-        value = current_q.get(str(mechanism_joint_id), 0.0)
+        value = 0.0
         if joint is not None:
             value = _clip_to_limit(value, _limit_tuple(joint))
         commands[str(mechanism_joint_id)] = value

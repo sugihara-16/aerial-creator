@@ -66,12 +66,30 @@ def _rotor_joint_for_link(urdf_model: URDFModel, link_name: str) -> URDFJoint | 
     return joint
 
 
+def _urdf_m_f_rate(urdf_model: URDFModel) -> float:
+    metadata = urdf_model.metadata.get("m_f_rate")
+    if not isinstance(metadata, dict):
+        return 0.0
+    try:
+        return float(metadata.get("value", 0.0))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _reaction_torque_coeff(entry: ThrustModelEntry, rotor_joint: URDFJoint | None, m_f_rate: float) -> float:
+    if entry.reaction_torque_coeff_nm_per_n != 0.0:
+        return float(entry.reaction_torque_coeff_nm_per_n)
+    if rotor_joint is None:
+        return 0.0
+    return float(rotor_joint.axis_xyz[2]) * m_f_rate
+
+
 def _build_rotor_models(urdf_model: URDFModel, thrust_model: ThrustModel) -> list[RotorModel]:
     rotors: list[RotorModel] = []
+    m_f_rate = _urdf_m_f_rate(urdf_model)
     for entry in thrust_model.rotors:
         thrust_link = _find_thrust_link_name(urdf_model, entry.rotor_id)
         rotor_joint = _rotor_joint_for_link(urdf_model, thrust_link)
-        thrust_axis = rotor_joint.axis_xyz if rotor_joint is not None else (0.0, 0.0, 1.0)
         vectoring_joint_ids = [
             joint.name for joint in _ancestor_joints(urdf_model, thrust_link) if "gimbal" in joint.name
         ]
@@ -79,10 +97,10 @@ def _build_rotor_models(urdf_model: URDFModel, thrust_model: ThrustModel) -> lis
             RotorModel(
                 rotor_id=entry.rotor_id,
                 thrust_frame_link=thrust_link,
-                thrust_axis_local=thrust_axis,
+                thrust_axis_local=(0.0, 0.0, 1.0),
                 thrust_min_n=entry.thrust_min_n,
                 thrust_max_n=entry.thrust_max_n,
-                reaction_torque_coeff_nm_per_n=entry.reaction_torque_coeff_nm_per_n,
+                reaction_torque_coeff_nm_per_n=_reaction_torque_coeff(entry, rotor_joint, m_f_rate),
                 vectoring_joint_ids=vectoring_joint_ids,
             )
         )
@@ -313,4 +331,3 @@ def build_module_capability_token(physical_model: PhysicalModel, *, module_type:
         has_vectoring=any(rotor.vectoring_joint_ids for rotor in physical_model.rotors),
         has_dock_mechanism=bool(physical_model.dock_ports),
     )
-

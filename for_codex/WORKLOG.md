@@ -3,6 +3,33 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control hover drift fix supplement
+- Work package / Agent label: Agent I/J boundary: P4-control hover stabilization debug
+- Summary: Fixed the causes of the observed 5-10 s single-module hover drift. The physical model now treats each rotor's local thrust direction as thrust-frame `+z`; the URDF rotor continuous joint axis sign is used to derive reaction torque from `<m_f_rate>` instead of being treated as thrust direction. The rigid-body model's vectoring virtual lateral channel now follows the actual positive gimbal motion direction, computed from `gimbal_axis x thrust_z`, instead of assuming rotor-arm x. Dock mechanism hold commands now command the nominal zero position instead of following the current passive joint angle.
+- Files changed:
+  - `amsrr/robot_model/physical_model_builder.py`
+  - `amsrr/controllers/rigid_body_model.py`
+  - `amsrr/controllers/qpid_controller.py`
+  - `tests/unit/robot_model/test_physical_model_builder.py`
+  - `tests/unit/controllers/test_rigid_body_model.py`
+  - `tests/unit/controllers/test_qpid_controller.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None. This corrects URDF interpretation and controller-internal target construction only.
+- Upstream dependencies used: Reference `aerial_robot_base` gimbalrotor controller, which uses rotor direction sign for `m_f_rate` reaction torque and thrust-frame z for translational force; Holon URDF gimbal/rotor joint axes; existing P4-control QP primary path.
+- Downstream impact: Single-module hover uses the same primary `rigid_body_qp` path but now matches Isaac's actual thrust/vectoring geometry. Pseudoinverse remains a debug comparison path, not a completion path.
+- Tests added or run:
+  - Added physical-model assertions for all-local-`+z` thrust axes and alternating reaction torque coefficients `[-0.0172, 0.0172, -0.0172, 0.0172]`.
+  - Added a finite-difference rigid-body model test requiring the vectoring virtual lateral axis to match positive gimbal joint motion.
+  - Updated QPID dock hold expectation to zero and relaxed the tiny QP residual assertion to `1e-4`.
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/robot_model/test_physical_model_builder.py tests/unit/controllers/test_rigid_body_model.py tests/unit/controllers/test_qpid_controller.py`
+  - Real Isaac 20 s single-module hover smoke via `/home/leus/.local/bin/micromamba run -n isaaclab3 /home/leus/IsaacLab/isaaclab.sh -p scripts/p4_control_holon_spawn_probe.py ... --steps 4000 --single-module-hover-smoke --hover-hold-duration-s 20.0 --no-hover-stop-on-hold --allocation-mode rigid_body_qp`
+- Tests run: Unit subset passed: 19 passed. Real Isaac 20 s hover passed with `single_module_hover_smoke_passed=true`, `single_module_hover_hold_time_s=20.0`, final position error `0.000966 m`, max position error `0.022904 m`, final attitude error `0.001038 rad`, QP infeasible count `0`, clipped target count `0`, and controller clipped count `0`.
+- Assumptions: This validates the single-module 20 s hover case only. It does not claim object grasp/carry, policy learning, fixed-morphology 20 s hover, or P4 full completion.
+- Blockers: None for the reported single-module hover drift reproduction after this fix.
+- Next steps: Let the user inspect the GUI run, then rerun broader P4-control smoke gates if desired after review.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control hover drift diagnostic supplement
 - Work package / Agent label: Agent I/J boundary: P4-control hover drift diagnostics
 - Summary: Added a debug-only pseudoinverse allocation path and a conversion-time vectoring velocity limit override to investigate the user's observed 5-10 s hover drift/crash. Ran real Isaac 10 s no-stop single-module hover comparisons for QP default, pseudoinverse default, QP with 20 rad/s vectoring velocity, and QP with 20 rad/s vectoring plus higher gimbal stiffness/damping.

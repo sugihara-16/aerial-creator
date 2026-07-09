@@ -276,9 +276,6 @@ class RigidBodyControlModelBuilder:
                             f"Vectoring joint parent link {vectoring_joint.parent_link!r} is missing"
                         )
                     arm_transform = module.link_transforms_world[vectoring_joint.parent_link]
-                    virtual_x_axis_body = _normalize(
-                        _matvec(world_to_body_rotation, _matvec(arm_transform.rotation, (1.0, 0.0, 0.0)))
-                    )
                     z_sign = 1.0 if _dot(rotor.thrust_axis_local, (0.0, 0.0, 1.0)) >= 0.0 else -1.0
                     virtual_z_axis_body = _normalize(
                         _matvec(
@@ -286,6 +283,10 @@ class RigidBodyControlModelBuilder:
                             _matvec(arm_transform.rotation, (0.0, 0.0, z_sign)),
                         )
                     )
+                    vectoring_axis_body = _normalize(
+                        _matvec(world_to_body_rotation, module.joint_axes_world[vectoring_joint.joint_id])
+                    )
+                    virtual_x_axis_body = _normalize(_cross(vectoring_axis_body, virtual_z_axis_body))
                 elements.append(
                     RotorControlElement(
                         global_rotor_id=global_rotor_id,

@@ -4,6 +4,15 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Hover Drift Fix Supplement
+
+- Context: User observation and real Isaac diagnostics showed that the single-module hover drifted after roughly 5-10 s. Pseudoinverse allocation did not hover and increasing vectoring speed alone did not remove the drift. Inspection against `aerial_robot_base` and the Holon URDF found three geometry/control-model mismatches.
+- Decision: Treat every rotor's local thrust direction as thrust-frame `+z`. The URDF rotor continuous joint axis sign is now used only to derive the reaction torque coefficient from `<m_f_rate>`, matching the reference controller and MuJoCo bridge convention. For Holon this yields alternating yaw torque coefficients `[-0.0172, 0.0172, -0.0172, 0.0172]` while all rotors push along local `+z`.
+- Vectoring decision: The QP virtual lateral channel is now the actual positive gimbal-motion direction, `vectoring_joint_axis_body x virtual_z_axis_body`, instead of rotor-arm x. This matches finite-difference thrust-axis motion in the current URDF where the gimbal axis itself is rotor-arm x.
+- Dock-hold decision: Dock mechanism position commands now hold nominal zero rather than the current observed angle. This prevents passive dock joints from being re-targeted to their drifted positions during free hover.
+- Validation result: Real Isaac 20 s single-module hover using the primary `rigid_body_qp` path passed with no QP infeasible steps or clipping, final position error below 1 mm, and max position error about 2.3 cm.
+- Compatibility impact: No schema change and no promotion of pseudoinverse allocation. This is a correction of URDF interpretation and internal control model geometry; P4-control still does not claim object grasp/carry, learned policies, fixed-morphology long hover, or P4 full completion.
+
 ### P4-Control Hover Drift Diagnostic Supplement
 
 - Context: User GUI observation showed that the single-module hover can initially hold but drifts after roughly 5-10 s and crashes. The user requested a temporary pseudoinverse allocation trial and investigation of slow vectoring motion.

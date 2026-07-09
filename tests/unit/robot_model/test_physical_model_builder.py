@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from amsrr.robot_model.physical_model_builder import (
     build_module_capability_token,
     build_physical_model_from_config,
@@ -28,8 +30,10 @@ def test_physical_model_rotors_and_dock_ports() -> None:
         "thrust_3",
         "thrust_4",
     ]
-    assert physical_model.rotors[0].thrust_axis_local == (0.0, 0.0, 1.0)
-    assert physical_model.rotors[1].thrust_axis_local == (0.0, 0.0, -1.0)
+    assert all(rotor.thrust_axis_local == (0.0, 0.0, 1.0) for rotor in physical_model.rotors)
+    assert [rotor.reaction_torque_coeff_nm_per_n for rotor in physical_model.rotors] == pytest.approx(
+        [-0.0172, 0.0172, -0.0172, 0.0172]
+    )
     assert physical_model.rotors[0].vectoring_joint_ids == ["gimbal1"]
     assert len(physical_model.dock_ports) == 4
     assert sorted(port.port_type for port in physical_model.dock_ports) == [
@@ -52,4 +56,3 @@ def test_module_capability_token_from_physical_model() -> None:
     assert capability.dock_port_type_counts == [2, 2, 0]
     assert capability.has_vectoring is True
     assert capability.has_dock_mechanism is True
-
