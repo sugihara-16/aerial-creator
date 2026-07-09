@@ -3,6 +3,40 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control split acceptance requirement
+- Work package / Agent label: Agent L boundary: P4-control Order 4 fast/real acceptance split
+- Summary: Implemented P4-control acceptance reporting that separates fast archive/interface checks from real Isaac smoke completion. The new report exposes `fast_gate_passed`, `real_isaac_smoke_passed`, and `completion_passed`; completion cannot pass unless single-module hover, fixed-morphology hover, and fixed-morphology waypoint smoke results are all Isaac-backed and passed.
+- Files changed:
+  - `amsrr/acceptance/p4_control_acceptance.py`
+  - `amsrr/acceptance/__init__.py`
+  - `tests/acceptance/test_p4_control_acceptance.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema change. Added acceptance/report dataclasses only.
+- Upstream dependencies used: v0.4 Sections 24.5.2 and 24.5.6; user clarification that fast pytest and real Isaac smoke gates must be separate and completion must not pass without real smoke; existing `EpisodeArchive` P4 fields.
+- Downstream impact: Later Agent J/K runners can feed real smoke results into this acceptance gate. Until then, P4-control fast gate may pass but P4-control completion remains false.
+- Tests added or run:
+  - Added `tests/acceptance/test_p4_control_acceptance.py`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p4_control_acceptance.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+- Commands run:
+  - `git status --short`
+  - `sed -n ... amsrr/acceptance/p4_0_acceptance.py tests/acceptance/test_p4_0_acceptance.py`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p4_control_acceptance.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: P4-control acceptance tests passed: 2 passed. Full acceptance suite passed: 9 passed. Full unit suite passed: 110 passed, 1 skipped. Compileall and diff check passed.
+- Assumptions: This order does not execute Isaac; it only evaluates smoke result records supplied by a later real Isaac runner. Synthetic smoke results in tests exercise aggregation only and are not a completion artifact.
+- Blockers: Real Isaac single-module/fixed-morphology hover and waypoint smoke remain unimplemented/unrun.
+- Next steps: Commit Order 4. The next implementation order should create the P4-control runner/config and/or real Isaac smoke harness; method-level Isaac execution details may require user confirmation before implementation.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control controller bridge requirements
 - Work package / Agent label: Agent I/J boundary: P4-control Order 3 actuator mapping and bridge target records
 - Summary: Implemented simulator-independent actuator mapping and Isaac target record conversion for P4-control. Added deterministic active actuator channels for rotor thrusts, vectoring joints, dock mechanism joints, and effort-limited joints; added a bridge that converts `ControllerCommand` into clipped actuator target records with missing/unsupported/clipped metrics and controller residual status.
@@ -1474,6 +1508,24 @@
 ## Work Package Logs
 
 ### P4-Control / P4a: QP/PID Controller Specification
+
+#### 2026-07-09
+- Scope: Implement Agent L boundary Order 4 P4-control fast/real acceptance split.
+- Files changed:
+  - `amsrr/acceptance/p4_control_acceptance.py`
+  - `amsrr/acceptance/__init__.py`
+  - `tests/acceptance/test_p4_control_acceptance.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: P4-control acceptance requirements, user clarification on real Isaac smoke gating, existing P4.0 acceptance/report style, and `EpisodeArchive` P4 logging fields.
+- Implemented: `P4ControlSmokeResult`, `P4ControlAcceptanceReport`, `run_p4_control_acceptance`, fast archive checks for controller/runtime/actuator/residual metrics, real smoke aggregation for the three required Isaac smoke cases, and tests proving fast gate does not imply completion.
+- Not implemented: Real Isaac smoke runner, Isaac environment spawn/step, hover stabilization, fixed-morphology waypoint tracking, or artifact collection from actual Isaac.
+- Schema/interface changes: None to persisted schemas. Added acceptance-only dataclasses and exports.
+- Downstream impact: Later P4-control smoke runners can call this acceptance function with real Isaac-backed smoke results. The gate will keep completion false if smoke is missing, skipped, synthetic-only, or failed.
+- Tests added: `test_p4_control_fast_gate_does_not_complete_without_real_isaac_smoke` and `test_p4_control_completion_requires_all_real_isaac_smokes`.
+- Tests passed: P4-control acceptance tests passed: 2 passed. Full acceptance suite passed: 9 passed. Full unit suite passed: 110 passed, 1 skipped. Compileall and `git diff --check` passed.
+- Handoff notes: This order intentionally does not claim P4-control completion. It codifies the split gate so later real smoke artifacts cannot be accidentally replaced by unit tests.
+- Open questions: Real Isaac execution details remain for the next runner/backend order.
 
 #### 2026-07-09
 - Scope: Implement Agent I/J boundary Order 3 actuator mapping and bridge target records.

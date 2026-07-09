@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Acceptance Split Implementation Supplement
+
+- Context: P4-control acceptance must distinguish fast pytest/interface/archive checks from real Isaac smoke, and P4-control completion must not pass when Isaac is unavailable or when only synthetic/unit checks were run.
+- Decision: Added `run_p4_control_acceptance` with explicit `fast_gate_passed`, `real_isaac_smoke_passed`, and `completion_passed` fields. The fast gate checks that `EpisodeArchive` records include controller commands, runtime observations, actuator target records, residual/clipping metrics, and no P4 full-completion/physical-success claim. The real smoke gate requires three Isaac-backed smoke results: single-module hover, fixed-morphology hover, and fixed-morphology waypoint. `completion_passed` is true only when both gates pass.
+- Compatibility impact: This is an acceptance/reporting contract only. It does not run Isaac, spawn Holon, or validate physical hover. Synthetic smoke results are accepted only as explicit report inputs for aggregation tests; actual P4-control completion still requires real Isaac smoke artifacts from later runner/backend work.
+
 ### P4-Control Actuator Mapping and Bridge Record Supplement
 
 - Context: After the primary virtual-thrust QP allocator, P4-control needs a controller bridge boundary that can be unit-tested without Isaac while preserving the P4 requirement that `ControllerCommand` is converted to Isaac actuator targets and archived as actuator target records.
