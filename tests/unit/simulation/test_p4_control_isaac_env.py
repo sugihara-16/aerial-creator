@@ -3,6 +3,7 @@ from __future__ import annotations
 from amsrr.simulation import (
     IsaacLabBackend,
     IsaacLabBackendConfig,
+    IsaacLabAvailability,
     P4ControlIsaacEnv,
     P4ControlLowLevelEnvConfig,
     load_isaac_lab_backend_config,
@@ -18,6 +19,7 @@ def test_p4_control_low_level_config_loader() -> None:
     assert backend_config.generated_usd_path == "artifacts/isaac/robots/holon/holon/holon.usda"
     assert backend_config.rotor_force_application == "wrench_composer"
     assert env_config.position_error_threshold_m == 0.20
+    assert env_config.hover_target_height_m == 0.5
     assert env_config.fixed_morphology_module_count == 2
 
 
@@ -57,6 +59,12 @@ def test_isaac_backend_probe_and_conversion_command_are_config_driven() -> None:
         attitude_tolerance_rad=0.25,
         hold_duration_s=1.0,
     )
+    force_convert_hover_smoke = backend.holon_single_module_hover_smoke_command(
+        config_path="configs/env/isaac_lab.yaml",
+        convert_if_missing=False,
+        force_convert=True,
+        steps=600,
+    )
 
     assert availability.metadata["backend_version"] == "isaac_lab_backend_v1"
     assert availability.urdf_exists is True
@@ -81,6 +89,8 @@ def test_isaac_backend_probe_and_conversion_command_are_config_driven() -> None:
     assert "0.5" in single_module_hover_smoke
     assert "--hover-position-tolerance-m" in single_module_hover_smoke
     assert "0.2" in single_module_hover_smoke
+    assert "--force-convert" in force_convert_hover_smoke
+    assert "--convert-if-missing" not in force_convert_hover_smoke
 
 
 def test_p4_control_smoke_scenarios_are_deterministic() -> None:
@@ -94,6 +104,7 @@ def test_p4_control_smoke_scenarios_are_deterministic() -> None:
         "fixed_morphology_waypoint",
     ]
     assert scenarios[0].module_count == 1
+    assert scenarios[0].target_pose_world[2] == 0.5
     assert scenarios[1].module_count == 2
     assert scenarios[2].waypoint_tracking is True
 
@@ -124,3 +135,63 @@ def test_p4_control_real_smokes_skip_when_backend_missing() -> None:
     assert len(results) == 3
     assert all(result.skipped for result in results)
     assert all("isaaclab_path_missing" in str(result.skip_reason) for result in results)
+
+
+def test_p4_control_real_smokes_run_single_module_and_skip_fixed_cases() -> None:
+    backend = _SingleModuleHoverBackend(
+        {
+            "isaac_backed": True,
+            "spawn_passed": True,
+            "command_probe_passed": True,
+            "single_module_hover_smoke": True,
+            "single_module_hover_smoke_passed": True,
+            "single_module_hover_steps": 200,
+            "single_module_hover_requested_steps": 600,
+            "single_module_hover_duration_s": 1.0,
+            "single_module_hover_hold_time_s": 1.0,
+            "single_module_hover_final_position_error_m": 0.014,
+            "single_module_hover_final_attitude_error_rad": 0.004,
+            "single_module_hover_qp_infeasible_count": 0,
+            "single_module_hover_clipped_target_count": 0,
+        }
+    )
+    env = P4ControlIsaacEnv(config=P4ControlLowLevelEnvConfig(), backend=backend)  # type: ignore[arg-type]
+
+    results = env.run_smokes(dry_run=False)
+
+    assert [result.smoke_name for result in results] == [
+        "single_module_hover",
+        "fixed_morphology_hover",
+        "fixed_morphology_waypoint",
+    ]
+    assert results[0].attempted is True
+    assert results[0].passed is True
+    assert results[0].isaac_backed is True
+    assert results[0].metrics["single_module_hover_final_position_error_m"] == 0.014
+    assert results[1].skipped is True
+    assert results[1].skip_reason == "real_isaac_execution_not_implemented"
+    assert results[2].skipped is True
+    assert backend.calls[0]["force_convert"] is True
+    assert backend.calls[0]["steps"] == 600
+    assert backend.calls[0]["hover_target_height"] == 0.5
+
+
+class _SingleModuleHoverBackend:
+    def __init__(self, report: dict[str, object]) -> None:
+        self.report = report
+        self.calls: list[dict[str, object]] = []
+
+    def availability(self) -> IsaacLabAvailability:
+        return IsaacLabAvailability(
+            available=True,
+            isaaclab_path_exists=True,
+            launch_script_exists=True,
+            urdf_exists=True,
+            generated_usd_exists=False,
+            python_modules_available=True,
+            missing_reasons=[],
+        )
+
+    def run_holon_single_module_hover_smoke(self, **kwargs: object) -> dict[str, object]:
+        self.calls.append(kwargs)
+        return dict(self.report)

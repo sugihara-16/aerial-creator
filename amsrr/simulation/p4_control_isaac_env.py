@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from amsrr.schemas.common import Pose7D, SchemaBase, SchemaValidationError, require_len, require_non_empty
 from amsrr.simulation.isaac_lab_backend import IsaacLabBackend, IsaacLabBackendConfig, load_isaac_lab_backend_config
@@ -19,6 +20,7 @@ class P4ControlLowLevelEnvConfig(SchemaBase):
     control_dt_s: float = 0.005
     smoke_duration_s: float = 3.0
     hold_duration_s: float = 1.0
+    hover_target_height_m: float = 0.5
     position_error_threshold_m: float = 0.20
     attitude_error_threshold_rad: float = 0.25
     max_episode_steps: int = 600
@@ -33,6 +35,7 @@ class P4ControlLowLevelEnvConfig(SchemaBase):
             "control_dt_s",
             "smoke_duration_s",
             "hold_duration_s",
+            "hover_target_height_m",
             "position_error_threshold_m",
             "attitude_error_threshold_rad",
         ):
@@ -96,7 +99,7 @@ class P4ControlIsaacEnv:
         self.backend = backend or IsaacLabBackend()
 
     def smoke_scenarios(self) -> list[P4ControlSmokeScenario]:
-        hover_pose: Pose7D = (0.0, 0.0, 0.4, 0.0, 0.0, 0.0, 1.0)
+        hover_pose: Pose7D = (0.0, 0.0, self.config.hover_target_height_m, 0.0, 0.0, 0.0, 1.0)
         waypoint_pose: Pose7D = (
             self.config.waypoint_target_position_m[0],
             self.config.waypoint_target_position_m[1],
@@ -153,18 +156,57 @@ class P4ControlIsaacEnv:
                 for scenario in scenarios
             ]
 
-        return [
-            P4ControlSmokeResult(
+        results: list[P4ControlSmokeResult] = []
+        for scenario in scenarios:
+            if scenario.smoke_name == "single_module_hover":
+                results.append(self._run_single_module_hover_smoke(scenario))
+            else:
+                results.append(
+                    P4ControlSmokeResult(
+                        scenario.smoke_name,
+                        attempted=False,
+                        passed=False,
+                        skipped=True,
+                        isaac_backed=False,
+                        skip_reason="real_isaac_execution_not_implemented",
+                        metrics={**_scenario_metrics(scenario), "isaac_backend_available": 1.0},
+                    )
+                )
+        return results
+
+    def _run_single_module_hover_smoke(self, scenario: P4ControlSmokeScenario) -> P4ControlSmokeResult:
+        metrics = {**_scenario_metrics(scenario), "isaac_backend_available": 1.0}
+        try:
+            report = self.backend.run_holon_single_module_hover_smoke(
+                config_path=self.config.config_path,
+                force_convert=True,
+                steps=self.config.max_episode_steps,
+                hover_target_height=scenario.target_pose_world[2],
+                position_tolerance_m=scenario.position_error_threshold_m,
+                attitude_tolerance_rad=scenario.attitude_error_threshold_rad,
+                hold_duration_s=scenario.hold_duration_s,
+            )
+        except Exception as exc:  # pragma: no cover - real subprocess failures are environment-specific.
+            return P4ControlSmokeResult(
                 scenario.smoke_name,
                 attempted=True,
                 passed=False,
                 skipped=False,
                 isaac_backed=True,
-                skip_reason="real_isaac_execution_not_implemented",
-                metrics={**_scenario_metrics(scenario), "isaac_backend_available": 1.0},
+                skip_reason=str(exc),
+                metrics={**metrics, "runner_exception": 1.0},
             )
-            for scenario in scenarios
-        ]
+        metrics.update(_single_module_hover_report_metrics(report))
+        passed = bool(report.get("single_module_hover_smoke_passed"))
+        return P4ControlSmokeResult(
+            scenario.smoke_name,
+            attempted=True,
+            passed=passed,
+            skipped=False,
+            isaac_backed=bool(report.get("isaac_backed", True)),
+            skip_reason=None if passed else str(report.get("error", "single_module_hover_failed")),
+            metrics=metrics,
+        )
 
     def _scenario(
         self,
@@ -199,3 +241,41 @@ def _scenario_metrics(scenario: P4ControlSmokeScenario) -> dict[str, float]:
         "attitude_error_threshold_rad": scenario.attitude_error_threshold_rad,
         "waypoint_tracking": 1.0 if scenario.waypoint_tracking else 0.0,
     }
+
+
+def _single_module_hover_report_metrics(report: dict[str, Any]) -> dict[str, float]:
+    keys = (
+        "command_returncode",
+        "spawn_passed",
+        "command_probe_passed",
+        "single_module_hover_smoke",
+        "single_module_hover_smoke_passed",
+        "single_module_hover_steps",
+        "single_module_hover_requested_steps",
+        "single_module_hover_duration_s",
+        "single_module_hover_hold_time_s",
+        "single_module_hover_hold_required_s",
+        "single_module_hover_stopped_on_hold",
+        "single_module_hover_position_tolerance_m",
+        "single_module_hover_attitude_tolerance_rad",
+        "single_module_hover_final_position_error_m",
+        "single_module_hover_final_attitude_error_rad",
+        "single_module_hover_max_position_error_m",
+        "single_module_hover_max_attitude_error_rad",
+        "single_module_hover_min_height_m",
+        "single_module_hover_max_height_m",
+        "single_module_hover_finite_state",
+        "single_module_hover_qp_infeasible_count",
+        "single_module_hover_controller_clipped_count",
+        "single_module_hover_missing_actuator_count",
+        "single_module_hover_unsupported_actuator_count",
+        "single_module_hover_clipped_target_count",
+    )
+    metrics: dict[str, float] = {}
+    for key in keys:
+        value = report.get(key)
+        if isinstance(value, bool):
+            metrics[key] = 1.0 if value else 0.0
+        elif isinstance(value, (int, float)):
+            metrics[key] = float(value)
+    return metrics

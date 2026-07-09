@@ -4,6 +4,13 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Single-Module Real Smoke Runner Supplement
+
+- Context: The standalone Holon probe could pass the real single-module closed-loop hover smoke, but the P4-control runner still returned placeholder real-smoke failures for every required smoke. The next bounded step was to connect the completed single-module smoke into the runner without inventing fixed-morphology spawn/docking semantics.
+- Decision: Extended `P4ControlIsaacEnv.run_smokes(dry_run=False)` so it executes only `single_module_hover` through `IsaacLabBackend.run_holon_single_module_hover_smoke`, parses the probe JSON, and converts the numeric pass/fail fields into `P4ControlSmokeResult.metrics`. The fixed-morphology hover and waypoint entries remain explicit skipped results with `skip_reason="real_isaac_execution_not_implemented"`.
+- Backend decision: Added a JSON subprocess helper in `IsaacLabBackend` for real smoke commands and made the single-module runner force URDF-to-USD conversion by default. Backend-generated USD paths are taken from `IsaacLabBackendConfig`, allowing tests or manual runs to route generated artifacts to `/tmp` while the checked-in config remains unchanged.
+- Compatibility impact: This is a runner/reporting integration for the already validated single-module smoke. It does not satisfy `real_isaac_smoke_passed` or `completion_passed`, because P4-control acceptance still requires fixed-morphology hover and fixed-morphology waypoint results. No object grasp/carry, learned policy, P4-control completion, or P4 full completion claim is introduced.
+
 ### P4-Control Single-Module Closed-Loop Hover Smoke Supplement
 
 - Context: After the `PolicyCommand` PID target builder and controller-to-Isaac command path were validated, P4-control needed a real Isaac closed-loop smoke that repeatedly observes Holon state, recomputes the rigid-body QP allocation, and applies bridge-supported actuator targets rather than a single open-loop command.

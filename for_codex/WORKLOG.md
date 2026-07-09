@@ -3,6 +3,37 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control controller supplement and split real-smoke acceptance
+- Work package / Agent label: Agent J/K boundary: P4-control Order 14 single-module real smoke runner integration
+- Summary: Connected the validated real single-module hover smoke into the P4-control runner path. `P4ControlIsaacEnv.run_smokes(dry_run=False)` now executes `single_module_hover` through `IsaacLabBackend.run_holon_single_module_hover_smoke`, parses the probe JSON, and converts the closed-loop smoke result into `P4ControlSmokeResult` metrics. Fixed-morphology hover and waypoint results remain explicit skipped entries until their Isaac semantics are implemented.
+- Files changed:
+  - `amsrr/simulation/isaac_lab_backend.py`
+  - `amsrr/simulation/p4_control_isaac_env.py`
+  - `configs/training/p4_control_low_level.yaml`
+  - `tests/unit/simulation/test_p4_control_isaac_env.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: Added internal config field `hover_target_height_m` to `P4ControlLowLevelEnvConfig` and config YAML. Added backend helper `run_holon_single_module_hover_smoke` plus force-convert support on Holon probe command builders. No persisted archive schema change.
+- Upstream dependencies used: Order 13 single-module closed-loop hover probe, existing `P4ControlSmokeResult` contract, split acceptance rule requiring all three real Isaac smokes, and backend generated-USD config paths.
+- Downstream impact: Runner/acceptance consumers can now see a real Isaac-backed passed `single_module_hover` smoke. P4-control completion still remains false because `fixed_morphology_hover` and `fixed_morphology_waypoint` are skipped.
+- Tests added or run:
+  - Added a fake-backend unit test verifying that real runner mode executes `single_module_hover`, maps JSON metrics, and skips fixed-morphology cases.
+  - Extended backend command tests for `--force-convert`.
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_control_isaac_env.py tests/unit/training/test_p4_control_runner.py -q`
+  - `python3 -m py_compile amsrr/simulation/isaac_lab_backend.py amsrr/simulation/p4_control_isaac_env.py tests/unit/simulation/test_p4_control_isaac_env.py`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `git diff --check`
+- Commands run:
+  - `sed -n ... amsrr/training/p4_control_runner.py`
+  - `sed -n ... amsrr/simulation/p4_control_isaac_env.py`
+  - `sed -n ... amsrr/simulation/isaac_lab_backend.py`
+  - `eval "$(~/.local/bin/micromamba shell hook -s bash)" && micromamba activate isaaclab3 && PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/leus/amsrr:$PYTHONPATH python3 -c '...'` to run `P4ControlIsaacEnv.run_smokes(dry_run=False)` with generated USD under `/tmp/amsrr_isaac_holon_runner`
+- Tests run: Related simulation/runner unit tests passed: 9 passed. Full unit suite passed: 123 passed, 1 skipped. Diff check passed. Real runner smoke passed for `single_module_hover` with final position error `0.014463 m`, final attitude error `0.004510 rad`, hold time `1.0 s`, QP infeasible count `0`, and no missing/unsupported/clipped bridge targets; `fixed_morphology_hover` and `fixed_morphology_waypoint` were intentionally skipped with `real_isaac_execution_not_implemented`.
+- Assumptions: The runner uses force-conversion for the single-module smoke so the real probe consumes current URDF assets. Generated USD paths are backend-configurable; the real runner verification used `/tmp` to avoid committing generated artifacts.
+- Blockers: Fixed-morphology hover and waypoint smoke remain unimplemented. Their Isaac module placement, physical connection/docking representation, and target morphology semantics need a method-level decision before implementation.
+- Next steps: Commit Order 14, then stop for the fixed-morphology smoke definition unless the user confirms the intended Isaac representation.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control controller supplement and user-provided initial PID gains
 - Work package / Agent label: Agent I/J/K boundary: P4-control Order 13 single-module closed-loop hover smoke
 - Summary: Added a real Isaac-backed closed-loop single-module hover smoke. The probe now keeps one persistent `QPIDController(allocation_mode="rigid_body_qp")`, rebuilds runtime observation from Isaac root/joint state every step, sends a direct `PolicyCommand.desired_body_pose` / `desired_body_twist` hover target, converts the bridge-supported `ControllerCommand` through `IsaacControllerBridge`, and applies rotor thrust plus vectoring/dock joint position targets in Isaac until the configured hold duration is achieved.

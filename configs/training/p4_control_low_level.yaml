@@ -11,6 +11,7 @@ env:
   control_dt_s: 0.005
   smoke_duration_s: 3.0
   hold_duration_s: 1.0
+  hover_target_height_m: 0.5
   position_error_threshold_m: 0.20
   attitude_error_threshold_rad: 0.25
   max_episode_steps: 600
