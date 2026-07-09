@@ -4,6 +4,32 @@
 
 ### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.1 full-scene backend smoke user clarifications
+- Work package / Agent label: Agent J/K/L boundary: P4.1 full-scene backend smoke Order 2 backend/probe boundary
+- Summary: Added the P4.1 backend command/env path and extended the Isaac Holon probe with a separate full-scene smoke mode. The probe can spawn robot, object, and floor in the same stage, run a short QPID/bridge step loop, and emit per-step `RuntimeObservation`, `ControllerCommand`, actuator target record, and object pose history fields under `p4_1_*` report keys. This path is intentionally separate from P4-control hover pass/fail metrics.
+- Files changed:
+  - `amsrr/simulation/isaac_lab_backend.py`
+  - `amsrr/simulation/p4_1_isaac_env.py`
+  - `amsrr/simulation/__init__.py`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - `tests/unit/simulation/test_p4_1_isaac_env.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added P4.1 backend/env helpers and probe CLI/report keys only.
+- Upstream dependencies used: Existing IsaacLab backend command wrapper, P4-control probe conversion/spawn utilities, `build_fixed_morphology`, QPID controller, Isaac bridge, and the P4.1 joint-state contract from Order 1.
+- Downstream impact: P4.1 runner/acceptance can now consume a fake or real backend report with full-scene and per-step evidence. The Order 2 fake gate does not satisfy P4.1 completion; a real Isaac full-scene smoke gate remains required.
+- Tests added or run:
+  - Added unit coverage for P4.1 config loading, backend command construction, dry-run/missing-backend skip behavior, fake backend report parsing, per-step log parsing, P2/P3 flag propagation, and joint-position rejection.
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_1_backend_smoke.py tests/unit/simulation/test_p4_1_isaac_env.py -q`
+  - `python3 -m compileall amsrr/simulation scripts -q`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_control_isaac_env.py tests/unit/simulation/test_p4_control_controller_smoke.py -q`
+  - `git diff --check`
+- Tests run: P4.1 targeted tests passed: 9 passed. Related P4-control simulation tests passed: 8 passed. Compileall and diff check passed.
+- Assumptions: Order 2 uses the existing generated fixed-morphology asset path as the backend smoke command surface. The later P4.1 runner order must select at least one case from P2 `DesignOutput` and P3 assembled morphology before P4.1 can be considered complete.
+- Blockers: None for Order 2.
+- Next steps: Commit Order 2, then implement the P4.1 runner/archive order with P2/P3 selected case materialization and artifact logging.
+
+### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.1 full-scene backend smoke user clarifications
 - Work package / Agent label: Agent J/K/L boundary: P4.1 full-scene backend smoke Order 1 contract
 - Summary: Added the initial P4.1 backend smoke contract. P4.1 is scoped as a full-scene Isaac backend smoke, not a P4-control hover rerun. The new contract records the required real smoke name, config defaults for robot/object/floor full-scene smoke, per-step runtime/controller/actuator/object-history result fields, and a RuntimeObservation joint-state checker that requires module pose/twist plus vectoring/gimbal and dock mechanism joint positions. Articulated P4.1 observations must additionally prove RigidBodyControlModel B(q)-style update metrics when the articulated flag is set.
 - Files changed:

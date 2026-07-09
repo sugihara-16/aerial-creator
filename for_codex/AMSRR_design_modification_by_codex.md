@@ -4,6 +4,14 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4.1 Backend Command and Probe Supplement
+
+- Context: After the P4.1 contract was added, the backend needed a real Isaac command surface and a fake-backend-testable env boundary without treating P4.1 as another hover acceptance loop.
+- Decision: Added `IsaacLabBackend.p4_1_full_scene_backend_smoke_command()` / `run_p4_1_full_scene_backend_smoke()` and `P4_1IsaacBackendEnv`. The Holon spawn probe now exposes `--p4-1-full-scene-backend-smoke`, object size/mass/pose flags, and a `--p4-1-uses-p2-p3` provenance flag.
+- Probe decision: The P4.1 probe path spawns a robot articulation, a rigid box object, and the floor in the same stage, then runs a short controller/bridge step loop. It reports `p4_1_runtime_observations`, `p4_1_controller_commands`, `p4_1_actuator_target_records`, and `p4_1_object_pose_history` in addition to summary pass/fail fields.
+- Validation decision: The P4.1 backend report parser requires the full-scene flags and reuses the Order 1 RuntimeObservation joint-state checker. Unit tests may use a fake backend report, but this does not satisfy P4.1 completion; later acceptance must still require a real Isaac smoke.
+- Compatibility impact: No persisted schema change. The new keys are additive probe/backend report fields and do not claim object grasp/carry success, learned policy success, P4.2 rollout, or P4 full completion.
+
 ### P4.1 Full-Scene Backend Smoke Contract Supplement
 
 - Context: The user approved starting P4.1 with the clarification that it is not another P4-control hover validation. P4.1 must smoke-test the Isaac backend as a full-scene path with robot, object, and floor in the same stage, and it must verify reset / step / RuntimeObservation / EpisodeArchive logging before P4.2 contact-rich rollout.

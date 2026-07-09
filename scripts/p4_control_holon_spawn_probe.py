@@ -71,6 +71,33 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run a closed-loop fixed-morphology waypoint smoke with a rigid combined URDF.",
     )
+    parser.add_argument(
+        "--p4-1-full-scene-backend-smoke",
+        action="store_true",
+        help="Run the P4.1 robot+object+floor backend smoke and emit short per-step records.",
+    )
+    parser.add_argument(
+        "--p4-1-uses-p2-p3",
+        action="store_true",
+        help="Mark this P4.1 case as sourced from P2 selected design and P3 assembled morphology.",
+    )
+    parser.add_argument(
+        "--p4-1-object-size-m",
+        type=float,
+        nargs=3,
+        default=(0.30, 0.20, 0.15),
+        metavar=("X", "Y", "Z"),
+        help="P4.1 box object dimensions in meters.",
+    )
+    parser.add_argument("--p4-1-object-mass-kg", type=float, default=1.0, help="P4.1 object mass in kg.")
+    parser.add_argument(
+        "--p4-1-object-pose-world",
+        type=float,
+        nargs=7,
+        default=(0.8, 0.0, 0.4, 0.0, 0.0, 0.0, 1.0),
+        metavar=("X", "Y", "Z", "QX", "QY", "QZ", "QW"),
+        help="P4.1 object initial pose in world coordinates.",
+    )
     parser.add_argument("--fixed-module-count", type=int, default=2, help="Module count for fixed-morphology smokes.")
     parser.add_argument("--fixed-module-spacing-m", type=float, default=0.45, help="Rigid spacing between fixed modules.")
     parser.add_argument(
@@ -174,6 +201,7 @@ def main() -> int:
         "fixed_morphology_hover_smoke_passed",
         "fixed_morphology_articulated_hover_smoke_passed",
         "fixed_morphology_waypoint_smoke_passed",
+        "p4_1_full_scene_backend_smoke_passed",
     ):
         if report.get(key) is False:
             return 1
@@ -183,7 +211,7 @@ def main() -> int:
 def run_probe(args: argparse.Namespace) -> dict[str, object]:
     import isaaclab.sim as sim_utils
     from isaaclab.actuators import ImplicitActuatorCfg
-    from isaaclab.assets import Articulation
+    from isaaclab.assets import Articulation, RigidObject, RigidObjectCfg
     from isaaclab.assets.articulation import ArticulationCfg
     from isaaclab.sim import SimulationContext
     from isaaclab.sim.converters import UrdfConverter, UrdfConverterCfg
@@ -214,11 +242,12 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     urdf_path = _expand_path(backend_config.holon_urdf_path)
     usd_dir = _expand_path(args.generated_usd_dir or backend_config.generated_usd_dir)
     usd_path = _expand_path(args.generated_usd_path or backend_config.generated_usd_path)
-    fixed_smoke_requested = bool(
+    fixed_control_smoke_requested = bool(
         args.fixed_morphology_hover_smoke
         or args.fixed_morphology_articulated_hover_smoke
         or args.fixed_morphology_waypoint_smoke
     )
+    fixed_smoke_requested = bool(fixed_control_smoke_requested or args.p4_1_full_scene_backend_smoke)
     fixed_module_poses = None
     articulated_connections = []
     converted = False
@@ -343,9 +372,33 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         },
     )
     robot = Articulation(robot_cfg)
+    p4_1_object = None
+    if args.p4_1_full_scene_backend_smoke:
+        object_pose = tuple(float(value) for value in args.p4_1_object_pose_world)
+        object_size = tuple(float(value) for value in args.p4_1_object_size_m)
+        object_cfg = RigidObjectCfg(
+            prim_path="/World/Object/box_01",
+            spawn=sim_utils.CuboidCfg(
+                size=object_size,
+                rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                    disable_gravity=False,
+                    max_depenetration_velocity=10.0,
+                ),
+                mass_props=sim_utils.MassPropertiesCfg(mass=float(args.p4_1_object_mass_kg)),
+                collision_props=sim_utils.CollisionPropertiesCfg(),
+                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.2, 0.55, 0.85)),
+            ),
+            init_state=RigidObjectCfg.InitialStateCfg(
+                pos=object_pose[:3],
+                rot=object_pose[3:7],
+            ),
+        )
+        p4_1_object = RigidObject(object_cfg)
 
     sim.reset()
     sim_dt = sim.get_physics_dt()
+    if p4_1_object is not None:
+        p4_1_object.update(sim_dt)
     thrust_body_ids, thrust_body_names = robot.find_bodies(".*thrust_.*")
     gimbal_joint_ids, gimbal_joint_names = robot.find_joints(".*gimbal.*")
     robot_mass = float(robot.data.body_mass.torch[0].sum().detach().cpu())
@@ -369,6 +422,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     initial_root_pos_w = _tensor_row(robot.data.root_pos_w.torch)
     controller_bundle = None
     hover_smoke_report = None
+    p4_1_smoke_report = None
     if args.controller_command_smoke:
         controller_bundle = build_single_module_controller_command_smoke(
             physical_model,
@@ -413,7 +467,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             articulated_joint_warmup_s=float(args.articulated_joint_warmup_s),
             articulated_joint_tracking_tolerance_rad=float(args.articulated_joint_tracking_tolerance_rad),
         )
-    if fixed_smoke_requested:
+    if fixed_control_smoke_requested:
         waypoint_position = args.waypoint_target_position_m
         target_height = float(args.hover_target_height if args.hover_target_height is not None else args.spawn_height)
         if waypoint_position is None:
@@ -475,7 +529,31 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             articulated_joint_tracking_tolerance_rad=float(args.articulated_joint_tracking_tolerance_rad),
             articulated_assembly=bool(args.fixed_morphology_articulated_hover_smoke),
         )
-    for _ in range(0 if hover_smoke_report is not None else max(0, args.steps)):
+    if args.p4_1_full_scene_backend_smoke:
+        if p4_1_object is None:
+            raise RuntimeError("P4.1 full-scene backend smoke requested without a spawned object.")
+        p4_1_smoke_report = _run_p4_1_full_scene_backend_smoke(
+            robot=robot,
+            p4_1_object=p4_1_object,
+            sim=sim,
+            sim_dt=sim_dt,
+            physical_model=physical_model,
+            device=sim.device,
+            steps=max(0, args.steps),
+            module_count=int(args.fixed_module_count),
+            module_spacing_m=float(args.fixed_module_spacing_m),
+            module_poses=fixed_module_poses,
+            object_id="box_01",
+            target_height=float(args.hover_target_height if args.hover_target_height is not None else args.spawn_height),
+            control_dt_s=float(args.dt),
+            build_fixed_morphology=build_fixed_morphology,
+            bridge_supported_controller_command=bridge_supported_controller_command,
+            split_fixed_module_name=split_fixed_module_name,
+            realtime_playback=bool(args.realtime_playback),
+            allocation_mode=str(args.allocation_mode),
+            uses_p2_p3=bool(args.p4_1_uses_p2_p3),
+        )
+    for _ in range(0 if hover_smoke_report is not None or p4_1_smoke_report is not None else max(0, args.steps)):
         if controller_bundle is not None:
             _apply_actuator_record(robot, controller_bundle.actuator_target_record, physical_model, sim.device)
         elif force_per_rotor_n != 0.0:
@@ -499,6 +577,8 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         robot.write_data_to_sim()
         sim.step()
         robot.update(sim_dt)
+        if p4_1_object is not None:
+            p4_1_object.update(sim_dt)
         if args.realtime_playback:
             time.sleep(max(0.0, sim_dt))
     final_root_pos_w = _tensor_row(robot.data.root_pos_w.torch)
@@ -535,10 +615,18 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     report = {
         "spawn_passed": True,
         "isaac_backed": True,
-        "command_applied": command_applied or controller_bundle is not None or hover_smoke_report is not None,
+        "command_applied": (
+            command_applied
+            or controller_bundle is not None
+            or hover_smoke_report is not None
+            or p4_1_smoke_report is not None
+        ),
         "command_probe_passed": (
             force_command_ok and gimbal_command_ok and controller_command_ok and hover_command_ok
-            if command_applied or controller_bundle is not None or hover_smoke_report is not None
+            if command_applied
+            or controller_bundle is not None
+            or hover_smoke_report is not None
+            or p4_1_smoke_report is not None
             else None
         ),
         "controller_command_smoke": controller_bundle is not None,
@@ -585,6 +673,8 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         report.update(_controller_bundle_report(controller_bundle))
     if hover_smoke_report is not None:
         report.update(hover_smoke_report)
+    if p4_1_smoke_report is not None:
+        report.update(p4_1_smoke_report)
     report["realtime_playback"] = bool(args.realtime_playback)
     report["keep_open_after_smoke_s"] = float(args.keep_open_after_smoke_s)
     if args.keep_open_after_smoke_s > 0.0:
@@ -1401,6 +1491,253 @@ def _run_fixed_morphology_smoke(
         f"{report_prefix}_last_controller_status": last_controller_status,
         f"{report_prefix}_last_bridge_metrics": last_bridge_metrics,
     }
+
+
+def _run_p4_1_full_scene_backend_smoke(
+    *,
+    robot,
+    p4_1_object,
+    sim,
+    sim_dt: float,
+    physical_model,
+    device: str,
+    steps: int,
+    module_count: int,
+    module_spacing_m: float,
+    module_poses: dict[int, tuple[float, float, float, float, float, float, float]] | None,
+    object_id: str,
+    target_height: float,
+    control_dt_s: float,
+    build_fixed_morphology,
+    bridge_supported_controller_command,
+    split_fixed_module_name,
+    realtime_playback: bool,
+    allocation_mode: str,
+    uses_p2_p3: bool,
+) -> dict[str, object]:
+    from amsrr.controllers.actuator_mapping import build_actuator_mapping
+    from amsrr.controllers.controller_base import ControllerContext
+    from amsrr.controllers.isaac_controller_bridge import IsaacControllerBridge
+    from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
+    from amsrr.schemas.policies import InteractionKnot, PolicyCommand
+    from amsrr.simulation.p4_1_backend_smoke import evaluate_runtime_observation_joint_state
+
+    morphology_graph = build_fixed_morphology(
+        physical_model,
+        graph_id="p4-1-full-scene-backend-smoke",
+        module_count=module_count,
+        module_spacing_m=module_spacing_m,
+        module_poses=module_poses,
+    )
+    actuator_mapping = build_actuator_mapping(morphology_graph, physical_model)
+    bridge = IsaacControllerBridge()
+    controller = QPIDController(
+        config=QPIDControllerConfig(
+            allocation_mode=allocation_mode,
+            control_dt_s=control_dt_s,
+        )
+    )
+    target_pose = (0.0, 0.0, target_height, 0.0, 0.0, 0.0, 1.0)
+    target_twist = [0.0] * 6
+    previous_command = None
+    runtime_observation_objects = []
+    runtime_observations: list[dict[str, object]] = []
+    controller_commands: list[dict[str, object]] = []
+    actuator_target_records: list[dict[str, object]] = []
+    object_pose_history: list[list[float]] = []
+    qp_infeasible_count = 0
+    clipped_count = 0
+    missing_actuator_count = 0
+    unsupported_actuator_count = 0
+    clipped_target_count = 0
+    finite_state = True
+    executed_steps = 0
+    last_controller_status = None
+    last_bridge_metrics: dict[str, float] = {}
+
+    for step_idx in range(max(0, steps)):
+        executed_steps = step_idx + 1
+        time_s = step_idx * sim_dt
+        root_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
+        root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch)
+        runtime_observation = _build_fixed_runtime_observation(
+            morphology_graph,
+            time_s=time_s,
+            root_pose_world=root_pose,  # type: ignore[arg-type]
+            root_twist_world=root_twist,
+            joint_names=robot.joint_names,
+            joint_positions_tensor=robot.data.joint_pos.torch,
+            joint_velocities_tensor=robot.data.joint_vel.torch,
+            module_count=module_count,
+            module_spacing_m=module_spacing_m,
+            module_poses=module_poses,
+            split_fixed_module_name=split_fixed_module_name,
+        )
+        object_state = _build_p4_1_object_runtime_state(p4_1_object, object_id=object_id)
+        runtime_observation.object_states = [object_state]
+        runtime_observation_objects.append(runtime_observation)
+        runtime_observations.append(runtime_observation.to_dict())
+        controller_command = controller.compute(
+            ControllerContext(
+                runtime_observation=runtime_observation,
+                morphology_graph=morphology_graph,
+                physical_model=physical_model,
+                active_knot=InteractionKnot(t_rel_s=time_s, contact_assignments=[]),
+                policy_command=PolicyCommand(
+                    desired_body_pose=target_pose,
+                    desired_body_twist=target_twist,
+                ),
+                previous_command=previous_command,
+                control_dt_s=control_dt_s,
+            )
+        )
+        bridged_command = bridge_supported_controller_command(controller_command)
+        actuator_record = bridge.convert(
+            bridged_command,
+            actuator_mapping,
+            time_s=time_s,
+            command_index=step_idx,
+        )
+        controller_commands.append(bridged_command.to_dict())
+        actuator_target_records.append(actuator_record.to_dict())
+        _apply_actuator_record(robot, actuator_record, physical_model, device)
+        robot.write_data_to_sim()
+        _write_asset_data_to_sim(p4_1_object)
+        sim.step()
+        robot.update(sim_dt)
+        p4_1_object.update(sim_dt)
+        if realtime_playback:
+            time.sleep(max(0.0, sim_dt))
+
+        object_pose, object_twist = _p4_1_object_pose_and_twist(p4_1_object)
+        object_pose_history.append(list(object_pose))
+        finite_state = finite_state and all(_is_finite(value) for value in root_pose)
+        finite_state = finite_state and all(_is_finite(value) for value in object_pose)
+        finite_state = finite_state and all(_is_finite(value) for value in object_twist)
+
+        status = bridged_command.controller_status
+        last_controller_status = status.to_dict()
+        last_bridge_metrics = dict(actuator_record.metrics)
+        if not status.qp_feasible:
+            qp_infeasible_count += 1
+        if status.metrics.get("clipped", 0.0) > 0.0:
+            clipped_count += 1
+        missing_actuator_count += len(actuator_record.missing_actuators)
+        unsupported_actuator_count += len(actuator_record.unsupported_actuators)
+        clipped_target_count += len(actuator_record.clipped_targets)
+        previous_command = bridged_command
+
+    joint_state_metrics = evaluate_runtime_observation_joint_state(
+        runtime_observation_objects,
+        articulated_morphology=False,
+    )
+    logged_step_count_ok = (
+        executed_steps > 0
+        and len(runtime_observations) == executed_steps
+        and len(controller_commands) == executed_steps
+        and len(actuator_target_records) == executed_steps
+        and len(object_pose_history) == executed_steps
+    )
+    object_pose_history_ok = all(len(pose) == 7 for pose in object_pose_history)
+    passed = (
+        executed_steps > 0
+        and finite_state
+        and logged_step_count_ok
+        and object_pose_history_ok
+        and joint_state_metrics.passed
+        and qp_infeasible_count == 0
+        and missing_actuator_count == 0
+        and unsupported_actuator_count == 0
+        and clipped_target_count == 0
+    )
+    return {
+        "p4_1_full_scene_backend_smoke": True,
+        "p4_1_full_scene_backend_smoke_passed": passed,
+        "p4_1_full_scene_spawned": True,
+        "p4_1_robot_spawned": True,
+        "p4_1_object_spawned": True,
+        "p4_1_floor_spawned": True,
+        "p4_1_uses_p2_p3": bool(uses_p2_p3),
+        "p4_1_articulated_morphology": False,
+        "p4_1_module_count": int(module_count),
+        "p4_1_module_spacing_m": float(module_spacing_m),
+        "p4_1_steps": int(executed_steps),
+        "p4_1_requested_steps": int(max(0, steps)),
+        "p4_1_duration_s": float(executed_steps * sim_dt),
+        "p4_1_runtime_observations": runtime_observations,
+        "p4_1_controller_commands": controller_commands,
+        "p4_1_actuator_target_records": actuator_target_records,
+        "p4_1_object_pose_history": object_pose_history,
+        "p4_1_runtime_observation_count": len(runtime_observations),
+        "p4_1_controller_command_count": len(controller_commands),
+        "p4_1_actuator_target_record_count": len(actuator_target_records),
+        "p4_1_object_pose_count": len(object_pose_history),
+        "p4_1_logged_step_count_ok": bool(logged_step_count_ok),
+        "p4_1_object_pose_history_ok": bool(object_pose_history_ok),
+        "p4_1_finite_state": bool(finite_state),
+        "p4_1_qp_infeasible_count": int(qp_infeasible_count),
+        "p4_1_controller_clipped_count": int(clipped_count),
+        "p4_1_missing_actuator_count": int(missing_actuator_count),
+        "p4_1_unsupported_actuator_count": int(unsupported_actuator_count),
+        "p4_1_clipped_target_count": int(clipped_target_count),
+        "p4_1_joint_state_preservation_passed": bool(joint_state_metrics.passed),
+        "p4_1_joint_state_failure_reasons": list(joint_state_metrics.failure_reasons),
+        "p4_1_module_state_count": int(joint_state_metrics.module_state_count),
+        "p4_1_modules_with_pose": int(joint_state_metrics.modules_with_pose),
+        "p4_1_modules_with_twist": int(joint_state_metrics.modules_with_twist),
+        "p4_1_modules_with_joint_positions": int(joint_state_metrics.modules_with_joint_positions),
+        "p4_1_modules_with_joint_velocities": int(joint_state_metrics.modules_with_joint_velocities),
+        "p4_1_vectoring_joint_key_count": int(joint_state_metrics.vectoring_joint_key_count),
+        "p4_1_dock_joint_key_count": int(joint_state_metrics.dock_joint_key_count),
+        "p4_1_vectoring_joint_value_count": int(joint_state_metrics.vectoring_joint_value_count),
+        "p4_1_dock_joint_value_count": int(joint_state_metrics.dock_joint_value_count),
+        "p4_1_max_model_rotor_origin_change_m": 0.0,
+        "p4_1_max_model_allocation_change": 0.0,
+        "p4_1_last_controller_status": last_controller_status,
+        "p4_1_last_bridge_metrics": last_bridge_metrics,
+    }
+
+
+def _build_p4_1_object_runtime_state(p4_1_object, *, object_id: str):
+    from amsrr.schemas.runtime import ObjectRuntimeState
+
+    pose_world, twist_world = _p4_1_object_pose_and_twist(p4_1_object)
+    return ObjectRuntimeState(
+        object_id=object_id,
+        pose_world=pose_world,
+        twist_world=twist_world,
+    )
+
+
+def _p4_1_object_pose_and_twist(p4_1_object):
+    data = p4_1_object.data
+    if hasattr(data, "root_pose_w"):
+        pose_values = _tensor_row(_isaac_tensor(data.root_pose_w))
+        pose_world = tuple(float(value) for value in pose_values[:7])
+    else:
+        root_pos = _tensor_row(_isaac_tensor(data.root_pos_w))
+        root_quat = _tensor_row(_isaac_tensor(data.root_quat_w))
+        pose_world = tuple(float(value) for value in [*root_pos[:3], *root_quat[:4]])
+
+    if hasattr(data, "root_lin_vel_w") and hasattr(data, "root_ang_vel_w"):
+        linear = _tensor_row(_isaac_tensor(data.root_lin_vel_w))
+        angular = _tensor_row(_isaac_tensor(data.root_ang_vel_w))
+        twist_world = [float(value) for value in [*linear[:3], *angular[:3]]]
+    elif hasattr(data, "root_vel_w"):
+        velocity_values = _tensor_row(_isaac_tensor(data.root_vel_w))
+        twist_world = [float(value) for value in (velocity_values + [0.0] * 6)[:6]]
+    else:
+        twist_world = [0.0] * 6
+    return pose_world, twist_world
+
+
+def _isaac_tensor(value):
+    return value.torch if hasattr(value, "torch") else value
+
+
+def _write_asset_data_to_sim(asset) -> None:
+    if hasattr(asset, "write_data_to_sim"):
+        asset.write_data_to_sim()
 
 
 def _build_fixed_runtime_observation(

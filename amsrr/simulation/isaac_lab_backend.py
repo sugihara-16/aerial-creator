@@ -426,6 +426,65 @@ class IsaacLabBackend:
         )
         return command
 
+    def p4_1_full_scene_backend_smoke_command(
+        self,
+        *,
+        config_path: str | Path = "configs/env/isaac_lab.yaml",
+        convert_if_missing: bool = True,
+        force_convert: bool = False,
+        steps: int = 80,
+        module_count: int = 2,
+        module_spacing_m: float = 0.45,
+        object_size_m: tuple[float, float, float] = (0.30, 0.20, 0.15),
+        object_mass_kg: float = 1.0,
+        object_pose_world: tuple[float, float, float, float, float, float, float] = (
+            0.8,
+            0.0,
+            0.4,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ),
+        uses_p2_p3_design: bool = True,
+        generated_usd_dir: str | Path | None = None,
+        generated_usd_path: str | Path | None = None,
+    ) -> list[str]:
+        command = self.holon_spawn_probe_command(
+            config_path=config_path,
+            convert_if_missing=convert_if_missing,
+            force_convert=force_convert,
+            steps=steps,
+            generated_usd_dir=generated_usd_dir,
+            generated_usd_path=generated_usd_path,
+        )
+        command.extend(
+            [
+                "--p4-1-full-scene-backend-smoke",
+                "--fixed-module-count",
+                str(module_count),
+                "--fixed-module-spacing-m",
+                str(module_spacing_m),
+                "--p4-1-object-size-m",
+                str(object_size_m[0]),
+                str(object_size_m[1]),
+                str(object_size_m[2]),
+                "--p4-1-object-mass-kg",
+                str(object_mass_kg),
+                "--p4-1-object-pose-world",
+                str(object_pose_world[0]),
+                str(object_pose_world[1]),
+                str(object_pose_world[2]),
+                str(object_pose_world[3]),
+                str(object_pose_world[4]),
+                str(object_pose_world[5]),
+                str(object_pose_world[6]),
+            ]
+        )
+        if uses_p2_p3_design:
+            command.append("--p4-1-uses-p2-p3")
+        return command
+
     def run_holon_single_module_hover_smoke(
         self,
         *,
@@ -583,6 +642,44 @@ class IsaacLabBackend:
             position_tolerance_m=position_tolerance_m,
             attitude_tolerance_rad=attitude_tolerance_rad,
             hold_duration_s=hold_duration_s,
+            generated_usd_dir=self.config.generated_usd_dir,
+            generated_usd_path=self.config.generated_usd_path,
+        )
+        return _run_json_command(command, timeout_s=timeout_s)
+
+    def run_p4_1_full_scene_backend_smoke(
+        self,
+        *,
+        config_path: str | Path = "configs/env/isaac_lab.yaml",
+        force_convert: bool = True,
+        steps: int = 80,
+        module_count: int = 2,
+        module_spacing_m: float = 0.45,
+        object_size_m: tuple[float, float, float] = (0.30, 0.20, 0.15),
+        object_mass_kg: float = 1.0,
+        object_pose_world: tuple[float, float, float, float, float, float, float] = (
+            0.8,
+            0.0,
+            0.4,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ),
+        uses_p2_p3_design: bool = True,
+        timeout_s: float | None = None,
+    ) -> dict[str, Any]:
+        command = self.p4_1_full_scene_backend_smoke_command(
+            config_path=config_path,
+            convert_if_missing=not force_convert,
+            force_convert=force_convert,
+            steps=steps,
+            module_count=module_count,
+            module_spacing_m=module_spacing_m,
+            object_size_m=object_size_m,
+            object_mass_kg=object_mass_kg,
+            object_pose_world=object_pose_world,
+            uses_p2_p3_design=uses_p2_p3_design,
             generated_usd_dir=self.config.generated_usd_dir,
             generated_usd_path=self.config.generated_usd_path,
         )
