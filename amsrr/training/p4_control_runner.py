@@ -5,7 +5,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from amsrr.geometry.pose_math import compose_pose
 from amsrr.logging.episode_archive import EpisodeArchive, write_episode_archives_jsonl
+from amsrr.robot_model.fixed_morphology_urdf import fixed_morphology_module_poses
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
 from amsrr.schemas.common import SchemaBase, SchemaValidationError, require_non_empty
 from amsrr.schemas.interaction_envelope import InteractionEnvelope, PrecisionRequirement
@@ -172,12 +174,18 @@ def _build_smoke_archive(
     if result.smoke_name == "single_module_hover":
         module_count = 1
     module_spacing_m = 0.0 if module_count == 1 else env_config.fixed_morphology_module_spacing_m
+    module_poses = fixed_morphology_module_poses(
+        physical_model.urdf_path,
+        module_count=module_count,
+        module_spacing_m=max(module_spacing_m, env_config.fixed_morphology_module_spacing_m),
+    )
     target_pose = _target_pose_for_smoke(result.smoke_name, env_config)
     morphology_graph = build_fixed_morphology(
         physical_model,
         graph_id=f"p4-control-{result.smoke_name}-morphology",
         module_count=module_count,
         module_spacing_m=module_spacing_m,
+        module_poses=module_poses,
     )
     task_spec = _smoke_task_spec(result, target_pose, module_count, env_config)
     controller_status = _smoke_controller_status(result)
@@ -468,15 +476,7 @@ def _module_summary_pose(
     root_pose: tuple[float, float, float, float, float, float, float],
     module_pose: tuple[float, float, float, float, float, float, float],
 ) -> tuple[float, float, float, float, float, float, float]:
-    return (
-        root_pose[0] + module_pose[0],
-        root_pose[1] + module_pose[1],
-        root_pose[2] + module_pose[2],
-        root_pose[3],
-        root_pose[4],
-        root_pose[5],
-        root_pose[6],
-    )
+    return compose_pose(root_pose, module_pose)
 
 
 def _yaw_quat(yaw_rad: float) -> tuple[float, float, float, float]:

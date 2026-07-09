@@ -3,6 +3,40 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus dock frame alignment supplement
+- Work package / Agent label: Agent D/I/J boundary: π_D dock geometry and P4-control fixed-morphology spawn alignment
+- Summary: Corrected the fixed-morphology docked pose and the upstream design geometry. Dock connections now use the face-to-face relation where pitch/yaw connect point origins coincide, z remains aligned, and x/y are reversed via `Rz(pi)`. `DockPortSpec.local_pose` now stores the connect dummy frame in the module/base frame, morphology builders compute dock-edge relative poses from selected port pairs, and the fixed-morphology URDF/probe/runner use the same dock-aligned module poses.
+- Files changed:
+  - `amsrr/geometry/pose_math.py`
+  - `amsrr/robot_model/urdf_transforms.py`
+  - `amsrr/robot_model/physical_model_builder.py`
+  - `amsrr/robot_model/fixed_morphology_urdf.py`
+  - `amsrr/morphology/dock_geometry.py`
+  - `amsrr/morphology/graph.py`
+  - `amsrr/morphology/grasp_carry_designs.py`
+  - `amsrr/simulation/p4_control_controller_smoke.py`
+  - `amsrr/training/p4_control_runner.py`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - related unit tests under `tests/unit/`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No dataclass field changes. Semantics of `DockPortSpec.local_pose` / `PortNode.local_pose` are corrected to module-frame connect-port poses. Added internal geometry helpers only.
+- Upstream dependencies used: Holon URDF connect point frame tree, `pitch_connect_point_*` / `yaw_connect_point_*`, existing pitch/yaw dock compatibility masks, fixed-morphology URDF generation, and P4-control smoke runner/probe paths.
+- Downstream impact: π_D design outputs, feasibility-visible dock edges, generated fixed-morphology URDF/USDs, runtime observations, and smoke summary archives now agree on docked module geometry. Existing generated fixed USDs should be regenerated.
+- Tests added or run:
+  - Added unit checks that physical dock ports are module-frame poses and satisfy `src_port * Rz(pi) == relative * dst_port`.
+  - Added fixed-URDF checks that generated module connect dummy frames satisfy the face-to-face relation.
+  - Added minimal and grasp/carry morphology checks that all dock edges are port-aligned.
+  - `python3 -m py_compile amsrr/geometry/pose_math.py amsrr/robot_model/urdf_transforms.py amsrr/robot_model/physical_model_builder.py amsrr/robot_model/fixed_morphology_urdf.py amsrr/morphology/dock_geometry.py amsrr/morphology/graph.py amsrr/morphology/grasp_carry_designs.py amsrr/simulation/p4_control_controller_smoke.py amsrr/training/p4_control_runner.py scripts/p4_control_holon_spawn_probe.py`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/robot_model/test_physical_model_builder.py tests/unit/robot_model/test_fixed_morphology_urdf.py tests/unit/morphology/test_minimal_morphology_builder.py tests/unit/morphology/test_grasp_carry_variants.py tests/unit/simulation/test_p4_control_controller_smoke.py tests/unit/training/test_p4_control_runner.py`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - Real Isaac fixed-morphology hover smoke for 20 s and fixed-morphology waypoint smoke with regenerated USDs.
+- Tests run: Related unit subset passed: 17 passed. Full unit suite passed: 132 passed, 1 skipped. Real Isaac fixed hover passed with `fixed_morphology_hover_smoke_passed=true`, hold time `20.0 s`, final position error `6.41e-05 m`, max position error `0.02295 m`, and QP infeasible count `0`. Real Isaac fixed waypoint passed with final position error `0.01677 m`, hold time `1.0 s`, QP infeasible count `0`, and no missing/unsupported/clipped targets.
+- Assumptions: The selected default fixed connection pairs are the first compatible free pitch/yaw pairs in sorted connect point order. `--fixed-module-spacing-m` remains as fallback metadata/legacy input, not the primary docked-pose definition when ports are available.
+- Blockers: None for two-module fixed-morphology spawn geometry after regeneration.
+- Next steps: User can rerun GUI fixed hover/waypoint commands with `--force-convert` to visually inspect the corrected facing dock pose.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control hover drift fix supplement
 - Work package / Agent label: Agent I/J boundary: P4-control hover stabilization debug
 - Summary: Fixed the causes of the observed 5-10 s single-module hover drift. The physical model now treats each rotor's local thrust direction as thrust-frame `+z`; the URDF rotor continuous joint axis sign is used to derive reaction torque from `<m_f_rate>` instead of being treated as thrust direction. The rigid-body model's vectoring virtual lateral channel now follows the actual positive gimbal motion direction, computed from `gimbal_axis x thrust_z`, instead of assuming rotor-arm x. Dock mechanism hold commands now command the nominal zero position instead of following the current passive joint angle.

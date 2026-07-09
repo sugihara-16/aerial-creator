@@ -15,6 +15,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from isaaclab.app import AppLauncher
 
+from amsrr.geometry.pose_math import compose_pose
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Spawn the generated Holon USD as an Isaac Lab articulation.")
@@ -146,6 +148,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     import torch
 
     from amsrr.robot_model.fixed_morphology_urdf import (
+        fixed_morphology_module_poses,
         split_fixed_module_name,
         write_fixed_morphology_urdf,
         write_joint_velocity_override_urdf,
@@ -168,11 +171,17 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     usd_dir = _expand_path(args.generated_usd_dir or backend_config.generated_usd_dir)
     usd_path = _expand_path(args.generated_usd_path or backend_config.generated_usd_path)
     fixed_smoke_requested = bool(args.fixed_morphology_hover_smoke or args.fixed_morphology_waypoint_smoke)
+    fixed_module_poses = None
     converted = False
 
     if args.force_convert or fixed_smoke_requested or (args.convert_if_missing and not usd_path.exists()):
         mesh_search_dirs = _holon_mesh_search_dirs()
         if fixed_smoke_requested:
+            fixed_module_poses = fixed_morphology_module_poses(
+                urdf_path,
+                module_count=int(args.fixed_module_count),
+                module_spacing_m=float(args.fixed_module_spacing_m),
+            )
             fixed_urdf_path = usd_dir / "fixed_morphology_urdf" / f"holon_fixed_{int(args.fixed_module_count)}.urdf"
             urdf_path = write_fixed_morphology_urdf(
                 urdf_path,
@@ -350,6 +359,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             steps=max(0, args.steps),
             module_count=int(args.fixed_module_count),
             module_spacing_m=float(args.fixed_module_spacing_m),
+            module_poses=fixed_module_poses,
             target_position=target_position,  # type: ignore[arg-type]
             target_yaw_rad=target_yaw,
             position_tolerance_m=float(args.hover_position_tolerance_m),
@@ -683,6 +693,7 @@ def _run_fixed_morphology_smoke(
     steps: int,
     module_count: int,
     module_spacing_m: float,
+    module_poses: dict[int, tuple[float, float, float, float, float, float, float]] | None,
     target_position: tuple[float, float, float],
     target_yaw_rad: float,
     position_tolerance_m: float,
@@ -709,6 +720,7 @@ def _run_fixed_morphology_smoke(
         graph_id=f"{report_prefix}-smoke",
         module_count=module_count,
         module_spacing_m=module_spacing_m,
+        module_poses=module_poses,
     )
     actuator_mapping = build_actuator_mapping(morphology_graph, physical_model)
     bridge = IsaacControllerBridge()
@@ -770,6 +782,7 @@ def _run_fixed_morphology_smoke(
             joint_velocities_tensor=robot.data.joint_vel.torch,
             module_count=module_count,
             module_spacing_m=module_spacing_m,
+            module_poses=module_poses,
             split_fixed_module_name=split_fixed_module_name,
         )
         controller_command = controller.compute(
@@ -887,6 +900,7 @@ def _build_fixed_runtime_observation(
     joint_velocities_tensor,
     module_count: int,
     module_spacing_m: float,
+    module_poses: dict[int, tuple[float, float, float, float, float, float, float]] | None,
     split_fixed_module_name,
 ):
     from amsrr.schemas.policies import ControllerStatus
@@ -907,8 +921,13 @@ def _build_fixed_runtime_observation(
     root_twist = (list(root_twist_world) + [0.0] * 6)[:6]
     module_states = []
     for module_id in range(module_count):
-        offset_root = (module_spacing_m * module_id, 0.0, 0.0)
-        pose_world = _fixed_module_pose(root_pose_world, offset_root)
+        relative_pose = (
+            module_poses[module_id]
+            if module_poses is not None and module_id in module_poses
+            else (module_spacing_m * module_id, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+        )
+        offset_root = tuple(float(value) for value in relative_pose[:3])
+        pose_world = compose_pose(root_pose_world, relative_pose)
         twist_world = _fixed_module_twist(root_pose_world, root_twist, offset_root)
         module_states.append(
             ModuleRuntimeState(

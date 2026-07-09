@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from amsrr.geometry.pose_math import FACE_TO_FACE_DOCK_RELATION, compose_pose, dock_module_relative_pose
 from amsrr.robot_model.physical_model_builder import (
     build_module_capability_token,
     build_physical_model_from_config,
@@ -43,6 +44,12 @@ def test_physical_model_rotors_and_dock_ports() -> None:
         "yaw_dock",
     ]
     assert all(port.compatible_port_types for port in physical_model.dock_ports)
+    pitch = next(port for port in physical_model.dock_ports if port.port_id == "pitch_connect_point_1")
+    yaw = next(port for port in physical_model.dock_ports if port.port_id == "yaw_connect_point_1")
+    relative = dock_module_relative_pose(pitch.local_pose, yaw.local_pose)
+    assert pitch.local_pose[0] > 0.2
+    assert yaw.local_pose[0] < -0.2
+    assert compose_pose(relative, yaw.local_pose) == pytest.approx(compose_pose(pitch.local_pose, FACE_TO_FACE_DOCK_RELATION))
 
 
 def test_module_capability_token_from_physical_model() -> None:

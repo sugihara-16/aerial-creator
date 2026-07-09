@@ -106,15 +106,20 @@ def build_fixed_morphology(
     graph_id: str = "fixed-morphology-controller-command-smoke",
     module_count: int = 2,
     module_spacing_m: float = 0.45,
+    module_poses: dict[int, tuple[float, float, float, float, float, float, float]] | None = None,
 ) -> MorphologyGraph:
     capability = build_module_capability_token(physical_model)
+    poses = module_poses or {
+        module_id: (module_spacing_m * module_id, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+        for module_id in range(module_count)
+    }
     return MorphologyGraph(
         graph_id=graph_id,
         modules=[
             ModuleNode(
                 module_id=module_id,
                 module_type="holon",
-                pose_in_design_frame=(module_spacing_m * module_id, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+                pose_in_design_frame=poses[module_id],
                 role_id="base" if module_id == 0 else "fixed_attached",
                 is_base=module_id == 0,
                 capability_token=capability,

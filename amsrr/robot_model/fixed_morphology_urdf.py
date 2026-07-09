@@ -2,9 +2,18 @@ from __future__ import annotations
 
 import copy
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
 from pathlib import Path
 
+from amsrr.geometry.pose_math import (
+    compose_pose,
+    dock_module_relative_pose,
+    inverse_pose,
+    pose_to_xyz_rpy,
+)
 from amsrr.schemas.common import SchemaValidationError
+from amsrr.robot_model.urdf_loader import URDFModel, load_urdf
+from amsrr.robot_model.urdf_transforms import link_poses_in_root_frame
 
 
 FIXED_MODULE_PREFIX_SEPARATOR = "__"
@@ -35,6 +44,12 @@ def write_fixed_morphology_urdf(
     source_links = _named_children(source_root, "link")
     if "root" not in source_links:
         raise SchemaValidationError("source Holon URDF must contain root link")
+    module_root_poses = fixed_morphology_module_poses(
+        source_path,
+        module_count=module_count,
+        module_spacing_m=module_spacing_m,
+    )
+    parent_module_ids = _fixed_morphology_parent_module_ids(module_count)
 
     output_root = ET.Element("robot", {"name": f"holon_fixed_morphology_{module_count}"})
     ET.SubElement(output_root, "baselink", {"name": _prefixed_name(0, "fc", prefix_separator)})
@@ -50,16 +65,21 @@ def write_fixed_morphology_urdf(
             _prefix_element(copied, prefix=prefix, source_dir=source_path.parent, mesh_search_dirs=search_dirs)
             output_root.append(copied)
         if module_id > 0:
+            parent_module_id = parent_module_ids[module_id]
+            parent_pose = module_root_poses[parent_module_id]
+            child_pose = module_root_poses[module_id]
+            relative_pose = compose_pose(inverse_pose(parent_pose), child_pose)
+            xyz, rpy = pose_to_xyz_rpy(relative_pose)
             joint = ET.SubElement(
                 output_root,
                 "joint",
                 {
-                    "name": f"fixed_module_{module_id}_to_module_0",
+                    "name": f"fixed_module_{module_id}_to_module_{parent_module_id}",
                     "type": "fixed",
                 },
             )
-            ET.SubElement(joint, "origin", {"xyz": f"{module_spacing_m * module_id:.9g} 0 0", "rpy": "0 0 0"})
-            ET.SubElement(joint, "parent", {"link": _prefixed_name(0, "root", prefix_separator)})
+            ET.SubElement(joint, "origin", {"xyz": _format_vec(xyz), "rpy": _format_vec(rpy)})
+            ET.SubElement(joint, "parent", {"link": _prefixed_name(parent_module_id, "root", prefix_separator)})
             ET.SubElement(joint, "child", {"link": _prefixed_name(module_id, "root", prefix_separator)})
             ET.SubElement(joint, "axis", {"xyz": "0 0 0"})
 
@@ -67,6 +87,98 @@ def write_fixed_morphology_urdf(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     ET.ElementTree(output_root).write(output_path, encoding="utf-8", xml_declaration=True)
     return output_path
+
+
+def fixed_morphology_module_poses(
+    source_urdf_path: str | Path,
+    *,
+    module_count: int = 2,
+    module_spacing_m: float = 0.45,
+) -> dict[int, tuple[float, float, float, float, float, float, float]]:
+    if module_count < 1:
+        raise SchemaValidationError("fixed morphology module_count must be >= 1")
+    source_path = Path(source_urdf_path).resolve()
+    urdf_model = load_urdf(source_path)
+    port_records = _connect_port_records(urdf_model)
+    if len(port_records) < 2:
+        return {
+            module_id: (module_spacing_m * module_id, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+            for module_id in range(module_count)
+        }
+    poses = {0: (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)}
+    used_ports: set[tuple[int, str]] = set()
+    for module_id in range(1, module_count):
+        parent_module_id = module_id - 1
+        src, dst = _first_compatible_free_pair(
+            parent_module_id,
+            module_id,
+            port_records,
+            used_ports,
+        )
+        used_ports.update({(parent_module_id, src.port_id), (module_id, dst.port_id)})
+        parent_to_child = dock_module_relative_pose(src.pose_root, dst.pose_root)
+        poses[module_id] = compose_pose(poses[parent_module_id], parent_to_child)
+    return poses
+
+
+@dataclass(frozen=True)
+class _ConnectPortRecord:
+    port_id: str
+    port_type: str
+    pose_root: tuple[float, float, float, float, float, float, float]
+
+
+def _fixed_morphology_parent_module_ids(module_count: int) -> dict[int, int]:
+    return {module_id: module_id - 1 for module_id in range(1, module_count)}
+
+
+def _connect_port_records(urdf_model: URDFModel) -> list[_ConnectPortRecord]:
+    link_poses_root = link_poses_in_root_frame(urdf_model)
+    joints_by_name = {joint.name: joint for joint in urdf_model.joints}
+    records: list[_ConnectPortRecord] = []
+    for joint_name in urdf_model.candidate_connect_joints:
+        joint = joints_by_name[joint_name]
+        records.append(
+            _ConnectPortRecord(
+                port_id=joint_name,
+                port_type=_port_type_from_name(joint_name + "_" + joint.parent_link),
+                pose_root=link_poses_root[joint.child_link],
+            )
+        )
+    return sorted(records, key=lambda item: item.port_id)
+
+
+def _port_type_from_name(name: str) -> str:
+    if "pitch" in name:
+        return "pitch_dock"
+    if "yaw" in name:
+        return "yaw_dock"
+    return "generic_dock"
+
+
+def _ports_compatible(src_type: str, dst_type: str) -> bool:
+    if src_type == "pitch_dock":
+        return dst_type == "yaw_dock"
+    if src_type == "yaw_dock":
+        return dst_type == "pitch_dock"
+    return src_type == "generic_dock" or dst_type == "generic_dock"
+
+
+def _first_compatible_free_pair(
+    src_module_id: int,
+    dst_module_id: int,
+    records: list[_ConnectPortRecord],
+    used_ports: set[tuple[int, str]],
+) -> tuple[_ConnectPortRecord, _ConnectPortRecord]:
+    for src in records:
+        if (src_module_id, src.port_id) in used_ports:
+            continue
+        for dst in records:
+            if (dst_module_id, dst.port_id) in used_ports:
+                continue
+            if _ports_compatible(src.port_type, dst.port_type):
+                return src, dst
+    raise SchemaValidationError("No compatible free dock port pair available for fixed morphology")
 
 
 def write_resolved_mesh_urdf(
@@ -210,6 +322,10 @@ def _normalise_mesh_search_dirs(mesh_search_dirs: list[str | Path] | None) -> li
 
 def _prefixed_name(module_id: int, local_name: str, separator: str) -> str:
     return f"module_{module_id}{separator}{local_name}"
+
+
+def _format_vec(vector) -> str:
+    return " ".join(f"{float(value):.9g}" for value in vector)
 
 
 def _named_children(root: ET.Element, tag: str) -> dict[str, ET.Element]:

@@ -4,6 +4,15 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### Dock Frame Alignment Supplement
+
+- Context: GUI inspection showed that the generated two-module fixed morphology placed the modules side-by-side rather than in the actual docked pose. The intended docked relation is that pitch/yaw connect point origins coincide and their axes are colinear, with the facing pitch/yaw dock geometry requiring x/y signs to be reversed while z remains aligned.
+- Decision: Represent a pitch/yaw dock connection as a face-to-face port relation `Rz(pi)` between connect point frames. The source module to destination module relative pose is now computed as `src_port_pose * Rz(pi) * inverse(dst_port_pose)`.
+- Physical model impact: `DockPortSpec.local_pose` now stores the connect dummy frame pose in the module/base frame, not merely the connect joint origin relative to its immediate dock mechanism parent link. This makes π_D-facing `PortNode.local_pose` geometrically meaningful for dock edge construction.
+- π_D/morphology impact: Minimal and grasp/carry morphology builders now compute `DockEdge.relative_pose_src_to_dst` from the selected port pair and propagate module poses through the dock tree so the design morphology itself satisfies the same port alignment relation.
+- P4-control/Isaac impact: The fixed-morphology URDF generator now places connected module roots using the selected compatible pitch/yaw port pair instead of a fixed x-spacing. The fixed-morphology controller smoke/probe/summary archive use the same module poses for runtime observations and logs.
+- Compatibility impact: The CLI still accepts `--fixed-module-spacing-m`, but spacing is now only a fallback when no connect ports are available. Existing fixed-morphology USDs should be regenerated with `--force-convert`. This does not claim dynamic docking, object grasp/carry success, learned policies, or P4 full completion.
+
 ### P4-Control Hover Drift Fix Supplement
 
 - Context: User observation and real Isaac diagnostics showed that the single-module hover drifted after roughly 5-10 s. Pseudoinverse allocation did not hover and increasing vectoring speed alone did not remove the drift. Inspection against `aerial_robot_base` and the Holon URDF found three geometry/control-model mismatches.

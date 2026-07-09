@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from amsrr.morphology.dock_geometry import modules_with_dock_aligned_poses, relative_pose_for_dock_ports
 from amsrr.robot_model.physical_model_builder import build_module_capability_token
-from amsrr.schemas.common import ContactMode, Pose7D, SchemaValidationError
+from amsrr.schemas.common import ContactMode, SchemaValidationError
 from amsrr.schemas.irg import IRGNode, IRGNodeType, InteractionRequirementGraph
 from amsrr.schemas.morphology import (
     ControlGroup,
@@ -21,7 +22,6 @@ from amsrr.schemas.physical_model import DockPortSpec, ModuleCapabilityToken, Ph
 from amsrr.schemas.task_spec import TaskSpec
 
 
-IDENTITY_POSE: Pose7D = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
 PORT_TYPE_ORDER = ("pitch_dock", "yaw_dock", "generic_dock")
 CONTACT_MODE_TO_ANCHOR_TYPE = {
     ContactMode.GRASP: "grasp",
@@ -69,6 +69,7 @@ class MinimalMorphologyBuilder:
 
         modules = self._build_modules(module_count, capability)
         ports, dock_edges = self._build_ports_and_edges(module_count, physical_model.dock_ports)
+        modules = modules_with_dock_aligned_poses(modules, dock_edges, base_module_id=0)
         anchors = self._build_anchors(anchor_plan, physical_model, task_spec)
         control_groups = [
             ControlGroup(group_id="all_modules", module_ids=[module.module_id for module in modules], role="whole_body")
@@ -175,7 +176,7 @@ class MinimalMorphologyBuilder:
                     src_port_id=src.port_global_id,
                     dst_module_id=dst.module_id,
                     dst_port_id=dst.port_global_id,
-                    relative_pose_src_to_dst=IDENTITY_POSE,
+                    relative_pose_src_to_dst=relative_pose_for_dock_ports(src, dst),
                     edge_role="structural",
                     estimated_stiffness=[1000.0, 1000.0, 1000.0, 50.0, 50.0, 50.0],
                     latch_state="planned",

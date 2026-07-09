@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from amsrr.morphology.dock_geometry import modules_with_dock_aligned_poses, relative_pose_for_dock_ports
 from amsrr.robot_model.physical_model_builder import build_module_capability_token
 from amsrr.schemas.common import ContactMode, Pose7D, SchemaValidationError, StrEnum
 from amsrr.schemas.irg import IRGNode, IRGNodeType, InteractionRequirementGraph
@@ -115,6 +116,7 @@ class GraspCarryMorphologyVariantBuilder:
         capability = build_module_capability_token(physical_model, module_type=physical_model.model_id)
         modules = _build_modules(layout, capability)
         ports, dock_edges = _build_ports_and_edges(layout, physical_model.dock_ports, modules)
+        modules = modules_with_dock_aligned_poses(modules, dock_edges, base_module_id=0)
         anchor_plan = _anchor_plan(
             required_items,
             slot_requirements,
@@ -291,7 +293,6 @@ def _build_ports_and_edges(
     ports_by_module: dict[int, list[PortNode]] = {}
     for port in ports:
         ports_by_module.setdefault(port.module_id, []).append(port)
-    poses = {module.module_id: module.pose_in_design_frame for module in modules}
     used_port_ids: set[int] = set()
     dock_edges: list[DockEdge] = []
     for edge_id, (src_module_id, dst_module_id, edge_role) in enumerate(layout.edge_specs):
@@ -308,7 +309,7 @@ def _build_ports_and_edges(
                 src_port_id=src_port.port_global_id,
                 dst_module_id=dst_module_id,
                 dst_port_id=dst_port.port_global_id,
-                relative_pose_src_to_dst=_relative_pose(poses[src_module_id], poses[dst_module_id]),
+                relative_pose_src_to_dst=relative_pose_for_dock_ports(src_port, dst_port),
                 edge_role=edge_role,  # type: ignore[arg-type]
                 estimated_stiffness=[1000.0, 1000.0, 1000.0, 50.0, 50.0, 50.0],
                 latch_state="planned",
@@ -598,18 +599,6 @@ def _first_compatible_free_pair(
             if _ports_compatible(src, dst):
                 return src, dst
     raise SchemaValidationError("No compatible free dock port pair available for grasp/carry variant")
-
-
-def _relative_pose(src_pose: Pose7D, dst_pose: Pose7D) -> Pose7D:
-    return (
-        dst_pose[0] - src_pose[0],
-        dst_pose[1] - src_pose[1],
-        dst_pose[2] - src_pose[2],
-        0.0,
-        0.0,
-        0.0,
-        1.0,
-    )
 
 
 def _default_anchor_link(physical_model: PhysicalModel) -> str | None:

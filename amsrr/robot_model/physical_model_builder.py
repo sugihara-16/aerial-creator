@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import Any
 
 from amsrr.robot_model.thrust_model import ThrustModel, ThrustModelEntry, load_thrust_model, normalize_rotor_id
-from amsrr.robot_model.urdf_loader import URDFJoint, URDFModel, load_urdf, pose_from_xyz_rpy
+from amsrr.robot_model.urdf_loader import URDFJoint, URDFModel, load_urdf
+from amsrr.robot_model.urdf_transforms import link_poses_in_module_frame
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.physical_model import (
     CollisionPrimitive,
@@ -133,6 +134,7 @@ def _mechanism_joint_for_port(urdf_model: URDFModel, parent_link: str) -> URDFJo
 def _build_dock_ports(urdf_model: URDFModel) -> list[DockPortSpec]:
     ports: list[DockPortSpec] = []
     joints_by_name = _joint_by_name(urdf_model)
+    link_poses_module = link_poses_in_module_frame(urdf_model)
     for joint_name in urdf_model.candidate_connect_joints:
         joint = joints_by_name[joint_name]
         port_type = _port_type_from_name(joint_name + "_" + joint.parent_link)
@@ -150,7 +152,7 @@ def _build_dock_ports(urdf_model: URDFModel) -> list[DockPortSpec]:
             DockPortSpec(
                 port_id=joint.name,
                 parent_link=joint.parent_link,
-                local_pose=pose_from_xyz_rpy(joint.origin_xyz, joint.origin_rpy),
+                local_pose=link_poses_module[joint.child_link],
                 port_type=port_type,  # type: ignore[arg-type]
                 compatible_port_types=_compatible_port_types(port_type),
                 latch_axis_local=joint.axis_xyz,

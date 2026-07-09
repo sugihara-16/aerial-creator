@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from amsrr.geometry.pose_math import FACE_TO_FACE_DOCK_RELATION, compose_pose
 from amsrr.irg.irg_builder import IRGBuilder
 from amsrr.morphology.graph import build_minimal_design_output
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
@@ -23,6 +26,20 @@ def test_minimal_morphology_builder_grasp_carry_design_output(grasp_carry_dict: 
     assert len(morphology.dock_edges) == 2
     assert morphology.is_closed_loop is False
     assert {anchor.anchor_type for anchor in morphology.robot_anchors} == {"grasp", "support"}
+    ports_by_id = {port.port_global_id: port for port in morphology.ports}
+    modules_by_id = {module.module_id: module for module in morphology.modules}
+    first_edge = morphology.dock_edges[0]
+    assert first_edge.relative_pose_src_to_dst != pytest.approx((0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0))
+    assert modules_by_id[first_edge.dst_module_id].pose_in_design_frame == pytest.approx(first_edge.relative_pose_src_to_dst)
+    src_port_world = compose_pose(
+        modules_by_id[first_edge.src_module_id].pose_in_design_frame,
+        compose_pose(ports_by_id[first_edge.src_port_id].local_pose, FACE_TO_FACE_DOCK_RELATION),
+    )
+    dst_port_world = compose_pose(
+        modules_by_id[first_edge.dst_module_id].pose_in_design_frame,
+        ports_by_id[first_edge.dst_port_id].local_pose,
+    )
+    assert dst_port_world == pytest.approx(src_port_world)
 
     required_slot = next(
         node
