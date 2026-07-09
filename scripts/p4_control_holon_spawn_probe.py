@@ -424,6 +424,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             report_prefix = "fixed_morphology_waypoint"
             waypoint_ramp_duration_s = float(args.waypoint_ramp_duration_s)
             fixed_articulated = False
+            fixed_articulated_joint_names = None
         elif args.fixed_morphology_articulated_hover_smoke:
             target_position = (0.0, 0.0, target_height)
             target_yaw = 0.0

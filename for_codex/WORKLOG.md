@@ -3,6 +3,28 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control/P4a closeout after articulated multi-link correction
+- Work package / Agent label: Agent I/J/K/L boundary: P4-control / P4a final closeout
+- Summary: Re-ran the P4-control/P4a fast gates and real Isaac smoke gates after the articulated multi-link correction. The first real runner rerun exposed a probe branching bug where `--fixed-morphology-waypoint-smoke` referenced `fixed_articulated_joint_names` without initializing it; fixed the non-articulated waypoint branch to pass `None`. The corrected runner then passed all required real Isaac smokes (`single_module_hover`, `fixed_morphology_hover`, `fixed_morphology_waypoint`) and produced a passing P4-control/P4a acceptance report. Re-ran the articulated multi-link hover smoke as a separate correction-specific regression and confirmed 20 s hover with real module motion and q-dependent model updates.
+- Files changed:
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None.
+- Upstream dependencies used: Latest articulated fixed-morphology URDF path, QPID rigid-body QP controller path, real Isaac smoke runner, P4-control split fast/real acceptance gate, and `/tmp` generated USD/archive output paths.
+- Downstream impact: P4-control/P4a low-level closeout now has fresh fast pytest, acceptance, compile, diff, real runner, and articulated multi-link smoke evidence. This does not claim object grasp/carry success, learned `π_D`/`π_H`/`π_L`, dynamic closed-loop docking constraints, P4.1/P4.2/P4.3, or P4 full completion.
+- Tests added or run:
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance -q`
+  - `python3 -m compileall amsrr scripts -q`
+  - `git diff --check`
+  - Real Isaac P4-control runner with generated USD at `/tmp/amsrr_p4a_closeout_runner_usd`, archive JSONL at `/tmp/amsrr_p4a_closeout_archives.jsonl`, and result JSON at `/tmp/amsrr_p4a_closeout_runner_result.json`.
+  - Real Isaac 20 s fixed-morphology articulated hover smoke with result JSON at `/tmp/amsrr_p4a_closeout_articulated_result.json`.
+- Tests run: After the probe fix, unit tests passed: 136 passed, 1 skipped. Acceptance tests passed: 9 passed. `compileall` passed. `git diff --check` passed. Real runner passed all required smokes with `fast_gate_passed=true`, `real_isaac_smoke_passed=true`, and `completion_passed=true` for P4-control/P4a only. Runner metrics: `single_module_hover` final position error `0.013609 m`, final attitude error `0.002473 rad`, QP infeasible `0`, no missing/unsupported/clipped targets; `fixed_morphology_hover` final position error `0.013599 m`, final attitude error `0.000576 rad`, QP infeasible `0`, no missing/unsupported/clipped targets; `fixed_morphology_waypoint` final position error `0.016774 m`, final attitude error `0.000847 rad`, QP infeasible `0`, no missing/unsupported/clipped targets. Articulated 20 s smoke passed with hold time `20.0 s`, final position error `0.004215 m`, final attitude error `0.001329 rad`, max position error `0.022913 m`, relative module position change `0.056426 m`, relative module attitude change `0.122662 rad`, model rotor-origin change `0.047150 m`, allocation-matrix change `0.088292`, max joint position `0.122662 rad`, max joint tracking error `0.008668 rad`, QP infeasible `0`, and no missing/unsupported/clipped targets.
+- Assumptions: The articulated regression remains the approved URDF-tree approximation: the selected parent-side dock mechanism moves the child module subtree, while the mating side is held to avoid an unsupported closed kinematic loop.
+- Blockers: None for P4-control/P4a closeout.
+- Next steps: Commit the closeout fix/log. Later work should start a new scope for closed-loop dock constraints, object grasp/carry, learned policies, or P4 full completion rather than extending this P4-control/P4a closeout.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus articulated assembly correction
 - Work package / Agent label: Agent I/J boundary: P4-control articulated multi-link assembly correction
 - Summary: Corrected the prior articulated hover smoke so the fixed-morphology articulated case is a real multi-link assembly rather than a rigid root-to-root fixed morphology with independently moving dock links. Added an articulated morphology URDF generator that attaches the child module root to the parent module's selected connect dummy frame, so the parent dock mechanism joint moves the whole child module subtree. The fixed articulated smoke now observes module poses from Isaac body poses (`module_i__fc`) and requires both real relative module motion and q-dependent control-model updates before it can pass.
@@ -2144,6 +2166,21 @@
 ## Work Package Logs
 
 ### P4-Control / P4a: QP/PID Controller Specification
+
+#### 2026-07-09
+- Scope: Final closeout for P4-control/P4a after the articulated multi-link correction.
+- Files changed:
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: Articulated multi-link smoke correction, real Isaac smoke runner, QPID rigid-body QP path, and P4-control split acceptance report.
+- Implemented: Fixed the non-articulated `--fixed-morphology-waypoint-smoke` probe branch so it initializes `fixed_articulated_joint_names=None` before calling the shared fixed-morphology smoke runner. Recorded final closeout gates and real Isaac results.
+- Not implemented: No new solver backend, no closed-loop docking constraint model, no object grasp/carry rollout, no learned policy training, and no P4 full completion claim.
+- Schema/interface changes: None.
+- Downstream impact: P4-control/P4a low-level runner can complete its required smoke set again after the articulated correction. The optional articulated smoke remains separate regression evidence for multi-link deformation and q-dependent model updates.
+- Tests added: None; this was a closeout rerun plus a small branch-initialization bug fix.
+- Tests passed: Unit suite passed: 136 passed, 1 skipped. Acceptance suite passed: 9 passed. `compileall` and `git diff --check` passed. Real runner passed required smokes (`single_module_hover`, `fixed_morphology_hover`, `fixed_morphology_waypoint`) with P4-control/P4a `completion_passed=true`. Real articulated 20 s hover smoke passed with module motion and control-model update checks.
+- Handoff notes: This closeout is scoped to P4-control/P4a. Do not interpret the acceptance report as P4 full completion, object manipulation success, or learned policy success.
+- Open questions: None for P4-control/P4a closeout.
 
 #### 2026-07-09
 - Scope: Add Agent I/J diagnostic controls for long-hover drift investigation.
