@@ -4,6 +4,37 @@
 
 ### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control Isaac environment recommendation
+- Work package / Agent label: Agent I/J boundary: P4-control Order 11 QP feasibility tuning for controller-command smoke
+- Summary: Resolved the controller smoke's false QP infeasible status. The QP solver was succeeding, but default smoothing weights pulled the first hover allocation toward the previous zero-thrust command and the post-solve hard check counted a zero-thrust vectoring angle singularity as clipping. Reduced the primary allocator regularization/previous-command weights, raised controller-level unsupported-wrench tolerance only to the small back-conversion residual scale, and held vectoring joints at current position when the back-converted rotor thrust is effectively zero.
+- Files changed:
+  - `amsrr/controllers/qp_allocator_interface.py`
+  - `amsrr/controllers/qpid_controller.py`
+  - `tests/unit/controllers/test_qpid_controller.py`
+  - `tests/unit/simulation/test_p4_control_controller_smoke.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None.
+- Upstream dependencies used: Agent I `VirtualThrustQPAllocator`, controller hard check/clamp rules, Agent J controller-command smoke helper, corrected Holon URDF/USD, and real Isaac command probe path.
+- Downstream impact: Controller-to-Isaac command smoke now reports QP feasible/ok with no residual or clipping violations under the single-module initial hover command. This remains a command-routing/QP-feasibility smoke, not closed-loop hover or P4-control completion.
+- Tests added or run:
+  - Added `test_qpid_controller_rigid_body_qp_hover_is_feasible_with_default_tolerance`.
+  - Strengthened `test_single_module_controller_command_smoke_builds_bridge_record` to assert QP feasible/status ok, residual `< 1e-5`, and no clipping.
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/controllers/test_qpid_controller.py tests/unit/simulation/test_p4_control_controller_smoke.py -q`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr scripts -q`
+  - `git diff --check`
+- Commands run:
+  - `sed -n ... amsrr/controllers/qp_allocator_interface.py`
+  - `sed -n ... amsrr/controllers/qpid_controller.py`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/leus/amsrr python3 - <<'PY' ...` for QP weight, residual, and clipping diagnostics
+  - `eval "$(~/.local/bin/micromamba shell hook -s bash)" && micromamba activate isaaclab3 && PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=/home/leus/amsrr:$PYTHONPATH /home/leus/IsaacLab/isaaclab.sh -p /home/leus/amsrr/scripts/p4_control_holon_spawn_probe.py --config /home/leus/amsrr/configs/env/isaac_lab.yaml --force-convert --generated-usd-dir /tmp/amsrr_isaac_holon_controller_feasible --generated-usd-path /tmp/amsrr_isaac_holon_controller_feasible/holon/holon.usda --steps 80 --controller-command-smoke`
+- Tests run: Focused controller/smoke tests passed: 9 passed. Full unit suite passed: 121 passed, 1 skipped. Compileall and diff check passed. The first sandboxed Isaac run failed because no CUDA GPU was visible; the approved external Isaac run passed with `command_probe_passed=true`, `controller_status.status="ok"`, `controller_status.qp_feasible=true`, `controller_qp_feasible=1.0`, `allocation_residual_norm ~= 3.83e-6`, `clipped_target_count=0.0`, `violation_count=0.0`, no missing/unsupported bridge targets, and no battery2 invalid-inertia warning.
+- Assumptions: A `1e-5` controller unsupported-wrench tolerance is a numerical back-conversion tolerance, not a physical tracking-success threshold. Near-zero-thrust vectoring angles are actuator-neutral, so holding current joint position is preferable to commanding an arbitrary rate-limit boundary.
+- Blockers: None for controller-command QP feasibility. This does not validate closed-loop hover, fixed-morphology hover, waypoint tracking, object carry, learned policies, or P4 full completion.
+- Next steps: Commit Order 11, then proceed toward the real closed-loop single-module hover smoke path unless a method-level undefined item appears.
+
+### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control Isaac environment recommendation
 - Work package / Agent label: Agent I/J/K boundary: P4-control Order 10 controller-to-Isaac command smoke
 - Summary: Added a unit-testable controller command smoke builder and connected it to the real Isaac Holon probe. The new path builds a single-module morphology/runtime observation, computes a `QPIDController` command with `allocation_mode="rigid_body_qp"`, converts it through `IsaacControllerBridge`, and applies the bridge record to Isaac thrust bodies and gimbal/dock joints via the existing probe script.
 - Files changed:
@@ -1715,6 +1746,25 @@
 ## Work Package Logs
 
 ### P4-Control / P4a: QP/PID Controller Specification
+
+#### 2026-07-09
+- Scope: Tune Agent I/J controller-command QP feasibility after the first real controller-to-Isaac smoke.
+- Files changed:
+  - `amsrr/controllers/qp_allocator_interface.py`
+  - `amsrr/controllers/qpid_controller.py`
+  - `tests/unit/controllers/test_qpid_controller.py`
+  - `tests/unit/simulation/test_p4_control_controller_smoke.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: Agent I virtual-thrust QP allocator and RigidBodyControlModel, Agent J controller-command smoke, Holon actuator limits and real Isaac command surface.
+- Implemented: Reduced QP smoothing/regularization weights so the primary objective tracks hover wrench before smoothing, set controller residual tolerance to `1e-5`, added tolerance-aware hard-check clipping detection, and held vectoring targets at current position for effectively zero-thrust rotors.
+- Not implemented: Closed-loop hover controller, fixed-morphology smoke, waypoint smoke, object grasp/carry, or P4 full completion.
+- Schema/interface changes: None.
+- Downstream impact: The controller-command smoke can now be used as a clean precondition for closed-loop work because QP infeasibility is no longer caused by numerical tuning or zero-thrust vectoring angle singularity.
+- Tests added: Rigid-body QP hover feasibility unit assertion and strengthened controller-command smoke assertions.
+- Tests passed: Focused tests passed: 9 passed. Full unit suite passed: 121 passed, 1 skipped. Compileall and `git diff --check` passed. Real Isaac controller-command smoke passed with QP feasible/ok and no bridge target violations after an approved external run.
+- Handoff notes: `BoundedVerticalRotorAllocator` remains only degraded fallback. The `1e-5` tolerance is still below the controller warning threshold and should not be reused as a success metric for real hover.
+- Open questions: None for this tuning order.
 
 #### 2026-07-09
 - Scope: Probe real IsaacLab URDF conversion for Holon and correct generated USD path.

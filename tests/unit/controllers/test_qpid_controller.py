@@ -284,3 +284,25 @@ def test_qpid_controller_can_select_rigid_body_qp_primary_path() -> None:
     assert controller_command.controller_status.metrics["qp_primary_path"] == 1.0
     assert any(key.startswith("module_0:thrust_") for key in controller_command.rotor_thrusts_n)
     assert any(key.startswith("module_0:gimbal") for key in controller_command.vectoring_joint_targets)
+
+
+def test_qpid_controller_rigid_body_qp_hover_is_feasible_with_default_tolerance() -> None:
+    physical_model = _physical_model()
+    runtime = _runtime_observation()
+
+    controller_command = QPIDController(
+        config=QPIDControllerConfig(allocation_mode="rigid_body_qp")
+    ).compute(
+        ControllerContext(
+            runtime_observation=runtime,
+            morphology_graph=runtime.morphology_graph,
+            physical_model=physical_model,
+            active_knot=_active_knot(wrench_z=physical_model.aggregate_mass_kg * 9.80665),
+            policy_command=PolicyCommand(),
+        )
+    )
+
+    assert controller_command.controller_status.status == "ok"
+    assert controller_command.controller_status.qp_feasible is True
+    assert controller_command.controller_status.metrics["allocation_residual_norm"] < 1.0e-5
+    assert controller_command.controller_status.metrics["clipped"] == 0.0

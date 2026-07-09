@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control QP Feasibility Tuning Supplement
+
+- Context: The real controller-to-Isaac command smoke proved that controller output and bridge targets could be applied in Isaac, but the controller still reported `qp_feasible=false`. Diagnostics showed the SLSQP solve succeeded; the default previous-command smoothing pulled the first hover allocation toward a zero-thrust previous command, and the post-solve hard check counted an effectively zero-thrust rotor's undefined vectoring angle as a rate-limit clip.
+- Decision: Reduced `VirtualThrustQPAllocator` regularization and previous-command weights to `1e-8` so wrench tracking remains dominant on the primary P4-control allocation path. Set `QPIDControllerConfig.unsupported_wrench_tolerance` to `1e-5`, matching the small residual introduced by virtual-channel linearization/back-conversion while staying below the controller warning threshold. Added tolerance-aware clip detection and a zero-thrust vectoring deadband: when a vectoring rotor back-converts to effectively zero thrust, the vectoring joint target holds the current joint position instead of commanding an arbitrary angle at the rate-limit boundary.
+- Compatibility impact: This changes only controller-local numerical tuning and hard-check interpretation. It does not change persisted schemas or the P4-control ownership boundary, does not promote pseudoinverse allocation, and does not claim closed-loop hover, object grasp/carry, policy learning, P4-control completion, or P4 full completion. The real Isaac controller-command smoke now reports QP feasible/ok with no clipping violations, but closed-loop smoke gates remain outstanding.
+
 ### P4-Control Controller-to-Isaac Command Smoke Supplement
 
 - Context: After validating raw Isaac command APIs, P4-control needed a real-smoke artifact that starts from A-MSRR controller output rather than manually supplied force/joint arguments.

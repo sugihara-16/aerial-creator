@@ -14,6 +14,7 @@ QP_SOLVER_UNAVAILABLE_CODE = "E_QP_SOLVER_UNAVAILABLE"
 QP_THRUST_CLIPPED_CODE = "E_QP_THRUST_CLIPPED"
 QP_UNSUPPORTED_WRENCH_CODE = "E_QP_UNSUPPORTED_WRENCH"
 QP_VECTORING_CLIPPED_CODE = "E_QP_VECTORING_CLIPPED"
+VECTORING_TARGET_DEADBAND_N = 1.0e-7
 
 
 @dataclass
@@ -169,8 +170,8 @@ class VirtualThrustQPAllocator:
     vectoring joint targets.
     """
 
-    regularization_weight: float = 1.0e-5
-    previous_command_weight: float = 1.0e-4
+    regularization_weight: float = 1.0e-8
+    previous_command_weight: float = 1.0e-8
 
     def allocate(self, problem: QPAllocationProblem) -> QPAllocationResult:
         desired = [float(value) for value in (problem.desired_wrench_body or [0.0] * 6)]
@@ -531,7 +532,7 @@ def _back_convert_solution(
         if "scalar" in channels:
             raw_thrust = values[channels["scalar"]]
             thrust = _clip(raw_thrust, rotor.thrust_min_n, rotor.thrust_max_n)
-            if thrust != raw_thrust:
+            if _outside_bounds(raw_thrust, rotor.thrust_min_n, rotor.thrust_max_n):
                 clipped_count += 1
                 thrust_clipped = True
             rotor_thrusts[rotor_id] = thrust
@@ -542,15 +543,19 @@ def _back_convert_solution(
         raw_thrust = math.hypot(fx, fz)
         raw_target = math.atan2(fx, fz)
         thrust = _clip(raw_thrust, rotor.thrust_min_n, rotor.thrust_max_n)
-        if thrust != raw_thrust:
+        if _outside_bounds(raw_thrust, rotor.thrust_min_n, rotor.thrust_max_n):
             clipped_count += 1
             thrust_clipped = True
         joint_id = rotor.vectoring_joint_ids[0]
         angle_lower, angle_upper = _vectoring_angle_bounds(model, joint_id, problem.control_dt_s)
-        target = _clip(raw_target, angle_lower, angle_upper)
-        if target != raw_target:
-            clipped_count += 1
-            vectoring_clipped = True
+        if thrust <= VECTORING_TARGET_DEADBAND_N:
+            current = float(model.current_joint_positions.get(joint_id, 0.0))
+            target = _clip(current, angle_lower, angle_upper)
+        else:
+            target = _clip(raw_target, angle_lower, angle_upper)
+            if _outside_bounds(raw_target, angle_lower, angle_upper):
+                clipped_count += 1
+                vectoring_clipped = True
         rotor_thrusts[rotor_id] = thrust
         vectoring_targets[joint_id] = target
     return rotor_thrusts, vectoring_targets, clipped_count, thrust_clipped, vectoring_clipped
@@ -627,6 +632,12 @@ def _clip(value: float, lower: float, upper: float) -> float:
     if lower > upper:
         lower, upper = upper, lower
     return min(max(float(value), float(lower)), float(upper))
+
+
+def _outside_bounds(value: float, lower: float, upper: float, *, tolerance: float = 1.0e-8) -> bool:
+    if lower > upper:
+        lower, upper = upper, lower
+    return float(value) < float(lower) - tolerance or float(value) > float(upper) + tolerance
 
 
 def _add(left: Vector3, right: Vector3) -> Vector3:

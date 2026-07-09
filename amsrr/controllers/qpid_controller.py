@@ -29,7 +29,7 @@ class QPIDControllerConfig:
     joint_kd: float = 0.4
     tracking_warning_residual_norm: float = 1.0e-3
     vertical_tolerance_n: float = 1.0e-6
-    unsupported_wrench_tolerance: float = 1.0e-6
+    unsupported_wrench_tolerance: float = 1.0e-5
 
 
 class QPIDController:
