@@ -4,6 +4,33 @@
 
 ### 2026-07-10
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.2 deterministic rollout user clarifications
+- Work package / Agent label: Agent K boundary: P4.2 deterministic rollout runner/archive
+- Summary: Added the P4.2 deterministic rollout runner and CLI. The runner builds a P2 selected design and P3 assembled morphology, samples contact candidates against the assembled graph, creates the P4.2 deterministic `ContactWrenchTrajectory`, calls the P4.2 Isaac env with the assembled `MorphologyGraph`, and archives per-step runtime/policy/controller/actuator logs plus phase transitions, attach events, candidate set, selected assignments, and no-mislabeling artifacts.
+- Files changed:
+  - `amsrr/training/p4_2_deterministic_rollout_runner.py`
+  - `amsrr/training/__init__.py`
+  - `scripts/p4_2_deterministic_rollout.py`
+  - `tests/unit/training/test_p4_2_deterministic_rollout_runner.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added runner/config/result dataclasses, package exports, and a CLI wrapper.
+- Upstream dependencies used: P4.2 Order 1 contract/result, Order 2 deterministic planner, Order 3 Isaac env/backend boundary, existing P2 design policy, P3 assembly runner, contact candidate sampler, and `EpisodeArchive`.
+- Downstream impact: P4.2 acceptance can now inspect archives for P2/P3 provenance, assembled graph usage, selected contact candidates, deterministic phase trajectory, attach event records, per-step logs, and no P4.3/P4-full/learning claims. Fake backend archives are possible for fast gate tests but record `isaac_backed=0` and `real_isaac_completion_claim=0`.
+- Tests added or run:
+  - Added unit coverage for config loading, P2/P3 rollout case construction, candidate/trajectory generation, fake-backend archive writing, archive JSONL roundtrip, and no real-completion/no-learning claims.
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p4_2_deterministic_rollout_runner.py -q`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/training/test_p4_2_deterministic_rollout_runner.py tests/unit/training/test_p4_1_backend_smoke_runner.py tests/unit/simulation/test_p4_2_isaac_env.py tests/unit/simulation/test_p4_2_rollout.py -q`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/policies/test_p4_2_deterministic_policies.py tests/unit/policies/test_high_level_baseline.py tests/unit/policies/test_low_level_baseline.py -q`
+  - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/p4_2_deterministic_rollout.py --config configs/training/p4_2_deterministic_rollout.yaml --archive-path /tmp/amsrr_p4_2_dry.jsonl`
+  - `python3 -m compileall amsrr/training scripts tests/unit/training/test_p4_2_deterministic_rollout_runner.py -q`
+  - `git diff --check`
+- Tests run: P4.2 runner tests passed: 3 passed. Combined runner/simulation tests passed: 18 passed. P4.2 policy tests passed: 8 passed. CLI dry-run exited 0 with no archives and no real rollout claim. Compileall and diff check passed.
+- Assumptions: This order archives deterministic rollout evidence and fake-backend results for later fast acceptance, but does not implement split acceptance, run real Isaac completion, or claim P4.2 completion without the real gate.
+- Blockers: None for Order 4.
+- Next steps: Commit Order 4, then assess P4.2 split acceptance/real gate order for method-level undefined items before implementation.
+
+### 2026-07-10
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.2 deterministic rollout user clarifications
 - Work package / Agent label: Agent J boundary: P4.2 graph-specific Isaac env/probe
 - Summary: Added the P4.2 Isaac env/backend/probe boundary for graph-specific deterministic rollout assets. The backend command now passes a serialized P3 assembled `MorphologyGraph` to the Isaac probe, and the probe generates a reset-time fixed graph morphology URDF from the graph's module poses and dock edges. This is explicitly not a π_A dynamic construction/update path: robot morphology is frozen during rollout, and any P4.2 attach/release semantics are object attach/release only.
 - Files changed:

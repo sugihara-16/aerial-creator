@@ -4,6 +4,15 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-10
 
+### P4.2 Runner and Archive Supplement
+
+- Context: P4.2 must archive deterministic grasp/carry rollout evidence from a P2 selected design and P3 assembled morphology without treating fake-backend success as P4.2 completion.
+- Decision: Added `P4_2DeterministicRolloutRunner`. It builds the deterministic P2/P3 case, samples contact candidates against the assembled morphology, generates the P4.2 phase-labeled `ContactWrenchTrajectory`, and passes the assembled `MorphologyGraph` to `P4_2IsaacEnv`.
+- Archive decision: A non-skipped attempted rollout writes an `EpisodeArchive` containing the selected `DesignOutput`, feasibility result, P3 assembly plan, deterministic trajectory, runtime observations, policy commands, controller commands, actuator target records, phase transitions, attach events, contact candidate set, and selected contact assignments.
+- Gate boundary: Fake-backend archives may store `p4_2_deterministic_rollout_passed=1` for fast-gate testing, but they also store `isaac_backed=0` and `real_isaac_completion_claim=0`. Split acceptance remains responsible for requiring a real Isaac-backed rollout before P4.2 completion.
+- Scope impact: Runner/archive artifacts preserve `module_attach_detach_claim=false`, `dynamic_morphology_update_claim=false`, `p4_3_learning_bootstrap=false`, `checkpoint_claim=false`, and `reward_curve_training_claim=false`. This order does not claim P4.3 learning, high-fidelity natural grasp success, or P4 full completion.
+- Compatibility impact: No persisted schema change. `EpisodeArchive.rollout_artifacts` carries P4.2-specific candidate/phase/attach evidence for later acceptance checks.
+
 ### P4.2 Graph-Specific Isaac Env/Probe Supplement
 
 - Context: P4.2 must reflect the P2 selected design and P3 assembled morphology in the Isaac rollout asset, but the user clarified that graph-specific URDF/USD generation should not be interpreted as π_A dynamic construction or module attach/detach during the grasp/carry rollout.

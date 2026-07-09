@@ -56,6 +56,14 @@ from amsrr.training.p4_1_backend_smoke_runner import (
     P4_1P2P3Case,
     load_p4_1_backend_smoke_runner_config,
 )
+from amsrr.training.p4_2_deterministic_rollout_runner import (
+    P4_2_DETERMINISTIC_ROLLOUT_RUNNER_VERSION,
+    P4_2DeterministicRolloutRunner,
+    P4_2DeterministicRolloutRunnerConfig,
+    P4_2DeterministicRolloutRunnerResult,
+    P4_2P2P3RolloutCase,
+    load_p4_2_deterministic_rollout_runner_config,
+)
 
 __all__ = [
     "P1GraspCarryTaskDistribution",
@@ -89,8 +97,14 @@ __all__ = [
     "P4_1BackendSmokeRunnerConfig",
     "P4_1BackendSmokeRunnerResult",
     "P4_1P2P3Case",
+    "P4_2_DETERMINISTIC_ROLLOUT_RUNNER_VERSION",
+    "P4_2DeterministicRolloutRunner",
+    "P4_2DeterministicRolloutRunnerConfig",
+    "P4_2DeterministicRolloutRunnerResult",
+    "P4_2P2P3RolloutCase",
     "ensure_real_smoke_requested",
     "load_p4_1_backend_smoke_runner_config",
+    "load_p4_2_deterministic_rollout_runner_config",
     "load_p1_runner_config",
     "load_p1_task_distribution_config",
     "load_p2_design_distribution_config",
