@@ -4,6 +4,40 @@
 
 ### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control Isaac environment recommendation
+- Work package / Agent label: Agent J boundary: P4-control Order 6 Isaac URDF conversion probe
+- Summary: Probed the real IsaacLab URDF converter path for Holon. The `isaaclab3` environment exposes `isaaclab` and `torch`; `isaaclab.sh -p scripts/p4_control_smoke.py --probe` reports the backend available in Isaac Python; `convert_urdf.py` successfully converted `assets/robots/holon/holon.urdf` to `/tmp/amsrr_isaac_holon/holon/holon.usda`. Updated generated USD config/default path to match Isaac importer's output layout.
+- Files changed:
+  - `configs/env/isaac_lab.yaml`
+  - `amsrr/simulation/isaac_lab_backend.py`
+  - `tests/unit/simulation/test_p4_control_isaac_env.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None.
+- Upstream dependencies used: AGENTS.md micromamba/IsaacLab instructions; IsaacLab `scripts/tools/convert_urdf.py`; Holon URDF from Agent B.
+- Downstream impact: Real smoke implementation can rely on URDF conversion succeeding and should expect generated USD under `<generated_usd_dir>/holon/holon.usda`.
+- Tests added or run:
+  - Updated generated USD path assertion in `tests/unit/simulation/test_p4_control_isaac_env.py`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_control_isaac_env.py tests/unit/training/test_p4_control_runner.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+- Commands run:
+  - `eval "$(~/.local/bin/micromamba shell hook -s bash)" && micromamba activate isaaclab3 && python -c ...`
+  - `eval "$(~/.local/bin/micromamba shell hook -s bash)" && micromamba activate isaaclab3 && PYTHONPATH=/home/leus/amsrr:$PYTHONPATH /home/leus/IsaacLab/isaaclab.sh -p /home/leus/amsrr/scripts/p4_control_smoke.py --probe`
+  - `sed -n ... /home/leus/IsaacLab/scripts/tools/convert_urdf.py`
+  - `eval "$(~/.local/bin/micromamba shell hook -s bash)" && micromamba activate isaaclab3 && PYTHONPATH=/home/leus/amsrr:$PYTHONPATH /home/leus/IsaacLab/isaaclab.sh -p /home/leus/IsaacLab/scripts/tools/convert_urdf.py /home/leus/amsrr/assets/robots/holon/holon.urdf /tmp/amsrr_isaac_holon --headless`
+  - `find /tmp/amsrr_isaac_holon -maxdepth 4 -type f -printf ...`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: Related P4-control env/runner tests passed: 8 passed. Full unit suite passed: 118 passed, 1 skipped. Compileall and diff check passed. Isaac URDF conversion probe passed and produced `/tmp/amsrr_isaac_holon/holon/holon.usda`.
+- Assumptions: Generated USD artifacts are reproducible outputs and are not committed. The repo config records where generated USD should live when produced under the workspace.
+- Blockers: None for URDF conversion. Next real-smoke order still needs Isaac articulation spawn, force/wrench application, joint command application, and observation extraction implementation.
+- Next steps: Commit Order 6, then implement or probe a minimal Isaac articulation spawn script for the generated Holon USD.
+
+### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control Isaac environment recommendation
 - Work package / Agent label: Agent J/K boundary: P4-control Order 5 smoke runner configuration and dry-run harness
 - Summary: Added configurable P4-control Isaac Lab backend settings, low-level smoke scenario config, smoke environment boundary, dry-run runner, and CLI probe/dry-run script. The runner defines the three required smoke names and thresholds while keeping real Isaac execution unimplemented and completion false unless later real smoke artifacts are supplied.
 - Files changed:
@@ -1555,6 +1589,24 @@
 ## Work Package Logs
 
 ### P4-Control / P4a: QP/PID Controller Specification
+
+#### 2026-07-09
+- Scope: Probe real IsaacLab URDF conversion for Holon and correct generated USD path.
+- Files changed:
+  - `configs/env/isaac_lab.yaml`
+  - `amsrr/simulation/isaac_lab_backend.py`
+  - `tests/unit/simulation/test_p4_control_isaac_env.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: AGENTS.md `isaaclab3` environment, IsaacLab `convert_urdf.py`, Holon URDF, and Order 5 backend config.
+- Implemented: Verified `isaaclab` Python module visibility under micromamba, verified `isaaclab.sh -p` can run the P4-control probe script, ran IsaacLab URDF conversion to `/tmp`, and corrected generated USD expected path to `<generated_usd_dir>/holon/holon.usda`.
+- Not implemented: Workspace USD generation, committed USD assets, articulation spawn, force application, joint target execution, or real smoke simulation.
+- Schema/interface changes: None.
+- Downstream impact: Later spawn code should consume `artifacts/isaac/robots/holon/holon/holon.usda` after conversion rather than expecting `holon.usd` directly in the generated root.
+- Tests added: Updated generated USD path assertion.
+- Tests passed: Related env/runner tests passed: 8 passed. Full unit suite passed: 118 passed, 1 skipped. Compileall and `git diff --check` passed. Real Isaac URDF conversion probe passed.
+- Handoff notes: The converter warned that `--headless` is deprecated and that omitting `--viz` is now default headless. Future command builders should avoid depending on `--headless`.
+- Open questions: None for conversion. Real spawn/control APIs are next.
 
 #### 2026-07-09
 - Scope: Implement Agent J/K boundary Order 5 smoke runner configuration and dry-run harness.

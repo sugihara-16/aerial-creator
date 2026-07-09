@@ -22,7 +22,7 @@ class IsaacLabBackendConfig(SchemaBase):
     robot_model_config_path: str = "configs/robot/robot_model.yaml"
     holon_urdf_path: str = "assets/robots/holon/holon.urdf"
     generated_usd_dir: str = "artifacts/isaac/robots/holon"
-    generated_usd_path: str = "artifacts/isaac/robots/holon/holon.usd"
+    generated_usd_path: str = "artifacts/isaac/robots/holon/holon/holon.usda"
     rotor_force_application: str = "wrench_composer"
     per_thruster_target_record: bool = True
 
@@ -113,7 +113,7 @@ class IsaacLabBackend:
             "-p",
             str(isaaclab_path / "scripts" / "tools" / "convert_urdf.py"),
             str(self._expanded_path(self.config.holon_urdf_path)),
-            str(self._expanded_path(self.config.generated_usd_path)),
+            str(self._expanded_path(self.config.generated_usd_dir)),
         ]
 
     @staticmethod

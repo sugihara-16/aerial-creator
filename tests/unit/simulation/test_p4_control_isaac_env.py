@@ -15,6 +15,7 @@ def test_p4_control_low_level_config_loader() -> None:
 
     assert backend_config.micromamba_env == "isaaclab3"
     assert backend_config.holon_urdf_path == "assets/robots/holon/holon.urdf"
+    assert backend_config.generated_usd_path == "artifacts/isaac/robots/holon/holon/holon.usda"
     assert backend_config.rotor_force_application == "wrench_composer"
     assert env_config.position_error_threshold_m == 0.20
     assert env_config.fixed_morphology_module_count == 2
@@ -31,7 +32,7 @@ def test_isaac_backend_probe_and_conversion_command_are_config_driven() -> None:
     assert availability.urdf_exists is True
     assert "convert_urdf.py" in command[2]
     assert command[-2].endswith("assets/robots/holon/holon.urdf")
-    assert command[-1].endswith("artifacts/isaac/robots/holon/holon.usd")
+    assert command[-1].endswith("artifacts/isaac/robots/holon")
 
 
 def test_p4_control_smoke_scenarios_are_deterministic() -> None:

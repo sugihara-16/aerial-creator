@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Isaac URDF Conversion Probe Supplement
+
+- Context: Before implementing real P4-control Isaac smoke execution, the Holon URDF import path needed validation in the approved `isaaclab3` / `isaaclab.sh -p` environment.
+- Decision: Ran Isaac Lab's `scripts/tools/convert_urdf.py` against `assets/robots/holon/holon.urdf` in headless mode with output under `/tmp/amsrr_isaac_holon`. The converter completed successfully and generated `/tmp/amsrr_isaac_holon/holon/holon.usda` plus payload USD files. Updated A-MSRR config/default generated USD path to `artifacts/isaac/robots/holon/holon/holon.usda`, matching Isaac importer output structure when `generated_usd_dir` is `artifacts/isaac/robots/holon`.
+- Compatibility impact: This validates the URDF-to-USD import path but still does not spawn or simulate Holon in a P4-control smoke. Generated USD artifacts were not committed; they remain reproducible from the source URDF and config.
+
 ### P4-Control Smoke Runner Configuration Supplement
 
 - Context: After the P4-control fast/real acceptance split, the next implementation order needs configurable Isaac Lab environment settings and smoke scenario definitions before calling real Isaac APIs. The user approved using the existing `isaaclab3` micromamba environment, URDF-to-USD custom articulation as the initial Holon asset path, wrench-composer rotor force application, and the controller supplement's initial waypoint thresholds.
