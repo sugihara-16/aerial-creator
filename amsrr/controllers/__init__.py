@@ -1,6 +1,19 @@
 """Controller-side interface helpers for A-MSRR."""
 
+from amsrr.controllers.actuator_mapping import (
+    ActuatorChannel,
+    ActuatorMapping,
+    ActuatorMappingBuilder,
+    build_actuator_mapping,
+)
 from amsrr.controllers.controller_base import ControllerBase, ControllerContext
+from amsrr.controllers.isaac_controller_bridge import (
+    IsaacActuatorTarget,
+    IsaacActuatorTargetRecord,
+    IsaacControllerBridge,
+    IsaacControllerBridgeConfig,
+    actuator_target_record_to_dict,
+)
 from amsrr.controllers.policy_command_builder import DesiredBiasReferences, PolicyCommandBiasBuilder
 from amsrr.controllers.qp_allocator_interface import (
     BoundedVerticalRotorAllocator,
@@ -24,10 +37,17 @@ from amsrr.controllers.rigid_body_model import (
 )
 
 __all__ = [
+    "ActuatorChannel",
+    "ActuatorMapping",
+    "ActuatorMappingBuilder",
     "BoundedVerticalRotorAllocator",
     "ControllerBase",
     "ControllerContext",
     "DesiredBiasReferences",
+    "IsaacActuatorTarget",
+    "IsaacActuatorTargetRecord",
+    "IsaacControllerBridge",
+    "IsaacControllerBridgeConfig",
     "PolicyCommandBiasBuilder",
     "QPAllocationProblem",
     "QPAllocationResult",
@@ -45,4 +65,6 @@ __all__ = [
     "RotorAllocationSpec",
     "RotorControlElement",
     "VirtualThrustQPAllocator",
+    "actuator_target_record_to_dict",
+    "build_actuator_mapping",
 ]

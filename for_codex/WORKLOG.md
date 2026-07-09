@@ -3,6 +3,44 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control controller bridge requirements
+- Work package / Agent label: Agent I/J boundary: P4-control Order 3 actuator mapping and bridge target records
+- Summary: Implemented simulator-independent actuator mapping and Isaac target record conversion for P4-control. Added deterministic active actuator channels for rotor thrusts, vectoring joints, dock mechanism joints, and effort-limited joints; added a bridge that converts `ControllerCommand` into clipped actuator target records with missing/unsupported/clipped metrics and controller residual status.
+- Files changed:
+  - `amsrr/controllers/actuator_mapping.py`
+  - `amsrr/controllers/isaac_controller_bridge.py`
+  - `amsrr/controllers/__init__.py`
+  - `tests/unit/controllers/test_actuator_mapping.py`
+  - `tests/unit/controllers/test_isaac_controller_bridge.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema change. Added controller-local bridge dataclasses and JSON-compatible target record conversion for use in existing `EpisodeArchive.actuator_target_records`.
+- Upstream dependencies used: v0.4 Sections 20.8, 23.5, 24.5.2, 25.1; Agent B `PhysicalModel`; Agent I `ControllerCommand`; existing `EpisodeArchive.actuator_target_records` dict field.
+- Downstream impact: Agent J/K/L can consume `ActuatorMapping` and `IsaacActuatorTargetRecord` as the fast-testable bridge contract before real Isaac execution. This does not satisfy the real Isaac smoke gate by itself.
+- Tests added or run:
+  - Added `tests/unit/controllers/test_actuator_mapping.py`
+  - Added `tests/unit/controllers/test_isaac_controller_bridge.py`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/controllers/test_actuator_mapping.py tests/unit/controllers/test_isaac_controller_bridge.py tests/unit/controllers -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+- Commands run:
+  - `git status --short`
+  - `rg -n ... actuator_target ...`
+  - `sed -n ... for_codex/A-MSRR_codex_ready_spec_v0_4_ja.md`
+  - `sed -n ... amsrr/logging/episode_archive.py amsrr/schemas/runtime.py`
+  - `python3 - <<'PY' ... physical model actuator summary ...`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/controllers/test_actuator_mapping.py tests/unit/controllers/test_isaac_controller_bridge.py tests/unit/controllers -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: Controller/mapping/bridge tests passed: 16 passed. Full unit suite passed: 110 passed, 1 skipped. Compileall and diff check passed.
+- Assumptions: Single-module bridge accepts local command keys for backward compatibility; multi-module bridge requires deterministic global `module_<module_id>:<local_id>` keys. The bridge records target conversion only and does not call Isaac APIs.
+- Blockers: None for the fast pytest bridge contract. Real Isaac smoke remains unrun and P4-control completion is not claimed.
+- Next steps: Commit Order 3, then proceed to the next implementation order for P4-control runner/config or Isaac smoke harness, stopping if real Isaac environment details are undefined.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control controller supplement and user virtual rotor clarification
 - Work package / Agent label: Agent I: P4-control Order 2 primary virtual-thrust QP allocator
 - Summary: Implemented the primary P4-control allocator path. Added rotor-arm-fixed virtual x/z thrust channels for vectoring rotors, SciPy-backed quadratic allocation with actuator bounds and linearized vectoring joint/rate constraints, back-conversion to non-negative rotor thrusts and absolute vectoring joint targets, achieved-wrench recomputation after hard check/clamp, and controller integration behind `QPIDControllerConfig(allocation_mode="rigid_body_qp")`.
@@ -1436,6 +1474,26 @@
 ## Work Package Logs
 
 ### P4-Control / P4a: QP/PID Controller Specification
+
+#### 2026-07-09
+- Scope: Implement Agent I/J boundary Order 3 actuator mapping and bridge target records.
+- Files changed:
+  - `amsrr/controllers/actuator_mapping.py`
+  - `amsrr/controllers/isaac_controller_bridge.py`
+  - `amsrr/controllers/__init__.py`
+  - `tests/unit/controllers/test_actuator_mapping.py`
+  - `tests/unit/controllers/test_isaac_controller_bridge.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: v0.4 controller bridge requirements, controller supplement bridge/logging section, `PhysicalModel`, `MorphologyGraph`, `ControllerCommand`, and `EpisodeArchive.actuator_target_records`.
+- Implemented: Active actuator channel extraction for rotors/vectoring joints/dock joints/joint efforts, deterministic global actuator ids, single-module local aliases, actuator limit clipping, `IsaacControllerBridge` conversion to target records, missing/unsupported/clipped metrics, controller residual/QP status propagation, and JSON-compatible record roundtrip tests.
+- Not implemented: Isaac Lab API calls, robot spawning, force application, P4-control runner, real single-module hover, fixed-morphology hover, or waypoint tracking smoke.
+- Schema/interface changes: None to persisted schemas. Added controller-local bridge dataclasses and exports.
+- Downstream impact: Later Isaac backend and runner code can use these records as the stable bridge contract and store their dict form in `EpisodeArchive.actuator_target_records`.
+- Tests added: `test_actuator_mapping_builds_single_module_aliases_and_limits`, `test_actuator_mapping_uses_global_keys_for_multiple_modules`, `test_clip_to_channel_reports_clipped_value`, `test_isaac_controller_bridge_converts_and_clips_targets`, and target-record roundtrip test.
+- Tests passed: Controller/mapping/bridge tests passed: 16 passed. Full unit suite passed: 110 passed, 1 skipped. Compileall and `git diff --check` passed.
+- Handoff notes: This is a fast pytest bridge contract only. P4-control completion still requires real Isaac smoke with these records or equivalent actuator targets actually executed.
+- Open questions: None for this bridge-contract order.
 
 #### 2026-07-09
 - Scope: Implement Agent I Order 2 primary virtual-thrust QP allocator and controller integration.

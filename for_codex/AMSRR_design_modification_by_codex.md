@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Actuator Mapping and Bridge Record Supplement
+
+- Context: After the primary virtual-thrust QP allocator, P4-control needs a controller bridge boundary that can be unit-tested without Isaac while preserving the P4 requirement that `ControllerCommand` is converted to Isaac actuator targets and archived as actuator target records.
+- Decision: Added controller-side `ActuatorMappingBuilder` and `IsaacControllerBridge`. The mapping extracts active module rotor thrust channels, vectoring joint position channels, dock mechanism position channels, and effort-limited joint channels from `MorphologyGraph` and `PhysicalModel` using deterministic global keys `module_<module_id>:<local_id>`, with single-module local-key aliases for backward compatibility. The bridge converts `ControllerCommand` dictionaries into `IsaacActuatorTargetRecord`, clips targets to mapped actuator limits, records missing/unsupported/clipped actuators, carries controller/QP residual status, and exposes a JSON-compatible dict for `EpisodeArchive.actuator_target_records`.
+- Compatibility impact: This is a bridge contract and fast pytest gate only. It does not execute Isaac Lab, does not spawn robots, and does not claim P4-control smoke completion. Later Isaac backend code must consume these records or equivalent `ControllerCommand` data and then satisfy the real single-module/fixed-morphology smoke gates.
+
 ### P4-Control VirtualThrustQPAllocator Implementation Supplement
 
 - Context: Agent I Order 2 implements the P4-control primary allocator after the user clarified that virtual rotor thrust directions may be fixed relative to the rotor-arm frame x/z directions and that thrust, joint, and rate limits should be included in QP constraints followed by hard check and clamp.
