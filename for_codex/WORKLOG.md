@@ -4,6 +4,32 @@
 
 ### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.1 full-scene backend smoke user clarifications
+- Work package / Agent label: Agent L boundary: P4.1 full-scene backend smoke Order 4 split acceptance
+- Summary: Added P4.1 split acceptance. The fast gate checks archives for P2 selected design, P3 assembled morphology, non-2-module case evidence, per-step runtime/controller/actuator/object-pose logs, RuntimeObservation joint-state preservation, full-scene robot/object/floor spawn evidence, and no-mislabeling fields. The real gate separately requires the named real smoke `p2_p3_full_scene_backend` to be attempted, passed, Isaac-backed, full-scene, and P2/P3-sourced. `completion_passed` is only true when both gates pass.
+- Files changed:
+  - `amsrr/acceptance/p4_1_acceptance.py`
+  - `amsrr/acceptance/__init__.py`
+  - `amsrr/training/p4_1_backend_smoke_runner.py`
+  - `scripts/p4_1_backend_smoke.py`
+  - `tests/acceptance/test_p4_1_acceptance.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added acceptance report dataclass and wired the runner/CLI to include acceptance output.
+- Upstream dependencies used: P4.1 required real smoke name, P4.1 backend smoke result contract, `EpisodeArchive`, and the RuntimeObservation joint-state checker.
+- Downstream impact: Fake-backend unit gates can validate archive/logging behavior, but P4.1 cannot complete unless the real Isaac smoke result is `isaac_backed=True` and passed. The CLI exits successfully for `--real` only when completion passes.
+- Tests added or run:
+  - Added acceptance coverage that fake-backed archives pass the fast gate but cannot pass completion, that a real Isaac-backed smoke result is required for completion, and that missing joint positions fail the fast gate.
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p4_1_acceptance.py tests/unit/training/test_p4_1_backend_smoke_runner.py -q`
+  - `python3 -m compileall amsrr/acceptance amsrr/training scripts -q`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p4_control_acceptance.py tests/acceptance/test_p4_0_acceptance.py tests/unit/simulation/test_p4_1_backend_smoke.py tests/unit/simulation/test_p4_1_isaac_env.py -q`
+  - `git diff --check`
+- Tests run: P4.1 acceptance/runner tests passed: 6 passed. Related acceptance/simulation tests passed: 12 passed. Compileall and diff check passed.
+- Assumptions: The real Isaac smoke itself has not been run in Order 4. This order implements and tests the split gate; actual P4.1 completion still requires running the real smoke.
+- Blockers: None for Order 4 implementation.
+- Next steps: Commit Order 4, then run the real Isaac P4.1 smoke if the environment is available and record the result without claiming P4.2, learned policy success, object grasp/carry success, or P4 full completion.
+
+### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.1 full-scene backend smoke user clarifications
 - Work package / Agent label: Agent K/L boundary: P4.1 full-scene backend smoke Order 3 runner/archive
 - Summary: Added the P4.1 backend smoke runner and CLI. The runner deterministically builds a P2-selected design and P3 assembled morphology before calling the backend smoke. The default seed selects the accepted `tri_anchor_support_grasp` case and the P3 assembled morphology has 3 modules, so the runner is not a fixed 2-module-only case. The runner stores per-step runtime observations, controller commands, actuator target records, and object pose history inside `EpisodeArchive` artifacts.
 - Files changed:

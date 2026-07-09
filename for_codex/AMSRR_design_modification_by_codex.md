@@ -4,6 +4,14 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4.1 Split Acceptance Gate Supplement
+
+- Context: The user explicitly required fast fake-backend gate and real Isaac smoke gate to be separated, and required P4.1 completion to remain false without a real Isaac smoke.
+- Decision: Added `run_p4_1_acceptance`. The fast gate checks `EpisodeArchive` evidence: P2 selected design, P3 assembled morphology, not fixed-2-module-only, per-step runtime/controller/actuator/object-pose records, RuntimeObservation joint-state preservation, full-scene robot/object/floor evidence, and no-mislabeling fields.
+- Real gate decision: The real gate requires the named smoke `p2_p3_full_scene_backend` to be attempted, passed, Isaac-backed, non-skipped, full-scene, P2/P3-sourced, and accompanied by passing joint-state metrics. `completion_passed = fast_gate_passed and real_isaac_smoke_passed`.
+- Runner/CLI decision: `P4_1BackendSmokeRunner` now includes the acceptance report in its result. The P4.1 CLI exits successfully for `--real` only when completion passes; dry runs remain probes and do not claim completion.
+- Compatibility impact: No persisted schema change. This is a gate/reporting layer only and does not claim object grasp/carry success, learned policy success, P4.2 rollout, or P4 full completion.
+
 ### P4.1 Runner and Per-Step Archive Supplement
 
 - Context: P4.1 must include at least one case sourced from P2 selected `DesignOutput` and P3 assembled morphology, and it must not be completed using only a fixed 2-module morphology.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from amsrr.assembly import AssemblyRunner, AssemblyRunnerConfig, SimplifiedAssemblyExecutor
 from amsrr.irg.envelope_extractor import InteractionEnvelopeExtractor
@@ -60,6 +61,7 @@ class P4_1BackendSmokeRunnerConfig(SchemaBase):
 class P4_1BackendSmokeRunnerResult(SchemaBase):
     dry_run: bool
     smoke_result: P4_1BackendSmokeResult
+    acceptance_report: Any | None = None
     archives: list[EpisodeArchive] = field(default_factory=list)
     metrics: dict[str, float] = field(default_factory=dict)
 
@@ -111,6 +113,8 @@ class P4_1BackendSmokeRunner:
         self.physical_model = physical_model
 
     def run(self, *, archive_path: str | Path | None = None) -> P4_1BackendSmokeRunnerResult:
+        from amsrr.acceptance.p4_1_acceptance import run_p4_1_acceptance
+
         case = self.build_p2_p3_case()
         smoke_result = self.env.run_smoke(
             dry_run=self.runner_config.dry_run,
@@ -128,11 +132,14 @@ class P4_1BackendSmokeRunner:
             output_path = self.runner_config.archive_path
         if output_path is not None and archives:
             write_episode_archives_jsonl(output_path, archives)
+        acceptance_report = run_p4_1_acceptance(archives, smoke_results=[smoke_result])
         return P4_1BackendSmokeRunnerResult(
             dry_run=self.runner_config.dry_run,
             smoke_result=smoke_result,
+            acceptance_report=acceptance_report,
             archives=archives,
             metrics={
+                **acceptance_report.metrics,
                 "dry_run": 1.0 if self.runner_config.dry_run else 0.0,
                 "archive_count": float(len(archives)),
                 "p2_selected_design_used": 1.0,
