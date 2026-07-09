@@ -4,6 +4,14 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-10
 
+### P4.2 Split Acceptance Gate Supplement
+
+- Context: P4.2 acceptance must separate a fast fake-backend/archive gate from a real Isaac rollout gate, and P4.2 completion must not pass without a real Isaac-backed deterministic rollout.
+- Decision: Added `run_p4_2_acceptance`. The fast gate checks `EpisodeArchive` evidence for P2 selected design, P3 assembled morphology, deterministic P4.2 trajectory phases, selected contact candidates/assignments, per-step runtime/policy/controller/actuator logs, gated object attach events, graph-specific morphology reflection, and no-mislabeling fields.
+- Real gate decision: The real gate requires the named rollout `p2_p3_deterministic_grasp_carry` to be attempted, passed, Isaac-backed, non-skipped, P2/P3-sourced, graph-reflected in asset/module placement/actuator mapping, terminal `success`, and accompanied by attach events plus per-step records. `completion_passed = fast_gate_passed and real_isaac_rollout_passed`.
+- Runner/CLI decision: `P4_2DeterministicRolloutRunner` now includes the acceptance report. The P4.2 CLI exits successfully for `--real` only when completion passes; dry runs remain probes and do not claim completion.
+- Compatibility impact: No persisted schema change. Fake-backend archives can satisfy the fast gate for unit testing, but they cannot satisfy completion because `isaac_backed=false`.
+
 ### P4.2 Runner and Archive Supplement
 
 - Context: P4.2 must archive deterministic grasp/carry rollout evidence from a P2 selected design and P3 assembled morphology without treating fake-backend success as P4.2 completion.

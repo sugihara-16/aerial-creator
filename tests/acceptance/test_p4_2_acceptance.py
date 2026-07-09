@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
+from dataclasses import replace
 from typing import Any
 
-from amsrr.logging import read_episode_archives_jsonl
+from amsrr.acceptance import run_p4_2_acceptance
 from amsrr.schemas.policies import ControllerCommand, ControllerStatus, PolicyCommand
 from amsrr.schemas.runtime import ModuleRuntimeState, ObjectRuntimeState, RuntimeObservation, TaskProgressState
 from amsrr.simulation import (
@@ -15,50 +15,61 @@ from amsrr.simulation import (
     P4_2PhaseTransitionRecord,
     P4_2RolloutPhase,
 )
-from amsrr.training import (
-    P4_2DeterministicRolloutRunner,
-    P4_2DeterministicRolloutRunnerConfig,
-    load_p4_2_deterministic_rollout_runner_config,
-)
+from amsrr.training import P4_2DeterministicRolloutRunner, P4_2DeterministicRolloutRunnerConfig
 
 
-def test_p4_2_deterministic_rollout_runner_config_loader() -> None:
-    runner_config, env_config = load_p4_2_deterministic_rollout_runner_config(
-        "configs/training/p4_2_deterministic_rollout.yaml"
-    )
+def test_p4_2_fast_gate_does_not_complete_without_real_isaac_rollout() -> None:
+    runner_result = _fake_runner_result()
 
-    assert runner_config.runner_version == "p4_2_deterministic_rollout_runner_v1"
-    assert runner_config.dry_run is True
-    assert runner_config.archive_path == "artifacts/p4_2/p4_2_deterministic_rollout.jsonl"
-    assert runner_config.p3_config_path == "configs/training/p3_assembly_grasp_carry.yaml"
-    assert env_config.rollout_name == "p2_p3_deterministic_grasp_carry"
-    assert env_config.contact_model == "kinematic_fixed_joint_attach_v1"
+    report = run_p4_2_acceptance(runner_result.archives, rollout_results=[runner_result.rollout_result])
 
-
-def test_p4_2_runner_builds_p2_p3_case_candidates_and_trajectory() -> None:
-    runner = P4_2DeterministicRolloutRunner(
-        runner_config=P4_2DeterministicRolloutRunnerConfig(dry_run=True, archive_path=None, seed=0)
-    )
-
-    case = runner.build_p2_p3_rollout_case()
-
-    assert case.selection.selected_candidate.feasibility_result.feasible is True
-    assert case.assembly_report.success is True
-    assert case.module_count == 3
-    assert case.contact_candidate_set.morphology_graph_id == case.assembled_morphology.graph_id
-    assert len(case.contact_candidate_set.candidates) > 0
-    assert case.trajectory.derived_mode_label == "p4_2_deterministic_grasp_carry"
-    assert [guard["phase"] for guard in (knot.guard_conditions[0] for knot in case.trajectory.knots)] == [
-        "approach",
-        "pregrasp_align",
-        "attach_attempt",
-        "attached_maintain",
-        "transport",
-        "release",
-    ]
+    assert report.fast_gate_passed is True
+    assert report.real_isaac_rollout_passed is False
+    assert report.completion_passed is False
+    assert report.p2_selected_design_used is True
+    assert report.p3_assembly_result_used is True
+    assert report.trajectory_records_saved is True
+    assert report.selected_contact_candidates_saved is True
+    assert report.phase_sequence_saved is True
+    assert report.per_step_runtime_observations_saved is True
+    assert report.per_step_policy_commands_saved is True
+    assert report.per_step_controller_commands_saved is True
+    assert report.per_step_actuator_target_records_saved is True
+    assert report.attach_events_saved is True
+    assert report.morphology_reflection_saved is True
+    assert "P4.2 real Isaac rollout gate has not passed" in report.failure_reasons
+    assert "P4.2 rollout was not Isaac-backed: p2_p3_deterministic_grasp_carry" in report.failure_reasons
+    assert report.metrics["completion_passed"] == 0.0
 
 
-def test_p4_2_runner_archives_fake_backend_rollout_without_real_completion_claim(tmp_path: Path) -> None:
+def test_p4_2_completion_requires_real_isaac_rollout() -> None:
+    runner_result = _fake_runner_result()
+    real_rollout = replace(runner_result.rollout_result, isaac_backed=True)
+
+    report = run_p4_2_acceptance(runner_result.archives, rollout_results=[real_rollout])
+
+    assert report.fast_gate_passed is True
+    assert report.real_isaac_rollout_passed is True
+    assert report.completion_passed is True
+    assert report.failure_reasons == []
+    assert report.passed_rollout_names == ["p2_p3_deterministic_grasp_carry"]
+    assert type(report).from_json(report.to_json()).to_dict() == report.to_dict()
+
+
+def test_p4_2_fast_gate_rejects_missing_attach_event() -> None:
+    runner_result = _fake_runner_result()
+    archive = runner_result.archives[0]
+    archive.rollout_artifacts["p4_2_attach_events"] = []
+    archive.metrics["attach_event_count"] = 0.0
+
+    report = run_p4_2_acceptance([archive], rollout_results=[runner_result.rollout_result])
+
+    assert report.fast_gate_passed is False
+    assert report.completion_passed is False
+    assert "P4.2 archives are missing gated object attach events" in report.failure_reasons
+
+
+def _fake_runner_result():
     backend = _FakeP4_2Backend(step_count=2)
     env_config = P4_2DeterministicRolloutConfig(max_episode_steps=2)
     env = P4_2IsaacEnv(config=env_config, backend=backend)  # type: ignore[arg-type]
@@ -67,65 +78,12 @@ def test_p4_2_runner_archives_fake_backend_rollout_without_real_completion_claim
         env_config=env_config,
         env=env,
     )
-    archive_path = tmp_path / "p4_2_deterministic_rollout.jsonl"
-
-    result = runner.run(archive_path=archive_path)
-
-    assert result.dry_run is False
-    assert result.rollout_result.passed is True
-    assert result.rollout_result.isaac_backed is False
-    assert result.acceptance_report.fast_gate_passed is True
-    assert result.acceptance_report.real_isaac_rollout_passed is False
-    assert result.acceptance_report.completion_passed is False
-    assert result.metrics["p2_selected_design_used"] == 1.0
-    assert result.metrics["p3_assembly_result_used"] == 1.0
-    assert result.metrics["fast_gate_passed"] == 1.0
-    assert result.metrics["completion_passed"] == 0.0
-    assert result.metrics["p4_full_completion"] == 0.0
-    assert result.metrics["p4_3_learning_bootstrap"] == 0.0
-    assert result.metrics["real_isaac_completion_claim"] == 0.0
-    assert backend.calls[0]["morphology_graph"].graph_id == result.archives[0].rollout_artifacts[
-        "assembled_morphology_graph_id"
-    ]
-    assert backend.calls[0]["uses_p2_p3_design"] is True
-
-    assert len(result.archives) == 1
-    archive = result.archives[0]
-    assert archive.design_output is not None
-    assert archive.feasibility_result is not None
-    assert archive.assembly_plan is not None
-    assert len(archive.trajectory_records) == 1
-    assert len(archive.runtime_observations) == 2
-    assert len(archive.policy_commands) == 2
-    assert len(archive.controller_commands) == 2
-    assert len(archive.actuator_target_records) == 2
-    assert archive.rollout_artifacts["archive_type"] == "p4_2_deterministic_rollout_per_step"
-    assert archive.rollout_artifacts["p2_selected_design_used"] is True
-    assert archive.rollout_artifacts["p3_assembled_morphology_used"] is True
-    assert archive.rollout_artifacts["object_attach_release_only"] is True
-    assert archive.rollout_artifacts["module_attach_detach_claim"] is False
-    assert archive.rollout_artifacts["dynamic_morphology_update_claim"] is False
-    assert archive.rollout_artifacts["real_isaac_completion_claim"] is False
-    assert archive.rollout_artifacts["p4_3_learning_bootstrap"] is False
-    assert archive.rollout_artifacts["checkpoint_claim"] is False
-    assert archive.rollout_artifacts["reward_curve_training_claim"] is False
-    assert archive.metrics["isaac_backed"] == 0.0
-    assert archive.metrics["p4_2_deterministic_rollout_passed"] == 1.0
-    assert archive.metrics["learned_policy_success_claim"] == 0.0
-    assert archive.metrics["high_fidelity_natural_grasp_success_claim"] == 0.0
-
-    loaded = read_episode_archives_jsonl(archive_path)
-
-    assert len(loaded) == 1
-    assert len(loaded[0].trajectory_records) == 1
-    assert len(loaded[0].runtime_observations) == 2
-    assert loaded[0].rollout_artifacts["real_isaac_completion_claim"] is False
+    return runner.run(archive_path=None)
 
 
 class _FakeP4_2Backend:
     def __init__(self, *, step_count: int) -> None:
         self.step_count = step_count
-        self.calls: list[dict[str, Any]] = []
 
     def availability(self) -> IsaacLabAvailability:
         return IsaacLabAvailability(
@@ -139,7 +97,6 @@ class _FakeP4_2Backend:
         )
 
     def run_p4_2_deterministic_rollout(self, **kwargs: Any) -> dict[str, Any]:
-        self.calls.append(dict(kwargs))
         return _p4_2_report(morphology=kwargs["morphology_graph"], step_count=self.step_count)
 
 

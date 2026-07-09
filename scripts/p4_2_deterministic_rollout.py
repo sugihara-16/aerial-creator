@@ -51,7 +51,7 @@ def main() -> int:
     runner = P4_2DeterministicRolloutRunner(runner_config=runner_config, env_config=env_config, env=env)
     result = runner.run(archive_path=Path(args.archive_path) if args.archive_path else None)
     print(json.dumps(result.to_dict(), sort_keys=True))
-    return 0 if result.dry_run or result.rollout_result.passed else 1
+    return 0 if result.dry_run or result.acceptance_report.completion_passed else 1
 
 
 if __name__ == "__main__":

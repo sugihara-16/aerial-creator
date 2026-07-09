@@ -77,6 +77,7 @@ class P4_2P2P3RolloutCase:
 class P4_2DeterministicRolloutRunnerResult(SchemaBase):
     dry_run: bool
     rollout_result: P4_2DeterministicRolloutResult
+    acceptance_report: Any | None = None
     archives: list[EpisodeArchive] = field(default_factory=list)
     metrics: dict[str, float] = field(default_factory=dict)
 
@@ -113,6 +114,8 @@ class P4_2DeterministicRolloutRunner:
         self.physical_model = physical_model
 
     def run(self, *, archive_path: str | Path | None = None) -> P4_2DeterministicRolloutRunnerResult:
+        from amsrr.acceptance.p4_2_acceptance import run_p4_2_acceptance
+
         case = self.build_p2_p3_rollout_case()
         rollout_result = self.env.run_rollout(
             dry_run=self.runner_config.dry_run,
@@ -130,11 +133,14 @@ class P4_2DeterministicRolloutRunner:
         if output_path is not None and archives:
             write_episode_archives_jsonl(output_path, archives)
 
+        acceptance_report = run_p4_2_acceptance(archives, rollout_results=[rollout_result])
         return P4_2DeterministicRolloutRunnerResult(
             dry_run=self.runner_config.dry_run,
             rollout_result=rollout_result,
+            acceptance_report=acceptance_report,
             archives=archives,
             metrics={
+                **acceptance_report.metrics,
                 **_case_metrics(case, rollout_result),
                 "dry_run": 1.0 if self.runner_config.dry_run else 0.0,
                 "archive_count": float(len(archives)),

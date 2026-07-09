@@ -4,6 +4,35 @@
 
 ### 2026-07-10
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.2 deterministic rollout user clarifications
+- Work package / Agent label: Agent L boundary: P4.2 split acceptance
+- Summary: Added P4.2 split acceptance. The fast gate checks archives for P2 selected design, P3 assembled morphology, deterministic phase trajectory, selected contact candidates/assignments, per-step runtime/policy/controller/actuator logs, gated object attach events, graph-specific morphology reflection, and no-mislabeling artifacts. The real gate separately requires the named rollout `p2_p3_deterministic_grasp_carry` to be attempted, passed, Isaac-backed, P2/P3-sourced, graph-reflected, final `success`, and backed by attach/per-step records.
+- Files changed:
+  - `amsrr/acceptance/p4_2_acceptance.py`
+  - `amsrr/acceptance/__init__.py`
+  - `amsrr/training/p4_2_deterministic_rollout_runner.py`
+  - `scripts/p4_2_deterministic_rollout.py`
+  - `tests/acceptance/test_p4_2_acceptance.py`
+  - `tests/unit/training/test_p4_2_deterministic_rollout_runner.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added acceptance report dataclass, package export, runner acceptance output, and CLI completion gating.
+- Upstream dependencies used: P4.2 contract/result, P4.2 runner archives, P4.2 required real rollout name, and user clarification that fake gate and real Isaac rollout gate must remain separate.
+- Downstream impact: P4.2 can now have fast archive tests without allowing completion. Actual P4.2 completion requires a real Isaac-backed successful rollout result and cannot be passed by fake backend archives alone.
+- Tests added or run:
+  - Added acceptance coverage that fake-backed archives pass the fast gate but cannot pass completion, that a real Isaac-backed rollout result is required for completion, and that missing attach events fail the fast gate.
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p4_2_acceptance.py tests/unit/training/test_p4_2_deterministic_rollout_runner.py -q`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p4_2_acceptance.py tests/acceptance/test_p4_1_acceptance.py tests/unit/training/test_p4_2_deterministic_rollout_runner.py tests/unit/training/test_p4_1_backend_smoke_runner.py -q`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_2_isaac_env.py tests/unit/simulation/test_p4_2_rollout.py tests/unit/policies/test_p4_2_deterministic_policies.py -q`
+  - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/p4_2_deterministic_rollout.py --config configs/training/p4_2_deterministic_rollout.yaml --archive-path /tmp/amsrr_p4_2_dry.jsonl`
+  - `python3 -m compileall amsrr/acceptance amsrr/training scripts tests/acceptance/test_p4_2_acceptance.py tests/unit/training/test_p4_2_deterministic_rollout_runner.py -q`
+  - `git diff --check`
+- Tests run: New acceptance/runner tests passed: 6 passed. Related acceptance/runner tests passed: 12 passed. Related P4.2 simulation/policy tests passed: 14 passed. CLI dry-run exited 0 with `completion_passed=false`. Compileall and diff check passed.
+- Assumptions: This order implements the split gate only. It does not implement the real Isaac object fixed-joint attach/release mechanics or claim P4.2 completion.
+- Blockers: None for Order 5.
+- Next steps: Commit Order 5. The next implementation area is real P4.2 object attach/transport/release in Isaac; before coding that, confirm any remaining method-level undefined details around Isaac fixed-joint/kinematic attach mechanics.
+
+### 2026-07-10
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.2 deterministic rollout user clarifications
 - Work package / Agent label: Agent K boundary: P4.2 deterministic rollout runner/archive
 - Summary: Added the P4.2 deterministic rollout runner and CLI. The runner builds a P2 selected design and P3 assembled morphology, samples contact candidates against the assembled graph, creates the P4.2 deterministic `ContactWrenchTrajectory`, calls the P4.2 Isaac env with the assembled `MorphologyGraph`, and archives per-step runtime/policy/controller/actuator logs plus phase transitions, attach events, candidate set, selected assignments, and no-mislabeling artifacts.
 - Files changed:
