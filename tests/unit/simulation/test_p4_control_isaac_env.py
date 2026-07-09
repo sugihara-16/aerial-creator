@@ -41,6 +41,12 @@ def test_isaac_backend_probe_and_conversion_command_are_config_driven() -> None:
         hover_force_scale=0.25,
         gimbal_target_rad=0.05,
     )
+    controller_command_probe = backend.holon_controller_command_probe_command(
+        config_path="configs/env/isaac_lab.yaml",
+        generated_usd_dir="/tmp/amsrr_isaac_holon_spawn",
+        generated_usd_path="/tmp/amsrr_isaac_holon_spawn/holon/holon.usda",
+        steps=20,
+    )
 
     assert availability.metadata["backend_version"] == "isaac_lab_backend_v1"
     assert availability.urdf_exists is True
@@ -57,6 +63,8 @@ def test_isaac_backend_probe_and_conversion_command_are_config_driven() -> None:
     assert "0.25" in command_probe
     assert "--gimbal-target-rad" in command_probe
     assert "0.05" in command_probe
+    assert controller_command_probe[:3] == spawn_command[:3]
+    assert "--controller-command-smoke" in controller_command_probe
 
 
 def test_p4_control_smoke_scenarios_are_deterministic() -> None:

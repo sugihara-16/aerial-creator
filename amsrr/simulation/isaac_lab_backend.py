@@ -172,6 +172,25 @@ class IsaacLabBackend:
         )
         return command
 
+    def holon_controller_command_probe_command(
+        self,
+        *,
+        config_path: str | Path = "configs/env/isaac_lab.yaml",
+        convert_if_missing: bool = True,
+        steps: int = 80,
+        generated_usd_dir: str | Path | None = None,
+        generated_usd_path: str | Path | None = None,
+    ) -> list[str]:
+        command = self.holon_spawn_probe_command(
+            config_path=config_path,
+            convert_if_missing=convert_if_missing,
+            steps=steps,
+            generated_usd_dir=generated_usd_dir,
+            generated_usd_path=generated_usd_path,
+        )
+        command.append("--controller-command-smoke")
+        return command
+
     @staticmethod
     def _expanded_path(path: str) -> Path:
         return Path(os.path.expandvars(os.path.expanduser(path)))

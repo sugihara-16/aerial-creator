@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Controller-to-Isaac Command Smoke Supplement
+
+- Context: After validating raw Isaac command APIs, P4-control needed a real-smoke artifact that starts from A-MSRR controller output rather than manually supplied force/joint arguments.
+- Decision: Added `amsrr/simulation/p4_control_controller_smoke.py` to build a single-module morphology, runtime observation, `QPIDController(allocation_mode="rigid_body_qp")` command, and `IsaacControllerBridge` target record. Extended `scripts/p4_control_holon_spawn_probe.py` with `--controller-command-smoke`, which applies bridge rotor-thrust targets to matching `thrust_.*` bodies using rotor local thrust axes and bridge joint-position targets to matching gimbal/dock joints. The script reports controller command, bridge metrics, target clipping/missing/unsupported lists, and controller smoke metrics.
+- Compatibility impact: This validates controller-to-bridge-to-Isaac command routing, not closed-loop hover. The current controller smoke still reports `controller_status.qp_feasible=false` because the QP path produces small residual/clipping violations under the present single-step hover request. Completion gates must continue to fail until a later order resolves controller feasibility and real hover/waypoint smoke.
+
 ### Holon Battery2 Inertial Correction Supplement
 
 - Context: Real Isaac spawn and command probes consistently reported a PhysX warning that `/World/Holon/Geometry/root/main_body/battery2` had invalid inertia and negative mass fallback behavior. Inspection showed that both the runtime Holon URDF and reference xacro had `battery2` inertial data set to `mass=0` and all inertia components `0`.

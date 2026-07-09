@@ -4,6 +4,40 @@
 
 ### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control Isaac environment recommendation
+- Work package / Agent label: Agent I/J/K boundary: P4-control Order 10 controller-to-Isaac command smoke
+- Summary: Added a unit-testable controller command smoke builder and connected it to the real Isaac Holon probe. The new path builds a single-module morphology/runtime observation, computes a `QPIDController` command with `allocation_mode="rigid_body_qp"`, converts it through `IsaacControllerBridge`, and applies the bridge record to Isaac thrust bodies and gimbal/dock joints via the existing probe script.
+- Files changed:
+  - `amsrr/simulation/p4_control_controller_smoke.py`
+  - `amsrr/simulation/isaac_lab_backend.py`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - `tests/unit/simulation/test_p4_control_controller_smoke.py`
+  - `tests/unit/simulation/test_p4_control_isaac_env.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema change. Added controller smoke helper dataclasses/functions and backend command helper `holon_controller_command_probe_command`.
+- Upstream dependencies used: `QPIDController`, `VirtualThrustQPAllocator`, `ActuatorMapping`, `IsaacControllerBridge`, corrected Holon URDF/USD, Isaac Lab wrench composer and joint target APIs.
+- Downstream impact: Later real-smoke runner work can consume the controller smoke bundle and bridge record instead of hand-authored force/joint commands. The same application path can be reused for single-module closed-loop hover once QP feasibility and control loop updates are fixed.
+- Tests added or run:
+  - Added `tests/unit/simulation/test_p4_control_controller_smoke.py`.
+  - Updated `tests/unit/simulation/test_p4_control_isaac_env.py` for the controller command probe command contract.
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_control_controller_smoke.py tests/unit/simulation/test_p4_control_isaac_env.py tests/unit/training/test_p4_control_runner.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr scripts -q`
+  - `git diff --check`
+- Commands run:
+  - `sed -n ... amsrr/controllers/qpid_controller.py`
+  - `sed -n ... amsrr/controllers/isaac_controller_bridge.py`
+  - `sed -n ... amsrr/simulation/p4_control_isaac_env.py`
+  - `PYTHONPATH=/home/leus/amsrr python3 - <<'PY' ...` to inspect command/bridge record contents
+  - `eval "$(~/.local/bin/micromamba shell hook -s bash)" && micromamba activate isaaclab3 && PYTHONPATH=/home/leus/amsrr:$PYTHONPATH /home/leus/IsaacLab/isaaclab.sh -p /home/leus/amsrr/scripts/p4_control_holon_spawn_probe.py --config /home/leus/amsrr/configs/env/isaac_lab.yaml --force-convert --generated-usd-dir /tmp/amsrr_isaac_holon_controller --generated-usd-path /tmp/amsrr_isaac_holon_controller/holon/holon.usda --steps 80 --controller-command-smoke`
+  - `find amsrr scripts tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: New/related controller smoke tests passed: 9 passed. Full unit suite passed: 120 passed, 1 skipped. Compileall and diff check passed. Real Isaac controller-command smoke passed with `command_probe_passed=true`, `controller_command_smoke=true`, `controller_bridge_missing_actuators=[]`, `controller_bridge_unsupported_actuators=[]`, `controller_bridge_clipped_targets=[]`, bridge target count `12`, and no battery2 invalid-inertia warning.
+- Assumptions: This order intentionally filters raw controller joint-torque commands out of the bridge record because this smoke validates P4-control rotor thrust, vectoring joint target, and dock joint position surfaces. The raw zero/rotor/fixed joint torque command behavior remains visible in `raw_joint_torque_command_count`.
+- Blockers: None for controller-to-Isaac command routing. The controller QP still reports `qp_feasible=false` with small residual/clipping violations (`allocation_residual_norm ~= 0.00692`), so this is not a hover pass or completion artifact.
+- Next steps: Commit Order 10, then investigate/resolve the single-module hover QP feasibility and closed-loop control update path before attempting real P4-control smoke acceptance.
+
+### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control Isaac environment recommendation
 - Work package / Agent label: Agent B/J boundary: P4-control Order 9 Holon battery2 inertial correction
 - Summary: Investigated the recurring real Isaac PhysX warning for `battery2`. The runtime Holon URDF and reference xacro had `battery2` inertial data set to zero mass and zero inertia. Copied the symmetric `battery1` inertial origin/mass/inertia to `battery2`, added a unit guard for mesh-bearing runtime URDF links, regenerated USD under `/tmp`, and verified the battery2 warning is gone in a real Isaac command probe.
 - Files changed:

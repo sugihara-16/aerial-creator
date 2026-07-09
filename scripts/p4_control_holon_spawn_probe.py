@@ -35,6 +35,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gimbal-tolerance-rad", type=float, default=0.02, help="Probe pass tolerance for gimbal joints.")
     parser.add_argument("--gimbal-stiffness", type=float, default=20.0, help="Implicit actuator stiffness.")
     parser.add_argument("--gimbal-damping", type=float, default=1.0, help="Implicit actuator damping.")
+    parser.add_argument(
+        "--controller-command-smoke",
+        action="store_true",
+        help="Use A-MSRR QPIDController and IsaacControllerBridge outputs as the command source.",
+    )
     AppLauncher.add_app_launcher_args(parser)
     return parser.parse_args()
 
@@ -66,10 +71,13 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     from isaaclab.sim.converters import UrdfConverter, UrdfConverterCfg
     import torch
 
+    from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
     from amsrr.simulation.isaac_lab_backend import IsaacLabBackend, load_isaac_lab_backend_config
+    from amsrr.simulation.p4_control_controller_smoke import build_single_module_controller_command_smoke
 
     backend_config = load_isaac_lab_backend_config(args.config)
     backend = IsaacLabBackend(backend_config)
+    physical_model = build_physical_model_from_config(backend_config.robot_model_config_path)
     urdf_path = _expand_path(backend_config.holon_urdf_path)
     usd_dir = _expand_path(args.generated_usd_dir or backend_config.generated_usd_dir)
     usd_path = _expand_path(args.generated_usd_path or backend_config.generated_usd_path)
@@ -169,8 +177,23 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     thrust_body_ids_tensor = torch.tensor(thrust_body_ids, dtype=torch.int32, device=sim.device)
     gimbal_joint_ids_tensor = torch.tensor(gimbal_joint_ids, dtype=torch.int32, device=sim.device)
     initial_root_pos_w = _tensor_row(robot.data.root_pos_w.torch)
+    controller_bundle = None
+    if args.controller_command_smoke:
+        controller_bundle = build_single_module_controller_command_smoke(
+            physical_model,
+            time_s=0.0,
+            command_index=0,
+            control_dt_s=args.dt,
+            pose_world=tuple(_tensor_row(robot.data.root_pose_w.torch)),  # type: ignore[arg-type]
+            twist_world=_tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch),
+            joint_positions=_joint_state_dict(robot.joint_names, robot.data.joint_pos.torch),
+            joint_velocities=_joint_state_dict(robot.joint_names, robot.data.joint_vel.torch),
+        )
+        _apply_actuator_record(robot, controller_bundle.actuator_target_record, physical_model, sim.device)
     for _ in range(max(0, args.steps)):
-        if force_per_rotor_n != 0.0:
+        if controller_bundle is not None:
+            _apply_actuator_record(robot, controller_bundle.actuator_target_record, physical_model, sim.device)
+        elif force_per_rotor_n != 0.0:
             forces = torch.zeros(robot.num_instances, len(thrust_body_ids), 3, device=sim.device)
             torques = torch.zeros_like(forces)
             forces[..., 2] = force_per_rotor_n
@@ -202,12 +225,24 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         )
     force_command_ok = force_per_rotor_n == 0.0 or len(thrust_body_ids) == 4
     gimbal_command_ok = args.gimbal_target_rad == 0.0 or gimbal_target_error_rad <= args.gimbal_tolerance_rad
+    controller_command_ok = True
+    if controller_bundle is not None:
+        controller_command_ok = (
+            controller_bundle.actuator_target_record.metrics["missing_actuator_count"] == 0.0
+            and controller_bundle.actuator_target_record.metrics["unsupported_actuator_count"] == 0.0
+            and controller_bundle.controller_command.controller_status.metrics.get("qp_primary_path", 0.0) == 1.0
+        )
 
     report = {
         "spawn_passed": True,
         "isaac_backed": True,
-        "command_applied": command_applied,
-        "command_probe_passed": force_command_ok and gimbal_command_ok if command_applied else None,
+        "command_applied": command_applied or controller_bundle is not None,
+        "command_probe_passed": (
+            force_command_ok and gimbal_command_ok and controller_command_ok
+            if command_applied or controller_bundle is not None
+            else None
+        ),
+        "controller_command_smoke": controller_bundle is not None,
         "converted": converted,
         "usd_path": str(usd_path),
         "urdf_path": str(urdf_path),
@@ -241,6 +276,8 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         "root_ang_vel_w": _tensor_row(robot.data.root_ang_vel_w.torch),
         "joint_pos_sample": _tensor_row(robot.data.joint_pos.torch, limit=8),
     }
+    if controller_bundle is not None:
+        report.update(_controller_bundle_report(controller_bundle))
     sim.stop()
     sim.clear_instance()
     return report
@@ -262,6 +299,66 @@ def _tensor_indices(tensor, indices: list[int]) -> list[float]:
         return []
     row = tensor[0, indices]
     return [float(value) for value in row.detach().cpu().tolist()]
+
+
+def _joint_state_dict(joint_names: list[str], tensor) -> dict[str, float]:
+    values = tensor[0].detach().cpu().tolist()
+    return {name: float(values[index]) for index, name in enumerate(joint_names)}
+
+
+def _apply_actuator_record(robot, actuator_record, physical_model, device: str) -> None:
+    import torch
+
+    rotors_by_id = {rotor.rotor_id: rotor for rotor in physical_model.rotors}
+    force_body_ids: list[int] = []
+    force_rows: list[list[float]] = []
+    joint_ids: list[int] = []
+    joint_targets: list[float] = []
+
+    for target in actuator_record.actuator_targets:
+        local_id = str(target.metadata.get("local_id", target.command_key))
+        if target.actuator_type == "rotor_thrust":
+            rotor = rotors_by_id.get(local_id)
+            if rotor is None or local_id not in robot.body_names:
+                continue
+            force_body_ids.append(robot.body_names.index(local_id))
+            force_rows.append([float(axis) * target.target_value for axis in rotor.thrust_axis_local])
+        elif target.actuator_type in {"vectoring_joint_position", "dock_joint_position"}:
+            if local_id not in robot.joint_names:
+                continue
+            joint_ids.append(robot.joint_names.index(local_id))
+            joint_targets.append(target.target_value)
+
+    if force_body_ids:
+        forces = torch.tensor([force_rows], dtype=torch.float32, device=device)
+        torques = torch.zeros_like(forces)
+        body_ids = torch.tensor(force_body_ids, dtype=torch.int32, device=device)
+        robot.permanent_wrench_composer.set_forces_and_torques_index(
+            forces=forces,
+            torques=torques,
+            body_ids=body_ids,
+            is_global=False,
+        )
+    if joint_ids:
+        target_tensor = torch.tensor([joint_targets], dtype=torch.float32, device=device)
+        joint_ids_tensor = torch.tensor(joint_ids, dtype=torch.int32, device=device)
+        robot.set_joint_position_target_index(target=target_tensor, joint_ids=joint_ids_tensor)
+
+
+def _controller_bundle_report(controller_bundle) -> dict[str, object]:
+    record = controller_bundle.actuator_target_record
+    command = controller_bundle.controller_command
+    return {
+        "controller_status": command.controller_status.to_dict(),
+        "controller_rotor_thrusts_n": dict(command.rotor_thrusts_n),
+        "controller_vectoring_joint_targets": dict(command.vectoring_joint_targets),
+        "controller_dock_mechanism_commands": dict(command.dock_mechanism_commands),
+        "controller_bridge_metrics": dict(record.metrics),
+        "controller_bridge_missing_actuators": list(record.missing_actuators),
+        "controller_bridge_unsupported_actuators": list(record.unsupported_actuators),
+        "controller_bridge_clipped_targets": list(record.clipped_targets),
+        "controller_smoke_metrics": dict(controller_bundle.metrics),
+    }
 
 
 if __name__ == "__main__":
