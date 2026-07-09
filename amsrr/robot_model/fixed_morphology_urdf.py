@@ -89,6 +89,43 @@ def write_resolved_mesh_urdf(
     return output_path
 
 
+def write_joint_velocity_override_urdf(
+    source_urdf_path: str | Path,
+    output_urdf_path: str | Path,
+    *,
+    joint_velocity_overrides: dict[str, float],
+    prefix_separator: str = FIXED_MODULE_PREFIX_SEPARATOR,
+) -> Path:
+    """Write a URDF copy with selected joint velocity limits overridden."""
+
+    source_path = Path(source_urdf_path).resolve()
+    output_path = Path(output_urdf_path)
+    source_root = ET.parse(source_path).getroot()
+    if _tag_name(source_root) != "robot":
+        raise SchemaValidationError(f"Expected <robot> root in {source_path}")
+    normalised = {name: float(value) for name, value in joint_velocity_overrides.items()}
+    for joint_name, velocity in normalised.items():
+        if velocity < 0.0:
+            raise SchemaValidationError(f"Joint velocity override for {joint_name!r} must be non-negative")
+    for joint in _iter_named_joints(source_root):
+        joint_name = joint.attrib["name"]
+        override = _matching_joint_velocity_override(
+            joint_name,
+            normalised,
+            prefix_separator=prefix_separator,
+        )
+        if override is None:
+            continue
+        limit = _child(joint, "limit")
+        if limit is None:
+            limit = ET.SubElement(joint, "limit")
+        limit.attrib["velocity"] = f"{override:.9g}"
+    _indent(source_root)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    ET.ElementTree(source_root).write(output_path, encoding="utf-8", xml_declaration=True)
+    return output_path
+
+
 def fixed_module_link_name(module_id: int, local_link_name: str) -> str:
     return _prefixed_name(module_id, local_link_name, FIXED_MODULE_PREFIX_SEPARATOR)
 
@@ -181,6 +218,35 @@ def _named_children(root: ET.Element, tag: str) -> dict[str, ET.Element]:
         for child in list(root)
         if _tag_name(child) == tag and child.attrib.get("name")
     }
+
+
+def _iter_named_joints(root: ET.Element) -> list[ET.Element]:
+    return [
+        child
+        for child in list(root)
+        if _tag_name(child) == "joint" and child.attrib.get("name")
+    ]
+
+
+def _child(element: ET.Element, tag: str) -> ET.Element | None:
+    for child in list(element):
+        if _tag_name(child) == tag:
+            return child
+    return None
+
+
+def _matching_joint_velocity_override(
+    joint_name: str,
+    overrides: dict[str, float],
+    *,
+    prefix_separator: str,
+) -> float | None:
+    if joint_name in overrides:
+        return overrides[joint_name]
+    parsed = split_fixed_module_name(joint_name, prefix_separator=prefix_separator)
+    if parsed is not None:
+        return overrides.get(parsed[1])
+    return None
 
 
 def _tag_name(element: ET.Element) -> str:

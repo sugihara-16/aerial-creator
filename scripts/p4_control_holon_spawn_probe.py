@@ -61,6 +61,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--fixed-module-count", type=int, default=2, help="Module count for fixed-morphology smokes.")
     parser.add_argument("--fixed-module-spacing-m", type=float, default=0.45, help="Rigid spacing between fixed modules.")
+    parser.add_argument(
+        "--allocation-mode",
+        choices=("rigid_body_qp", "rigid_body_pseudoinverse"),
+        default="rigid_body_qp",
+        help="Controller allocation mode for closed-loop P4-control smokes.",
+    )
+    parser.add_argument(
+        "--vectoring-velocity-limit-rad-s",
+        type=float,
+        default=None,
+        help="Override gimbal/vectoring joint velocity limits in the generated conversion URDF.",
+    )
     parser.add_argument("--hover-target-height", type=float, default=None, help="Closed-loop hover target z in meters.")
     parser.add_argument(
         "--waypoint-target-position-m",
@@ -136,6 +148,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     from amsrr.robot_model.fixed_morphology_urdf import (
         split_fixed_module_name,
         write_fixed_morphology_urdf,
+        write_joint_velocity_override_urdf,
         write_resolved_mesh_urdf,
     )
     from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
@@ -173,6 +186,15 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
                 urdf_path,
                 usd_dir / "resolved_urdf" / "holon.urdf",
                 mesh_search_dirs=mesh_search_dirs,
+            )
+        if args.vectoring_velocity_limit_rad_s is not None:
+            urdf_path = write_joint_velocity_override_urdf(
+                urdf_path,
+                urdf_path,
+                joint_velocity_overrides=_vectoring_velocity_overrides(
+                    physical_model,
+                    float(args.vectoring_velocity_limit_rad_s),
+                ),
             )
         converter_cfg = UrdfConverterCfg(
             asset_path=str(urdf_path),
@@ -302,6 +324,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             build_single_module_morphology=build_single_module_morphology,
             bridge_supported_controller_command=bridge_supported_controller_command,
             realtime_playback=bool(args.realtime_playback),
+            allocation_mode=str(args.allocation_mode),
         )
     if fixed_smoke_requested:
         waypoint_position = args.waypoint_target_position_m
@@ -340,6 +363,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             report_prefix=report_prefix,
             waypoint_ramp_duration_s=waypoint_ramp_duration_s,
             realtime_playback=bool(args.realtime_playback),
+            allocation_mode=str(args.allocation_mode),
         )
     for _ in range(0 if hover_smoke_report is not None else max(0, args.steps)):
         if controller_bundle is not None:
@@ -431,6 +455,12 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         "gimbal_target_error_rad": gimbal_target_error_rad,
         "gimbal_joint_pos": gimbal_joint_pos,
         "gimbal_joint_pos_target": gimbal_joint_pos_target,
+        "allocation_mode": str(args.allocation_mode),
+        "vectoring_velocity_limit_rad_s": (
+            float(args.vectoring_velocity_limit_rad_s)
+            if args.vectoring_velocity_limit_rad_s is not None
+            else None
+        ),
         "initial_root_pos_w": initial_root_pos_w,
         "root_pos_w": final_root_pos_w,
         "root_delta_w": [final - initial for final, initial in zip(final_root_pos_w, initial_root_pos_w, strict=True)],
@@ -463,6 +493,16 @@ def _holon_mesh_search_dirs() -> list[Path]:
     ]
 
 
+def _vectoring_velocity_overrides(physical_model, velocity_limit_rad_s: float) -> dict[str, float]:
+    if velocity_limit_rad_s < 0.0:
+        raise ValueError("vectoring velocity limit must be non-negative")
+    return {
+        joint_id: velocity_limit_rad_s
+        for rotor in physical_model.rotors
+        for joint_id in rotor.vectoring_joint_ids
+    }
+
+
 def _run_single_module_hover_smoke(
     *,
     robot,
@@ -481,6 +521,7 @@ def _run_single_module_hover_smoke(
     build_single_module_morphology,
     bridge_supported_controller_command,
     realtime_playback: bool,
+    allocation_mode: str,
 ) -> dict[str, object]:
     from amsrr.controllers.actuator_mapping import build_actuator_mapping
     from amsrr.controllers.controller_base import ControllerContext
@@ -496,7 +537,7 @@ def _run_single_module_hover_smoke(
     bridge = IsaacControllerBridge()
     controller = QPIDController(
         config=QPIDControllerConfig(
-            allocation_mode="rigid_body_qp",
+            allocation_mode=allocation_mode,
             control_dt_s=control_dt_s,
         )
     )
@@ -655,6 +696,7 @@ def _run_fixed_morphology_smoke(
     report_prefix: str,
     waypoint_ramp_duration_s: float,
     realtime_playback: bool,
+    allocation_mode: str,
 ) -> dict[str, object]:
     from amsrr.controllers.actuator_mapping import build_actuator_mapping
     from amsrr.controllers.controller_base import ControllerContext
@@ -672,7 +714,7 @@ def _run_fixed_morphology_smoke(
     bridge = IsaacControllerBridge()
     controller = QPIDController(
         config=QPIDControllerConfig(
-            allocation_mode="rigid_body_qp",
+            allocation_mode=allocation_mode,
             control_dt_s=control_dt_s,
         )
     )

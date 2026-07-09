@@ -26,6 +26,7 @@ from amsrr.controllers.qp_allocator_interface import (
     QP_THRUST_CLIPPED_CODE,
     QP_UNSUPPORTED_WRENCH_CODE,
     QP_VECTORING_CLIPPED_CODE,
+    RigidBodyPseudoinverseAllocator,
     RotorAllocationSpec,
     VirtualThrustQPAllocator,
 )
@@ -60,6 +61,7 @@ __all__ = [
     "QP_THRUST_CLIPPED_CODE",
     "QP_UNSUPPORTED_WRENCH_CODE",
     "QP_VECTORING_CLIPPED_CODE",
+    "RigidBodyPseudoinverseAllocator",
     "RigidBodyControlModel",
     "RigidBodyControlModelBuilder",
     "RotorAllocationSpec",

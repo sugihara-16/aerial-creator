@@ -384,6 +384,161 @@ class VirtualThrustQPAllocator:
         )
 
 
+class RigidBodyPseudoinverseAllocator:
+    """Experimental virtual-channel pseudoinverse allocator for P4-control debugging.
+
+    This allocator is intentionally not the primary P4-control path. It uses the
+    same virtual x/z rotor channels as the QP allocator, solves a least-squares
+    pseudoinverse command, then applies the same hard thrust/vectoring clamps.
+    """
+
+    def allocate(self, problem: QPAllocationProblem) -> QPAllocationResult:
+        desired = [float(value) for value in (problem.desired_wrench_body or [0.0] * 6)]
+        if problem.rigid_body_model is None:
+            return _failed_allocation(
+                desired,
+                [QP_RIGID_BODY_MODEL_REQUIRED_CODE],
+                "rigid_body_model_required",
+                metrics={"pseudoinverse_path": 1.0, "qp_primary_path": 0.0},
+            )
+        if not _all_finite(desired):
+            return _failed_allocation(
+                desired,
+                [QP_INFEASIBLE_CODE],
+                "non_finite_desired_wrench",
+                metrics={"pseudoinverse_path": 1.0, "qp_primary_path": 0.0},
+            )
+        try:
+            import numpy as np
+        except Exception:
+            return _failed_allocation(
+                desired,
+                [QP_SOLVER_UNAVAILABLE_CODE],
+                "numpy_unavailable",
+                metrics={"pseudoinverse_path": 1.0, "qp_primary_path": 0.0},
+            )
+
+        variables: list[dict[str, object]] = []
+        rotor_channels: dict[str, dict[str, int]] = {}
+        columns: list[list[float]] = []
+        lower_bounds: list[float] = []
+        upper_bounds: list[float] = []
+        previous_values: list[float] = []
+
+        for rotor in sorted(problem.rigid_body_model.rotor_elements, key=lambda item: item.global_rotor_id):
+            if _is_vectoring_rotor(rotor):
+                fx_idx = len(variables)
+                _append_variable(
+                    variables,
+                    columns,
+                    lower_bounds,
+                    upper_bounds,
+                    previous_values,
+                    rotor=rotor,
+                    kind="virtual_x",
+                    axis_body=rotor.virtual_x_axis_body,
+                    lower=-rotor.thrust_max_n,
+                    upper=rotor.thrust_max_n,
+                    previous_value=0.0,
+                )
+                fz_idx = len(variables)
+                _append_variable(
+                    variables,
+                    columns,
+                    lower_bounds,
+                    upper_bounds,
+                    previous_values,
+                    rotor=rotor,
+                    kind="virtual_z",
+                    axis_body=rotor.virtual_z_axis_body,
+                    lower=0.0,
+                    upper=rotor.thrust_max_n,
+                    previous_value=0.0,
+                )
+                rotor_channels[rotor.global_rotor_id] = {"x": fx_idx, "z": fz_idx}
+                continue
+
+            idx = len(variables)
+            _append_variable(
+                variables,
+                columns,
+                lower_bounds,
+                upper_bounds,
+                previous_values,
+                rotor=rotor,
+                kind="scalar",
+                axis_body=rotor.axis_body,
+                lower=rotor.thrust_min_n,
+                upper=rotor.thrust_max_n,
+                previous_value=0.0,
+            )
+            rotor_channels[rotor.global_rotor_id] = {"scalar": idx}
+
+        if not variables:
+            return _failed_allocation(
+                desired,
+                [QP_INFEASIBLE_CODE],
+                "no_rotor_variables",
+                metrics={"pseudoinverse_path": 1.0, "qp_primary_path": 0.0},
+            )
+
+        allocation_matrix = np.asarray(_columns_to_rows(columns, row_count=6), dtype=float)
+        desired_vector = np.asarray(desired, dtype=float)
+        raw_values = np.linalg.pinv(allocation_matrix) @ desired_vector
+        lower = np.asarray(lower_bounds, dtype=float)
+        upper = np.asarray(upper_bounds, dtype=float)
+        clipped_values = np.minimum(np.maximum(raw_values, lower), upper)
+        variable_clip_count = int(np.count_nonzero(np.abs(clipped_values - raw_values) > 1.0e-8))
+
+        rotor_thrusts, vectoring_targets, clamp_count, thrust_clipped, vectoring_clipped = _back_convert_solution(
+            problem.rigid_body_model,
+            problem,
+            [float(value) for value in clipped_values],
+            rotor_channels,
+        )
+        achieved = _achieved_wrench(problem.rigid_body_model, rotor_thrusts, vectoring_targets)
+        residual = [desired[idx] - achieved[idx] for idx in range(6)]
+        residual_norm = math.sqrt(sum(value * value for value in residual))
+        force_residual_norm = math.sqrt(sum(value * value for value in residual[:3]))
+        torque_residual_norm = math.sqrt(sum(value * value for value in residual[3:]))
+        violation_codes: list[str] = []
+        if residual_norm > problem.unsupported_wrench_tolerance:
+            violation_codes.append(QP_UNSUPPORTED_WRENCH_CODE)
+        if variable_clip_count > 0 or thrust_clipped:
+            violation_codes.append(QP_THRUST_CLIPPED_CODE)
+        if vectoring_clipped:
+            violation_codes.append(QP_VECTORING_CLIPPED_CODE)
+        feasible = residual_norm <= problem.unsupported_wrench_tolerance
+        if not feasible:
+            violation_codes.insert(0, QP_INFEASIBLE_CODE)
+        clipped_count = variable_clip_count + clamp_count
+        return QPAllocationResult(
+            rotor_thrusts_n=rotor_thrusts,
+            feasible=feasible,
+            residual_wrench_body=residual,
+            residual_norm=residual_norm,
+            clipped=clipped_count > 0,
+            violation_codes=violation_codes,
+            metrics={
+                "qp_primary_path": 0.0,
+                "pseudoinverse_path": 1.0,
+                "degraded_fallback": 0.0,
+                "virtual_channel_count": float(sum(1 for item in variables if str(item["kind"]).startswith("virtual_"))),
+                "allocation_variable_count": float(len(variables)),
+                "allocation_residual_norm": residual_norm,
+                "force_residual_norm": force_residual_norm,
+                "torque_residual_norm": torque_residual_norm,
+                "clipped_target_count": float(clipped_count),
+                "pseudoinverse_variable_clip_count": float(variable_clip_count),
+                "rotor_saturation_ratio": _rotor_saturation_ratio(problem.rigid_body_model, rotor_thrusts),
+                "min_rotor_thrust_margin": _min_rotor_margin(problem.rigid_body_model, rotor_thrusts),
+                "min_vectoring_joint_margin": _min_vectoring_margin(problem.rigid_body_model, vectoring_targets),
+            },
+            vectoring_joint_targets=vectoring_targets,
+            achieved_wrench_body=achieved,
+        )
+
+
 def _failed_allocation(
     desired: list[float],
     violation_codes: list[str],

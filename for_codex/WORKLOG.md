@@ -3,6 +3,35 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control hover drift diagnostic supplement
+- Work package / Agent label: Agent I/J boundary: P4-control hover drift diagnostics
+- Summary: Added a debug-only pseudoinverse allocation path and a conversion-time vectoring velocity limit override to investigate the user's observed 5-10 s hover drift/crash. Ran real Isaac 10 s no-stop single-module hover comparisons for QP default, pseudoinverse default, QP with 20 rad/s vectoring velocity, and QP with 20 rad/s vectoring plus higher gimbal stiffness/damping.
+- Files changed:
+  - `amsrr/controllers/qp_allocator_interface.py`
+  - `amsrr/controllers/qpid_controller.py`
+  - `amsrr/controllers/__init__.py`
+  - `amsrr/robot_model/fixed_morphology_urdf.py`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - `tests/unit/controllers/test_qpid_controller.py`
+  - `tests/unit/robot_model/test_fixed_morphology_urdf.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None. Added debug allocator/CLI options only: `allocation_mode="rigid_body_pseudoinverse"` and `--vectoring-velocity-limit-rad-s`.
+- Upstream dependencies used: Existing virtual x/z thrust channel representation, rigid-body model builder, IsaacLab URDF converter, and P4-control hover smoke probe.
+- Downstream impact: The QP path remains the primary P4-control path. Pseudoinverse is available only for comparison and must not be used to claim P4-control completion.
+- Tests added or run:
+  - Added pseudoinverse allocator and controller selection unit tests.
+  - Added fixed-module local-name joint velocity override unit test.
+  - `python3 -m py_compile amsrr/controllers/qp_allocator_interface.py amsrr/controllers/qpid_controller.py amsrr/controllers/__init__.py amsrr/robot_model/fixed_morphology_urdf.py scripts/p4_control_holon_spawn_probe.py`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/controllers/test_qpid_controller.py tests/unit/robot_model/test_fixed_morphology_urdf.py tests/unit/simulation/test_p4_control_isaac_env.py -q`
+  - Real Isaac no-stop 10 s single-module hover comparisons under `micromamba run -n isaaclab3`
+- Commands run: Real Isaac comparisons used `/home/leus/.local/bin/micromamba run -n isaaclab3 /home/leus/IsaacLab/isaaclab.sh -p /home/leus/amsrr/scripts/p4_control_holon_spawn_probe.py ... --steps 2000 --single-module-hover-smoke --no-hover-stop-on-hold`.
+- Tests run: Related unit tests passed: 21 passed. QP default reproduced drift with final position error `4.94 m`, hold time `1.745 s`, QP infeasible count `1690`, clipped count `1446`. Pseudoinverse default ended with smaller lateral error but altitude loss, final position error `0.424 m`, hold time `0.28 s`, infeasible/clipped every step. QP with vectoring velocity `20 rad/s` worsened final position error to `8.87 m`. QP with velocity `20 rad/s`, gimbal stiffness `200`, damping `20` reduced final position error to `0.469 m` but ended with attitude error `2.89 rad`; it still failed the 10 s hover.
+- Assumptions: These are diagnostic comparisons, not acceptance gates. Old 1 s hold smoke remains a narrow smoke, not a long hover claim.
+- Blockers: Stable 10 s hover likely needs the next controller investigation; vectoring speed alone is not sufficient.
+- Next steps: Inspect rotor/vectoring sign conventions, reaction torque/yaw authority, dock joint passive motion, and PID/integrator behavior before changing acceptance thresholds.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control Holon USD visual mesh resolution supplement
 - Work package / Agent label: Agent J/K boundary: P4-control Isaac/GUI asset visibility support
 - Summary: Fixed the GUI case where Kit opened and `/World/Holon` existed but the aircraft body was invisible. The runtime Holon URDF referenced `mesh/*.STL` relative to `assets/robots/holon`, but the STL files live under `module_urdf/mesh`; Isaac conversion therefore produced articulation/link Xforms without visible mesh payloads. Added a conversion-only mesh resolver that writes a temporary URDF with existing absolute STL paths before single-module conversion and also resolves mesh paths for fixed-morphology URDF generation.
@@ -1999,6 +2028,28 @@
 ## Work Package Logs
 
 ### P4-Control / P4a: QP/PID Controller Specification
+
+#### 2026-07-09
+- Scope: Add Agent I/J diagnostic controls for long-hover drift investigation.
+- Files changed:
+  - `amsrr/controllers/qp_allocator_interface.py`
+  - `amsrr/controllers/qpid_controller.py`
+  - `amsrr/controllers/__init__.py`
+  - `amsrr/robot_model/fixed_morphology_urdf.py`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - `tests/unit/controllers/test_qpid_controller.py`
+  - `tests/unit/robot_model/test_fixed_morphology_urdf.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: Virtual thrust channel allocator, rigid-body model, Holon URDF conversion helper, and single-module hover smoke.
+- Implemented: Debug-only `RigidBodyPseudoinverseAllocator`, `QPIDControllerConfig(allocation_mode="rigid_body_pseudoinverse")`, probe `--allocation-mode`, and probe `--vectoring-velocity-limit-rad-s` for conversion-time gimbal velocity-limit overrides.
+- Not implemented: No controller retuning, no acceptance-threshold change, no replacement of QP primary allocation, no P4 full completion claim.
+- Schema/interface changes: None.
+- Downstream impact: Future hover debugging can compare QP and pseudoinverse with the same smoke runner and can regenerate faster-vectoring USDs without changing source URDF assets.
+- Tests added: Pseudoinverse allocator back-conversion test, controller pseudoinverse selection test, fixed-module joint velocity override test.
+- Tests passed: Related unit tests passed: 21 passed. Real Isaac 10 s no-stop comparisons reproduced QP drift and showed vectoring velocity/stiffness changes alone do not solve stability.
+- Handoff notes: Pseudoinverse is diagnostic-only; QP remains the required primary path for P4-control acceptance.
+- Open questions: Need deeper investigation of axis/sign conventions, passive dock joint motion, yaw/reaction torque authority, and PID/integrator behavior.
 
 #### 2026-07-09
 - Scope: Fix Agent J/K Isaac GUI asset visibility for Holon generated USDs.

@@ -10,6 +10,7 @@ from amsrr.controllers.qp_allocator_interface import (
     QPAllocationProblem,
     QPAllocatorInterface,
     QPAllocationResult,
+    RigidBodyPseudoinverseAllocator,
     RotorAllocationSpec,
     VirtualThrustQPAllocator,
 )
@@ -94,6 +95,8 @@ class QPIDController:
     def _default_allocator(config: QPIDControllerConfig) -> QPAllocatorInterface:
         if config.allocation_mode == "rigid_body_qp":
             return VirtualThrustQPAllocator()
+        if config.allocation_mode == "rigid_body_pseudoinverse":
+            return RigidBodyPseudoinverseAllocator()
         return BoundedVerticalRotorAllocator()
 
     def _build_references(self, context: ControllerContext) -> DesiredBiasReferences:
@@ -261,7 +264,10 @@ class QPIDController:
         )
 
     def _uses_rigid_body_qp(self) -> bool:
-        return self.config.allocation_mode == "rigid_body_qp" or isinstance(self.allocator, VirtualThrustQPAllocator)
+        return self.config.allocation_mode in {"rigid_body_qp", "rigid_body_pseudoinverse"} or isinstance(
+            self.allocator,
+            (VirtualThrustQPAllocator, RigidBodyPseudoinverseAllocator),
+        )
 
 
 def _controller_status(allocation: QPAllocationResult, config: QPIDControllerConfig) -> ControllerStatus:
@@ -290,6 +296,8 @@ def _controller_status(allocation: QPAllocationResult, config: QPIDControllerCon
 def _active_mode(allocation: QPAllocationResult) -> str:
     if allocation.metrics.get("qp_primary_path") == 1.0:
         return "qpid_rigid_body_qp"
+    if allocation.metrics.get("pseudoinverse_path") == 1.0:
+        return "qpid_rigid_body_pseudoinverse"
     if allocation.metrics.get("degraded_fallback") == 1.0:
         return "qpid_degraded_fallback"
     return "qpid_baseline"

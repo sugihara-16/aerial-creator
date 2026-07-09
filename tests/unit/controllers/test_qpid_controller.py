@@ -13,6 +13,7 @@ from amsrr.controllers.qp_allocator_interface import (
     QP_THRUST_CLIPPED_CODE,
     QP_UNSUPPORTED_WRENCH_CODE,
     QP_VECTORING_CLIPPED_CODE,
+    RigidBodyPseudoinverseAllocator,
     RotorAllocationSpec,
     VirtualThrustQPAllocator,
 )
@@ -287,6 +288,24 @@ def test_virtual_thrust_qp_allocator_applies_limits_and_hard_clamp() -> None:
     assert QP_THRUST_CLIPPED_CODE in result.violation_codes or QP_VECTORING_CLIPPED_CODE in result.violation_codes
 
 
+def test_rigid_body_pseudoinverse_allocator_back_converts_vectoring_channel() -> None:
+    problem = QPAllocationProblem(
+        desired_wrench_body=[2.0, 0.0, 5.0, 0.0, 0.0, 0.0],
+        rotors=[],
+        rigid_body_model=_single_vectoring_rigid_body_model(),
+        unsupported_wrench_tolerance=1.0e-6,
+    )
+
+    result = RigidBodyPseudoinverseAllocator().allocate(problem)
+
+    assert result.feasible is True
+    assert result.metrics["pseudoinverse_path"] == 1.0
+    assert result.metrics["qp_primary_path"] == 0.0
+    assert result.rotor_thrusts_n["module_0:thrust_1"] == pytest.approx((2.0**2 + 5.0**2) ** 0.5)
+    assert result.vectoring_joint_targets["module_0:gimbal1"] == pytest.approx(0.3805063771)
+    assert result.achieved_wrench_body[:3] == pytest.approx([2.0, 0.0, 5.0], abs=1.0e-6)
+
+
 def test_qpid_controller_outputs_controller_command() -> None:
     physical_model = _physical_model()
     runtime = _runtime_observation()
@@ -407,6 +426,31 @@ def test_qpid_controller_rigid_body_qp_hover_is_feasible_with_default_tolerance(
     assert controller_command.controller_status.qp_feasible is True
     assert controller_command.controller_status.metrics["allocation_residual_norm"] < 1.0e-5
     assert controller_command.controller_status.metrics["clipped"] == 0.0
+
+
+def test_qpid_controller_can_select_rigid_body_pseudoinverse_debug_path() -> None:
+    physical_model = _physical_model()
+    runtime = _runtime_observation()
+
+    controller_command = QPIDController(
+        config=QPIDControllerConfig(
+            allocation_mode="rigid_body_pseudoinverse",
+            unsupported_wrench_tolerance=1000.0,
+        )
+    ).compute(
+        ControllerContext(
+            runtime_observation=runtime,
+            morphology_graph=runtime.morphology_graph,
+            physical_model=physical_model,
+            active_knot=_active_knot(wrench_z=10.0),
+            policy_command=PolicyCommand(),
+        )
+    )
+
+    assert controller_command.controller_status.active_mode == "qpid_rigid_body_pseudoinverse"
+    assert controller_command.controller_status.metrics["pseudoinverse_path"] == 1.0
+    assert any(key.startswith("module_0:thrust_") for key in controller_command.rotor_thrusts_n)
+    assert any(key.startswith("module_0:gimbal") for key in controller_command.vectoring_joint_targets)
 
 
 def test_qpid_controller_builds_pid_wrench_from_policy_body_target_and_feedforward() -> None:

@@ -4,6 +4,13 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Hover Drift Diagnostic Supplement
+
+- Context: User GUI observation showed that the single-module hover can initially hold but drifts after roughly 5-10 s and crashes. The user requested a temporary pseudoinverse allocation trial and investigation of slow vectoring motion.
+- Decision: Added an explicit debug-only `rigid_body_pseudoinverse` allocation mode and a probe-only `--vectoring-velocity-limit-rad-s` conversion override for gimbal/vectoring joint velocity limits. The primary P4-control path remains `rigid_body_qp`; the pseudoinverse path is not an acceptance or completion path.
+- Diagnostic result: A 10 s no-stop QP hover reproduced the drift. The pseudoinverse path reduced lateral drift but remained infeasible/clipped throughout and lost altitude. Raising vectoring velocity from 3 to 20 rad/s was correctly reflected in Isaac's joint table but did not stabilize hover, and combining the higher velocity with higher gimbal stiffness/damping still produced late attitude loss. This suggests vectoring speed/servo tracking contributes to the transient behavior but is not the sole cause.
+- Compatibility impact: No persisted schema change. The new CLI options are for controlled debugging/comparison only and do not alter P4-control acceptance thresholds or the requirement that QP allocation remains the primary path.
+
 ### P4-Control Holon USD Visual Mesh Resolution Supplement
 
 - Context: The Kit GUI could open and `/World/Holon` existed in the stage, but only link frames/axes were visible. Inspection showed `assets/robots/holon/holon.urdf` references relative `mesh/*.STL` paths while the STL files live under `module_urdf/mesh`; the previous generated USD therefore contained articulation/link transforms but no visible mesh payload.

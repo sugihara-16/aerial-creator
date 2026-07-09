@@ -7,6 +7,7 @@ from amsrr.robot_model.fixed_morphology_urdf import (
     fixed_module_link_name,
     split_fixed_module_name,
     write_fixed_morphology_urdf,
+    write_joint_velocity_override_urdf,
     write_resolved_mesh_urdf,
 )
 from amsrr.robot_model.urdf_loader import load_urdf
@@ -57,3 +58,24 @@ def test_resolved_mesh_urdf_points_asset_meshes_to_existing_files(tmp_path: Path
     assert mesh_refs
     assert all(Path(ref).is_absolute() for ref in mesh_refs)
     assert all(Path(ref).exists() for ref in mesh_refs)
+
+
+def test_joint_velocity_override_matches_fixed_module_local_names(tmp_path: Path) -> None:
+    fixed_path = write_fixed_morphology_urdf(
+        "assets/robots/holon/holon.urdf",
+        tmp_path / "holon_fixed_2.urdf",
+        module_count=2,
+        module_spacing_m=0.45,
+        mesh_search_dirs=MESH_SEARCH_DIRS,
+    )
+    output_path = write_joint_velocity_override_urdf(
+        fixed_path,
+        tmp_path / "holon_fixed_2_fast_gimbals.urdf",
+        joint_velocity_overrides={"gimbal1": 20.0, "gimbal2": 20.0},
+    )
+
+    text = output_path.read_text()
+
+    assert 'name="module_0__gimbal1"' in text
+    assert 'name="module_1__gimbal1"' in text
+    assert text.count('velocity="20"') >= 4
