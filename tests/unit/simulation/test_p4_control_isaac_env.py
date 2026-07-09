@@ -68,6 +68,15 @@ def test_isaac_backend_probe_and_conversion_command_are_config_driven() -> None:
         force_convert=True,
         steps=600,
     )
+    single_module_articulated_hover_smoke = backend.holon_single_module_articulated_hover_smoke_command(
+        config_path="configs/env/isaac_lab.yaml",
+        generated_usd_dir="/tmp/amsrr_isaac_holon_spawn",
+        generated_usd_path="/tmp/amsrr_isaac_holon_spawn/holon/holon.usda",
+        steps=600,
+        articulated_joint_amplitude_rad=0.12,
+        articulated_joint_period_s=8.0,
+        articulated_joint_warmup_s=1.0,
+    )
     fixed_morphology_hover_smoke = backend.holon_fixed_morphology_hover_smoke_command(
         config_path="configs/env/isaac_lab.yaml",
         generated_usd_dir="/tmp/amsrr_isaac_holon_fixed",
@@ -80,6 +89,18 @@ def test_isaac_backend_probe_and_conversion_command_are_config_driven() -> None:
         position_tolerance_m=0.20,
         attitude_tolerance_rad=0.25,
         hold_duration_s=1.0,
+    )
+    fixed_morphology_articulated_hover_smoke = backend.holon_fixed_morphology_articulated_hover_smoke_command(
+        config_path="configs/env/isaac_lab.yaml",
+        generated_usd_dir="/tmp/amsrr_isaac_holon_fixed",
+        generated_usd_path="/tmp/amsrr_isaac_holon_fixed/holon_fixed_2/holon_fixed_2.usda",
+        force_convert=True,
+        steps=600,
+        module_count=2,
+        module_spacing_m=0.45,
+        articulated_joint_amplitude_rad=0.12,
+        articulated_joint_period_s=8.0,
+        articulated_joint_warmup_s=1.0,
     )
     fixed_morphology_waypoint_smoke = backend.holon_fixed_morphology_waypoint_smoke_command(
         config_path="configs/env/isaac_lab.yaml",
@@ -122,11 +143,20 @@ def test_isaac_backend_probe_and_conversion_command_are_config_driven() -> None:
     assert "0.2" in single_module_hover_smoke
     assert "--force-convert" in force_convert_hover_smoke
     assert "--convert-if-missing" not in force_convert_hover_smoke
+    assert "--single-module-articulated-hover-smoke" in single_module_articulated_hover_smoke
+    assert "--single-module-hover-smoke" not in single_module_articulated_hover_smoke
+    assert "--articulated-joint-amplitude-rad" in single_module_articulated_hover_smoke
+    assert "0.12" in single_module_articulated_hover_smoke
+    assert "--articulated-joint-period-s" in single_module_articulated_hover_smoke
+    assert "8.0" in single_module_articulated_hover_smoke
     assert "--fixed-morphology-hover-smoke" in fixed_morphology_hover_smoke
     assert "--fixed-module-count" in fixed_morphology_hover_smoke
     assert "2" in fixed_morphology_hover_smoke
     assert "--fixed-module-spacing-m" in fixed_morphology_hover_smoke
     assert "0.45" in fixed_morphology_hover_smoke
+    assert "--fixed-morphology-articulated-hover-smoke" in fixed_morphology_articulated_hover_smoke
+    assert "--fixed-morphology-hover-smoke" not in fixed_morphology_articulated_hover_smoke
+    assert "--articulated-joint-tracking-tolerance-rad" in fixed_morphology_articulated_hover_smoke
     assert "--fixed-morphology-waypoint-smoke" in fixed_morphology_waypoint_smoke
     assert "--waypoint-target-position-m" in fixed_morphology_waypoint_smoke
     assert "0.05" in fixed_morphology_waypoint_smoke

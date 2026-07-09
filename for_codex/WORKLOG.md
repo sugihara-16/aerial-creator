@@ -3,6 +3,32 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control articulated hover smoke supplement
+- Work package / Agent label: Agent I/J boundary: P4-control articulated joint flight smoke
+- Summary: Added explicit articulated hover smoke paths for single-module and fixed-morphology P4-control checks. `PostureTarget.joint_pos_target` can now command dock mechanism position targets through `QPIDController.dock_mechanism_commands` while unspecified dock joints still default to nominal zero hold. The Isaac probe exposes `--single-module-articulated-hover-smoke` and `--fixed-morphology-articulated-hover-smoke`, drives selected dock mechanism joints with a bounded sinusoidal target during hover, and reports both hover stability and actual joint-motion/tracking metrics.
+- Files changed:
+  - `amsrr/controllers/qpid_controller.py`
+  - `amsrr/simulation/isaac_lab_backend.py`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - `tests/unit/controllers/test_qpid_controller.py`
+  - `tests/unit/simulation/test_p4_control_isaac_env.py`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema change. Added CLI/backend helper options only. `InteractionKnot.posture_target` remains the controller-facing route for commanded internal joint posture; `PolicyCommand` still does not directly emit actuator targets.
+- Upstream dependencies used: Existing P4-control hover smoke loop, QPID posture reference builder, dock mechanism actuator mapping, Isaac bridge position target path, and fixed-morphology runtime observation reconstruction.
+- Downstream impact: The new smoke reports are optional diagnostic/acceptance aids for articulated low-level flight and are not added to the existing P4-control full acceptance set by default. They do not claim dynamic docking, object grasp/carry, learned policy success, or P4 full completion.
+- Tests added or run:
+  - Added unit coverage for QPID dock mechanism posture targets and backend command construction for articulated hover smokes.
+  - `python3 -m py_compile amsrr/controllers/qpid_controller.py amsrr/simulation/isaac_lab_backend.py scripts/p4_control_holon_spawn_probe.py tests/unit/controllers/test_qpid_controller.py tests/unit/simulation/test_p4_control_isaac_env.py`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/controllers/test_qpid_controller.py tests/unit/simulation/test_p4_control_isaac_env.py -q`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - Real Isaac 20 s single-module articulated hover smoke.
+  - Real Isaac 20 s fixed-morphology articulated hover smoke.
+- Tests run: Targeted unit tests passed: 19 passed. Full unit suite passed: 133 passed, 1 skipped. Real Isaac single-module articulated hover passed with `single_module_articulated_hover_smoke_passed=true`, hold time `20.0 s`, final position error `0.000881 m`, max position error `0.022904 m`, QP infeasible count `0`, max observed joint motion `0.122956 rad`, and max joint tracking error `0.007602 rad`. Real Isaac fixed-morphology articulated hover passed with `fixed_morphology_articulated_hover_smoke_passed=true`, hold time `20.0 s`, final position error `0.000131 m`, max position error `0.022951 m`, QP infeasible count `0`, max observed joint motion `0.124773 rad`, and max joint tracking error `0.009495 rad`.
+- Assumptions: Default articulated trajectory is small-amplitude sinusoidal dock mechanism motion (`0.12 rad`, `8 s` period, `1 s` warmup) to verify q-dependent control updates without deliberately destabilizing the hover.
+- Blockers: None for the added articulated-hover smoke paths.
+- Next steps: Provide user-facing commands for headless and GUI runs; do not treat these smokes as object grasp/carry, learned policy, dynamic docking, or P4 full completion evidence.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus dock frame alignment supplement
 - Work package / Agent label: Agent D/I/J boundary: π_D dock geometry and P4-control fixed-morphology spawn alignment
 - Summary: Corrected the fixed-morphology docked pose and the upstream design geometry. Dock connections now use the face-to-face relation where pitch/yaw connect point origins coincide, z remains aligned, and x/y are reversed via `Rz(pi)`. `DockPortSpec.local_pose` now stores the connect dummy frame in the module/base frame, morphology builders compute dock-edge relative poses from selected port pairs, and the fixed-morphology URDF/probe/runner use the same dock-aligned module poses.

@@ -4,6 +4,14 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Articulated Hover Smoke Supplement
+
+- Context: The user asked whether flight with internal joint motion is part of the current P4-control/P4a validation scope. It is in scope as a low-level articulated-hover smoke, distinct from dynamic docking, policy learning, object grasp/carry, or P4 full completion.
+- Decision: Added optional single-module and fixed-morphology articulated hover smokes. The smoke drives dock mechanism joints with a bounded sinusoidal `InteractionKnot.posture_target.joint_pos_target` while the QPID controller continues to receive hover pose/twist through `PolicyCommand`.
+- Controller contract decision: `QPIDController` now passes dock mechanism posture references into `dock_mechanism_commands` after joint-limit clipping. Unspecified dock mechanism joints still hold nominal zero. This keeps actuator authority inside the controller/bridge layer; `PolicyCommand` still does not directly emit rotor thrusts, vectoring targets, or dock actuator targets.
+- Validation decision: The new smokes require both hover stability and observed joint motion. Reports include selected dock joint ids, trajectory amplitude/period/warmup, max commanded/observed joint motion, max tracking error, bridge target health, and QP feasibility.
+- Compatibility impact: No persisted schema change and no expansion of the existing P4-control full acceptance set by default. These smokes are optional low-level checks for q-dependent control updates and articulated flight behavior.
+
 ### Dock Frame Alignment Supplement
 
 - Context: GUI inspection showed that the generated two-module fixed morphology placed the modules side-by-side rather than in the actual docked pose. The intended docked relation is that pitch/yaw connect point origins coincide and their axes are colinear, with the facing pitch/yaw dock geometry requiring x/y signs to be reversed while z remains aligned.

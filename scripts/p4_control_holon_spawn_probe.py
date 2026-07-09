@@ -52,9 +52,19 @@ def parse_args() -> argparse.Namespace:
         help="Run a closed-loop single-module hover smoke with QPIDController commands.",
     )
     parser.add_argument(
+        "--single-module-articulated-hover-smoke",
+        action="store_true",
+        help="Run a closed-loop single-module hover smoke while dock mechanism joints move.",
+    )
+    parser.add_argument(
         "--fixed-morphology-hover-smoke",
         action="store_true",
         help="Run a closed-loop fixed-morphology hover smoke with a rigid combined URDF.",
+    )
+    parser.add_argument(
+        "--fixed-morphology-articulated-hover-smoke",
+        action="store_true",
+        help="Run a closed-loop fixed-morphology hover smoke while dock mechanism joints move.",
     )
     parser.add_argument(
         "--fixed-morphology-waypoint-smoke",
@@ -89,6 +99,36 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hover-position-tolerance-m", type=float, default=0.20, help="Closed-loop hover position tolerance.")
     parser.add_argument("--hover-attitude-tolerance-rad", type=float, default=0.25, help="Closed-loop hover attitude tolerance.")
     parser.add_argument("--hover-hold-duration-s", type=float, default=1.0, help="Required final hold duration for hover pass.")
+    parser.add_argument(
+        "--articulated-joint-amplitude-rad",
+        type=float,
+        default=0.12,
+        help="Sinusoidal dock mechanism joint target amplitude for articulated hover smokes.",
+    )
+    parser.add_argument(
+        "--articulated-joint-period-s",
+        type=float,
+        default=8.0,
+        help="Sinusoidal dock mechanism joint target period for articulated hover smokes.",
+    )
+    parser.add_argument(
+        "--articulated-joint-warmup-s",
+        type=float,
+        default=1.0,
+        help="Initial zero-target warmup before articulated joint motion starts.",
+    )
+    parser.add_argument(
+        "--articulated-joint-tracking-tolerance-rad",
+        type=float,
+        default=0.20,
+        help="Allowed max dock mechanism target tracking error for articulated hover smokes.",
+    )
+    parser.add_argument(
+        "--articulated-joint-names",
+        nargs="*",
+        default=None,
+        help="Optional local dock mechanism joint names to move; defaults to all dock mechanism joints.",
+    )
     parser.add_argument(
         "--hover-stop-on-hold",
         action=argparse.BooleanOptionalAction,
@@ -130,7 +170,9 @@ def main() -> int:
     for key in (
         "command_probe_passed",
         "single_module_hover_smoke_passed",
+        "single_module_articulated_hover_smoke_passed",
         "fixed_morphology_hover_smoke_passed",
+        "fixed_morphology_articulated_hover_smoke_passed",
         "fixed_morphology_waypoint_smoke_passed",
     ):
         if report.get(key) is False:
@@ -170,7 +212,11 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     urdf_path = _expand_path(backend_config.holon_urdf_path)
     usd_dir = _expand_path(args.generated_usd_dir or backend_config.generated_usd_dir)
     usd_path = _expand_path(args.generated_usd_path or backend_config.generated_usd_path)
-    fixed_smoke_requested = bool(args.fixed_morphology_hover_smoke or args.fixed_morphology_waypoint_smoke)
+    fixed_smoke_requested = bool(
+        args.fixed_morphology_hover_smoke
+        or args.fixed_morphology_articulated_hover_smoke
+        or args.fixed_morphology_waypoint_smoke
+    )
     fixed_module_poses = None
     converted = False
 
@@ -315,7 +361,8 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             joint_velocities=_joint_state_dict(robot.joint_names, robot.data.joint_vel.torch),
         )
         _apply_actuator_record(robot, controller_bundle.actuator_target_record, physical_model, sim.device)
-    if args.single_module_hover_smoke:
+    if args.single_module_hover_smoke or args.single_module_articulated_hover_smoke:
+        single_articulated = bool(args.single_module_articulated_hover_smoke)
         hover_smoke_report = _run_single_module_hover_smoke(
             robot=robot,
             sim=sim,
@@ -334,6 +381,17 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             bridge_supported_controller_command=bridge_supported_controller_command,
             realtime_playback=bool(args.realtime_playback),
             allocation_mode=str(args.allocation_mode),
+            report_prefix=(
+                "single_module_articulated_hover"
+                if single_articulated
+                else "single_module_hover"
+            ),
+            articulated=single_articulated,
+            articulated_joint_names=args.articulated_joint_names,
+            articulated_joint_amplitude_rad=float(args.articulated_joint_amplitude_rad),
+            articulated_joint_period_s=float(args.articulated_joint_period_s),
+            articulated_joint_warmup_s=float(args.articulated_joint_warmup_s),
+            articulated_joint_tracking_tolerance_rad=float(args.articulated_joint_tracking_tolerance_rad),
         )
     if fixed_smoke_requested:
         waypoint_position = args.waypoint_target_position_m
@@ -345,11 +403,19 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             target_yaw = float(args.waypoint_target_yaw_rad)
             report_prefix = "fixed_morphology_waypoint"
             waypoint_ramp_duration_s = float(args.waypoint_ramp_duration_s)
+            fixed_articulated = False
+        elif args.fixed_morphology_articulated_hover_smoke:
+            target_position = (0.0, 0.0, target_height)
+            target_yaw = 0.0
+            report_prefix = "fixed_morphology_articulated_hover"
+            waypoint_ramp_duration_s = 0.0
+            fixed_articulated = True
         else:
             target_position = (0.0, 0.0, target_height)
             target_yaw = 0.0
             report_prefix = "fixed_morphology_hover"
             waypoint_ramp_duration_s = 0.0
+            fixed_articulated = False
         hover_smoke_report = _run_fixed_morphology_smoke(
             robot=robot,
             sim=sim,
@@ -374,6 +440,12 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             waypoint_ramp_duration_s=waypoint_ramp_duration_s,
             realtime_playback=bool(args.realtime_playback),
             allocation_mode=str(args.allocation_mode),
+            articulated=fixed_articulated,
+            articulated_joint_names=args.articulated_joint_names,
+            articulated_joint_amplitude_rad=float(args.articulated_joint_amplitude_rad),
+            articulated_joint_period_s=float(args.articulated_joint_period_s),
+            articulated_joint_warmup_s=float(args.articulated_joint_warmup_s),
+            articulated_joint_tracking_tolerance_rad=float(args.articulated_joint_tracking_tolerance_rad),
         )
     for _ in range(0 if hover_smoke_report is not None else max(0, args.steps)):
         if controller_bundle is not None:
@@ -425,7 +497,9 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             bool(hover_smoke_report.get(key))
             for key in (
                 "single_module_hover_smoke_passed",
+                "single_module_articulated_hover_smoke_passed",
                 "fixed_morphology_hover_smoke_passed",
+                "fixed_morphology_articulated_hover_smoke_passed",
                 "fixed_morphology_waypoint_smoke_passed",
             )
         )
@@ -513,6 +587,57 @@ def _vectoring_velocity_overrides(physical_model, velocity_limit_rad_s: float) -
     }
 
 
+def _articulated_joint_ids(physical_model, requested_joint_names: list[str] | None) -> list[str]:
+    available = sorted(
+        {
+            str(port.mechanical_limits["mechanism_joint_id"])
+            for port in physical_model.dock_ports
+            if port.mechanical_limits.get("mechanism_joint_id")
+        }
+    )
+    if requested_joint_names is None:
+        return available
+    requested = [str(joint_id) for joint_id in requested_joint_names]
+    unknown = sorted(set(requested) - set(available))
+    if unknown:
+        raise ValueError(f"Unknown dock mechanism joints for articulated smoke: {unknown}")
+    return requested
+
+
+def _articulated_joint_targets(
+    joint_ids: list[str],
+    *,
+    time_s: float,
+    amplitude_rad: float,
+    period_s: float,
+    warmup_s: float,
+) -> dict[str, float]:
+    if amplitude_rad < 0.0:
+        raise ValueError("articulated joint amplitude must be non-negative")
+    if period_s <= 0.0:
+        raise ValueError("articulated joint period must be positive")
+    if warmup_s < 0.0:
+        raise ValueError("articulated joint warmup must be non-negative")
+    if time_s < warmup_s or not joint_ids:
+        return {joint_id: 0.0 for joint_id in joint_ids}
+    active_t = float(time_s) - float(warmup_s)
+    value = float(amplitude_rad) * math.sin(2.0 * math.pi * active_t / float(period_s))
+    return {joint_id: value for joint_id in joint_ids}
+
+
+def _joint_position_for_module_joint(
+    joint_names: list[str],
+    joint_positions_tensor,
+    *,
+    module_id: int,
+    local_id: str,
+) -> float | None:
+    joint_name = _resolve_module_name(joint_names, module_id, local_id)
+    if joint_name is None:
+        return None
+    return _tensor_row(joint_positions_tensor)[joint_names.index(joint_name)]
+
+
 def _run_single_module_hover_smoke(
     *,
     robot,
@@ -532,12 +657,19 @@ def _run_single_module_hover_smoke(
     bridge_supported_controller_command,
     realtime_playback: bool,
     allocation_mode: str,
+    report_prefix: str,
+    articulated: bool,
+    articulated_joint_names: list[str] | None,
+    articulated_joint_amplitude_rad: float,
+    articulated_joint_period_s: float,
+    articulated_joint_warmup_s: float,
+    articulated_joint_tracking_tolerance_rad: float,
 ) -> dict[str, object]:
     from amsrr.controllers.actuator_mapping import build_actuator_mapping
     from amsrr.controllers.controller_base import ControllerContext
     from amsrr.controllers.isaac_controller_bridge import IsaacControllerBridge
     from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
-    from amsrr.schemas.policies import InteractionKnot, PolicyCommand
+    from amsrr.schemas.policies import InteractionKnot, PolicyCommand, PostureTarget
 
     morphology_graph = build_single_module_morphology(
         physical_model,
@@ -572,12 +704,36 @@ def _run_single_module_hover_smoke(
     last_controller_status = None
     last_bridge_metrics: dict[str, float] = {}
     executed_steps = 0
+    articulated_joint_ids = _articulated_joint_ids(physical_model, articulated_joint_names) if articulated else []
+    max_joint_target_abs = 0.0
+    max_joint_position_abs = 0.0
+    max_joint_tracking_error = 0.0
+    observed_joint_count = 0
+    last_joint_targets: dict[str, float] = {}
 
     for step_idx in range(max(0, steps)):
         executed_steps = step_idx + 1
+        time_s = step_idx * sim_dt
+        joint_targets = (
+            _articulated_joint_targets(
+                articulated_joint_ids,
+                time_s=time_s,
+                amplitude_rad=articulated_joint_amplitude_rad,
+                period_s=articulated_joint_period_s,
+                warmup_s=articulated_joint_warmup_s,
+            )
+            if articulated
+            else {}
+        )
+        last_joint_targets = dict(joint_targets)
+        posture_target = (
+            PostureTarget(joint_pos_target=joint_targets, joint_vel_target={joint_id: 0.0 for joint_id in joint_targets})
+            if joint_targets
+            else None
+        )
         runtime_observation = build_runtime_observation(
             morphology_graph,
-            time_s=step_idx * sim_dt,
+            time_s=time_s,
             pose_world=tuple(_tensor_row(robot.data.root_pose_w.torch)),
             twist_world=_tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch),
             joint_positions=_joint_state_dict(robot.joint_names, robot.data.joint_pos.torch),
@@ -588,7 +744,11 @@ def _run_single_module_hover_smoke(
                 runtime_observation=runtime_observation,
                 morphology_graph=morphology_graph,
                 physical_model=physical_model,
-                active_knot=InteractionKnot(t_rel_s=step_idx * sim_dt, contact_assignments=[]),
+                active_knot=InteractionKnot(
+                    t_rel_s=time_s,
+                    contact_assignments=[],
+                    posture_target=posture_target,
+                ),
                 policy_command=PolicyCommand(
                     desired_body_pose=target_pose,
                     desired_body_twist=target_twist,
@@ -622,6 +782,20 @@ def _run_single_module_hover_smoke(
         min_height = min(min_height, root_pos[2])
         max_height = max(max_height, root_pos[2])
         finite_state = finite_state and all(_is_finite(value) for value in root_pose)
+        if articulated:
+            for joint_id, target in joint_targets.items():
+                actual = _joint_position_for_module_joint(
+                    robot.joint_names,
+                    robot.data.joint_pos.torch,
+                    module_id=0,
+                    local_id=joint_id,
+                )
+                if actual is None:
+                    continue
+                observed_joint_count += 1
+                max_joint_target_abs = max(max_joint_target_abs, abs(float(target)))
+                max_joint_position_abs = max(max_joint_position_abs, abs(float(actual)))
+                max_joint_tracking_error = max(max_joint_tracking_error, abs(float(actual) - float(target)))
         if position_error <= position_tolerance_m and attitude_error <= attitude_tolerance_rad:
             hold_steps += 1
         else:
@@ -639,10 +813,25 @@ def _run_single_module_hover_smoke(
         unsupported_actuator_count += len(actuator_record.unsupported_actuators)
         clipped_target_count += len(actuator_record.clipped_targets)
         previous_command = bridged_command
-        if stop_on_hold and hold_steps >= hold_steps_required:
+        motion_observed_for_stop = (
+            not articulated
+            or max_joint_position_abs + 1.0e-9 >= 0.5 * abs(float(articulated_joint_amplitude_rad))
+        )
+        if stop_on_hold and hold_steps >= hold_steps_required and motion_observed_for_stop:
             break
 
     hold_time_s = max_hold_steps * sim_dt
+    expected_joint_motion = 0.5 * abs(float(articulated_joint_amplitude_rad))
+    joint_motion_passed = (
+        not articulated
+        or (
+            bool(articulated_joint_ids)
+            and observed_joint_count > 0
+            and max_joint_target_abs + 1.0e-9 >= expected_joint_motion
+            and max_joint_position_abs + 1.0e-9 >= expected_joint_motion
+            and max_joint_tracking_error <= articulated_joint_tracking_tolerance_rad
+        )
+    )
     passed = (
         executed_steps > 0
         and finite_state
@@ -653,33 +842,48 @@ def _run_single_module_hover_smoke(
         and final_position_error <= position_tolerance_m
         and final_attitude_error <= attitude_tolerance_rad
         and hold_time_s + 1.0e-9 >= hold_duration_s
+        and joint_motion_passed
     )
     return {
-        "single_module_hover_smoke": True,
-        "single_module_hover_smoke_passed": passed,
-        "single_module_hover_target_pose": list(target_pose),
-        "single_module_hover_steps": int(executed_steps),
-        "single_module_hover_requested_steps": int(max(0, steps)),
-        "single_module_hover_duration_s": float(executed_steps * sim_dt),
-        "single_module_hover_hold_time_s": hold_time_s,
-        "single_module_hover_hold_required_s": hold_duration_s,
-        "single_module_hover_stopped_on_hold": bool(stop_on_hold and executed_steps < max(0, steps)),
-        "single_module_hover_position_tolerance_m": position_tolerance_m,
-        "single_module_hover_attitude_tolerance_rad": attitude_tolerance_rad,
-        "single_module_hover_final_position_error_m": final_position_error,
-        "single_module_hover_final_attitude_error_rad": final_attitude_error,
-        "single_module_hover_max_position_error_m": max_position_error,
-        "single_module_hover_max_attitude_error_rad": max_attitude_error,
-        "single_module_hover_min_height_m": min_height if executed_steps > 0 else None,
-        "single_module_hover_max_height_m": max_height if executed_steps > 0 else None,
-        "single_module_hover_finite_state": finite_state,
-        "single_module_hover_qp_infeasible_count": qp_infeasible_count,
-        "single_module_hover_controller_clipped_count": clipped_count,
-        "single_module_hover_missing_actuator_count": missing_actuator_count,
-        "single_module_hover_unsupported_actuator_count": unsupported_actuator_count,
-        "single_module_hover_clipped_target_count": clipped_target_count,
-        "single_module_hover_last_controller_status": last_controller_status,
-        "single_module_hover_last_bridge_metrics": last_bridge_metrics,
+        f"{report_prefix}_smoke": True,
+        f"{report_prefix}_smoke_passed": passed,
+        f"{report_prefix}_target_pose": list(target_pose),
+        f"{report_prefix}_steps": int(executed_steps),
+        f"{report_prefix}_requested_steps": int(max(0, steps)),
+        f"{report_prefix}_duration_s": float(executed_steps * sim_dt),
+        f"{report_prefix}_hold_time_s": hold_time_s,
+        f"{report_prefix}_hold_required_s": hold_duration_s,
+        f"{report_prefix}_stopped_on_hold": bool(stop_on_hold and executed_steps < max(0, steps)),
+        f"{report_prefix}_position_tolerance_m": position_tolerance_m,
+        f"{report_prefix}_attitude_tolerance_rad": attitude_tolerance_rad,
+        f"{report_prefix}_final_position_error_m": final_position_error,
+        f"{report_prefix}_final_attitude_error_rad": final_attitude_error,
+        f"{report_prefix}_max_position_error_m": max_position_error,
+        f"{report_prefix}_max_attitude_error_rad": max_attitude_error,
+        f"{report_prefix}_min_height_m": min_height if executed_steps > 0 else None,
+        f"{report_prefix}_max_height_m": max_height if executed_steps > 0 else None,
+        f"{report_prefix}_finite_state": finite_state,
+        f"{report_prefix}_qp_infeasible_count": qp_infeasible_count,
+        f"{report_prefix}_controller_clipped_count": clipped_count,
+        f"{report_prefix}_missing_actuator_count": missing_actuator_count,
+        f"{report_prefix}_unsupported_actuator_count": unsupported_actuator_count,
+        f"{report_prefix}_clipped_target_count": clipped_target_count,
+        f"{report_prefix}_articulated": bool(articulated),
+        f"{report_prefix}_articulated_joint_ids": list(articulated_joint_ids),
+        f"{report_prefix}_articulated_joint_amplitude_rad": float(articulated_joint_amplitude_rad),
+        f"{report_prefix}_articulated_joint_period_s": float(articulated_joint_period_s),
+        f"{report_prefix}_articulated_joint_warmup_s": float(articulated_joint_warmup_s),
+        f"{report_prefix}_articulated_joint_tracking_tolerance_rad": float(
+            articulated_joint_tracking_tolerance_rad
+        ),
+        f"{report_prefix}_articulated_joint_motion_passed": bool(joint_motion_passed),
+        f"{report_prefix}_articulated_joint_observed_count": int(observed_joint_count),
+        f"{report_prefix}_articulated_max_joint_target_abs_rad": float(max_joint_target_abs),
+        f"{report_prefix}_articulated_max_joint_position_abs_rad": float(max_joint_position_abs),
+        f"{report_prefix}_articulated_max_joint_tracking_error_rad": float(max_joint_tracking_error),
+        f"{report_prefix}_articulated_last_joint_targets": dict(last_joint_targets),
+        f"{report_prefix}_last_controller_status": last_controller_status,
+        f"{report_prefix}_last_bridge_metrics": last_bridge_metrics,
     }
 
 
@@ -708,12 +912,18 @@ def _run_fixed_morphology_smoke(
     waypoint_ramp_duration_s: float,
     realtime_playback: bool,
     allocation_mode: str,
+    articulated: bool,
+    articulated_joint_names: list[str] | None,
+    articulated_joint_amplitude_rad: float,
+    articulated_joint_period_s: float,
+    articulated_joint_warmup_s: float,
+    articulated_joint_tracking_tolerance_rad: float,
 ) -> dict[str, object]:
     from amsrr.controllers.actuator_mapping import build_actuator_mapping
     from amsrr.controllers.controller_base import ControllerContext
     from amsrr.controllers.isaac_controller_bridge import IsaacControllerBridge
     from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
-    from amsrr.schemas.policies import InteractionKnot, PolicyCommand
+    from amsrr.schemas.policies import InteractionKnot, PolicyCommand, PostureTarget
 
     morphology_graph = build_fixed_morphology(
         physical_model,
@@ -761,20 +971,44 @@ def _run_fixed_morphology_smoke(
     last_controller_status = None
     last_bridge_metrics: dict[str, float] = {}
     executed_steps = 0
+    articulated_joint_ids = _articulated_joint_ids(physical_model, articulated_joint_names) if articulated else []
+    max_joint_target_abs = 0.0
+    max_joint_position_abs = 0.0
+    max_joint_tracking_error = 0.0
+    observed_joint_count = 0
+    last_joint_targets: dict[str, float] = {}
 
     for step_idx in range(max(0, steps)):
         executed_steps = step_idx + 1
+        time_s = step_idx * sim_dt
         root_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
         root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch)
         command_target_pose = _ramped_target_pose(
             initial_root_pose,  # type: ignore[arg-type]
             target_pose,
-            elapsed_s=step_idx * sim_dt,
+            elapsed_s=time_s,
             ramp_duration_s=waypoint_ramp_duration_s,
+        )
+        joint_targets = (
+            _articulated_joint_targets(
+                articulated_joint_ids,
+                time_s=time_s,
+                amplitude_rad=articulated_joint_amplitude_rad,
+                period_s=articulated_joint_period_s,
+                warmup_s=articulated_joint_warmup_s,
+            )
+            if articulated
+            else {}
+        )
+        last_joint_targets = dict(joint_targets)
+        posture_target = (
+            PostureTarget(joint_pos_target=joint_targets, joint_vel_target={joint_id: 0.0 for joint_id in joint_targets})
+            if joint_targets
+            else None
         )
         runtime_observation = _build_fixed_runtime_observation(
             morphology_graph,
-            time_s=step_idx * sim_dt,
+            time_s=time_s,
             root_pose_world=root_pose,  # type: ignore[arg-type]
             root_twist_world=root_twist,
             joint_names=robot.joint_names,
@@ -790,7 +1024,11 @@ def _run_fixed_morphology_smoke(
                 runtime_observation=runtime_observation,
                 morphology_graph=morphology_graph,
                 physical_model=physical_model,
-                active_knot=InteractionKnot(t_rel_s=step_idx * sim_dt, contact_assignments=[]),
+                active_knot=InteractionKnot(
+                    t_rel_s=time_s,
+                    contact_assignments=[],
+                    posture_target=posture_target,
+                ),
                 policy_command=PolicyCommand(
                     desired_body_pose=command_target_pose,
                     desired_body_twist=target_twist,
@@ -824,7 +1062,22 @@ def _run_fixed_morphology_smoke(
         min_height = min(min_height, root_pos[2])
         max_height = max(max_height, root_pos[2])
         finite_state = finite_state and all(_is_finite(value) for value in root_pose_after)
-        ramp_complete = step_idx * sim_dt + 1.0e-9 >= waypoint_ramp_duration_s
+        if articulated:
+            for module_id in range(module_count):
+                for joint_id, target in joint_targets.items():
+                    actual = _joint_position_for_module_joint(
+                        robot.joint_names,
+                        robot.data.joint_pos.torch,
+                        module_id=module_id,
+                        local_id=joint_id,
+                    )
+                    if actual is None:
+                        continue
+                    observed_joint_count += 1
+                    max_joint_target_abs = max(max_joint_target_abs, abs(float(target)))
+                    max_joint_position_abs = max(max_joint_position_abs, abs(float(actual)))
+                    max_joint_tracking_error = max(max_joint_tracking_error, abs(float(actual) - float(target)))
+        ramp_complete = time_s + 1.0e-9 >= waypoint_ramp_duration_s
         if ramp_complete and position_error <= position_tolerance_m and attitude_error <= attitude_tolerance_rad:
             hold_steps += 1
         else:
@@ -842,10 +1095,25 @@ def _run_fixed_morphology_smoke(
         unsupported_actuator_count += len(actuator_record.unsupported_actuators)
         clipped_target_count += len(actuator_record.clipped_targets)
         previous_command = bridged_command
-        if stop_on_hold and hold_steps >= hold_steps_required:
+        motion_observed_for_stop = (
+            not articulated
+            or max_joint_position_abs + 1.0e-9 >= 0.5 * abs(float(articulated_joint_amplitude_rad))
+        )
+        if stop_on_hold and hold_steps >= hold_steps_required and motion_observed_for_stop:
             break
 
     hold_time_s = max_hold_steps * sim_dt
+    expected_joint_motion = 0.5 * abs(float(articulated_joint_amplitude_rad))
+    joint_motion_passed = (
+        not articulated
+        or (
+            bool(articulated_joint_ids)
+            and observed_joint_count > 0
+            and max_joint_target_abs + 1.0e-9 >= expected_joint_motion
+            and max_joint_position_abs + 1.0e-9 >= expected_joint_motion
+            and max_joint_tracking_error <= articulated_joint_tracking_tolerance_rad
+        )
+    )
     passed = (
         executed_steps > 0
         and finite_state
@@ -856,6 +1124,7 @@ def _run_fixed_morphology_smoke(
         and final_position_error <= position_tolerance_m
         and final_attitude_error <= attitude_tolerance_rad
         and hold_time_s + 1.0e-9 >= hold_duration_s
+        and joint_motion_passed
     )
     return {
         f"{report_prefix}_smoke": True,
@@ -884,6 +1153,20 @@ def _run_fixed_morphology_smoke(
         f"{report_prefix}_missing_actuator_count": missing_actuator_count,
         f"{report_prefix}_unsupported_actuator_count": unsupported_actuator_count,
         f"{report_prefix}_clipped_target_count": clipped_target_count,
+        f"{report_prefix}_articulated": bool(articulated),
+        f"{report_prefix}_articulated_joint_ids": list(articulated_joint_ids),
+        f"{report_prefix}_articulated_joint_amplitude_rad": float(articulated_joint_amplitude_rad),
+        f"{report_prefix}_articulated_joint_period_s": float(articulated_joint_period_s),
+        f"{report_prefix}_articulated_joint_warmup_s": float(articulated_joint_warmup_s),
+        f"{report_prefix}_articulated_joint_tracking_tolerance_rad": float(
+            articulated_joint_tracking_tolerance_rad
+        ),
+        f"{report_prefix}_articulated_joint_motion_passed": bool(joint_motion_passed),
+        f"{report_prefix}_articulated_joint_observed_count": int(observed_joint_count),
+        f"{report_prefix}_articulated_max_joint_target_abs_rad": float(max_joint_target_abs),
+        f"{report_prefix}_articulated_max_joint_position_abs_rad": float(max_joint_position_abs),
+        f"{report_prefix}_articulated_max_joint_tracking_error_rad": float(max_joint_tracking_error),
+        f"{report_prefix}_articulated_last_joint_targets": dict(last_joint_targets),
         f"{report_prefix}_last_controller_status": last_controller_status,
         f"{report_prefix}_last_bridge_metrics": last_bridge_metrics,
     }

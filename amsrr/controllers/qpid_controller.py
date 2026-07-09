@@ -74,7 +74,11 @@ class QPIDController:
         vectoring_targets = _vectoring_joint_targets(refs, context.physical_model)
         vectoring_targets.update(allocation.vectoring_joint_targets)
         joint_torques = _pd_joint_torques(refs, context.runtime_observation, context.physical_model, self.config)
-        dock_commands = _dock_mechanism_hold_commands(context.runtime_observation, context.physical_model)
+        dock_commands = _dock_mechanism_hold_commands(
+            refs,
+            context.physical_model,
+            commanded_joint_ids=_commanded_joint_position_ids(context.active_knot, context.policy_command),
+        )
         controller_status = _controller_status(allocation, self.config)
         controller_status.metrics.update(self._reference_metrics)
         return ControllerCommand(
@@ -348,8 +352,10 @@ def _pd_joint_torques(
 
 
 def _dock_mechanism_hold_commands(
-    runtime_observation: RuntimeObservation,
+    refs: DesiredBiasReferences,
     physical_model: PhysicalModel,
+    *,
+    commanded_joint_ids: set[str],
 ) -> dict[str, float]:
     commands: dict[str, float] = {}
     joint_by_id = {joint.joint_id: joint for joint in physical_model.joints}
@@ -358,11 +364,19 @@ def _dock_mechanism_hold_commands(
         if not mechanism_joint_id:
             continue
         joint = joint_by_id.get(str(mechanism_joint_id))
-        value = 0.0
+        joint_id = str(mechanism_joint_id)
+        value = float(refs.joint_position_ref.get(joint_id, 0.0)) if joint_id in commanded_joint_ids else 0.0
         if joint is not None:
             value = _clip_to_limit(value, _limit_tuple(joint))
-        commands[str(mechanism_joint_id)] = value
+        commands[joint_id] = value
     return commands
+
+
+def _commanded_joint_position_ids(active_knot, policy_command) -> set[str]:
+    joint_ids: set[str] = set(policy_command.joint_position_bias)
+    if active_knot.posture_target is not None and active_knot.posture_target.joint_pos_target is not None:
+        joint_ids.update(str(joint_id) for joint_id in active_knot.posture_target.joint_pos_target)
+    return joint_ids
 
 
 def _current_joint_positions(runtime_observation: RuntimeObservation) -> dict[str, float]:
