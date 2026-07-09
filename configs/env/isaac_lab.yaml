@@ -1,0 +1,12 @@
+isaac_lab:
+  isaaclab_path: ${HOME}/IsaacLab
+  micromamba_env: isaaclab3
+  launch_script: isaaclab.sh
+  headless: true
+  device: cuda:0
+  robot_model_config_path: configs/robot/robot_model.yaml
+  holon_urdf_path: assets/robots/holon/holon.urdf
+  generated_usd_dir: artifacts/isaac/robots/holon
+  generated_usd_path: artifacts/isaac/robots/holon/holon.usd
+  rotor_force_application: wrench_composer
+  per_thruster_target_record: true

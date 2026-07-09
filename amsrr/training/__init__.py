@@ -40,6 +40,14 @@ from amsrr.training.p4_0_full_pipeline_runner import (
     P4_0FullPipelineRunnerResult,
     load_p4_0_full_pipeline_runner_config,
 )
+from amsrr.training.p4_control_runner import (
+    P4_CONTROL_LOW_LEVEL_RUNNER_VERSION,
+    P4ControlLowLevelRunner,
+    P4ControlLowLevelRunnerConfig,
+    P4ControlLowLevelRunnerResult,
+    ensure_real_smoke_requested,
+    load_p4_control_low_level_runner_config,
+)
 
 __all__ = [
     "P1GraspCarryTaskDistribution",
@@ -64,10 +72,16 @@ __all__ = [
     "P4_0FullPipelineRunner",
     "P4_0FullPipelineRunnerConfig",
     "P4_0FullPipelineRunnerResult",
+    "P4_CONTROL_LOW_LEVEL_RUNNER_VERSION",
+    "P4ControlLowLevelRunner",
+    "P4ControlLowLevelRunnerConfig",
+    "P4ControlLowLevelRunnerResult",
+    "ensure_real_smoke_requested",
     "load_p1_runner_config",
     "load_p1_task_distribution_config",
     "load_p2_design_distribution_config",
     "load_p2_design_runner_config",
     "load_p3_assembly_runner_config",
     "load_p4_0_full_pipeline_runner_config",
+    "load_p4_control_low_level_runner_config",
 ]

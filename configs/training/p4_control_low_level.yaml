@@ -1,0 +1,19 @@
+runner:
+  seed: 0
+  source_hash: p4_control_low_level
+  runner_version: p4_control_low_level_runner_v1
+  dry_run: true
+  archive_path: artifacts/p4_control/p4_control_smoke.jsonl
+
+env:
+  config_path: configs/env/isaac_lab.yaml
+  robot_model_config_path: configs/robot/robot_model.yaml
+  control_dt_s: 0.005
+  smoke_duration_s: 3.0
+  hold_duration_s: 1.0
+  position_error_threshold_m: 0.20
+  attitude_error_threshold_rad: 0.25
+  max_episode_steps: 600
+  fixed_morphology_module_count: 2
+  waypoint_target_position_m: [0.25, 0.0, 0.2]
+  waypoint_target_yaw_rad: 0.0

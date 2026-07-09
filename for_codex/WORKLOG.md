@@ -3,6 +3,53 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control Isaac environment recommendation
+- Work package / Agent label: Agent J/K boundary: P4-control Order 5 smoke runner configuration and dry-run harness
+- Summary: Added configurable P4-control Isaac Lab backend settings, low-level smoke scenario config, smoke environment boundary, dry-run runner, and CLI probe/dry-run script. The runner defines the three required smoke names and thresholds while keeping real Isaac execution unimplemented and completion false unless later real smoke artifacts are supplied.
+- Files changed:
+  - `configs/env/isaac_lab.yaml`
+  - `configs/training/p4_control_low_level.yaml`
+  - `amsrr/simulation/isaac_lab_backend.py`
+  - `amsrr/simulation/p4_control_smoke.py`
+  - `amsrr/simulation/p4_control_isaac_env.py`
+  - `amsrr/simulation/__init__.py`
+  - `amsrr/training/p4_control_runner.py`
+  - `amsrr/training/__init__.py`
+  - `scripts/p4_control_smoke.py`
+  - `tests/unit/simulation/test_p4_control_isaac_env.py`
+  - `tests/unit/training/test_p4_control_runner.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema change. Added simulation/training config/result dataclasses and shared P4-control smoke-result contract.
+- Upstream dependencies used: AGENTS.md Isaac Lab micromamba instructions; v0.4 Sections 23.5 and 24.5.2; controller supplement Sections 9, 11, and 13; user approval for URDF-to-USD custom articulation and wrench-composer initial path.
+- Downstream impact: Later real Isaac execution code can use the config and scenario contracts. Current dry-run/probe path is safe for fast pytest and cannot claim P4-control completion.
+- Tests added or run:
+  - Added `tests/unit/simulation/test_p4_control_isaac_env.py`
+  - Added `tests/unit/training/test_p4_control_runner.py`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_control_isaac_env.py tests/unit/training/test_p4_control_runner.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p4_control_acceptance.py -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+  - `PYTHONPATH=/home/leus/amsrr python3 scripts/p4_control_smoke.py --probe`
+  - `PYTHONPATH=/home/leus/amsrr python3 scripts/p4_control_smoke.py`
+- Commands run:
+  - `sed -n ... amsrr/utils/config.py amsrr/simulation/base.py amsrr/training/p4_0_full_pipeline_runner.py`
+  - `find configs ...`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_control_isaac_env.py tests/unit/training/test_p4_control_runner.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p4_control_acceptance.py -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+  - `PYTHONPATH=/home/leus/amsrr python3 scripts/p4_control_smoke.py --probe`
+  - `PYTHONPATH=/home/leus/amsrr python3 scripts/p4_control_smoke.py`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: New P4-control env/runner tests passed: 8 passed. Full unit suite passed: 118 passed, 1 skipped. Targeted P4-control acceptance tests passed: 2 passed. Compileall, diff check, CLI probe, and CLI dry-run passed.
+- Assumptions: Normal repo Python is not the Isaac runtime; `scripts/p4_control_smoke.py --probe` is expected to report Isaac Python modules unavailable unless run through the `isaaclab3` environment / `isaaclab.sh -p` path.
+- Blockers: Real Isaac physics execution, URDF conversion, Holon spawn, wrench application, and observation extraction are still unimplemented.
+- Next steps: Commit Order 5, then probe the actual `isaaclab3` / `isaaclab.sh -p` environment and proceed to URDF conversion or stop if Isaac API details are still undefined.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control split acceptance requirement
 - Work package / Agent label: Agent L boundary: P4-control Order 4 fast/real acceptance split
 - Summary: Implemented P4-control acceptance reporting that separates fast archive/interface checks from real Isaac smoke completion. The new report exposes `fast_gate_passed`, `real_isaac_smoke_passed`, and `completion_passed`; completion cannot pass unless single-module hover, fixed-morphology hover, and fixed-morphology waypoint smoke results are all Isaac-backed and passed.
@@ -1508,6 +1555,32 @@
 ## Work Package Logs
 
 ### P4-Control / P4a: QP/PID Controller Specification
+
+#### 2026-07-09
+- Scope: Implement Agent J/K boundary Order 5 smoke runner configuration and dry-run harness.
+- Files changed:
+  - `configs/env/isaac_lab.yaml`
+  - `configs/training/p4_control_low_level.yaml`
+  - `amsrr/simulation/isaac_lab_backend.py`
+  - `amsrr/simulation/p4_control_smoke.py`
+  - `amsrr/simulation/p4_control_isaac_env.py`
+  - `amsrr/simulation/__init__.py`
+  - `amsrr/training/p4_control_runner.py`
+  - `amsrr/training/__init__.py`
+  - `scripts/p4_control_smoke.py`
+  - `tests/unit/simulation/test_p4_control_isaac_env.py`
+  - `tests/unit/training/test_p4_control_runner.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: AGENTS.md Isaac environment notes, P4-control controller supplement, prior acceptance split, and approved recommendations for URDF-to-USD custom articulation plus wrench-composer thrust application.
+- Implemented: Config-driven IsaacLab backend probe, URDF conversion command construction, low-level smoke thresholds/scenarios, shared smoke result dataclass, dry-run smoke runner, CLI probe/dry-run entry point, and tests proving dry-run cannot pass completion.
+- Not implemented: Real Isaac API execution, URDF-to-USD conversion run, Holon spawn, rotor force application, joint command application, runtime observation extraction, or real smoke pass/fail measurement.
+- Schema/interface changes: None to persisted schemas. Added simulation/training-side contracts.
+- Downstream impact: The next order can run the CLI under `isaaclab3` / `isaaclab.sh -p` to validate environment imports and then implement real execution behind the existing scenario/result contract.
+- Tests added: P4-control backend/env config tests and P4-control runner dry-run tests.
+- Tests passed: New P4-control env/runner tests passed: 8 passed. Full unit suite passed: 118 passed, 1 skipped. Targeted P4-control acceptance tests passed: 2 passed. Compileall, `git diff --check`, CLI probe, and CLI dry-run passed.
+- Handoff notes: Running the CLI with normal repo Python reports `isaac_python_modules_unavailable_in_current_interpreter`, which is expected. Real probes should use the AGENTS.md micromamba/IsaacLab launch path.
+- Open questions: None for config/dry-run. Real Isaac execution details remain to be probed in the next order.
 
 #### 2026-07-09
 - Scope: Implement Agent L boundary Order 4 P4-control fast/real acceptance split.

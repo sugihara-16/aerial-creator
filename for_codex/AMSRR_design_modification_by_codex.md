@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Smoke Runner Configuration Supplement
+
+- Context: After the P4-control fast/real acceptance split, the next implementation order needs configurable Isaac Lab environment settings and smoke scenario definitions before calling real Isaac APIs. The user approved using the existing `isaaclab3` micromamba environment, URDF-to-USD custom articulation as the initial Holon asset path, wrench-composer rotor force application, and the controller supplement's initial waypoint thresholds.
+- Decision: Added `configs/env/isaac_lab.yaml`, `configs/training/p4_control_low_level.yaml`, `IsaacLabBackend`, `P4ControlIsaacEnv`, `P4ControlLowLevelRunner`, and `scripts/p4_control_smoke.py`. The runner supports `dry_run` by producing skipped smoke results and never marks completion. Backend availability probes are config-driven and lazy so normal unit tests do not require Isaac imports. The real smoke path now has deterministic scenario names and thresholds, but actual Isaac physics execution is intentionally left for the next order.
+- Compatibility impact: This adds configuration and runner contracts only. It does not convert URDF to USD, spawn Holon, apply rotor forces in Isaac, or claim P4-control completion. Real Isaac smoke still requires executing the script through `micromamba activate isaaclab3` and `$ISAACLAB_PATH/isaaclab.sh -p` after the Isaac execution layer is implemented.
+
 ### P4-Control Acceptance Split Implementation Supplement
 
 - Context: P4-control acceptance must distinguish fast pytest/interface/archive checks from real Isaac smoke, and P4-control completion must not pass when Isaac is unavailable or when only synthetic/unit checks were run.
