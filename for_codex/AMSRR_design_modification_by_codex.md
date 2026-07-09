@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control Holon Isaac Command Probe Supplement
+
+- Context: After Holon articulation spawn was validated, P4-control needed a minimal real Isaac check that the intended command surfaces are reachable: rotor-like external wrenches through the wrench composer and vectoring-like joint position targets through Isaac Lab articulation actuators.
+- Decision: Extended `scripts/p4_control_holon_spawn_probe.py` with command-probe arguments. The probe can apply world-frame `+z` wrenches to `thrust_.*` bodies using `permanent_wrench_composer.set_forces_and_torques_index(is_global=True)` and command `gimbal.*` joints using `set_joint_position_target_index`. It reports thrust body ids/names, gimbal joint ids/names, robot mass/gravity, commanded force totals, root-state deltas, gimbal target/actual positions, and a tolerance-based `command_probe_passed` flag. Added a backend helper to build this command line.
+- Compatibility impact: This is an Isaac API/actuator-path smoke only. The force is a global `+z` probe input, not the finalized rotor-axis thrust model, not QP closed-loop hover, and not a P4-control completion artifact. The probe confirms command routing and observation extraction; later work must connect `ControllerCommand` / `IsaacControllerBridge` records and implement the real single-module/fixed-morphology smoke gates.
+
 ### P4-Control Holon Isaac Spawn Probe Supplement
 
 - Context: After validating URDF-to-USD conversion, the next P4-control Isaac smoke prerequisite was to verify that the generated Holon USD can be spawned as an Isaac Lab articulation and stepped in the approved `isaaclab3` / `isaaclab.sh -p` runtime.

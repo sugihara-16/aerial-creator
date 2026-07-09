@@ -144,6 +144,34 @@ class IsaacLabBackend:
             command.extend(["--generated-usd-path", str(generated_usd_path)])
         return command
 
+    def holon_command_probe_command(
+        self,
+        *,
+        config_path: str | Path = "configs/env/isaac_lab.yaml",
+        convert_if_missing: bool = True,
+        steps: int = 80,
+        hover_force_scale: float = 0.5,
+        gimbal_target_rad: float = 0.1,
+        generated_usd_dir: str | Path | None = None,
+        generated_usd_path: str | Path | None = None,
+    ) -> list[str]:
+        command = self.holon_spawn_probe_command(
+            config_path=config_path,
+            convert_if_missing=convert_if_missing,
+            steps=steps,
+            generated_usd_dir=generated_usd_dir,
+            generated_usd_path=generated_usd_path,
+        )
+        command.extend(
+            [
+                "--hover-force-scale",
+                str(hover_force_scale),
+                "--gimbal-target-rad",
+                str(gimbal_target_rad),
+            ]
+        )
+        return command
+
     @staticmethod
     def _expanded_path(path: str) -> Path:
         return Path(os.path.expandvars(os.path.expanduser(path)))

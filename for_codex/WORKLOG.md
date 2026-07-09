@@ -4,6 +4,36 @@
 
 ### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control Isaac environment recommendation
+- Work package / Agent label: Agent J/K boundary: P4-control Order 8 Holon Isaac wrench and joint command probe
+- Summary: Extended the real Isaac Holon probe from spawn-only to command-path validation. The probe now applies world-frame `+z` wrenches to the four `thrust_.*` bodies and position targets to `gimbal.*` joints, then reports command ids, force totals, root-state deltas, gimbal actual/target positions, and a tolerance-based command pass flag.
+- Files changed:
+  - `amsrr/simulation/isaac_lab_backend.py`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - `tests/unit/simulation/test_p4_control_isaac_env.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema change. Added `IsaacLabBackend.holon_command_probe_command` and command-probe JSON fields in the Isaac-only script.
+- Upstream dependencies used: IsaacLab `WrenchComposer.set_forces_and_torques_index`, `Articulation.set_joint_position_target_index`, Holon real body names `thrust_1..4`, Holon real gimbal joints `gimbal1..4`.
+- Downstream impact: The next real-smoke order can connect `ControllerCommand` / `IsaacControllerBridge` outputs to the same Isaac body/joint command surfaces. The command probe also gives a concrete observation extraction payload for root state and joint state, but still does not evaluate closed-loop hover.
+- Tests added or run:
+  - Updated `tests/unit/simulation/test_p4_control_isaac_env.py` to assert the command-probe command line contract.
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_control_isaac_env.py tests/unit/training/test_p4_control_runner.py -q`
+  - `python3 -m py_compile scripts/p4_control_holon_spawn_probe.py amsrr/simulation/isaac_lab_backend.py tests/unit/simulation/test_p4_control_isaac_env.py`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr scripts -q`
+  - `git diff --check`
+- Commands run:
+  - `sed -n ... /home/leus/IsaacLab/source/isaaclab/isaaclab/utils/wrench_composer.py`
+  - `sed -n ... /home/leus/IsaacLab/source/isaaclab_physx/isaaclab_physx/assets/articulation/articulation.py`
+  - `eval "$(~/.local/bin/micromamba shell hook -s bash)" && micromamba activate isaaclab3 && PYTHONPATH=/home/leus/amsrr:$PYTHONPATH /home/leus/IsaacLab/isaaclab.sh -p /home/leus/amsrr/scripts/p4_control_holon_spawn_probe.py --config /home/leus/amsrr/configs/env/isaac_lab.yaml --convert-if-missing --generated-usd-dir /tmp/amsrr_isaac_holon_spawn --generated-usd-path /tmp/amsrr_isaac_holon_spawn/holon/holon.usda --steps 80 --hover-force-scale 0.5 --gimbal-target-rad 0.1`
+  - `find amsrr scripts tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: Related P4-control env/runner tests passed: 8 passed. Full unit suite passed: 118 passed, 1 skipped. Compileall, py_compile, and diff check passed. Real Isaac command probe passed with `command_probe_passed=true`, `thrust_body_names=["thrust_1","thrust_2","thrust_3","thrust_4"]`, `gimbal_joint_names=["gimbal1","gimbal2","gimbal3","gimbal4"]`, total commanded force `13.0386 N`, and max gimbal target error `0.001052 rad` against a `0.02 rad` tolerance.
+- Assumptions: The command probe's `hover-force-scale` applies a global `+z` wrench for Isaac API validation only. It is not the final rotor-axis force semantics, not QP allocation, and not a hover success criterion.
+- Blockers: None for command API routing. The real logs still show the `battery2` PhysX inertia/mass warning, and the half-hover open-loop probe falls as expected; both should be handled before claiming physical hover performance.
+- Next steps: Commit Order 8, then wire `ControllerCommand` / `IsaacControllerBridge` outputs into the real Isaac probe or runner and begin single-module closed-loop smoke implementation.
+
+### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control Isaac environment recommendation
 - Work package / Agent label: Agent J boundary: P4-control Order 7 Holon Isaac articulation spawn probe
 - Summary: Added a real Isaac Lab spawn probe for the generated Holon USD. The probe runs under `isaaclab3` / `isaaclab.sh -p`, optionally converts the URDF, creates a fresh stage, spawns `/World/Holon` as an `Articulation`, steps a few frames, and emits JSON metadata. Real execution passed with Holon reported as 25 bodies and 12 joints.
 - Files changed:
