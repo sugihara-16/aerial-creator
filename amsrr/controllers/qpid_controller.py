@@ -10,7 +10,9 @@ from amsrr.controllers.qp_allocator_interface import (
     QPAllocatorInterface,
     QPAllocationResult,
     RotorAllocationSpec,
+    VirtualThrustQPAllocator,
 )
+from amsrr.controllers.rigid_body_model import RigidBodyControlModelBuilder
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.physical_model import JointModel, PhysicalModel
 from amsrr.schemas.policies import ControllerCommand, ControllerStatus
@@ -19,6 +21,8 @@ from amsrr.schemas.runtime import RuntimeObservation
 
 @dataclass(frozen=True)
 class QPIDControllerConfig:
+    allocation_mode: str = "bounded_vertical"
+    control_dt_s: float = 0.005
     gravity_mps2: float = 9.80665
     default_hover_when_no_wrench: bool = True
     joint_kp: float = 4.0
@@ -36,16 +40,19 @@ class QPIDController:
         *,
         allocator: QPAllocatorInterface | None = None,
         bias_builder: PolicyCommandBiasBuilder | None = None,
+        rigid_body_model_builder: RigidBodyControlModelBuilder | None = None,
         config: QPIDControllerConfig | None = None,
     ) -> None:
-        self.allocator = allocator or BoundedVerticalRotorAllocator()
-        self.bias_builder = bias_builder or PolicyCommandBiasBuilder()
         self.config = config or QPIDControllerConfig()
+        self.allocator = allocator or self._default_allocator(self.config)
+        self.bias_builder = bias_builder or PolicyCommandBiasBuilder()
+        self.rigid_body_model_builder = rigid_body_model_builder or RigidBodyControlModelBuilder()
 
     def compute(self, context: ControllerContext) -> ControllerCommand:
         refs = context.desired_references or self._build_references(context)
         allocation = self.allocator.allocate(self._allocation_problem(context, refs))
         vectoring_targets = _vectoring_joint_targets(refs, context.physical_model)
+        vectoring_targets.update(allocation.vectoring_joint_targets)
         joint_torques = _pd_joint_torques(refs, context.runtime_observation, context.physical_model, self.config)
         dock_commands = _dock_mechanism_hold_commands(context.runtime_observation, context.physical_model)
         return ControllerCommand(
@@ -55,6 +62,12 @@ class QPIDController:
             dock_mechanism_commands=dock_commands,
             controller_status=_controller_status(allocation, self.config),
         )
+
+    @staticmethod
+    def _default_allocator(config: QPIDControllerConfig) -> QPAllocatorInterface:
+        if config.allocation_mode == "rigid_body_qp":
+            return VirtualThrustQPAllocator()
+        return BoundedVerticalRotorAllocator()
 
     def _build_references(self, context: ControllerContext) -> DesiredBiasReferences:
         current_q = _current_joint_positions(context.runtime_observation)
@@ -83,6 +96,13 @@ class QPIDController:
         desired_wrench = refs.desired_wrench_body
         if desired_wrench is None and self.config.default_hover_when_no_wrench:
             desired_wrench = [0.0, 0.0, context.physical_model.aggregate_mass_kg * self.config.gravity_mps2, 0.0, 0.0, 0.0]
+        rigid_body_model = None
+        if self._uses_rigid_body_qp():
+            rigid_body_model = self.rigid_body_model_builder.build(
+                context.morphology_graph,
+                context.physical_model,
+                context.runtime_observation,
+            )
         return QPAllocationProblem(
             desired_wrench_body=desired_wrench,
             rotors=[
@@ -94,10 +114,18 @@ class QPIDController:
                 )
                 for rotor in context.physical_model.rotors
             ],
+            rigid_body_model=rigid_body_model,
             previous_rotor_thrusts_n=(context.previous_command.rotor_thrusts_n if context.previous_command is not None else {}),
+            previous_vectoring_joint_targets=(
+                context.previous_command.vectoring_joint_targets if context.previous_command is not None else {}
+            ),
+            control_dt_s=self.config.control_dt_s,
             vertical_tolerance_n=self.config.vertical_tolerance_n,
             unsupported_wrench_tolerance=self.config.unsupported_wrench_tolerance,
         )
+
+    def _uses_rigid_body_qp(self) -> bool:
+        return self.config.allocation_mode == "rigid_body_qp" or isinstance(self.allocator, VirtualThrustQPAllocator)
 
 
 def _controller_status(allocation: QPAllocationResult, config: QPIDControllerConfig) -> ControllerStatus:
@@ -112,7 +140,7 @@ def _controller_status(allocation: QPAllocationResult, config: QPIDControllerCon
     return ControllerStatus(
         status=status,  # type: ignore[arg-type]
         qp_feasible=allocation.feasible,
-        active_mode="qpid_baseline",
+        active_mode=_active_mode(allocation),
         message=message,
         metrics={
             **allocation.metrics,
@@ -121,6 +149,14 @@ def _controller_status(allocation: QPAllocationResult, config: QPIDControllerCon
             "violation_count": float(len(allocation.violation_codes)),
         },
     )
+
+
+def _active_mode(allocation: QPAllocationResult) -> str:
+    if allocation.metrics.get("qp_primary_path") == 1.0:
+        return "qpid_rigid_body_qp"
+    if allocation.metrics.get("degraded_fallback") == 1.0:
+        return "qpid_degraded_fallback"
+    return "qpid_baseline"
 
 
 def _vectoring_joint_targets(

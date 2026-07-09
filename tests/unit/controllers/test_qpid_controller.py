@@ -9,9 +9,12 @@ from amsrr.controllers.qp_allocator_interface import (
     QP_INFEASIBLE_CODE,
     QP_THRUST_CLIPPED_CODE,
     QP_UNSUPPORTED_WRENCH_CODE,
+    QP_VECTORING_CLIPPED_CODE,
     RotorAllocationSpec,
+    VirtualThrustQPAllocator,
 )
-from amsrr.controllers.qpid_controller import QPIDController
+from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
+from amsrr.controllers.rigid_body_model import RigidBodyControlModel, RotorControlElement
 from amsrr.robot_model.physical_model_builder import build_module_capability_token, build_physical_model_from_config
 from amsrr.schemas.morphology import ModuleNode, MorphologyGraph
 from amsrr.schemas.policies import CentroidalTarget, ControllerStatus, InteractionKnot, PolicyCommand, PostureTarget
@@ -81,6 +84,56 @@ def _active_knot(wrench_z: float = 10.0) -> InteractionKnot:
     )
 
 
+def _single_vectoring_rigid_body_model(
+    *,
+    thrust_max_n: float = 10.0,
+    joint_lower: float = -1.0,
+    joint_upper: float = 1.0,
+    joint_velocity: float | None = None,
+) -> RigidBodyControlModel:
+    rotor = RotorControlElement(
+        global_rotor_id="module_0:thrust_1",
+        module_id=0,
+        rotor_id="thrust_1",
+        thrust_frame_link="thrust_1",
+        origin_body=(0.0, 0.0, 0.0),
+        axis_body=(0.0, 0.0, 1.0),
+        thrust_min_n=0.0,
+        thrust_max_n=thrust_max_n,
+        reaction_torque_coeff_nm_per_n=0.0,
+        reaction_torque_axis_body=(0.0, 0.0, 1.0),
+        vectoring_joint_ids=["module_0:gimbal1"],
+        virtual_x_axis_body=(1.0, 0.0, 0.0),
+        virtual_z_axis_body=(0.0, 0.0, 1.0),
+        allocation_column_body=[0.0, 0.0, 1.0, 0.0, 0.0, 0.0],
+    )
+    return RigidBodyControlModel(
+        model_id="test-rigid-body",
+        graph_id="test-graph",
+        base_module_id=0,
+        body_pose_world=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+        total_mass_kg=1.0,
+        center_of_mass_body=(0.0, 0.0, 0.0),
+        inertia_body=[1.0, 0.0, 0.0, 1.0, 0.0, 1.0],
+        rotor_elements=[rotor],
+        rotor_origins_body={"module_0:thrust_1": rotor.origin_body},
+        rotor_axes_body={"module_0:thrust_1": rotor.axis_body},
+        allocation_matrix_body=[[0.0], [0.0], [1.0], [0.0], [0.0], [0.0]],
+        vectoring_joint_axes_body={"module_0:gimbal1": (1.0, 0.0, 0.0)},
+        dock_actuator_ids=[],
+        active_actuator_limits={
+            "module_0:thrust_1": {"lower": 0.0, "upper": thrust_max_n, "velocity": None, "effort": None},
+            "module_0:gimbal1": {
+                "lower": joint_lower,
+                "upper": joint_upper,
+                "velocity": joint_velocity,
+                "effort": 6.6,
+            },
+        },
+        current_joint_positions={"module_0:gimbal1": 0.0},
+    )
+
+
 def test_bounded_vertical_rotor_allocator_feasible_and_unsupported_residual() -> None:
     problem = QPAllocationProblem(
         desired_wrench_body=[1.0, 0.0, 10.0, 0.0, 0.0, 0.0],
@@ -115,6 +168,48 @@ def test_bounded_vertical_rotor_allocator_reports_infeasible_clip() -> None:
     assert result.residual_wrench_body[2] == pytest.approx(5.0)
     assert QP_INFEASIBLE_CODE in result.violation_codes
     assert QP_THRUST_CLIPPED_CODE in result.violation_codes
+
+
+def test_virtual_thrust_qp_allocator_back_converts_vectoring_channel() -> None:
+    allocator = VirtualThrustQPAllocator()
+    allocator.regularization_weight = 0.0
+    allocator.previous_command_weight = 0.0
+    problem = QPAllocationProblem(
+        desired_wrench_body=[2.0, 0.0, 5.0, 0.0, 0.0, 0.0],
+        rotors=[],
+        rigid_body_model=_single_vectoring_rigid_body_model(),
+        unsupported_wrench_tolerance=1.0e-6,
+    )
+
+    result = allocator.allocate(problem)
+
+    assert result.feasible is True
+    assert result.metrics["qp_primary_path"] == 1.0
+    assert result.metrics["degraded_fallback"] == 0.0
+    assert result.metrics["virtual_channel_count"] == 2.0
+    assert result.rotor_thrusts_n["module_0:thrust_1"] == pytest.approx((2.0**2 + 5.0**2) ** 0.5)
+    assert result.vectoring_joint_targets["module_0:gimbal1"] == pytest.approx(0.3805063771)
+    assert result.achieved_wrench_body[:3] == pytest.approx([2.0, 0.0, 5.0], abs=1.0e-6)
+
+
+def test_virtual_thrust_qp_allocator_applies_limits_and_hard_clamp() -> None:
+    allocator = VirtualThrustQPAllocator()
+    allocator.regularization_weight = 0.0
+    allocator.previous_command_weight = 0.0
+    problem = QPAllocationProblem(
+        desired_wrench_body=[10.0, 0.0, 10.0, 0.0, 0.0, 0.0],
+        rotors=[],
+        rigid_body_model=_single_vectoring_rigid_body_model(thrust_max_n=10.0, joint_velocity=0.5),
+        control_dt_s=0.1,
+        unsupported_wrench_tolerance=100.0,
+    )
+
+    result = allocator.allocate(problem)
+
+    assert result.rotor_thrusts_n["module_0:thrust_1"] <= 10.0
+    assert result.vectoring_joint_targets["module_0:gimbal1"] <= 0.05
+    assert result.clipped is True
+    assert QP_THRUST_CLIPPED_CODE in result.violation_codes or QP_VECTORING_CLIPPED_CODE in result.violation_codes
 
 
 def test_qpid_controller_outputs_controller_command() -> None:
@@ -164,3 +259,28 @@ def test_qpid_controller_reports_infeasible_vertical_wrench() -> None:
     assert controller_command.controller_status.qp_feasible is False
     assert controller_command.controller_status.metrics["clipped"] == 1.0
     assert sum(controller_command.rotor_thrusts_n.values()) == pytest.approx(80.0)
+
+
+def test_qpid_controller_can_select_rigid_body_qp_primary_path() -> None:
+    physical_model = _physical_model()
+    runtime = _runtime_observation()
+
+    controller_command = QPIDController(
+        config=QPIDControllerConfig(
+            allocation_mode="rigid_body_qp",
+            unsupported_wrench_tolerance=1000.0,
+        )
+    ).compute(
+        ControllerContext(
+            runtime_observation=runtime,
+            morphology_graph=runtime.morphology_graph,
+            physical_model=physical_model,
+            active_knot=_active_knot(wrench_z=10.0),
+            policy_command=PolicyCommand(),
+        )
+    )
+
+    assert controller_command.controller_status.active_mode == "qpid_rigid_body_qp"
+    assert controller_command.controller_status.metrics["qp_primary_path"] == 1.0
+    assert any(key.startswith("module_0:thrust_") for key in controller_command.rotor_thrusts_n)
+    assert any(key.startswith("module_0:gimbal") for key in controller_command.vectoring_joint_targets)

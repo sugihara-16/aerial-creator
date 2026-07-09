@@ -3,6 +3,46 @@
 ## Global Worklog
 
 ### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control controller supplement and user virtual rotor clarification
+- Work package / Agent label: Agent I: P4-control Order 2 primary virtual-thrust QP allocator
+- Summary: Implemented the primary P4-control allocator path. Added rotor-arm-fixed virtual x/z thrust channels for vectoring rotors, SciPy-backed quadratic allocation with actuator bounds and linearized vectoring joint/rate constraints, back-conversion to non-negative rotor thrusts and absolute vectoring joint targets, achieved-wrench recomputation after hard check/clamp, and controller integration behind `QPIDControllerConfig(allocation_mode="rigid_body_qp")`.
+- Files changed:
+  - `amsrr/controllers/rigid_body_model.py`
+  - `amsrr/controllers/qp_allocator_interface.py`
+  - `amsrr/controllers/qpid_controller.py`
+  - `amsrr/controllers/__init__.py`
+  - `tests/unit/controllers/test_qpid_controller.py`
+  - `tests/unit/controllers/test_rigid_body_model.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema change. Backward-compatible optional controller-local fields were added to `QPAllocationProblem`, `QPAllocationResult`, and `RigidBodyControlModel`.
+- Upstream dependencies used: Agent I Order 1 `RigidBodyControlModel`, v0.4 Sections 20 and 24.5.2, controller supplement Section 7, and user clarification that virtual directions are rotor-arm x/z fixed and limits should be in QP constraints plus hard check/clamp.
+- Downstream impact: P4-control now has a QP-primary allocator interface for controller-side unit tests. `BoundedVerticalRotorAllocator` remains available but is explicitly tagged as degraded fallback and must not be used to claim P4-control completion.
+- Tests added or run:
+  - Added virtual-thrust allocator back-conversion and limit/clamp tests.
+  - Added controller integration test for `allocation_mode="rigid_body_qp"`.
+  - Updated rigid-body model test for current q and virtual axes.
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/controllers/test_qpid_controller.py tests/unit/controllers/test_rigid_body_model.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/controllers -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+- Commands run:
+  - `sed -n ... amsrr/controllers/*.py`
+  - `rg -n ... for_codex/*.md amsrr tests`
+  - `python3 - <<'PY' ... import scipy ...`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/controllers/test_qpid_controller.py tests/unit/controllers/test_rigid_body_model.py -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/controllers -q`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit -q`
+  - `python3 -m compileall amsrr -q`
+  - `git diff --check`
+  - `find amsrr tests -type d -name __pycache__ -prune -exec rm -rf {} +`
+- Tests run: Targeted QP/controller/rigid-body tests passed: 10 passed. Controller unit tests passed: 11 passed. Full unit suite passed: 105 passed, 1 skipped. Compileall and diff check passed.
+- Assumptions: The virtual z channel is rotor-arm fixed but sign-aligned to each rotor's positive thrust direction, because Holon includes both `+z` and `-z` rotor thrust axes. True rotor thrust magnitude is hard checked after solving because exact `sqrt(Fx^2+Fz^2)` thrust bounds are not linear QP constraints in the virtual channel parameterization.
+- Blockers: None for Agent I Order 2 fast pytest gate. Real Isaac smoke is still not run and P4-control completion is not claimed.
+- Next steps: Commit Agent I Order 2, then proceed to the next implementation order, likely controller bridge / actuator mapping, unless method-level details are undefined.
+
+### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4-control controller supplement and virtual thrust channel supplement
 - Work package / Agent label: Agent I: P4-control Order 1 RigidBodyControlModel
 - Summary: Implemented deterministic per-control-step rigid-body model update for P4-control. Added controller-local `RigidBodyControlModel`, `RotorControlElement`, and `RigidBodyControlModelBuilder` that compute link-level composite mass/COM/inertia, current rotor origins and axes, scalar rotor allocation columns, vectoring joint axes, dock actuator ids, and actuator limits from `PhysicalModel`, `MorphologyGraph`, and `RuntimeObservation.module_states[*].joint_positions`.
@@ -1396,6 +1436,27 @@
 ## Work Package Logs
 
 ### P4-Control / P4a: QP/PID Controller Specification
+
+#### 2026-07-09
+- Scope: Implement Agent I Order 2 primary virtual-thrust QP allocator and controller integration.
+- Files changed:
+  - `amsrr/controllers/rigid_body_model.py`
+  - `amsrr/controllers/qp_allocator_interface.py`
+  - `amsrr/controllers/qpid_controller.py`
+  - `amsrr/controllers/__init__.py`
+  - `tests/unit/controllers/test_qpid_controller.py`
+  - `tests/unit/controllers/test_rigid_body_model.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: Agent I Order 1 rigid-body model, P4-control controller supplement, user clarification on rotor-arm-fixed x/z virtual channels and QP constraints plus hard check/clamp.
+- Implemented: `VirtualThrustQPAllocator`, optional rigid-body-model allocation inputs, optional vectoring outputs and achieved wrench in allocation results, virtual x/z channel construction, vectoring joint limit/rate linear constraints, thrust/joint hard check and clamp after back-conversion, QP/degraded metrics, controller `allocation_mode="rigid_body_qp"`, and focused unit tests.
+- Not implemented: Isaac controller bridge, actuator target record conversion, P4-control runner, real Isaac single-module/fixed-morphology smoke, or waypoint tracking smoke.
+- Schema/interface changes: None to persisted schemas. Controller-local dataclasses gained backward-compatible optional fields.
+- Downstream impact: Agent J/K/L can now consume a primary QP controller path for fast tests and bridge development, while treating `BoundedVerticalRotorAllocator` as degraded fallback only.
+- Tests added: `test_virtual_thrust_qp_allocator_back_converts_vectoring_channel`, `test_virtual_thrust_qp_allocator_applies_limits_and_hard_clamp`, `test_qpid_controller_can_select_rigid_body_qp_primary_path`, plus rigid-body virtual axis/current-q assertions.
+- Tests passed: Targeted QP/controller/rigid-body tests passed: 10 passed. Controller unit tests passed: 11 passed. Full unit suite passed: 105 passed, 1 skipped. Compileall and `git diff --check` passed.
+- Handoff notes: Virtual z is rotor-arm fixed but sign-aligned with the rotor's positive thrust axis. Exact thrust magnitude bounds are rechecked after solving because the virtual-channel magnitude constraint is nonlinear; QP still includes actuator box bounds and vectoring angle/rate linear constraints.
+- Open questions: None for the fast pytest gate. P4-control completion remains blocked on real Isaac smoke in later orders.
 
 #### 2026-07-09
 - Scope: Implement Agent I Order 1 deterministic `RigidBodyControlModel` update.

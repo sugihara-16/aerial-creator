@@ -97,6 +97,9 @@ def test_rigid_body_model_builds_single_module_allocation_matrix() -> None:
         "module_0:gimbal3",
         "module_0:gimbal4",
     }
+    assert model.current_joint_positions["module_0:gimbal1"] == pytest.approx(0.0)
+    assert model.rotor_elements[0].virtual_x_axis_body is not None
+    assert model.rotor_elements[0].virtual_z_axis_body is not None
     assert model.to_dict()["rotor_elements"][0]["global_rotor_id"].startswith("module_0:")
 
 

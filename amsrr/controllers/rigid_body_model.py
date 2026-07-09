@@ -25,6 +25,8 @@ class RotorControlElement(SchemaBase):
     reaction_torque_coeff_nm_per_n: float
     reaction_torque_axis_body: Vector3
     vectoring_joint_ids: list[str] = field(default_factory=list)
+    virtual_x_axis_body: Vector3 | None = None
+    virtual_z_axis_body: Vector3 | None = None
     allocation_column_body: list[float] = field(default_factory=list)
 
     def validate(self) -> None:
@@ -34,6 +36,10 @@ class RotorControlElement(SchemaBase):
         require_len(self.origin_body, 3, "RotorControlElement.origin_body")
         require_len(self.axis_body, 3, "RotorControlElement.axis_body")
         require_len(self.reaction_torque_axis_body, 3, "RotorControlElement.reaction_torque_axis_body")
+        if self.virtual_x_axis_body is not None:
+            require_len(self.virtual_x_axis_body, 3, "RotorControlElement.virtual_x_axis_body")
+        if self.virtual_z_axis_body is not None:
+            require_len(self.virtual_z_axis_body, 3, "RotorControlElement.virtual_z_axis_body")
         require_len(self.allocation_column_body, 6, "RotorControlElement.allocation_column_body")
         if self.thrust_min_n < 0.0 or self.thrust_max_n < self.thrust_min_n:
             raise SchemaValidationError("RotorControlElement thrust limits are invalid")
@@ -55,6 +61,7 @@ class RigidBodyControlModel(SchemaBase):
     vectoring_joint_axes_body: dict[str, Vector3]
     dock_actuator_ids: list[str]
     active_actuator_limits: dict[str, dict[str, float | None]]
+    current_joint_positions: dict[str, float] = field(default_factory=dict)
     metadata: dict[str, float | int | str | bool] = field(default_factory=dict)
 
     def validate(self) -> None:
@@ -167,6 +174,7 @@ class RigidBodyControlModelBuilder:
         )
         dock_actuator_ids = self._dock_actuator_ids(physical_model, active_module_ids)
         actuator_limits = self._active_actuator_limits(physical_model, rotor_elements, dock_actuator_ids, active_module_ids)
+        current_joint_positions = _current_joint_positions(module_states, active_module_ids)
         return RigidBodyControlModel(
             model_id=f"rigid_body:{physical_model.model_id}:{morphology_graph.graph_id}",
             graph_id=morphology_graph.graph_id,
@@ -182,6 +190,7 @@ class RigidBodyControlModelBuilder:
             vectoring_joint_axes_body=vectoring_axes,
             dock_actuator_ids=dock_actuator_ids,
             active_actuator_limits=actuator_limits,
+            current_joint_positions=current_joint_positions,
             metadata={
                 "active_module_count": len(active_module_ids),
                 "active_link_count": len(link_kinematics),
@@ -238,6 +247,7 @@ class RigidBodyControlModelBuilder:
         world_to_body_rotation: Matrix3,
     ) -> list[RotorControlElement]:
         elements: list[RotorControlElement] = []
+        joints_by_id = {joint.joint_id: joint for joint in physical_model.joints}
         for module in sorted(module_kinematics, key=lambda item: item.module_id):
             for rotor in sorted(physical_model.rotors, key=lambda item: item.rotor_id):
                 if rotor.thrust_frame_link not in module.link_transforms_world:
@@ -252,6 +262,30 @@ class RigidBodyControlModelBuilder:
                 reaction_body = _scale(axis_body, rotor.reaction_torque_coeff_nm_per_n)
                 torque_column = _add(moment_body, reaction_body)
                 global_rotor_id = _global_id(module.module_id, rotor.rotor_id)
+                virtual_x_axis_body = None
+                virtual_z_axis_body = None
+                if rotor.vectoring_joint_ids:
+                    vectoring_joint = joints_by_id.get(rotor.vectoring_joint_ids[0])
+                    if vectoring_joint is None:
+                        raise SchemaValidationError(
+                            f"Rotor {rotor.rotor_id!r} references unknown vectoring joint "
+                            f"{rotor.vectoring_joint_ids[0]!r}"
+                        )
+                    if vectoring_joint.parent_link not in module.link_transforms_world:
+                        raise SchemaValidationError(
+                            f"Vectoring joint parent link {vectoring_joint.parent_link!r} is missing"
+                        )
+                    arm_transform = module.link_transforms_world[vectoring_joint.parent_link]
+                    virtual_x_axis_body = _normalize(
+                        _matvec(world_to_body_rotation, _matvec(arm_transform.rotation, (1.0, 0.0, 0.0)))
+                    )
+                    z_sign = 1.0 if _dot(rotor.thrust_axis_local, (0.0, 0.0, 1.0)) >= 0.0 else -1.0
+                    virtual_z_axis_body = _normalize(
+                        _matvec(
+                            world_to_body_rotation,
+                            _matvec(arm_transform.rotation, (0.0, 0.0, z_sign)),
+                        )
+                    )
                 elements.append(
                     RotorControlElement(
                         global_rotor_id=global_rotor_id,
@@ -265,6 +299,8 @@ class RigidBodyControlModelBuilder:
                         reaction_torque_coeff_nm_per_n=rotor.reaction_torque_coeff_nm_per_n,
                         reaction_torque_axis_body=axis_body,
                         vectoring_joint_ids=[_global_id(module.module_id, joint_id) for joint_id in rotor.vectoring_joint_ids],
+                        virtual_x_axis_body=virtual_x_axis_body,
+                        virtual_z_axis_body=virtual_z_axis_body,
                         allocation_column_body=[
                             axis_body[0],
                             axis_body[1],
@@ -435,6 +471,18 @@ def _joint_limits(joint: JointModel) -> dict[str, float | None]:
         "velocity": joint.velocity_limit,
         "effort": joint.effort_limit,
     }
+
+
+def _current_joint_positions(
+    module_states: dict[int, ModuleRuntimeState],
+    active_module_ids: list[int],
+) -> dict[str, float]:
+    values: dict[str, float] = {}
+    for module_id in active_module_ids:
+        module_state = module_states[module_id]
+        for joint_id, position in module_state.joint_positions.items():
+            values[_global_id(module_id, joint_id)] = float(position)
+    return values
 
 
 def _global_id(module_id: int, local_id: str) -> str:

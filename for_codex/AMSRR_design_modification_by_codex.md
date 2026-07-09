@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-09
 
+### P4-Control VirtualThrustQPAllocator Implementation Supplement
+
+- Context: Agent I Order 2 implements the P4-control primary allocator after the user clarified that virtual rotor thrust directions may be fixed relative to the rotor-arm frame x/z directions and that thrust, joint, and rate limits should be included in QP constraints followed by hard check and clamp.
+- Decision: Added `VirtualThrustQPAllocator` as the primary P4-control allocation path. Vectoring rotors are expanded to rotor-arm-fixed virtual x/z force channels, solved with a Python/SciPy quadratic objective plus actuator bounds and linearized vectoring angle/rate constraints, then back-converted to non-negative `rotor_thrusts_n` and absolute `vectoring_joint_targets`. Because Holon physical rotors include both `+z` and `-z` thrust axes, the virtual z channel is sign-aligned with each rotor's positive thrust direction while remaining fixed in the rotor-arm frame. The allocator recomputes achieved wrench after hard check/clamp and records residual, clipping, saturation, and primary/degraded metrics.
+- Compatibility impact: `QPAllocationProblem` and `QPAllocationResult` gained backward-compatible optional fields for rigid-body model input, previous vectoring targets, control dt, vectoring outputs, and achieved wrench. `BoundedVerticalRotorAllocator` remains available but now marks itself as `degraded_fallback=1.0`; it is not the P4-control primary path. This does not claim Isaac smoke completion, object grasp/carry success, learned policy performance, or P4 full completion.
+
 ### P4-Control RigidBodyControlModel Implementation Supplement
 
 - Context: Agent I Order 1 implemented the deterministic rigid-body model update required before QP allocation and Isaac bridge work. The v0.4 spec and controller supplement require link-level quasi-static inertia aggregation and per-step `q`-conditioned rotor geometry updates, while leaving the exact controller-local body-frame convention and multi-module actuator key convention to implementation.
