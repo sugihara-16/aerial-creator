@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from amsrr.simulation.isaac_lab_backend import IsaacLabBackend, load_isaac_lab_backend_config
 from amsrr.simulation.p4_1_isaac_env import P4_1IsaacBackendEnv

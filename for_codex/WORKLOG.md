@@ -4,6 +4,22 @@
 
 ### 2026-07-09
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.1 full-scene backend smoke user clarifications
+- Work package / Agent label: Agent L boundary: P4.1 CLI probe fix before real smoke
+- Summary: Fixed `scripts/p4_1_backend_smoke.py` so direct script execution adds the repository root to `sys.path`, matching the existing Isaac probe script pattern. Verified normal Python probe reports missing current-interpreter Isaac modules, and micromamba `isaaclab3` probe reports the real backend as available.
+- Files changed:
+  - `scripts/p4_1_backend_smoke.py`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: None.
+- Tests added or run:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 scripts/p4_1_backend_smoke.py --probe`
+  - `/home/leus/.local/bin/micromamba run -n isaaclab3 python scripts/p4_1_backend_smoke.py --probe`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/acceptance/test_p4_1_acceptance.py tests/unit/training/test_p4_1_backend_smoke_runner.py -q`
+  - `python3 -m compileall scripts amsrr/acceptance amsrr/training -q`
+- Tests run: P4.1 acceptance/runner tests passed: 6 passed. Compileall passed. Micromamba probe reported `available=true`.
+- Next steps: Commit the CLI probe fix, then run the real P4.1 Isaac smoke.
+
+### 2026-07-09
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.1 full-scene backend smoke user clarifications
 - Work package / Agent label: Agent L boundary: P4.1 full-scene backend smoke Order 4 split acceptance
 - Summary: Added P4.1 split acceptance. The fast gate checks archives for P2 selected design, P3 assembled morphology, non-2-module case evidence, per-step runtime/controller/actuator/object-pose logs, RuntimeObservation joint-state preservation, full-scene robot/object/floor spawn evidence, and no-mislabeling fields. The real gate separately requires the named real smoke `p2_p3_full_scene_backend` to be attempted, passed, Isaac-backed, full-scene, and P2/P3-sourced. `completion_passed` is only true when both gates pass.
 - Files changed:
