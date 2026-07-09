@@ -51,6 +51,12 @@ from amsrr.simulation.p4_2_rollout import (
     p4_2_metric_definitions,
     p4_2_no_mislabeling_artifacts,
 )
+from amsrr.simulation.p4_2_isaac_env import (
+    P4_2_ISAAC_ENV_VERSION,
+    P4_2IsaacEnv,
+    load_p4_2_deterministic_rollout_env_config,
+    p4_2_result_from_report,
+)
 from amsrr.simulation.simplified_grasp_carry_env import (
     SimplifiedBatchRunResult,
     SimplifiedEpisodeResult,
@@ -71,6 +77,7 @@ __all__ = [
     "P4_2_REQUIRED_REAL_ROLLOUTS",
     "P4_2_ROLLOUT_VERSION",
     "P4_2_SUCCESS_SCOPE_NOTE",
+    "P4_2_ISAAC_ENV_VERSION",
     "IsaacLabAvailability",
     "IsaacLabBackend",
     "IsaacLabBackendConfig",
@@ -91,6 +98,7 @@ __all__ = [
     "P4_2PhaseDefinition",
     "P4_2PhaseTransitionRecord",
     "P4_2RolloutPhase",
+    "P4_2IsaacEnv",
     "SimplifiedBatchRunResult",
     "SimplifiedEpisodeResult",
     "SimplifiedGraspCarryBuildArtifacts",
@@ -103,10 +111,12 @@ __all__ = [
     "load_isaac_lab_backend_config",
     "load_p4_1_full_scene_backend_config",
     "load_p4_2_deterministic_rollout_config",
+    "load_p4_2_deterministic_rollout_env_config",
     "load_p4_control_low_level_env_config",
     "p4_1_result_from_report",
     "p4_2_failure_metrics",
     "p4_2_metric_definitions",
     "p4_2_no_mislabeling_artifacts",
+    "p4_2_result_from_report",
     "run_crash_free_episodes",
 ]

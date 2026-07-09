@@ -4,6 +4,15 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-10
 
+### P4.2 Graph-Specific Isaac Env/Probe Supplement
+
+- Context: P4.2 must reflect the P2 selected design and P3 assembled morphology in the Isaac rollout asset, but the user clarified that graph-specific URDF/USD generation should not be interpreted as π_A dynamic construction or module attach/detach during the grasp/carry rollout.
+- Decision: Added a graph-specific fixed morphology URDF generator that consumes a P3 assembled `MorphologyGraph` at reset time, prefixes module-local Holon bodies/joints, and connects module roots with fixed joints derived from the graph's dock-edge tree and module poses. During P4.2 rollout, robot morphology is frozen.
+- Probe decision: The P4.2 Isaac probe now accepts `--p4-2-morphology-graph-json`, generates the reset-time graph asset, spawns robot/object/floor, and reports graph id, module ids, module poses, dock edge count, and actuator mapping graph id/channel count. The backend command intentionally does not use `--fixed-module-count` as P4.2 provenance.
+- Attach boundary: This order does not perform object attach. Because selected contact candidates / RobotAnchors are not yet provided to the probe, the report records `p4_2_attach_gate_input_available=false`, `p4_2_unconditional_attach_allowed=false`, no attach events, and terminal `timeout_failure` or `controller_failure`. A reflected graph without an attach event cannot pass P4.2.
+- Scope impact: P4.2 object attach/release events remain distinct from module attach/detach. The report carries `module_attach_detach_claim=false`, `dynamic_morphology_update_claim=false`, and `asset_generation_semantics="reset_time_fixed_morphology_not_pi_a_dynamic_construction"`. This order does not claim real P4.2 completion, P4.3 learning bootstrap, checkpoint training, reward-curve training, or P4 full completion.
+- Compatibility impact: No persisted schema change. The new env/report parser and backend command are additive and prepare the later runner/archive and split-acceptance orders.
+
 ### P4.2 Deterministic Policy Phase Adaptation Supplement
 
 - Context: P4.2 requires a deterministic grasp/carry rollout with explicit approach / pregrasp / attach / maintain / transport / release behavior, while preserving the rule that `π_L` emits `PolicyCommand` only and never final actuator commands.

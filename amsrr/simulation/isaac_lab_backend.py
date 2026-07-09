@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from amsrr.schemas.common import SchemaBase, SchemaValidationError, require_non_empty
+from amsrr.schemas.morphology import MorphologyGraph
 from amsrr.utils.config import load_config
 
 
@@ -485,6 +486,71 @@ class IsaacLabBackend:
             command.append("--p4-1-uses-p2-p3")
         return command
 
+    def p4_2_deterministic_rollout_command(
+        self,
+        *,
+        config_path: str | Path = "configs/env/isaac_lab.yaml",
+        convert_if_missing: bool = True,
+        force_convert: bool = False,
+        steps: int = 1200,
+        morphology_graph: MorphologyGraph,
+        object_size_m: tuple[float, float, float] = (0.30, 0.20, 0.15),
+        object_mass_kg: float = 1.0,
+        object_pose_world: tuple[float, float, float, float, float, float, float] = (
+            0.8,
+            0.0,
+            0.4,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ),
+        contact_model: str = "kinematic_fixed_joint_attach_v1",
+        attach_distance_threshold_m: float = 0.06,
+        attach_relative_velocity_threshold_mps: float = 0.20,
+        uses_p2_p3_design: bool = True,
+        generated_usd_dir: str | Path | None = None,
+        generated_usd_path: str | Path | None = None,
+    ) -> list[str]:
+        command = self.holon_spawn_probe_command(
+            config_path=config_path,
+            convert_if_missing=convert_if_missing,
+            force_convert=force_convert,
+            steps=steps,
+            generated_usd_dir=generated_usd_dir,
+            generated_usd_path=generated_usd_path,
+        )
+        command.extend(
+            [
+                "--p4-2-deterministic-rollout",
+                "--p4-2-morphology-graph-json",
+                morphology_graph.to_json(),
+                "--p4-2-object-size-m",
+                str(object_size_m[0]),
+                str(object_size_m[1]),
+                str(object_size_m[2]),
+                "--p4-2-object-mass-kg",
+                str(object_mass_kg),
+                "--p4-2-object-pose-world",
+                str(object_pose_world[0]),
+                str(object_pose_world[1]),
+                str(object_pose_world[2]),
+                str(object_pose_world[3]),
+                str(object_pose_world[4]),
+                str(object_pose_world[5]),
+                str(object_pose_world[6]),
+                "--p4-2-contact-model",
+                str(contact_model),
+                "--p4-2-attach-distance-threshold-m",
+                str(attach_distance_threshold_m),
+                "--p4-2-attach-relative-velocity-threshold-mps",
+                str(attach_relative_velocity_threshold_mps),
+            ]
+        )
+        if uses_p2_p3_design:
+            command.append("--p4-2-uses-p2-p3")
+        return command
+
     def run_holon_single_module_hover_smoke(
         self,
         *,
@@ -679,6 +745,48 @@ class IsaacLabBackend:
             object_size_m=object_size_m,
             object_mass_kg=object_mass_kg,
             object_pose_world=object_pose_world,
+            uses_p2_p3_design=uses_p2_p3_design,
+            generated_usd_dir=self.config.generated_usd_dir,
+            generated_usd_path=self.config.generated_usd_path,
+        )
+        return _run_json_command(command, timeout_s=timeout_s)
+
+    def run_p4_2_deterministic_rollout(
+        self,
+        *,
+        config_path: str | Path = "configs/env/isaac_lab.yaml",
+        force_convert: bool = True,
+        steps: int = 1200,
+        morphology_graph: MorphologyGraph,
+        object_size_m: tuple[float, float, float] = (0.30, 0.20, 0.15),
+        object_mass_kg: float = 1.0,
+        object_pose_world: tuple[float, float, float, float, float, float, float] = (
+            0.8,
+            0.0,
+            0.4,
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        ),
+        contact_model: str = "kinematic_fixed_joint_attach_v1",
+        attach_distance_threshold_m: float = 0.06,
+        attach_relative_velocity_threshold_mps: float = 0.20,
+        uses_p2_p3_design: bool = True,
+        timeout_s: float | None = None,
+    ) -> dict[str, Any]:
+        command = self.p4_2_deterministic_rollout_command(
+            config_path=config_path,
+            convert_if_missing=not force_convert,
+            force_convert=force_convert,
+            steps=steps,
+            morphology_graph=morphology_graph,
+            object_size_m=object_size_m,
+            object_mass_kg=object_mass_kg,
+            object_pose_world=object_pose_world,
+            contact_model=contact_model,
+            attach_distance_threshold_m=attach_distance_threshold_m,
+            attach_relative_velocity_threshold_mps=attach_relative_velocity_threshold_mps,
             uses_p2_p3_design=uses_p2_p3_design,
             generated_usd_dir=self.config.generated_usd_dir,
             generated_usd_path=self.config.generated_usd_path,

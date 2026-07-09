@@ -10,12 +10,16 @@ from amsrr.robot_model.fixed_morphology_urdf import (
     fixed_module_joint_name,
     fixed_module_link_name,
     fixed_morphology_module_poses,
+    morphology_graph_module_poses,
     split_fixed_module_name,
     write_articulated_morphology_urdf,
     write_fixed_morphology_urdf,
+    write_fixed_morphology_graph_urdf,
     write_joint_velocity_override_urdf,
     write_resolved_mesh_urdf,
 )
+from amsrr.robot_model.physical_model_builder import build_module_capability_token, build_physical_model_from_config
+from amsrr.schemas.morphology import ControlGroup, DockEdge, ModuleNode, MorphologyGraph
 from amsrr.robot_model.urdf_loader import load_urdf
 from amsrr.robot_model.urdf_transforms import link_poses_in_root_frame
 
@@ -61,6 +65,45 @@ def test_fixed_morphology_urdf_prefixes_modules_and_keeps_single_tree(tmp_path: 
     assert mesh_refs
     assert all(Path(ref).is_absolute() for ref in mesh_refs)
     assert all(Path(ref).exists() for ref in mesh_refs)
+
+
+def test_fixed_morphology_graph_urdf_reflects_graph_module_poses_and_edges(tmp_path: Path) -> None:
+    physical_model = build_physical_model_from_config("configs/robot/robot_model.yaml")
+    capability = build_module_capability_token(physical_model)
+    morphology = MorphologyGraph(
+        graph_id="p4_2_graph_specific_asset",
+        modules=[
+            ModuleNode(0, "holon", (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0), "base", True, capability),
+            ModuleNode(1, "holon", (0.42, -0.18, 0.03, 0.0, 0.0, 0.0, 1.0), "left_grasp", False, capability),
+            ModuleNode(2, "holon", (0.36, 0.22, 0.02, 0.0, 0.0, 0.0, 1.0), "right_grasp", False, capability),
+        ],
+        ports=[],
+        dock_edges=[
+            DockEdge(0, 0, 0, 1, 1, (0.42, -0.18, 0.03, 0.0, 0.0, 0.0, 1.0), "grasp_arm", [1.0] * 6, "attached"),
+            DockEdge(1, 0, 2, 2, 3, (0.36, 0.22, 0.02, 0.0, 0.0, 0.0, 1.0), "grasp_arm", [1.0] * 6, "attached"),
+        ],
+        robot_anchors=[],
+        control_groups=[ControlGroup("all", [0, 1, 2], "whole_body")],
+        base_module_id=0,
+        is_closed_loop=False,
+    )
+
+    output_path = write_fixed_morphology_graph_urdf(
+        "assets/robots/holon/holon.urdf",
+        tmp_path / "holon_graph.urdf",
+        morphology_graph=morphology,
+        mesh_search_dirs=MESH_SEARCH_DIRS,
+    )
+    model = load_urdf(output_path)
+    link_poses = link_poses_in_root_frame(model)
+
+    assert model.frame_tree_valid is True
+    assert model.root_links == [fixed_module_link_name(0, "root")]
+    assert "graph_edge_0_module_1_to_module_0" in {joint.name for joint in model.joints}
+    assert "graph_edge_1_module_2_to_module_0" in {joint.name for joint in model.joints}
+    assert link_poses[fixed_module_link_name(1, "root")] == pytest.approx(morphology.modules[1].pose_in_design_frame)
+    assert link_poses[fixed_module_link_name(2, "root")] == pytest.approx(morphology.modules[2].pose_in_design_frame)
+    assert morphology_graph_module_poses(morphology)[2] == pytest.approx(morphology.modules[2].pose_in_design_frame)
 
 
 def test_articulated_morphology_urdf_connects_child_root_to_parent_dock_port(tmp_path: Path) -> None:

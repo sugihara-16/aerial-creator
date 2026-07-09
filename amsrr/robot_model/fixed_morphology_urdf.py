@@ -13,6 +13,7 @@ from amsrr.geometry.pose_math import (
     pose_to_xyz_rpy,
 )
 from amsrr.schemas.common import SchemaValidationError
+from amsrr.schemas.morphology import MorphologyGraph
 from amsrr.robot_model.urdf_loader import URDFModel, load_urdf
 from amsrr.robot_model.urdf_transforms import link_poses_in_root_frame
 
@@ -90,6 +91,91 @@ def write_fixed_morphology_urdf(
     return output_path
 
 
+def write_fixed_morphology_graph_urdf(
+    source_urdf_path: str | Path,
+    output_urdf_path: str | Path,
+    *,
+    morphology_graph: MorphologyGraph,
+    prefix_separator: str = FIXED_MODULE_PREFIX_SEPARATOR,
+    mesh_search_dirs: list[str | Path] | None = None,
+) -> Path:
+    """Write a rigid URDF from an assembled MorphologyGraph.
+
+    This reflects a P3 assembled graph at reset time. It is not a dynamic
+    module attach/detach operation and does not edit morphology during rollout.
+    """
+
+    if not morphology_graph.modules:
+        raise SchemaValidationError("fixed morphology graph URDF requires at least one module")
+    if morphology_graph.is_closed_loop:
+        raise SchemaValidationError("fixed morphology graph URDF requires a tree morphology")
+    source_path = Path(source_urdf_path).resolve()
+    output_path = Path(output_urdf_path)
+    source_root = ET.parse(source_path).getroot()
+    if _tag_name(source_root) != "robot":
+        raise SchemaValidationError(f"Expected <robot> root in {source_path}")
+    source_links = _named_children(source_root, "link")
+    if "root" not in source_links:
+        raise SchemaValidationError("source Holon URDF must contain root link")
+    search_dirs = _normalise_mesh_search_dirs(mesh_search_dirs)
+    module_ids = sorted(module.module_id for module in morphology_graph.modules)
+    if morphology_graph.base_module_id not in module_ids:
+        raise SchemaValidationError("morphology graph base module is missing")
+    tree_edges = _morphology_graph_tree_edges(morphology_graph)
+    module_poses = morphology_graph_module_poses(morphology_graph)
+
+    output_root = ET.Element("robot", {"name": f"holon_graph_morphology_{_safe_graph_name(morphology_graph.graph_id)}"})
+    ET.SubElement(output_root, "baselink", {"name": _prefixed_name(morphology_graph.base_module_id, "fc", prefix_separator)})
+    ET.SubElement(output_root, "thrust_link", {"name": "thrust"})
+
+    for module_id in module_ids:
+        prefix = f"module_{module_id}{prefix_separator}"
+        for child in list(source_root):
+            tag = _tag_name(child)
+            if tag in {"baselink", "thrust_link", "m_f_rate"}:
+                continue
+            copied = copy.deepcopy(child)
+            _prefix_element(copied, prefix=prefix, source_dir=source_path.parent, mesh_search_dirs=search_dirs)
+            output_root.append(copied)
+
+    for edge_index, (parent_module_id, child_module_id) in enumerate(tree_edges):
+        parent_pose = module_poses[parent_module_id]
+        child_pose = module_poses[child_module_id]
+        relative_pose = compose_pose(inverse_pose(parent_pose), child_pose)
+        xyz, rpy = pose_to_xyz_rpy(relative_pose)
+        joint = ET.SubElement(
+            output_root,
+            "joint",
+            {
+                "name": f"graph_edge_{edge_index}_module_{child_module_id}_to_module_{parent_module_id}",
+                "type": "fixed",
+            },
+        )
+        ET.SubElement(joint, "origin", {"xyz": _format_vec(xyz), "rpy": _format_vec(rpy)})
+        ET.SubElement(joint, "parent", {"link": _prefixed_name(parent_module_id, "root", prefix_separator)})
+        ET.SubElement(joint, "child", {"link": _prefixed_name(child_module_id, "root", prefix_separator)})
+        ET.SubElement(joint, "axis", {"xyz": "0 0 0"})
+
+    _indent(output_root)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    ET.ElementTree(output_root).write(output_path, encoding="utf-8", xml_declaration=True)
+    return output_path
+
+
+def morphology_graph_module_poses(
+    morphology_graph: MorphologyGraph,
+) -> dict[int, tuple[float, float, float, float, float, float, float]]:
+    modules_by_id = {module.module_id: module for module in morphology_graph.modules}
+    base = modules_by_id.get(morphology_graph.base_module_id)
+    if base is None:
+        raise SchemaValidationError("morphology graph base module is missing")
+    base_inv = inverse_pose(base.pose_in_design_frame)
+    return {
+        module_id: compose_pose(base_inv, module.pose_in_design_frame)
+        for module_id, module in modules_by_id.items()
+    }
+
+
 def fixed_morphology_module_poses(
     source_urdf_path: str | Path,
     *,
@@ -146,6 +232,41 @@ class ArticulatedDockConnection:
 
 def _fixed_morphology_parent_module_ids(module_count: int) -> dict[int, int]:
     return {module_id: module_id - 1 for module_id in range(1, module_count)}
+
+
+def _morphology_graph_tree_edges(morphology_graph: MorphologyGraph) -> list[tuple[int, int]]:
+    module_ids = {module.module_id for module in morphology_graph.modules}
+    if len(module_ids) <= 1:
+        return []
+    adjacency: dict[int, list[int]] = {module_id: [] for module_id in module_ids}
+    for edge in morphology_graph.dock_edges:
+        if edge.src_module_id not in module_ids or edge.dst_module_id not in module_ids:
+            raise SchemaValidationError("dock edge references a missing module")
+        adjacency[edge.src_module_id].append(edge.dst_module_id)
+        adjacency[edge.dst_module_id].append(edge.src_module_id)
+    if not any(adjacency.values()):
+        raise SchemaValidationError("multi-module graph URDF requires dock edges")
+
+    visited = {morphology_graph.base_module_id}
+    frontier = [morphology_graph.base_module_id]
+    tree_edges: list[tuple[int, int]] = []
+    while frontier:
+        parent = frontier.pop(0)
+        for neighbor in sorted(adjacency[parent]):
+            if neighbor in visited:
+                continue
+            visited.add(neighbor)
+            frontier.append(neighbor)
+            tree_edges.append((parent, neighbor))
+    if visited != module_ids:
+        raise SchemaValidationError("morphology graph is disconnected")
+    if len(tree_edges) != len(module_ids) - 1:
+        raise SchemaValidationError("morphology graph must be a tree for fixed graph URDF generation")
+    return tree_edges
+
+
+def _safe_graph_name(graph_id: str) -> str:
+    return "".join(char if char.isalnum() else "_" for char in graph_id)[:80] or "graph"
 
 
 def articulated_morphology_connections(

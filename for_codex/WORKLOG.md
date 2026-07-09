@@ -4,6 +4,34 @@
 
 ### 2026-07-10
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.2 deterministic rollout user clarifications
+- Work package / Agent label: Agent J boundary: P4.2 graph-specific Isaac env/probe
+- Summary: Added the P4.2 Isaac env/backend/probe boundary for graph-specific deterministic rollout assets. The backend command now passes a serialized P3 assembled `MorphologyGraph` to the Isaac probe, and the probe generates a reset-time fixed graph morphology URDF from the graph's module poses and dock edges. This is explicitly not a π_A dynamic construction/update path: robot morphology is frozen during rollout, and any P4.2 attach/release semantics are object attach/release only.
+- Files changed:
+  - `amsrr/robot_model/fixed_morphology_urdf.py`
+  - `amsrr/simulation/p4_2_isaac_env.py`
+  - `amsrr/simulation/isaac_lab_backend.py`
+  - `amsrr/simulation/__init__.py`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - `tests/unit/robot_model/test_fixed_morphology_urdf.py`
+  - `tests/unit/simulation/test_p4_2_isaac_env.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema changes. Added graph-specific fixed-URDF helper, P4.2 env/report parser, backend command wrappers, and additive probe/report fields.
+- Upstream dependencies used: P4.2 Order 1 contract/state machine, Order 2 deterministic policy phase metadata, existing P3 `MorphologyGraph`, Isaac backend command surface, and controller/bridge actuator mapping.
+- Downstream impact: P4.2 runner/acceptance can now call a real Isaac command surface that requires P3 graph JSON and reflects graph module placement and actuator mapping. The current real probe deliberately cannot pass P4.2 completion without selected contact candidates and a gated attach event.
+- Tests added or run:
+  - Added unit coverage for graph-specific fixed morphology URDF generation from `MorphologyGraph`, P4.2 backend command JSON usage without `--fixed-module-count`, P4.2 env dry-run/missing-graph behavior, fake report parsing, no dynamic morphology claim propagation, and no-attach timeout rejection.
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_2_isaac_env.py tests/unit/simulation/test_p4_2_rollout.py tests/unit/robot_model/test_fixed_morphology_urdf.py -q`
+  - `PYTHONDONTWRITEBYTECODE=1 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest tests/unit/simulation/test_p4_1_isaac_env.py tests/unit/simulation/test_p4_1_backend_smoke.py tests/unit/robot_model/test_fixed_morphology_urdf.py -q`
+  - `python3 -m py_compile scripts/p4_control_holon_spawn_probe.py`
+  - `python3 -m compileall amsrr/simulation amsrr/robot_model tests/unit/simulation/test_p4_2_isaac_env.py tests/unit/robot_model/test_fixed_morphology_urdf.py -q`
+- Tests run: P4.2 env/contract/URDF tests passed: 17 passed. P4.1 related regression tests passed: 14 passed. Py compile and compileall passed.
+- Assumptions: This order establishes the graph-specific Isaac rollout boundary and nonpassing probe surface only. It does not implement selected contact-candidate attach gating, object fixed-joint creation/release, rollout archive writing, split P4.2 acceptance, real P4.2 completion, learning bootstrap, checkpoints, or reward-curve training.
+- Blockers: None for Order 3.
+- Next steps: Commit Order 3, then assess the P4.2 runner/archive order for method-level undefined items before implementation.
+
+### 2026-07-10
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus P4.2 deterministic rollout user clarifications
 - Work package / Agent label: Agent H/I boundary: P4.2 deterministic π_H/π_L phase adaptation
 - Summary: Added a P4.2-specific deterministic grasp/carry planner that emits explicit phase-labeled knots for `approach`, `pregrasp_align`, `attach_attempt`, `attached_maintain`, `transport`, and `release`. The planner reuses selected assignment feasibility and stores P4.2 phase/contact-model guard metadata without changing policy schemas. Updated baseline `π_L` so P4.2 phase guards are reflected as numeric `PolicyCommand.priority_weights` intent fields, keeping final actuator authority in the controller/bridge layer.
 - Files changed:

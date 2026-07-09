@@ -98,6 +98,55 @@ def parse_args() -> argparse.Namespace:
         metavar=("X", "Y", "Z", "QX", "QY", "QZ", "QW"),
         help="P4.1 object initial pose in world coordinates.",
     )
+    parser.add_argument(
+        "--p4-2-deterministic-rollout",
+        action="store_true",
+        help="Run the P4.2 deterministic graph-specific grasp/carry rollout probe.",
+    )
+    parser.add_argument(
+        "--p4-2-uses-p2-p3",
+        action="store_true",
+        help="Mark this P4.2 case as sourced from P2 selected design and P3 assembled morphology.",
+    )
+    parser.add_argument(
+        "--p4-2-morphology-graph-json",
+        default=None,
+        help="Serialized P3 assembled MorphologyGraph JSON for graph-specific reset asset generation.",
+    )
+    parser.add_argument(
+        "--p4-2-object-size-m",
+        type=float,
+        nargs=3,
+        default=(0.30, 0.20, 0.15),
+        metavar=("X", "Y", "Z"),
+        help="P4.2 box object dimensions in meters.",
+    )
+    parser.add_argument("--p4-2-object-mass-kg", type=float, default=1.0, help="P4.2 object mass in kg.")
+    parser.add_argument(
+        "--p4-2-object-pose-world",
+        type=float,
+        nargs=7,
+        default=(0.8, 0.0, 0.4, 0.0, 0.0, 0.0, 1.0),
+        metavar=("X", "Y", "Z", "QX", "QY", "QZ", "QW"),
+        help="P4.2 object initial pose in world coordinates.",
+    )
+    parser.add_argument(
+        "--p4-2-contact-model",
+        default="kinematic_fixed_joint_attach_v1",
+        help="P4.2 contact model label.",
+    )
+    parser.add_argument(
+        "--p4-2-attach-distance-threshold-m",
+        type=float,
+        default=0.06,
+        help="P4.2 object attach distance threshold.",
+    )
+    parser.add_argument(
+        "--p4-2-attach-relative-velocity-threshold-mps",
+        type=float,
+        default=0.20,
+        help="P4.2 object attach relative velocity threshold.",
+    )
     parser.add_argument("--fixed-module-count", type=int, default=2, help="Module count for fixed-morphology smokes.")
     parser.add_argument("--fixed-module-spacing-m", type=float, default=0.45, help="Rigid spacing between fixed modules.")
     parser.add_argument(
@@ -202,6 +251,7 @@ def main() -> int:
         "fixed_morphology_articulated_hover_smoke_passed",
         "fixed_morphology_waypoint_smoke_passed",
         "p4_1_full_scene_backend_smoke_passed",
+        "p4_2_deterministic_rollout_passed",
     ):
         if report.get(key) is False:
             return 1
@@ -220,13 +270,16 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     from amsrr.robot_model.fixed_morphology_urdf import (
         articulated_morphology_connections,
         fixed_morphology_module_poses,
+        morphology_graph_module_poses,
         split_fixed_module_name,
         write_articulated_morphology_urdf,
         write_fixed_morphology_urdf,
+        write_fixed_morphology_graph_urdf,
         write_joint_velocity_override_urdf,
         write_resolved_mesh_urdf,
     )
     from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
+    from amsrr.schemas.morphology import MorphologyGraph
     from amsrr.simulation.isaac_lab_backend import IsaacLabBackend, load_isaac_lab_backend_config
     from amsrr.simulation.p4_control_controller_smoke import (
         bridge_supported_controller_command,
@@ -247,7 +300,16 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         or args.fixed_morphology_articulated_hover_smoke
         or args.fixed_morphology_waypoint_smoke
     )
-    fixed_smoke_requested = bool(fixed_control_smoke_requested or args.p4_1_full_scene_backend_smoke)
+    fixed_smoke_requested = bool(
+        fixed_control_smoke_requested
+        or args.p4_1_full_scene_backend_smoke
+        or args.p4_2_deterministic_rollout
+    )
+    p4_2_morphology_graph = (
+        MorphologyGraph.from_json(args.p4_2_morphology_graph_json)
+        if args.p4_2_deterministic_rollout and args.p4_2_morphology_graph_json
+        else None
+    )
     fixed_module_poses = None
     articulated_connections = []
     converted = False
@@ -255,12 +317,26 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     if args.force_convert or fixed_smoke_requested or (args.convert_if_missing and not usd_path.exists()):
         mesh_search_dirs = _holon_mesh_search_dirs()
         if fixed_smoke_requested:
-            fixed_module_poses = fixed_morphology_module_poses(
-                urdf_path,
-                module_count=int(args.fixed_module_count),
-                module_spacing_m=float(args.fixed_module_spacing_m),
-            )
-            if args.fixed_morphology_articulated_hover_smoke:
+            if args.p4_2_deterministic_rollout:
+                if p4_2_morphology_graph is None:
+                    raise RuntimeError("P4.2 deterministic rollout requires --p4-2-morphology-graph-json")
+                fixed_module_poses = morphology_graph_module_poses(p4_2_morphology_graph)
+                graph_urdf_path = usd_dir / "graph_morphology_urdf" / "holon_p4_2_graph.urdf"
+                urdf_path = write_fixed_morphology_graph_urdf(
+                    urdf_path,
+                    graph_urdf_path,
+                    morphology_graph=p4_2_morphology_graph,
+                    mesh_search_dirs=mesh_search_dirs,
+                )
+            else:
+                fixed_module_poses = fixed_morphology_module_poses(
+                    urdf_path,
+                    module_count=int(args.fixed_module_count),
+                    module_spacing_m=float(args.fixed_module_spacing_m),
+                )
+            if args.p4_2_deterministic_rollout:
+                pass
+            elif args.fixed_morphology_articulated_hover_smoke:
                 articulated_connections = articulated_morphology_connections(
                     urdf_path,
                     module_count=int(args.fixed_module_count),
@@ -373,9 +449,16 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     )
     robot = Articulation(robot_cfg)
     p4_1_object = None
-    if args.p4_1_full_scene_backend_smoke:
-        object_pose = tuple(float(value) for value in args.p4_1_object_pose_world)
-        object_size = tuple(float(value) for value in args.p4_1_object_size_m)
+    if args.p4_1_full_scene_backend_smoke or args.p4_2_deterministic_rollout:
+        object_pose = tuple(
+            float(value)
+            for value in (args.p4_2_object_pose_world if args.p4_2_deterministic_rollout else args.p4_1_object_pose_world)
+        )
+        object_size = tuple(
+            float(value)
+            for value in (args.p4_2_object_size_m if args.p4_2_deterministic_rollout else args.p4_1_object_size_m)
+        )
+        object_mass = float(args.p4_2_object_mass_kg if args.p4_2_deterministic_rollout else args.p4_1_object_mass_kg)
         object_cfg = RigidObjectCfg(
             prim_path="/World/Object/box_01",
             spawn=sim_utils.CuboidCfg(
@@ -384,7 +467,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
                     disable_gravity=False,
                     max_depenetration_velocity=10.0,
                 ),
-                mass_props=sim_utils.MassPropertiesCfg(mass=float(args.p4_1_object_mass_kg)),
+                mass_props=sim_utils.MassPropertiesCfg(mass=object_mass),
                 collision_props=sim_utils.CollisionPropertiesCfg(),
                 visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.2, 0.55, 0.85)),
             ),
@@ -423,6 +506,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     controller_bundle = None
     hover_smoke_report = None
     p4_1_smoke_report = None
+    p4_2_rollout_report = None
     if args.controller_command_smoke:
         controller_bundle = build_single_module_controller_command_smoke(
             physical_model,
@@ -553,7 +637,36 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             allocation_mode=str(args.allocation_mode),
             uses_p2_p3=bool(args.p4_1_uses_p2_p3),
         )
-    for _ in range(0 if hover_smoke_report is not None or p4_1_smoke_report is not None else max(0, args.steps)):
+    if args.p4_2_deterministic_rollout:
+        if p4_1_object is None:
+            raise RuntimeError("P4.2 deterministic rollout requested without a spawned object.")
+        if p4_2_morphology_graph is None:
+            raise RuntimeError("P4.2 deterministic rollout requested without a morphology graph.")
+        p4_2_rollout_report = _run_p4_2_deterministic_rollout_probe(
+            robot=robot,
+            p4_2_object=p4_1_object,
+            sim=sim,
+            sim_dt=sim_dt,
+            physical_model=physical_model,
+            device=sim.device,
+            steps=max(0, args.steps),
+            morphology_graph=p4_2_morphology_graph,
+            module_poses=fixed_module_poses,
+            object_id="box_01",
+            target_height=float(args.hover_target_height if args.hover_target_height is not None else args.spawn_height),
+            control_dt_s=float(args.dt),
+            bridge_supported_controller_command=bridge_supported_controller_command,
+            split_fixed_module_name=split_fixed_module_name,
+            realtime_playback=bool(args.realtime_playback),
+            allocation_mode=str(args.allocation_mode),
+            uses_p2_p3=bool(args.p4_2_uses_p2_p3),
+            contact_model=str(args.p4_2_contact_model),
+        )
+    for _ in range(
+        0
+        if hover_smoke_report is not None or p4_1_smoke_report is not None or p4_2_rollout_report is not None
+        else max(0, args.steps)
+    ):
         if controller_bundle is not None:
             _apply_actuator_record(robot, controller_bundle.actuator_target_record, physical_model, sim.device)
         elif force_per_rotor_n != 0.0:
@@ -620,6 +733,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             or controller_bundle is not None
             or hover_smoke_report is not None
             or p4_1_smoke_report is not None
+            or p4_2_rollout_report is not None
         ),
         "command_probe_passed": (
             force_command_ok and gimbal_command_ok and controller_command_ok and hover_command_ok
@@ -627,6 +741,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             or controller_bundle is not None
             or hover_smoke_report is not None
             or p4_1_smoke_report is not None
+            or p4_2_rollout_report is not None
             else None
         ),
         "controller_command_smoke": controller_bundle is not None,
@@ -675,6 +790,8 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         report.update(hover_smoke_report)
     if p4_1_smoke_report is not None:
         report.update(p4_1_smoke_report)
+    if p4_2_rollout_report is not None:
+        report.update(p4_2_rollout_report)
     report["realtime_playback"] = bool(args.realtime_playback)
     report["keep_open_after_smoke_s"] = float(args.keep_open_after_smoke_s)
     if args.keep_open_after_smoke_s > 0.0:
@@ -1695,6 +1812,317 @@ def _run_p4_1_full_scene_backend_smoke(
         "p4_1_max_model_allocation_change": 0.0,
         "p4_1_last_controller_status": last_controller_status,
         "p4_1_last_bridge_metrics": last_bridge_metrics,
+    }
+
+
+def _run_p4_2_deterministic_rollout_probe(
+    *,
+    robot,
+    p4_2_object,
+    sim,
+    sim_dt: float,
+    physical_model,
+    device: str,
+    steps: int,
+    morphology_graph,
+    module_poses: dict[int, tuple[float, float, float, float, float, float, float]] | None,
+    object_id: str,
+    target_height: float,
+    control_dt_s: float,
+    bridge_supported_controller_command,
+    split_fixed_module_name,
+    realtime_playback: bool,
+    allocation_mode: str,
+    uses_p2_p3: bool,
+    contact_model: str,
+) -> dict[str, object]:
+    from amsrr.controllers.actuator_mapping import build_actuator_mapping
+    from amsrr.controllers.controller_base import ControllerContext
+    from amsrr.controllers.isaac_controller_bridge import IsaacControllerBridge
+    from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
+    from amsrr.schemas.policies import InteractionKnot, PolicyCommand
+    from amsrr.simulation.p4_2_rollout import (
+        P4_2RolloutPhase,
+        P4_2PhaseTransitionRecord,
+        p4_2_failure_metrics,
+        p4_2_no_mislabeling_artifacts,
+    )
+
+    module_count = len(morphology_graph.modules)
+    graph_module_poses = module_poses or {
+        module.module_id: module.pose_in_design_frame
+        for module in morphology_graph.modules
+    }
+    actuator_mapping = build_actuator_mapping(morphology_graph, physical_model)
+    bridge = IsaacControllerBridge()
+    controller = QPIDController(
+        config=QPIDControllerConfig(
+            allocation_mode=allocation_mode,
+            control_dt_s=control_dt_s,
+        )
+    )
+    object_pose_initial, _ = _p4_1_object_pose_and_twist(p4_2_object)
+    approach_pose = (
+        float(object_pose_initial[0]) - 0.25,
+        float(object_pose_initial[1]),
+        max(float(target_height), float(object_pose_initial[2]) + 0.20),
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    )
+    target_twist = [0.0] * 6
+    previous_command = None
+    runtime_observation_objects = []
+    runtime_observations: list[dict[str, object]] = []
+    policy_commands: list[dict[str, object]] = []
+    controller_commands: list[dict[str, object]] = []
+    actuator_target_records: list[dict[str, object]] = []
+    object_pose_history: list[list[float]] = []
+    qp_infeasible_count = 0
+    clipped_count = 0
+    missing_actuator_count = 0
+    unsupported_actuator_count = 0
+    clipped_target_count = 0
+    finite_state = True
+    executed_steps = 0
+    last_controller_status = None
+    last_bridge_metrics: dict[str, float] = {}
+    selected_contact_candidates_available = False
+    phase_transitions = [
+        P4_2PhaseTransitionRecord(
+            from_phase=P4_2RolloutPhase.RESET,
+            to_phase=P4_2RolloutPhase.APPROACH,
+            time_s=0.0,
+            phase_elapsed_s=0.0,
+            reason="reset_complete_graph_specific_fixed_morphology_spawned",
+            entry_condition_results={
+                "p2_p3_design_claim": bool(uses_p2_p3),
+                "morphology_graph_available": True,
+            },
+            exit_condition_results={
+                "morphology_asset_reflected": True,
+                "module_placement_reflected": len(graph_module_poses) == module_count,
+                "actuator_mapping_reflected": len(actuator_mapping.channels) > 0,
+            },
+        )
+    ]
+
+    for step_idx in range(max(0, steps)):
+        executed_steps = step_idx + 1
+        time_s = step_idx * sim_dt
+        root_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
+        root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch)
+        runtime_observation = _build_fixed_runtime_observation(
+            morphology_graph,
+            time_s=time_s,
+            root_pose_world=root_pose,  # type: ignore[arg-type]
+            root_twist_world=root_twist,
+            joint_names=robot.joint_names,
+            joint_positions_tensor=robot.data.joint_pos.torch,
+            joint_velocities_tensor=robot.data.joint_vel.torch,
+            module_count=module_count,
+            module_spacing_m=0.45,
+            module_poses=graph_module_poses,
+            split_fixed_module_name=split_fixed_module_name,
+        )
+        object_state = _build_p4_1_object_runtime_state(p4_2_object, object_id=object_id)
+        runtime_observation.object_states = [object_state]
+        runtime_observation.task_progress.phase_label = P4_2RolloutPhase.APPROACH.value
+        runtime_observation.task_progress.metrics.update(
+            {
+                "selected_contact_candidates_available": 0.0,
+                "unconditional_attach_allowed": 0.0,
+            }
+        )
+        runtime_observation_objects.append(runtime_observation)
+        runtime_observations.append(runtime_observation.to_dict())
+        policy_command = PolicyCommand(
+            desired_body_pose=approach_pose,
+            desired_body_twist=target_twist,
+            priority_weights={
+                "p4_2_phase_approach": 1.0,
+                "attach_condition_gate": 0.0,
+            },
+        )
+        active_knot = InteractionKnot(
+            t_rel_s=time_s,
+            contact_assignments=[],
+            priority_weights={"p4_2_phase_approach": 1.0},
+            guard_conditions=[
+                {
+                    "type": "p4_2_phase",
+                    "phase": P4_2RolloutPhase.APPROACH.value,
+                    "contact_model": contact_model,
+                },
+                {
+                    "type": "p4_2_attach_gate",
+                    "selected_contact_candidates_available": False,
+                    "robot_anchors_available": len(morphology_graph.robot_anchors) > 0,
+                    "unconditional_attach_allowed": False,
+                },
+            ],
+        )
+        policy_commands.append(policy_command.to_dict())
+        controller_command = controller.compute(
+            ControllerContext(
+                runtime_observation=runtime_observation,
+                morphology_graph=morphology_graph,
+                physical_model=physical_model,
+                active_knot=active_knot,
+                policy_command=policy_command,
+                previous_command=previous_command,
+                control_dt_s=control_dt_s,
+            )
+        )
+        bridged_command = bridge_supported_controller_command(controller_command)
+        actuator_record = bridge.convert(
+            bridged_command,
+            actuator_mapping,
+            time_s=time_s,
+            command_index=step_idx,
+        )
+        controller_commands.append(bridged_command.to_dict())
+        actuator_target_records.append(actuator_record.to_dict())
+        _apply_actuator_record(robot, actuator_record, physical_model, device)
+        robot.write_data_to_sim()
+        _write_asset_data_to_sim(p4_2_object)
+        sim.step()
+        robot.update(sim_dt)
+        p4_2_object.update(sim_dt)
+        if realtime_playback:
+            time.sleep(max(0.0, sim_dt))
+
+        object_pose, object_twist = _p4_1_object_pose_and_twist(p4_2_object)
+        object_pose_history.append(list(object_pose))
+        finite_state = finite_state and all(_is_finite(value) for value in root_pose)
+        finite_state = finite_state and all(_is_finite(value) for value in object_pose)
+        finite_state = finite_state and all(_is_finite(value) for value in object_twist)
+
+        status = bridged_command.controller_status
+        last_controller_status = status.to_dict()
+        last_bridge_metrics = dict(actuator_record.metrics)
+        if not status.qp_feasible:
+            qp_infeasible_count += 1
+        if status.metrics.get("clipped", 0.0) > 0.0:
+            clipped_count += 1
+        missing_actuator_count += len(actuator_record.missing_actuators)
+        unsupported_actuator_count += len(actuator_record.unsupported_actuators)
+        clipped_target_count += len(actuator_record.clipped_targets)
+        previous_command = bridged_command
+
+    controller_terminal = qp_infeasible_count > 0
+    final_phase = (
+        P4_2RolloutPhase.CONTROLLER_FAILURE
+        if controller_terminal
+        else P4_2RolloutPhase.TIMEOUT_FAILURE
+    )
+    phase_transitions.append(
+        P4_2PhaseTransitionRecord(
+            from_phase=P4_2RolloutPhase.APPROACH,
+            to_phase=final_phase,
+            time_s=float(executed_steps * sim_dt),
+            phase_elapsed_s=float(executed_steps * sim_dt),
+            reason=(
+                "controller_or_qp_infeasible"
+                if controller_terminal
+                else "selected_contact_candidate_gate_not_available_before_probe_end"
+            ),
+            entry_condition_results={
+                "selected_contact_candidates_available": selected_contact_candidates_available,
+                "unconditional_attach_allowed": False,
+            },
+            exit_condition_results={
+                "attach_attempt_not_entered": True,
+                "object_attach_event_recorded": False,
+            },
+            timeout_s=float(executed_steps * sim_dt) if executed_steps > 0 else None,
+        )
+    )
+    logged_step_count_ok = (
+        len(runtime_observations) == executed_steps
+        and len(policy_commands) == executed_steps
+        and len(controller_commands) == executed_steps
+        and len(actuator_target_records) == executed_steps
+        and len(object_pose_history) == executed_steps
+    )
+    object_pose_history_ok = all(len(pose) == 7 for pose in object_pose_history)
+    module_placement_reflected = len(graph_module_poses) == module_count
+    actuator_mapping_reflected = len(actuator_mapping.channels) > 0 and actuator_mapping.graph_id == morphology_graph.graph_id
+    metrics = p4_2_failure_metrics(
+        final_phase=final_phase,
+        controller_qp_infeasible_terminal=controller_terminal,
+    )
+    metrics.update(
+        {
+            "p4_2_runtime_observation_count": float(len(runtime_observations)),
+            "p4_2_policy_command_count": float(len(policy_commands)),
+            "p4_2_controller_command_count": float(len(controller_commands)),
+            "p4_2_actuator_target_record_count": float(len(actuator_target_records)),
+            "p4_2_selected_contact_candidates_available": 0.0,
+            "p4_2_unconditional_attach_allowed": 0.0,
+            "p4_2_attach_event_count": 0.0,
+            "p4_2_actuator_channel_count": float(len(actuator_mapping.channels)),
+        }
+    )
+    artifacts = p4_2_no_mislabeling_artifacts()
+    artifacts.update(
+        {
+            "object_attach_release_only": True,
+            "module_attach_detach_claim": False,
+            "dynamic_morphology_update_claim": False,
+            "asset_generation_semantics": "reset_time_fixed_morphology_not_pi_a_dynamic_construction",
+        }
+    )
+    return {
+        "p4_2_deterministic_rollout": True,
+        "p4_2_deterministic_rollout_passed": False,
+        "p4_2_contact_model": contact_model,
+        "p4_2_final_phase": final_phase.value,
+        "p4_2_uses_p2_p3": bool(uses_p2_p3),
+        "p4_2_graph_id": morphology_graph.graph_id,
+        "p4_2_module_count": int(module_count),
+        "p4_2_module_ids": [module.module_id for module in morphology_graph.modules],
+        "p4_2_dock_edge_count": len(morphology_graph.dock_edges),
+        "p4_2_robot_anchor_count": len(morphology_graph.robot_anchors),
+        "p4_2_morphology_asset_reflected": True,
+        "p4_2_module_placement_reflected": bool(module_placement_reflected),
+        "p4_2_module_poses_source": "p3_assembled_morphology_graph",
+        "p4_2_module_poses": {str(module_id): list(pose) for module_id, pose in sorted(graph_module_poses.items())},
+        "p4_2_actuator_mapping_reflected": bool(actuator_mapping_reflected),
+        "p4_2_actuator_mapping_graph_id": actuator_mapping.graph_id,
+        "p4_2_actuator_channel_count": len(actuator_mapping.channels),
+        "p4_2_object_attach_release_only": True,
+        "p4_2_module_attach_detach_claim": False,
+        "p4_2_dynamic_morphology_update_claim": False,
+        "p4_2_asset_generation_semantics": "reset_time_fixed_morphology_not_pi_a_dynamic_construction",
+        "p4_2_attach_gate_input_available": False,
+        "p4_2_unconditional_attach_allowed": False,
+        "p4_2_selected_contact_candidate_count": 0,
+        "p4_2_runtime_observations": runtime_observations,
+        "p4_2_policy_commands": policy_commands,
+        "p4_2_controller_commands": controller_commands,
+        "p4_2_actuator_target_records": actuator_target_records,
+        "p4_2_phase_transitions": [transition.to_dict() for transition in phase_transitions],
+        "p4_2_attach_events": [],
+        "p4_2_object_pose_history": object_pose_history,
+        "p4_2_runtime_observation_count": len(runtime_observations),
+        "p4_2_policy_command_count": len(policy_commands),
+        "p4_2_controller_command_count": len(controller_commands),
+        "p4_2_actuator_target_record_count": len(actuator_target_records),
+        "p4_2_object_pose_count": len(object_pose_history),
+        "p4_2_logged_step_count_ok": bool(logged_step_count_ok),
+        "p4_2_object_pose_history_ok": bool(object_pose_history_ok),
+        "p4_2_finite_state": bool(finite_state),
+        "p4_2_qp_infeasible_count": int(qp_infeasible_count),
+        "p4_2_controller_clipped_count": int(clipped_count),
+        "p4_2_missing_actuator_count": int(missing_actuator_count),
+        "p4_2_unsupported_actuator_count": int(unsupported_actuator_count),
+        "p4_2_clipped_target_count": int(clipped_target_count),
+        "p4_2_last_controller_status": last_controller_status,
+        "p4_2_last_bridge_metrics": last_bridge_metrics,
+        "p4_2_rollout_artifacts": artifacts,
+        **metrics,
     }
 
 
