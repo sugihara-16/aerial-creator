@@ -218,7 +218,28 @@ def _actuator_target_records_saved(archive: EpisodeArchive) -> bool:
 
 def _attach_events_saved(archive: EpisodeArchive) -> bool:
     events = archive.rollout_artifacts.get("p4_2_attach_events")
-    return isinstance(events, list) and bool(events) and archive.metrics.get("attach_event_count", 0.0) > 0.0
+    return (
+        isinstance(events, list)
+        and bool(events)
+        and archive.metrics.get("attach_event_count", 0.0) > 0.0
+        and any(_attach_event_uses_isaac_link_anchor(event) for event in events if isinstance(event, dict))
+    )
+
+
+def _attach_event_uses_isaac_link_anchor(event: dict) -> bool:
+    link_pose = event.get("anchor_link_pose_world")
+    local_pose = event.get("anchor_local_pose_in_link")
+    return (
+        event.get("anchor_pose_source") == "isaac_link"
+        and isinstance(event.get("anchor_link_id"), str)
+        and bool(event.get("anchor_link_id"))
+        and isinstance(event.get("anchor_resolved_body_name"), str)
+        and bool(event.get("anchor_resolved_body_name"))
+        and isinstance(link_pose, list)
+        and len(link_pose) == 7
+        and isinstance(local_pose, list)
+        and len(local_pose) == 7
+    )
 
 
 def _release_events_saved(archive: EpisodeArchive) -> bool:
@@ -323,6 +344,7 @@ def _real_isaac_rollout_passed(rollout_results: list[P4_2DeterministicRolloutRes
             and result.actuator_mapping_reflected
             and result.final_phase == P4_2RolloutPhase.SUCCESS
             and bool(result.attach_events)
+            and any(event.anchor_pose_source == "isaac_link" for event in result.attach_events)
             and bool(result.release_events)
             and bool(result.runtime_observations)
             and bool(result.policy_commands)
@@ -373,7 +395,7 @@ def _fast_failure_reasons(
     if not per_step_actuator_target_records_saved:
         reasons.append("P4.2 archives are missing per-step actuator target records")
     if not attach_events_saved:
-        reasons.append("P4.2 archives are missing gated object attach events")
+        reasons.append("P4.2 archives are missing link-backed gated object attach events")
     if not release_events_saved:
         reasons.append("P4.2 archives are missing intended object release events")
     if not payload_coupling_saved:
@@ -411,6 +433,8 @@ def _rollout_failure_reasons(rollout_results: list[P4_2DeterministicRolloutResul
             reasons.append(f"P4.2 real Isaac rollout did not reflect graph-specific morphology: {rollout_name}")
         elif not result.attach_events:
             reasons.append(f"P4.2 real Isaac rollout has no gated attach event: {rollout_name}")
+        elif not any(event.anchor_pose_source == "isaac_link" for event in result.attach_events):
+            reasons.append(f"P4.2 real Isaac rollout has no link-backed attach event: {rollout_name}")
         elif not result.release_events:
             reasons.append(f"P4.2 real Isaac rollout has no release event: {rollout_name}")
     return reasons

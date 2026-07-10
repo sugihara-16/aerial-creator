@@ -251,6 +251,13 @@ class P4_2AttachEvent(SchemaBase):
     contact_region_ids: list[str] = field(default_factory=list)
     distance_margins: dict[str, float] = field(default_factory=dict)
     assignment_feasibility: dict[str, Any] = field(default_factory=dict)
+    anchor_link_id: str | None = None
+    anchor_resolved_body_name: str | None = None
+    anchor_pose_source: str = "module_state_fallback"
+    anchor_link_pose_world: Pose7D | None = None
+    anchor_local_pose_in_link: Pose7D | None = None
+    anchor_link_twist_world: list[float] = field(default_factory=list)
+    anchor_link_resolution: dict[str, Any] = field(default_factory=dict)
 
     def validate(self) -> None:
         if self.time_s < 0.0:
@@ -279,6 +286,18 @@ class P4_2AttachEvent(SchemaBase):
             raise SchemaValidationError("P4_2AttachEvent.relative_pose_error_m must be non-negative")
         if not self.condition_report.passed:
             raise SchemaValidationError("P4_2AttachEvent requires a passed condition_report")
+        require_non_empty(self.anchor_pose_source, "P4_2AttachEvent.anchor_pose_source")
+        if self.anchor_pose_source == "isaac_link":
+            require_non_empty(self.anchor_link_id or "", "P4_2AttachEvent.anchor_link_id")
+            require_non_empty(self.anchor_resolved_body_name or "", "P4_2AttachEvent.anchor_resolved_body_name")
+            if self.anchor_link_pose_world is None:
+                raise SchemaValidationError("P4_2AttachEvent.anchor_link_pose_world is required for isaac_link anchors")
+            if self.anchor_local_pose_in_link is None:
+                raise SchemaValidationError("P4_2AttachEvent.anchor_local_pose_in_link is required for isaac_link anchors")
+            require_len(self.anchor_link_pose_world, 7, "P4_2AttachEvent.anchor_link_pose_world")
+            require_len(self.anchor_local_pose_in_link, 7, "P4_2AttachEvent.anchor_local_pose_in_link")
+            if self.anchor_link_twist_world and len(self.anchor_link_twist_world) != 6:
+                raise SchemaValidationError("P4_2AttachEvent.anchor_link_twist_world must have length 6")
 
 
 @dataclass

@@ -4,6 +4,36 @@
 
 ### 2026-07-10
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus approved P4.2 payload-coupled deterministic rollout clarification
+- Work package / Agent label: Agent J/K/L boundary: P4.2 link-backed RobotAnchor attach gate hardening
+- Summary: Hardened the P4.2 v1 attach gate so successful attach evidence must be tied to the selected `RobotAnchor.link_id` resolved as an Isaac articulation body. The probe now computes the selected anchor pose from the resolved connector-link body pose plus `RobotAnchor.local_pose`, uses that pose for attach distance, relative velocity, object slaving, and body target computation, and archives link-backed attach evidence. Acceptance now rejects attach archives that only prove the older module-state fallback anchor.
+- Files changed:
+  - `amsrr/simulation/p4_2_rollout.py`
+  - `amsrr/simulation/p4_2_isaac_env.py`
+  - `amsrr/acceptance/p4_2_acceptance.py`
+  - `amsrr/training/p4_2_deterministic_rollout_runner.py`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - P4.2 unit/acceptance tests
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted base schema change. Additive P4.2 runtime/archive fields were added to `P4_2AttachEvent` for `anchor_link_id`, resolved Isaac body name, anchor pose source, link pose, local pose in link frame, link twist, and link-resolution metadata. P4.2 acceptance now requires a link-backed attach event.
+- Upstream dependencies used: P2 selected `DesignOutput`, P3 assembled `MorphologyGraph`, `RobotAnchor.link_id` / `local_pose`, P4.2 selected contact assignments, existing Isaac body-name prefixing, and the approved `contact_model="kinematic_payload_coupled_attach_v1"` scope.
+- Downstream impact: P4.2 completion can no longer pass on an attach event that is only based on module-frame virtual anchors. The archive now contains enough evidence to inspect which connector-link body triggered attach. This still does not validate natural contact or connector mesh contact.
+- Tests added or run:
+  - Added schema coverage for link-backed attach event evidence.
+  - Added acceptance coverage rejecting attach events without `anchor_pose_source="isaac_link"`.
+  - `python3 -m py_compile amsrr/simulation/p4_2_rollout.py amsrr/acceptance/p4_2_acceptance.py amsrr/simulation/p4_2_isaac_env.py amsrr/training/p4_2_deterministic_rollout_runner.py scripts/p4_control_holon_spawn_probe.py tests/acceptance/test_p4_2_acceptance.py tests/unit/simulation/test_p4_2_rollout.py tests/unit/simulation/test_p4_2_isaac_env.py tests/unit/training/test_p4_2_deterministic_rollout_runner.py`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q tests/unit/simulation/test_p4_2_rollout.py tests/unit/simulation/test_p4_2_isaac_env.py tests/unit/training/test_p4_2_deterministic_rollout_runner.py tests/acceptance/test_p4_2_acceptance.py`
+  - `PYTHONPATH=/home/leus/amsrr python3 scripts/p4_2_deterministic_rollout.py --config configs/training/p4_2_deterministic_rollout.yaml --real`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q tests/unit tests/acceptance`
+  - `git diff --check`
+- Tests run: Targeted P4.2 tests passed: 21 passed. Full unit/acceptance suite passed: 186 passed, 1 skipped. Real Isaac P4.2 gate passed with `completion_passed=true`, `real_isaac_rollout_passed=true`, one link-backed attach event, one release event, and no acceptance failures.
+- Real Isaac evidence: The attach event archived `anchor_id=0`, `anchor_link_id="pitch_dock_mech1"`, `anchor_resolved_body_name="module_1__pitch_dock_mech1"`, `anchor_pose_source="isaac_link"`, `distance_m=0.10354209267884071`, `relative_velocity_mps=0.19955582230704955`, `p4_2_attach_event_link_backed_count=1.0`, `p4_2_payload_controller_metric_record_count=101.0`, and `p4_2_payload_wrench_delta_norm=14.017291907331392`.
+- Assumptions: `RobotAnchor.local_pose` is interpreted as a link-relative P4.2 runtime offset when `link_id` resolves in Isaac. This is an implementation-time supplement for P4.2 v1 and does not alter the meaning of π_D as graph-level design.
+- Blockers: None for this hardening step.
+- Next steps / handoff: The GUI should be rerun with the generated command to visually inspect whether the connector-link-backed anchor is acceptable. P4.2 remains a kinematic payload-coupled attach approximation, not natural grasp. Keep `P4.4 / P4-natural-contact-grasp validation` open for free rigid-body contact/friction/contact maintenance, slip/contact break/drop/unintended collision/penetration/contact-force logging, and comparison against `natural_contact_grasp_v1`.
+
+### 2026-07-10
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus approved P4.2 payload-coupled deterministic rollout clarification
 - Work package / Agent label: Agent J/K/L boundary: P4.2 Order 6b real Isaac gated attach / payload transport / release
 - Summary: Completed the real Isaac-backed P4.2 v1 rollout for `contact_model="kinematic_payload_coupled_attach_v1"`. The P4.2 probe now consumes P2/P3-selected `ContactCandidateSet` and `ContactWrenchTrajectory`, reflects the P3 assembled graph into the reset-time Isaac morphology asset, evaluates gated attach against selected candidates/anchors/slots/contact regions, applies controller-side payload coupling after attach, transports the slaved payload through a bounded P4.2 v1 payload-carry segment, emits an intended release event, and returns terminal `success` without claiming natural grasp, true fixed-joint dynamics, learned policy success, P4.3 bootstrap, or P4 full completion.
 - Files changed:
@@ -2494,6 +2524,36 @@
 ## Work Package Logs
 
 ### P4.2 Implementation: Isaac Deterministic Grasp-Carry Rollout
+
+#### 2026-07-10
+- Scope: Link-backed RobotAnchor attach gate hardening for the completed P4.2 v1 deterministic rollout.
+- Files changed:
+  - `amsrr/simulation/p4_2_rollout.py`
+  - `amsrr/simulation/p4_2_isaac_env.py`
+  - `amsrr/acceptance/p4_2_acceptance.py`
+  - `amsrr/training/p4_2_deterministic_rollout_runner.py`
+  - `scripts/p4_control_holon_spawn_probe.py`
+  - `tests/unit/simulation/test_p4_2_rollout.py`
+  - `tests/unit/simulation/test_p4_2_isaac_env.py`
+  - `tests/unit/training/test_p4_2_deterministic_rollout_runner.py`
+  - `tests/acceptance/test_p4_2_acceptance.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: P4.2 selected ContactCandidate / RobotAnchor assignments, P3 assembled graph module ids, Isaac body-name prefixing, and P4.2 payload-coupled attach contract.
+- Implemented: Link-backed anchor pose resolution from `RobotAnchor.link_id`, attach/root-target/slaving based on the resolved Isaac body pose plus `RobotAnchor.local_pose`, attach event link evidence, rollout anchor debug samples, and acceptance rejection for module-state-only attach evidence.
+- Not implemented: Natural contact grasp, connector mesh contact validation, friction/slip validation, contact-force logging, or joint-closure grasping.
+- Schema/interface changes: No persisted base schema changes. Additive P4.2 attach-event/report/archive fields only.
+- Downstream impact: P4.2 fake and real gates now require link-backed attach evidence. A fallback anchor pose can be logged for diagnostics but cannot complete P4.2.
+- Tests added:
+  - Link-backed attach event schema checks.
+  - Acceptance rejection for attach events lacking `anchor_pose_source="isaac_link"`.
+- Tests passed:
+  - Targeted P4.2 tests: 21 passed.
+  - Full unit/acceptance suite: 186 passed, 1 skipped.
+  - Real Isaac P4.2 rollout: `completion_passed=true`, `anchor_resolved_body_name="module_1__pitch_dock_mech1"`, `p4_2_attach_event_link_backed_count=1.0`.
+  - `git diff --check` passed.
+- Handoff notes: This is still `kinematic_payload_coupled_attach_v1`; it is connector-link-backed kinematic attach, not natural grasp or high-fidelity contact.
+- Open questions: Whether later P4.2/P4.4 should replace heuristic `RobotAnchor.local_pose` with a dock-port/contact-surface-derived anchor frame before natural-contact validation.
 
 #### 2026-07-10
 - Scope: Order 2 deterministic `π_H` / `π_L` P4.2 phase adaptation.

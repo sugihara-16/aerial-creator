@@ -2010,7 +2010,7 @@ def _run_p4_2_deterministic_rollout_probe(
         contact_candidate_set,
         [assignment.candidate_id for assignment in selected_assignments],
     )
-    anchor_relative_pose = (
+    fallback_anchor_relative_pose = (
         _p4_2_anchor_relative_pose(morphology_graph, graph_module_poses, selected_anchor)
         if selected_anchor is not None
         else None
@@ -2038,6 +2038,9 @@ def _run_p4_2_deterministic_rollout_probe(
     transport_displacement_m = 0.0
     root_pose_at_release = None
     object_pose_at_release = None
+    anchor_debug_samples: list[dict[str, object]] = []
+    link_backed_anchor_pose_used = False
+    last_anchor_resolution: dict[str, object] = {}
     phase_transitions = [
         P4_2PhaseTransitionRecord(
             from_phase=P4_2RolloutPhase.RESET,
@@ -2075,7 +2078,22 @@ def _run_p4_2_deterministic_rollout_probe(
             module_poses=graph_module_poses,
             split_fixed_module_name=split_fixed_module_name,
         )
-        anchor_pose = _p4_2_anchor_world_pose(runtime_observation, selected_anchor)
+        anchor_resolution = _p4_2_anchor_resolution(
+            robot=robot,
+            runtime_observation=runtime_observation,
+            anchor=selected_anchor,
+        )
+        last_anchor_resolution = dict(anchor_resolution)
+        anchor_pose = anchor_resolution.get("pose_world")
+        anchor_twist = anchor_resolution.get("twist_world")
+        link_backed_anchor_pose_used = link_backed_anchor_pose_used or (
+            anchor_resolution.get("anchor_pose_source") == "isaac_link"
+        )
+        anchor_relative_pose_for_control = (
+            compose_pose(inverse_pose(root_pose), anchor_pose)
+            if anchor_pose is not None
+            else fallback_anchor_relative_pose
+        )
         if not attached and current_phase in {
             P4_2RolloutPhase.APPROACH,
             P4_2RolloutPhase.PREGRASP_ALIGN,
@@ -2102,7 +2120,7 @@ def _run_p4_2_deterministic_rollout_probe(
             else float("inf")
         )
         relative_velocity_mps = _p4_2_relative_speed(
-            _p4_2_anchor_twist(runtime_observation, selected_anchor),
+            list(anchor_twist) if isinstance(anchor_twist, list) else [0.0] * 6,
             object_state.twist_world,
         )
         phase_elapsed_s = max(0.0, time_s - phase_started_s)
@@ -2212,8 +2230,25 @@ def _run_p4_2_deterministic_rollout_probe(
                 "transport_displacement_m": float(transport_displacement_m),
                 "transport_min_displacement_m": float(rollout_config.transport_min_displacement_m),
                 "unconditional_attach_allowed": 0.0,
+                "anchor_pose_source_is_isaac_link": (
+                    1.0 if anchor_resolution.get("anchor_pose_source") == "isaac_link" else 0.0
+                ),
             }
         )
+        if len(anchor_debug_samples) < 64 and anchor_pose is not None:
+            anchor_debug_samples.append(
+                {
+                    "time_s": float(time_s),
+                    "phase": current_phase.value,
+                    "anchor_id": None if selected_anchor is None else int(selected_anchor.anchor_id),
+                    "anchor_pose_world": list(anchor_pose),
+                    "anchor_pose_source": anchor_resolution.get("anchor_pose_source"),
+                    "anchor_link_id": anchor_resolution.get("anchor_link_id"),
+                    "anchor_resolved_body_name": anchor_resolution.get("anchor_resolved_body_name"),
+                    "contact_pose_world": list(attach_anchor_target),
+                    "anchor_object_distance_m": float(anchor_distance_m),
+                }
+            )
         runtime_observation_objects.append(runtime_observation)
         runtime_observations.append(runtime_observation.to_dict())
         desired_body_pose = _p4_2_target_pose_for_phase(
@@ -2222,7 +2257,7 @@ def _run_p4_2_deterministic_rollout_probe(
             attach_anchor_target=attach_anchor_target,
             root_pose=root_pose,  # type: ignore[arg-type]
             release_object_target=release_object_target,
-            anchor_relative_pose=anchor_relative_pose,
+            anchor_relative_pose=anchor_relative_pose_for_control,
             object_relative_to_anchor=object_relative_to_anchor,
         )
         phase_weight = f"p4_2_phase_{current_phase.value}"
@@ -2346,6 +2381,47 @@ def _run_p4_2_deterministic_rollout_probe(
                     assignment_feasibility={
                         "feasible": bool(selected_assignment_feasible),
                         "selected_assignment_count": float(len(selected_assignments)),
+                    },
+                    anchor_link_id=(
+                        str(anchor_resolution.get("anchor_link_id"))
+                        if anchor_resolution.get("anchor_link_id") is not None
+                        else None
+                    ),
+                    anchor_resolved_body_name=(
+                        str(anchor_resolution.get("anchor_resolved_body_name"))
+                        if anchor_resolution.get("anchor_resolved_body_name") is not None
+                        else None
+                    ),
+                    anchor_pose_source=str(anchor_resolution.get("anchor_pose_source", "module_state_fallback")),
+                    anchor_link_pose_world=(
+                        tuple(float(value) for value in anchor_resolution["anchor_link_pose_world"])
+                        if isinstance(anchor_resolution.get("anchor_link_pose_world"), (list, tuple))
+                        else None
+                    ),
+                    anchor_local_pose_in_link=(
+                        tuple(float(value) for value in anchor_resolution["anchor_local_pose_in_link"])
+                        if isinstance(anchor_resolution.get("anchor_local_pose_in_link"), (list, tuple))
+                        else None
+                    ),
+                    anchor_link_twist_world=[
+                        float(value)
+                        for value in (
+                            anchor_resolution.get("anchor_link_twist_world")
+                            if isinstance(anchor_resolution.get("anchor_link_twist_world"), list)
+                            else []
+                        )
+                    ],
+                    anchor_link_resolution={
+                        key: value
+                        for key, value in anchor_resolution.items()
+                        if key
+                        not in {
+                            "pose_world",
+                            "twist_world",
+                            "anchor_link_pose_world",
+                            "anchor_local_pose_in_link",
+                            "anchor_link_twist_world",
+                        }
                     },
                 )
                 attach_events.append(attach_event)
@@ -2518,6 +2594,10 @@ def _run_p4_2_deterministic_rollout_probe(
             "p4_2_transport_min_displacement_m": float(rollout_config.transport_min_displacement_m),
             "p4_2_transport_displacement_m": float(transport_displacement_m),
             "p4_2_attach_event_count": float(len(attach_events)),
+            "p4_2_attach_event_link_backed_count": float(
+                sum(1 for event in attach_events if event.anchor_pose_source == "isaac_link")
+            ),
+            "p4_2_link_backed_anchor_pose_used": 1.0 if link_backed_anchor_pose_used else 0.0,
             "p4_2_release_event_count": float(len(release_events)),
             "p4_2_actuator_channel_count": float(len(actuator_mapping.channels)),
             **payload_metric_summary,
@@ -2558,6 +2638,11 @@ def _run_p4_2_deterministic_rollout_probe(
         "p4_2_pre_attach_object_pose_hold": True,
         "p4_2_attach_gate_input_available": bool(selected_contact_candidates_available),
         "p4_2_unconditional_attach_allowed": False,
+        "p4_2_link_backed_anchor_pose_used": bool(link_backed_anchor_pose_used),
+        "p4_2_anchor_pose_source": str(last_anchor_resolution.get("anchor_pose_source", "")),
+        "p4_2_anchor_link_id": str(last_anchor_resolution.get("anchor_link_id", "")),
+        "p4_2_anchor_resolved_body_name": str(last_anchor_resolution.get("anchor_resolved_body_name", "")),
+        "p4_2_anchor_debug_samples": anchor_debug_samples,
         "p4_2_selected_contact_candidate_count": len(
             {assignment.candidate_id for assignment in selected_assignments}
         ),
@@ -2684,6 +2769,72 @@ def _p4_2_anchor_relative_pose(morphology_graph, module_poses, anchor):
     if module_pose is None:
         return anchor.local_pose
     return compose_pose(module_pose, anchor.local_pose)
+
+
+def _p4_2_anchor_resolution(*, robot, runtime_observation, anchor) -> dict[str, object]:
+    if anchor is None:
+        return {
+            "pose_world": None,
+            "twist_world": [0.0] * 6,
+            "anchor_pose_source": "missing_anchor",
+            "anchor_link_id": None,
+            "anchor_resolved_body_name": None,
+            "anchor_link_pose_world": None,
+            "anchor_local_pose_in_link": None,
+            "anchor_link_twist_world": [0.0] * 6,
+            "fallback_reason": "selected_anchor_missing",
+        }
+    if anchor.link_id:
+        body_name = _resolve_module_name(robot.body_names, anchor.module_id, str(anchor.link_id))
+        if body_name is not None:
+            body_id = robot.body_names.index(body_name)
+            link_pos = _tensor_body_row(robot.data.body_pos_w.torch, body_id)
+            link_quat = _tensor_body_row(robot.data.body_quat_w.torch, body_id)
+            link_pose = (
+                link_pos[0],
+                link_pos[1],
+                link_pos[2],
+                link_quat[0],
+                link_quat[1],
+                link_quat[2],
+                link_quat[3],
+            )
+            link_twist = _module_body_twist(
+                robot,
+                module_id=anchor.module_id,
+                local_body_name=str(anchor.link_id),
+            )
+            if link_twist is None:
+                link_twist = _p4_2_anchor_twist(runtime_observation, anchor)
+            anchor_pose = compose_pose(link_pose, anchor.local_pose)
+            return {
+                "pose_world": anchor_pose,
+                "twist_world": (list(link_twist) + [0.0] * 6)[:6],
+                "anchor_pose_source": "isaac_link",
+                "anchor_link_id": str(anchor.link_id),
+                "anchor_resolved_body_name": body_name,
+                "anchor_link_pose_world": link_pose,
+                "anchor_local_pose_in_link": anchor.local_pose,
+                "anchor_link_twist_world": (list(link_twist) + [0.0] * 6)[:6],
+                "fallback_reason": None,
+                "module_id": int(anchor.module_id),
+                "anchor_id": int(anchor.anchor_id),
+            }
+    fallback_pose = _p4_2_anchor_world_pose(runtime_observation, anchor)
+    fallback_twist = _p4_2_anchor_twist(runtime_observation, anchor)
+    return {
+        "pose_world": fallback_pose,
+        "twist_world": fallback_twist,
+        "anchor_pose_source": "module_state_fallback",
+        "anchor_link_id": str(anchor.link_id) if anchor.link_id else None,
+        "anchor_resolved_body_name": None,
+        "anchor_link_pose_world": None,
+        "anchor_local_pose_in_link": None,
+        "anchor_link_twist_world": [0.0] * 6,
+        "fallback_reason": "anchor_link_body_not_resolved" if anchor.link_id else "anchor_link_id_missing",
+        "module_id": int(anchor.module_id),
+        "anchor_id": int(anchor.anchor_id),
+    }
 
 
 def _p4_2_anchor_world_pose(runtime_observation, anchor):

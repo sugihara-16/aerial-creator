@@ -249,6 +249,11 @@ def p4_2_result_from_report(
                     "reset_time_fixed_morphology_not_pi_a_dynamic_construction",
                 )
             ),
+            "link_backed_anchor_pose_used": bool(report.get("p4_2_link_backed_anchor_pose_used", False)),
+            "anchor_pose_source": str(report.get("p4_2_anchor_pose_source", "")),
+            "anchor_link_id": str(report.get("p4_2_anchor_link_id", "")),
+            "anchor_resolved_body_name": str(report.get("p4_2_anchor_resolved_body_name", "")),
+            "anchor_debug_samples": list(report.get("p4_2_anchor_debug_samples", [])),
             "is_p4_full_completion": False,
             "p4_3_learning_bootstrap": False,
             "learning_claim": False,

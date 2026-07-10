@@ -4,6 +4,15 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-10
 
+### P4.2 Link-Backed RobotAnchor Attach Gate Supplement
+
+- Context: GUI inspection showed that the earlier P4.2 v1 rollout could satisfy the attach gate using a virtual module-frame RobotAnchor pose, even when the visible connector mechanism was not the apparent attaching structure.
+- Decision: The real P4.2 Isaac probe now resolves `RobotAnchor.link_id` against the spawned Isaac articulation body names for the selected module. When the link is resolved, attach distance, relative velocity, object slaving, and root target computation use the link-backed anchor pose `link_pose_world * RobotAnchor.local_pose`, not only `ModuleRuntimeState.pose_world * RobotAnchor.local_pose`.
+- Archive decision: `P4_2AttachEvent` now records `anchor_link_id`, `anchor_resolved_body_name`, `anchor_pose_source`, `anchor_link_pose_world`, `anchor_local_pose_in_link`, `anchor_link_twist_world`, and link-resolution metadata. Rollout artifacts also preserve bounded anchor debug samples so the selected anchor/contact-region distance can be inspected after GUI or headless runs.
+- Acceptance decision: P4.2 fast acceptance and the real Isaac rollout gate now require at least one attach event with `anchor_pose_source="isaac_link"` and a resolved Isaac body name/link pose. A fallback module-state anchor can still be reported for diagnostics, but it cannot satisfy P4.2 completion.
+- Compatibility impact: No persisted base schema change. The event/report/archive additions are defaulted, additive P4.2 runtime contract fields.
+- Remaining limitation: This remains `contact_model="kinematic_payload_coupled_attach_v1"`. It proves that the kinematic attach gate is tied to a specified connector-link body and payload-coupled controller rollout, but it still does not prove natural contact grasping, connector mesh contact, frictional slip stability, or joint-closure grasping. `P4.4 / P4-natural-contact-grasp validation` remains the follow-on phase for those checks.
+
 ### P4.2 Real Isaac Payload-Carry Rollout v1 Supplement
 
 - Context: The approved P4.2 v1 scope requires a real Isaac-backed deterministic attach / maintain / transport / release rollout under `contact_model="kinematic_payload_coupled_attach_v1"`, but it must not claim high-fidelity natural grasping, true fixed-joint dynamics, learned policy success, P4.3 bootstrap, or P4 full completion.

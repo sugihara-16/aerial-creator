@@ -7,6 +7,8 @@ from amsrr.schemas.policies import ControllerStatus
 from amsrr.simulation import (
     P4_2_CONTACT_MODEL,
     P4_2_SUCCESS_SCOPE_NOTE,
+    P4_2AttachConditionReport,
+    P4_2AttachEvent,
     P4_2DeterministicRolloutConfig,
     P4_2DeterministicRolloutResult,
     P4_2RolloutPhase,
@@ -144,6 +146,89 @@ def test_p4_2_success_result_requires_attach_event_and_reflected_p2_p3_morpholog
             isaac_backed=True,
             final_phase=P4_2RolloutPhase.SUCCESS,
         )
+
+
+def test_p4_2_link_backed_attach_event_requires_resolved_isaac_body_evidence() -> None:
+    report = P4_2AttachConditionReport(
+        candidate_id=1,
+        anchor_id=2,
+        slot_id=0,
+        object_id="box_01",
+        distance_m=0.02,
+        relative_velocity_mps=0.01,
+        attach_snap_distance_m=0.01,
+        relative_pose_error_m=0.01,
+        assignment_feasible=True,
+        controller_ok=True,
+        within_distance=True,
+        within_relative_velocity=True,
+        within_attach_snap_distance=True,
+        within_attach_phase_timeout=True,
+        passed=True,
+    )
+
+    with pytest.raises(SchemaValidationError, match="anchor_link_pose_world is required"):
+        P4_2AttachEvent(
+            time_s=0.01,
+            phase=P4_2RolloutPhase.ATTACH_ATTEMPT,
+            event_type="attach",
+            contact_model=P4_2_CONTACT_MODEL,
+            object_id="box_01",
+            candidate_id=1,
+            anchor_id=2,
+            slot_id=0,
+            contact_pose_world=(0.8, 0.0, 0.4, 0.0, 0.0, 0.0, 1.0),
+            anchor_pose_world=(0.79, 0.0, 0.4, 0.0, 0.0, 0.0, 1.0),
+            object_pose_world=(0.8, 0.0, 0.4, 0.0, 0.0, 0.0, 1.0),
+            distance_m=0.02,
+            relative_velocity_mps=0.01,
+            attach_snap_distance_m=0.01,
+            relative_pose_error_m=0.01,
+            assignment_feasible=True,
+            controller_ok=True,
+            condition_report=report,
+            candidate_ids=[1],
+            anchor_ids=[2],
+            slot_ids=[0],
+            contact_region_ids=["box_01:region_0"],
+            anchor_link_id="pitch_dock_mech1",
+            anchor_resolved_body_name="module_2__pitch_dock_mech1",
+            anchor_pose_source="isaac_link",
+        )
+
+    event = P4_2AttachEvent(
+        time_s=0.01,
+        phase=P4_2RolloutPhase.ATTACH_ATTEMPT,
+        event_type="attach",
+        contact_model=P4_2_CONTACT_MODEL,
+        object_id="box_01",
+        candidate_id=1,
+        anchor_id=2,
+        slot_id=0,
+        contact_pose_world=(0.8, 0.0, 0.4, 0.0, 0.0, 0.0, 1.0),
+        anchor_pose_world=(0.79, 0.0, 0.4, 0.0, 0.0, 0.0, 1.0),
+        object_pose_world=(0.8, 0.0, 0.4, 0.0, 0.0, 0.0, 1.0),
+        distance_m=0.02,
+        relative_velocity_mps=0.01,
+        attach_snap_distance_m=0.01,
+        relative_pose_error_m=0.01,
+        assignment_feasible=True,
+        controller_ok=True,
+        condition_report=report,
+        candidate_ids=[1],
+        anchor_ids=[2],
+        slot_ids=[0],
+        contact_region_ids=["box_01:region_0"],
+        anchor_link_id="pitch_dock_mech1",
+        anchor_resolved_body_name="module_2__pitch_dock_mech1",
+        anchor_pose_source="isaac_link",
+        anchor_link_pose_world=(0.79, 0.0, 0.4, 0.0, 0.0, 0.0, 1.0),
+        anchor_local_pose_in_link=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+        anchor_link_twist_world=[0.0] * 6,
+    )
+
+    assert event.anchor_pose_source == "isaac_link"
+    assert event.anchor_resolved_body_name == "module_2__pitch_dock_mech1"
 
 
 def test_p4_2_failure_metrics_define_terminal_rates_without_learning_claims() -> None:

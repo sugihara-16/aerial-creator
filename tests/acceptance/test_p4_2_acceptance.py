@@ -69,7 +69,35 @@ def test_p4_2_fast_gate_rejects_missing_attach_event() -> None:
 
     assert report.fast_gate_passed is False
     assert report.completion_passed is False
-    assert "P4.2 archives are missing gated object attach events" in report.failure_reasons
+    assert "P4.2 archives are missing link-backed gated object attach events" in report.failure_reasons
+
+
+def test_p4_2_fast_gate_rejects_attach_without_isaac_link_anchor() -> None:
+    runner_result = _fake_runner_result()
+    archive = runner_result.archives[0]
+    event = dict(archive.rollout_artifacts["p4_2_attach_events"][0])
+    event["anchor_pose_source"] = "module_state_fallback"
+    event["anchor_resolved_body_name"] = None
+    event["anchor_link_pose_world"] = None
+    archive.rollout_artifacts["p4_2_attach_events"] = [event]
+
+    fallback_rollout = replace(
+        runner_result.rollout_result,
+        attach_events=[
+            replace(
+                runner_result.rollout_result.attach_events[0],
+                anchor_pose_source="module_state_fallback",
+                anchor_resolved_body_name=None,
+                anchor_link_pose_world=None,
+            )
+        ],
+    )
+    report = run_p4_2_acceptance([archive], rollout_results=[fallback_rollout])
+
+    assert report.fast_gate_passed is False
+    assert report.real_isaac_rollout_passed is False
+    assert report.completion_passed is False
+    assert "P4.2 archives are missing link-backed gated object attach events" in report.failure_reasons
 
 
 def test_p4_2_fast_gate_rejects_missing_payload_coupling() -> None:
@@ -287,6 +315,13 @@ def _attach_event() -> P4_2AttachEvent:
         contact_region_ids=["box_01:region_0"],
         distance_margins={"anchor_candidate_distance_margin_m": 0.04},
         assignment_feasibility={"feasible": True},
+        anchor_link_id="pitch_dock_mech1",
+        anchor_resolved_body_name="module_2__pitch_dock_mech1",
+        anchor_pose_source="isaac_link",
+        anchor_link_pose_world=(0.79, 0.0, 0.4, 0.0, 0.0, 0.0, 1.0),
+        anchor_local_pose_in_link=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+        anchor_link_twist_world=[0.0] * 6,
+        anchor_link_resolution={"module_id": 2, "anchor_id": 2},
     )
 
 

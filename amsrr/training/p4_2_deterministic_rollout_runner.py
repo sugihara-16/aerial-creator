@@ -278,6 +278,13 @@ class P4_2DeterministicRolloutRunner:
                 "morphology_asset_reflected": rollout_result.morphology_asset_reflected,
                 "module_placement_reflected": rollout_result.module_placement_reflected,
                 "actuator_mapping_reflected": rollout_result.actuator_mapping_reflected,
+                "link_backed_anchor_pose_used": bool(
+                    rollout_result.rollout_artifacts.get("link_backed_anchor_pose_used", False)
+                ),
+                "anchor_pose_source": rollout_result.rollout_artifacts.get("anchor_pose_source", ""),
+                "anchor_link_id": rollout_result.rollout_artifacts.get("anchor_link_id", ""),
+                "anchor_resolved_body_name": rollout_result.rollout_artifacts.get("anchor_resolved_body_name", ""),
+                "anchor_debug_samples": rollout_result.rollout_artifacts.get("anchor_debug_samples", []),
                 "object_attach_release_only": bool(
                     rollout_result.rollout_artifacts.get("object_attach_release_only", True)
                 ),
