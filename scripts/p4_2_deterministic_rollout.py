@@ -28,7 +28,26 @@ def main() -> int:
     parser.add_argument("--real", action="store_true", help="Request real Isaac rollout execution.")
     parser.add_argument("--probe", action="store_true", help="Only report IsaacLab backend availability.")
     parser.add_argument("--archive-path", default=None, help="Optional archive JSONL output path.")
+    parser.add_argument(
+        "--viewer",
+        choices=("kit",),
+        default=None,
+        help="Launch the Isaac Lab Kit viewer for a real rollout.",
+    )
+    parser.add_argument(
+        "--realtime-playback",
+        action="store_true",
+        help="Advance each real Isaac step at the configured physics dt for visual inspection.",
+    )
+    parser.add_argument(
+        "--keep-open-after-rollout-s",
+        type=float,
+        default=0.0,
+        help="Keep the Kit viewer open after the rollout finishes.",
+    )
     args = parser.parse_args()
+    if args.keep_open_after_rollout_s < 0.0:
+        parser.error("--keep-open-after-rollout-s must be non-negative")
 
     runner_config, env_config = load_p4_2_deterministic_rollout_runner_config(args.config)
     backend_config = load_isaac_lab_backend_config(env_config.config_path)
@@ -47,7 +66,13 @@ def main() -> int:
         robot_model_config_path=runner_config.robot_model_config_path,
         p3_config_path=runner_config.p3_config_path,
     )
-    env = P4_2IsaacEnv(config=env_config, backend=backend)
+    env = P4_2IsaacEnv(
+        config=env_config,
+        backend=backend,
+        viewer=args.viewer,
+        realtime_playback=args.realtime_playback,
+        keep_open_after_rollout_s=args.keep_open_after_rollout_s,
+    )
     runner = P4_2DeterministicRolloutRunner(runner_config=runner_config, env_config=env_config, env=env)
     result = runner.run(archive_path=Path(args.archive_path) if args.archive_path else None)
     print(json.dumps(result.to_dict(), sort_keys=True))

@@ -134,6 +134,9 @@ class IsaacLabBackend:
         steps: int = 5,
         generated_usd_dir: str | Path | None = None,
         generated_usd_path: str | Path | None = None,
+        viewer: str | None = None,
+        realtime_playback: bool = False,
+        keep_open_after_smoke_s: float = 0.0,
     ) -> list[str]:
         isaaclab_path = self._expanded_path(self.config.isaaclab_path)
         repo_root = Path(__file__).resolve().parents[2]
@@ -157,6 +160,12 @@ class IsaacLabBackend:
             command.extend(["--generated-usd-dir", str(generated_usd_dir)])
         if generated_usd_path is not None:
             command.extend(["--generated-usd-path", str(generated_usd_path)])
+        if viewer is not None:
+            command.extend(["--viz", str(viewer)])
+        if realtime_playback:
+            command.append("--realtime-playback")
+        if keep_open_after_smoke_s > 0.0:
+            command.extend(["--keep-open-after-smoke-s", str(keep_open_after_smoke_s)])
         return command
 
     def holon_command_probe_command(
@@ -525,6 +534,9 @@ class IsaacLabBackend:
         uses_p2_p3_design: bool = True,
         generated_usd_dir: str | Path | None = None,
         generated_usd_path: str | Path | None = None,
+        viewer: str | None = None,
+        realtime_playback: bool = False,
+        keep_open_after_smoke_s: float = 0.0,
     ) -> list[str]:
         command = self.holon_spawn_probe_command(
             config_path=config_path,
@@ -533,6 +545,9 @@ class IsaacLabBackend:
             steps=steps,
             generated_usd_dir=generated_usd_dir,
             generated_usd_path=generated_usd_path,
+            viewer=viewer,
+            realtime_playback=realtime_playback,
+            keep_open_after_smoke_s=keep_open_after_smoke_s,
         )
         command.extend(
             [
@@ -803,6 +818,9 @@ class IsaacLabBackend:
         attach_snap_distance_threshold_m: float = 0.03,
         pregrasp_alignment_distance_m: float = 0.12,
         uses_p2_p3_design: bool = True,
+        viewer: str | None = None,
+        realtime_playback: bool = False,
+        keep_open_after_smoke_s: float = 0.0,
         timeout_s: float | None = None,
     ) -> dict[str, Any]:
         with tempfile.TemporaryDirectory(prefix="amsrr_p4_2_inputs_") as input_dir:
@@ -833,6 +851,9 @@ class IsaacLabBackend:
                 uses_p2_p3_design=uses_p2_p3_design,
                 generated_usd_dir=self.config.generated_usd_dir,
                 generated_usd_path=self.config.generated_usd_path,
+                viewer=viewer,
+                realtime_playback=realtime_playback,
+                keep_open_after_smoke_s=keep_open_after_smoke_s,
             )
             return _run_json_command(command, timeout_s=timeout_s)
 

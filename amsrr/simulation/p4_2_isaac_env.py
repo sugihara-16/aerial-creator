@@ -45,9 +45,17 @@ class P4_2IsaacEnv:
         *,
         backend: IsaacLabBackend | None = None,
         config: P4_2DeterministicRolloutConfig | None = None,
+        viewer: str | None = None,
+        realtime_playback: bool = False,
+        keep_open_after_rollout_s: float = 0.0,
     ) -> None:
+        if keep_open_after_rollout_s < 0.0:
+            raise ValueError("keep_open_after_rollout_s must be non-negative")
         self.config = config or P4_2DeterministicRolloutConfig()
         self.backend = backend or IsaacLabBackend()
+        self.viewer = viewer
+        self.realtime_playback = realtime_playback
+        self.keep_open_after_rollout_s = keep_open_after_rollout_s
 
     def run_rollout(
         self,
@@ -131,6 +139,9 @@ class P4_2IsaacEnv:
                 attach_snap_distance_threshold_m=self.config.attach_snap_distance_threshold_m,
                 pregrasp_alignment_distance_m=self.config.pregrasp_alignment_distance_m,
                 uses_p2_p3_design=uses_p2_selected_design and uses_p3_assembled_morphology,
+                viewer=self.viewer,
+                realtime_playback=self.realtime_playback,
+                keep_open_after_smoke_s=self.keep_open_after_rollout_s,
             )
         except Exception as exc:  # pragma: no cover - real subprocess failures are environment-specific.
             return P4_2DeterministicRolloutResult(

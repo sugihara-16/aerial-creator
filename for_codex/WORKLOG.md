@@ -4,6 +4,32 @@
 
 ### 2026-07-10
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus approved P4.2 payload-coupled deterministic rollout clarification
+- Work package / Agent label: Agent J/K/L boundary: P4.2 GUI observation launcher
+- Summary: Added a hand-executable Kit viewer launcher for the existing real P4.2 deterministic rollout. The P4.2 parent CLI now forwards optional viewer, real-time playback, and post-rollout hold settings through the environment/backend command boundary to the existing Isaac probe; the default headless acceptance path is unchanged.
+- Files changed:
+  - `amsrr/simulation/isaac_lab_backend.py`
+  - `amsrr/simulation/p4_2_isaac_env.py`
+  - `scripts/p4_2_deterministic_rollout.py`
+  - `scripts/run_p4_2_gui.sh`
+  - `tests/unit/simulation/test_p4_2_isaac_env.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema change. Added optional P4.2 visual-observation arguments only: `viewer`, `realtime_playback`, and `keep_open_after_rollout_s` / probe `keep_open_after_smoke_s`.
+- Upstream dependencies used: Existing P4.2 parent CLI, `P4_2IsaacEnv`, IsaacLab backend command builder, probe support for `--viz kit`, real-time playback, and viewer hold.
+- Downstream impact: `scripts/run_p4_2_gui.sh` runs the same P2/P3-sourced deterministic payload-carry rollout under `kinematic_payload_coupled_attach_v1` in the Kit GUI. Visualization does not change attach conditions, payload coupling, archives, success semantics, or split acceptance.
+- Tests added or run:
+  - Added P4.2 command and environment propagation coverage for Kit viewer, real-time playback, and viewer hold.
+  - `python3 -m py_compile amsrr/simulation/isaac_lab_backend.py amsrr/simulation/p4_2_isaac_env.py scripts/p4_2_deterministic_rollout.py`
+  - `bash -n scripts/run_p4_2_gui.sh`
+  - `PYTHONPATH=/home/leus/amsrr PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q tests/unit/simulation/test_p4_2_isaac_env.py tests/unit/training/test_p4_2_deterministic_rollout_runner.py tests/acceptance/test_p4_2_acceptance.py`
+  - `scripts/run_p4_2_gui.sh --help`
+- Tests run: Targeted P4.2 / shared Isaac command tests passed: 21 passed. The launcher help was verified from the `isaaclab3` micromamba environment without opening Isaac Lab. The headless real Isaac P4.2 rollout passed with `completion_passed=true` and `real_isaac_rollout_passed=true`.
+- Assumptions: `${HOME}/IsaacLab/isaaclab.sh` and `${HOME}/.local/bin/micromamba` retain the paths specified by the existing `configs/env/isaac_lab.yaml` / AGENTS environment setup.
+- Blockers: None. GUI rendering is intentionally left for the user's local display session; `--help` does not launch a simulator.
+- Next steps: Run `scripts/run_p4_2_gui.sh` on the desktop session and inspect the selected `module_1__pitch_dock_mech1` anchor during attach. Natural contact validation remains P4.4 work.
+
+### 2026-07-10
+- Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus approved P4.2 payload-coupled deterministic rollout clarification
 - Work package / Agent label: Agent J/K/L boundary: P4.2 link-backed RobotAnchor attach gate hardening
 - Summary: Hardened the P4.2 v1 attach gate so successful attach evidence must be tied to the selected `RobotAnchor.link_id` resolved as an Isaac articulation body. The probe now computes the selected anchor pose from the resolved connector-link body pose plus `RobotAnchor.local_pose`, uses that pose for attach distance, relative velocity, object slaving, and body target computation, and archives link-backed attach evidence. Acceptance now rejects attach archives that only prove the older module-state fallback anchor.
 - Files changed:
@@ -2524,6 +2550,30 @@
 ## Work Package Logs
 
 ### P4.2 Implementation: Isaac Deterministic Grasp-Carry Rollout
+
+#### 2026-07-10
+- Scope: Hand-executable GUI observation path for the real P4.2 deterministic rollout.
+- Files changed:
+  - `amsrr/simulation/isaac_lab_backend.py`
+  - `amsrr/simulation/p4_2_isaac_env.py`
+  - `scripts/p4_2_deterministic_rollout.py`
+  - `scripts/run_p4_2_gui.sh`
+  - `tests/unit/simulation/test_p4_2_isaac_env.py`
+  - `for_codex/AMSRR_design_modification_by_codex.md`
+  - `for_codex/WORKLOG.md`
+- Upstream dependencies: Existing P4.2 real rollout command, Isaac probe GUI controls, and the P4.2 link-backed attach gate.
+- Implemented: Optional `--viewer kit`, real-time playback, and post-rollout hold propagate from the P4.2 CLI through `P4_2IsaacEnv` / `IsaacLabBackend` to the Isaac probe. `run_p4_2_gui.sh` supplies those controls with a 20-second default hold.
+- Not implemented: Any change to P4.2 state-machine behavior, geometry, contact model, attach threshold, controller, payload coupling, natural grasp, or acceptance logic.
+- Schema/interface changes: No persisted schemas. Optional observation parameters only; defaults preserve headless automation.
+- Downstream impact: Users can inspect the exact P4.2 path that is archived and accepted, rather than a separate graphical smoke. The GUI run remains `kinematic_payload_coupled_attach_v1`, not natural-contact-grasp validation.
+- Tests added: Backend command and environment propagation assertions for the three observation controls.
+- Tests passed:
+  - `py_compile` and `bash -n` passed.
+  - Targeted P4.2 env/runner/acceptance plus shared Isaac command tests: 21 passed.
+  - `scripts/run_p4_2_gui.sh --help` passed in the `isaaclab3` environment without launching Isaac Lab.
+  - Headless real Isaac P4.2 rollout passed with `completion_passed=true` and `real_isaac_rollout_passed=true`.
+- Handoff notes: Run `scripts/run_p4_2_gui.sh`; set `KEEP_OPEN_AFTER_ROLLOUT_S=60` for a longer post-rollout inspection. GUI controls do not add success evidence.
+- Open questions: None for the launcher. The separate P4.4 natural-contact validation remains open.
 
 #### 2026-07-10
 - Scope: Link-backed RobotAnchor attach gate hardening for the completed P4.2 v1 deterministic rollout.

@@ -50,6 +50,9 @@ def test_p4_2_backend_command_uses_morphology_graph_json_not_module_count_only()
         object_mass_kg=1.5,
         object_pose_world=(0.7, 0.1, 0.35, 0.0, 0.0, 0.0, 1.0),
         uses_p2_p3_design=True,
+        viewer="kit",
+        realtime_playback=True,
+        keep_open_after_smoke_s=12.0,
     )
 
     assert "--p4-2-deterministic-rollout" in command
@@ -71,6 +74,9 @@ def test_p4_2_backend_command_uses_morphology_graph_json_not_module_count_only()
     assert "--p4-2-pregrasp-alignment-distance-m" in command
     assert "--force-convert" in command
     assert "--convert-if-missing" not in command
+    assert command[command.index("--viz") + 1] == "kit"
+    assert "--realtime-playback" in command
+    assert command[command.index("--keep-open-after-smoke-s") + 1] == "12.0"
 
 
 def test_p4_2_dry_run_and_missing_morphology_do_not_attempt_rollout() -> None:
@@ -95,6 +101,9 @@ def test_p4_2_fake_backend_report_parses_rollout_logs_and_attach_event() -> None
     env = P4_2IsaacEnv(
         config=P4_2DeterministicRolloutConfig(max_episode_steps=2),
         backend=backend,  # type: ignore[arg-type]
+        viewer="kit",
+        realtime_playback=True,
+        keep_open_after_rollout_s=12.0,
     )
 
     result = env.run_rollout(
@@ -130,6 +139,9 @@ def test_p4_2_fake_backend_report_parses_rollout_logs_and_attach_event() -> None
     )
     assert backend.calls[0]["morphology_graph"].graph_id == morphology.graph_id
     assert backend.calls[0]["uses_p2_p3_design"] is True
+    assert backend.calls[0]["viewer"] == "kit"
+    assert backend.calls[0]["realtime_playback"] is True
+    assert backend.calls[0]["keep_open_after_smoke_s"] == 12.0
 
 
 def test_p4_2_report_with_reflected_graph_but_no_attach_event_cannot_pass() -> None:

@@ -4,6 +4,13 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-10
 
+### P4.2 GUI Observation Launcher Supplement
+
+- Context: P4.2 link-backed attach evidence must be visually inspectable in Isaac Lab, but the existing real-rollout CLI only forwarded the headless execution contract to the probe process.
+- Decision: Add optional viewer-only runtime controls to the P4.2 execution boundary: `viewer="kit"`, `realtime_playback`, and `keep_open_after_rollout_s`. `scripts/run_p4_2_gui.sh` activates the existing `isaaclab3` environment and starts the ordinary P4.2 real rollout with `--viewer kit`, real-time playback, and a configurable post-rollout hold (`KEEP_OPEN_AFTER_ROLLOUT_S`, default `20`).
+- Semantics: These controls are passed to Isaac Lab as `--viz kit`, `--realtime-playback`, and `--keep-open-after-smoke-s`. They do not change P2/P3 selection, frozen reset-time morphology generation, the deterministic `pi_H`/`pi_L` rollout, attachment conditions, payload coupling, event archives, or acceptance. A GUI observation is not separate success evidence; real P4.2 completion remains governed by the same archive and real-Isaac gates.
+- Compatibility impact: No persisted schema or rollout contract change. The P4.2 backend and environment interfaces gain optional visual-observation parameters with headless defaults, so existing automated runs remain unchanged.
+
 ### P4.2 Link-Backed RobotAnchor Attach Gate Supplement
 
 - Context: GUI inspection showed that the earlier P4.2 v1 rollout could satisfy the attach gate using a virtual module-frame RobotAnchor pose, even when the visible connector mechanism was not the apparent attaching structure.
