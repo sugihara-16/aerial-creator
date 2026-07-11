@@ -1,0 +1,39 @@
+runner:
+  seed: 0
+  module_count: null
+  dry_run: true
+  source_hash: random_morphology_takeoff
+  runner_version: random_morphology_takeoff_runner_v1
+  report_path: artifacts/p4_full/random_morphology_takeoff.json
+  archive_path: artifacts/p4_full/random_morphology_takeoff.jsonl
+  max_sampling_attempts: 256
+
+takeoff:
+  backend_config_path: configs/env/isaac_lab.yaml
+  robot_model_config_path: configs/robot/robot_model.yaml
+  mesh_search_dirs: [module_urdf]
+  simulation_dt_s: 0.005
+  floor_clearance_m: 0.002
+  floor_contact_force_threshold_n: 0.5
+  floor_contact_dwell_duration_s: 0.10
+  exact_cross_module_contact_force_threshold_n: 0.001
+  exact_cross_module_contact_max_patches_per_body_pair: 8
+  initial_root_position_tolerance_m: 0.002
+  initial_root_attitude_tolerance_rad: 0.001
+  settle_duration_s: 1.0
+  settle_dwell_duration_s: 0.25
+  takeoff_ramp_duration_s: 2.0
+  hover_hold_duration_s: 1.0
+  hover_acquisition_timeout_s: 2.0
+  hover_height_delta_m: 0.5
+  position_error_threshold_m: 0.20
+  attitude_error_threshold_rad: 0.25
+  settle_linear_speed_threshold_mps: 0.20
+  settle_angular_speed_threshold_rad_s: 0.50
+  hover_linear_speed_threshold_mps: 0.15
+  hover_angular_speed_threshold_rad_s: 0.25
+  max_vertical_speed_mps: 3.0
+  min_height_gain_ratio: 0.80
+  allocation_mode: rigid_body_qp
+  stop_on_hover_hold: true
+  command_timeout_s: 300.0

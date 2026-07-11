@@ -122,7 +122,10 @@ def write_fixed_morphology_graph_urdf(
     if morphology_graph.base_module_id not in module_ids:
         raise SchemaValidationError("morphology graph base module is missing")
     tree_edges = _morphology_graph_tree_edges(morphology_graph)
-    module_poses = morphology_graph_module_poses(morphology_graph)
+    module_poses = morphology_graph_module_root_poses(
+        morphology_graph,
+        source_urdf_path=source_path,
+    )
 
     output_root = ET.Element("robot", {"name": f"holon_graph_morphology_{_safe_graph_name(morphology_graph.graph_id)}"})
     ET.SubElement(output_root, "baselink", {"name": _prefixed_name(morphology_graph.base_module_id, "fc", prefix_separator)})
@@ -173,6 +176,37 @@ def morphology_graph_module_poses(
     return {
         module_id: compose_pose(base_inv, module.pose_in_design_frame)
         for module_id, module in modules_by_id.items()
+    }
+
+
+def morphology_graph_module_root_poses(
+    morphology_graph: MorphologyGraph,
+    *,
+    source_urdf_path: str | Path,
+) -> dict[int, tuple[float, float, float, float, float, float, float]]:
+    """Convert graph module-frame (``fc``) poses to generated-URDF root poses.
+
+    ``MorphologyGraph`` dock geometry is expressed in the PhysicalModel module
+    frame, which is Holon's ``fc`` link.  A generated multi-module URDF is
+    connected at each copied ``root`` link.  The two frames coincide only for
+    translations without rotation, so apply the conjugation
+    ``root_T_fc * fc0_T_fci * fc_T_root`` before writing fixed root joints.
+    """
+
+    source_path = Path(source_urdf_path).resolve()
+    urdf_model = load_urdf(source_path)
+    link_poses_root = link_poses_in_root_frame(urdf_model)
+    base_link = urdf_model.metadata.get("baselink", {}).get("name", "fc")
+    if base_link not in link_poses_root:
+        raise SchemaValidationError(f"source Holon module frame {base_link!r} is missing")
+    root_to_module_frame = link_poses_root[base_link]
+    module_frame_to_root = inverse_pose(root_to_module_frame)
+    return {
+        module_id: compose_pose(
+            compose_pose(root_to_module_frame, module_pose),
+            module_frame_to_root,
+        )
+        for module_id, module_pose in morphology_graph_module_poses(morphology_graph).items()
     }
 
 

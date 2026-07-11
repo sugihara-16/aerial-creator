@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 from typing import Any
 
@@ -251,7 +252,11 @@ def build_physical_model(
         )
         for joint in urdf_model.joints
     ]
-    aggregate_mass = sum(link.mass_kg for link in links)
+    # ``sum`` changed its floating-point summation algorithm in Python 3.12.
+    # Model identity must remain stable between the host runner and Isaac's
+    # Python environment, so use the explicitly reproducible high-precision
+    # accumulator for provenance-bearing aggregate values.
+    aggregate_mass = math.fsum(link.mass_kg for link in links)
     metadata = {
         **urdf_model.metadata,
         "module_type": module_type,

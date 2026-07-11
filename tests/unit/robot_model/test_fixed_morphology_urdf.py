@@ -4,13 +4,14 @@ from pathlib import Path
 
 import pytest
 
-from amsrr.geometry.pose_math import FACE_TO_FACE_DOCK_RELATION, compose_pose
+from amsrr.geometry.pose_math import FACE_TO_FACE_DOCK_RELATION, compose_pose, inverse_pose
 from amsrr.robot_model.fixed_morphology_urdf import (
     articulated_morphology_connections,
     fixed_module_joint_name,
     fixed_module_link_name,
     fixed_morphology_module_poses,
     morphology_graph_module_poses,
+    morphology_graph_module_root_poses,
     split_fixed_module_name,
     write_articulated_morphology_urdf,
     write_fixed_morphology_urdf,
@@ -104,6 +105,47 @@ def test_fixed_morphology_graph_urdf_reflects_graph_module_poses_and_edges(tmp_p
     assert link_poses[fixed_module_link_name(1, "root")] == pytest.approx(morphology.modules[1].pose_in_design_frame)
     assert link_poses[fixed_module_link_name(2, "root")] == pytest.approx(morphology.modules[2].pose_in_design_frame)
     assert morphology_graph_module_poses(morphology)[2] == pytest.approx(morphology.modules[2].pose_in_design_frame)
+
+
+def test_fixed_morphology_graph_urdf_converts_rotated_fc_poses_to_root_poses(tmp_path: Path) -> None:
+    physical_model = build_physical_model_from_config("configs/robot/robot_model.yaml")
+    capability = build_module_capability_token(physical_model)
+    quarter_turn_z = (0.0, 0.0, 2.0**-0.5, 2.0**-0.5)
+    child_fc_pose = (0.42, -0.18, 0.12, *quarter_turn_z)
+    morphology = MorphologyGraph(
+        graph_id="rotated-fc-frame-graph",
+        modules=[
+            ModuleNode(0, "holon", (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0), "base", True, capability),
+            ModuleNode(1, "holon", child_fc_pose, "member", False, capability),
+        ],
+        ports=[],
+        dock_edges=[
+            DockEdge(0, 0, 0, 1, 1, child_fc_pose, "structural", [1.0] * 6, "attached"),
+        ],
+        robot_anchors=[],
+        control_groups=[ControlGroup("all", [0, 1], "whole_body")],
+        base_module_id=0,
+        is_closed_loop=False,
+    )
+
+    output_path = write_fixed_morphology_graph_urdf(
+        "assets/robots/holon/holon.urdf",
+        tmp_path / "rotated_graph.urdf",
+        morphology_graph=morphology,
+        mesh_search_dirs=MESH_SEARCH_DIRS,
+    )
+    link_poses = link_poses_in_root_frame(load_urdf(output_path))
+    base_fc_pose = link_poses[fixed_module_link_name(0, "fc")]
+    child_fc_pose_in_output = link_poses[fixed_module_link_name(1, "fc")]
+    observed_base_fc_to_child_fc = compose_pose(inverse_pose(base_fc_pose), child_fc_pose_in_output)
+    root_poses = morphology_graph_module_root_poses(
+        morphology,
+        source_urdf_path="assets/robots/holon/holon.urdf",
+    )
+
+    assert observed_base_fc_to_child_fc == pytest.approx(child_fc_pose, abs=1.0e-6)
+    assert link_poses[fixed_module_link_name(1, "root")] == pytest.approx(root_poses[1], abs=1.0e-6)
+    assert root_poses[1] != pytest.approx(child_fc_pose, abs=1.0e-6)
 
 
 def test_articulated_morphology_urdf_connects_child_root_to_parent_dock_port(tmp_path: Path) -> None:

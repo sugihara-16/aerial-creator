@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sys
 import time
 import traceback
@@ -71,6 +72,62 @@ def parse_args() -> argparse.Namespace:
         "--fixed-morphology-waypoint-smoke",
         action="store_true",
         help="Run a closed-loop fixed-morphology waypoint smoke with a rigid combined URDF.",
+    )
+    parser.add_argument(
+        "--random-morphology-takeoff",
+        action="store_true",
+        help="Run graph-specific floor settle, takeoff ramp, and hover hold with deterministic control.",
+    )
+    parser.add_argument(
+        "--random-morphology-teleop",
+        action="store_true",
+        help="Continue a passing random-morphology hover with terminal keyboard pose commands.",
+    )
+    parser.add_argument(
+        "--teleop-translation-step-m",
+        type=float,
+        default=0.05,
+        help="Position-target increment for each teleop translation keypress.",
+    )
+    parser.add_argument(
+        "--teleop-rotation-step-rad",
+        type=float,
+        default=0.08726646259971647,
+        help="Attitude-target increment for each teleop rotation keypress.",
+    )
+    parser.add_argument(
+        "--teleop-max-roll-pitch-rad",
+        type=float,
+        default=0.5235987755982988,
+        help="Absolute roll/pitch target safety bound during terminal teleop.",
+    )
+    parser.add_argument(
+        "--teleop-max-position-lead-m",
+        type=float,
+        default=0.50,
+        help="Maximum teleop target-position lead from the measured robot pose.",
+    )
+    parser.add_argument(
+        "--teleop-minimum-height-above-settled-m",
+        type=float,
+        default=0.15,
+        help="Minimum teleop target height above the measured settled pose.",
+    )
+    parser.add_argument(
+        "--random-morphology-graph-json",
+        default=None,
+        help="Serialized feasible connected MorphologyGraph for the random morphology takeoff smoke.",
+    )
+    parser.add_argument(
+        "--random-morphology-graph-json-path",
+        default=None,
+        help="Path to a serialized feasible connected MorphologyGraph for takeoff.",
+    )
+    parser.add_argument(
+        "--random-morphology-mesh-search-dir",
+        action="append",
+        default=None,
+        help="Collision/URDF mesh search directory for random-morphology floor placement; repeatable.",
     )
     parser.add_argument(
         "--p4-1-full-scene-backend-smoke",
@@ -220,6 +277,89 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hover-attitude-tolerance-rad", type=float, default=0.25, help="Closed-loop hover attitude tolerance.")
     parser.add_argument("--hover-hold-duration-s", type=float, default=1.0, help="Required final hold duration for hover pass.")
     parser.add_argument(
+        "--takeoff-hover-acquisition-timeout-s",
+        type=float,
+        default=2.0,
+        help="Extra deterministic horizon in which to acquire the continuous hover hold.",
+    )
+    parser.add_argument("--floor-clearance-m", type=float, default=0.002, help="Initial collision-AABB clearance over floor.")
+    parser.add_argument(
+        "--takeoff-floor-contact-force-threshold-n",
+        type=float,
+        default=0.5,
+        help="Minimum measured aggregate body contact force for floor-contact evidence.",
+    )
+    parser.add_argument(
+        "--takeoff-floor-contact-dwell-duration-s",
+        type=float,
+        default=0.10,
+        help="Required continuous measured floor-contact dwell during zero-thrust settle.",
+    )
+    parser.add_argument(
+        "--takeoff-exact-cross-module-contact-force-threshold-n",
+        type=float,
+        default=1.0e-3,
+        help="Maximum tensor-reported force allowed for unintended cross-module contact.",
+    )
+    parser.add_argument(
+        "--takeoff-exact-cross-module-contact-max-patches-per-body-pair",
+        type=int,
+        default=8,
+        help="Raw PhysX contact-patch buffer capacity multiplier per body pair.",
+    )
+    parser.add_argument(
+        "--takeoff-initial-root-position-tolerance-m",
+        type=float,
+        default=0.002,
+        help="Allowed Isaac-vs-requested initial root position error for floor placement evidence.",
+    )
+    parser.add_argument(
+        "--takeoff-initial-root-attitude-tolerance-rad",
+        type=float,
+        default=0.001,
+        help="Allowed Isaac-vs-requested initial root attitude error for floor placement evidence.",
+    )
+    parser.add_argument("--takeoff-settle-duration-s", type=float, default=1.0, help="Zero-thrust floor settle duration.")
+    parser.add_argument(
+        "--takeoff-settle-dwell-duration-s",
+        type=float,
+        default=0.25,
+        help="Required continuous low-speed dwell within the zero-thrust settle phase.",
+    )
+    parser.add_argument("--takeoff-ramp-duration-s", type=float, default=2.0, help="Settled-pose to hover target ramp duration.")
+    parser.add_argument("--takeoff-hover-height-delta-m", type=float, default=0.5, help="Hover root-height gain from settled pose.")
+    parser.add_argument(
+        "--takeoff-settle-linear-speed-threshold-mps",
+        type=float,
+        default=0.20,
+        help="Maximum settled linear speed for the floor initialization gate.",
+    )
+    parser.add_argument(
+        "--takeoff-settle-angular-speed-threshold-rad-s",
+        type=float,
+        default=0.50,
+        help="Maximum settled angular speed for the floor initialization gate.",
+    )
+    parser.add_argument(
+        "--takeoff-hover-linear-speed-threshold-mps",
+        type=float,
+        default=0.15,
+        help="Maximum continuous linear speed during the accepted hover hold.",
+    )
+    parser.add_argument(
+        "--takeoff-hover-angular-speed-threshold-rad-s",
+        type=float,
+        default=0.25,
+        help="Maximum continuous angular speed during the accepted hover hold.",
+    )
+    parser.add_argument("--takeoff-max-vertical-speed-mps", type=float, default=3.0, help="Takeoff safety speed threshold.")
+    parser.add_argument(
+        "--takeoff-min-height-gain-ratio",
+        type=float,
+        default=0.80,
+        help="Required fraction of configured hover height gain.",
+    )
+    parser.add_argument(
         "--articulated-joint-amplitude-rad",
         type=float,
         default=0.12,
@@ -287,7 +427,12 @@ def main() -> int:
             "traceback_tail": traceback.format_exc(limit=8),
         }
     report.setdefault("warp_cpu_pinned_allocator_fallback", warp_cpu_pinned_allocator_fallback)
-    print(json.dumps(report, sort_keys=True))
+    printable_report = (
+        _compact_random_morphology_teleop_report(report)
+        if args_cli.random_morphology_teleop
+        else report
+    )
+    print(json.dumps(printable_report, sort_keys=True))
     if not report.get("spawn_passed"):
         return 1
     for key in (
@@ -297,12 +442,48 @@ def main() -> int:
         "fixed_morphology_hover_smoke_passed",
         "fixed_morphology_articulated_hover_smoke_passed",
         "fixed_morphology_waypoint_smoke_passed",
+        "random_morphology_takeoff_smoke_passed",
+        "random_morphology_teleop_passed",
         "p4_1_full_scene_backend_smoke_passed",
         "p4_2_deterministic_rollout_passed",
     ):
         if report.get(key) is False:
             return 1
     return 0
+
+
+def _compact_random_morphology_teleop_report(
+    report: dict[str, object],
+) -> dict[str, object]:
+    """Keep an interactive terminal run readable while retaining its safety result."""
+    keys = (
+        "spawn_passed",
+        "isaac_backed",
+        "random_morphology_graph_id",
+        "random_morphology_module_count",
+        "random_morphology_takeoff_smoke_passed",
+        "random_morphology_teleop",
+        "random_morphology_teleop_version",
+        "random_morphology_teleop_passed",
+        "random_morphology_teleop_no_learning",
+        "random_morphology_teleop_quit_reason",
+        "random_morphology_teleop_steps",
+        "random_morphology_teleop_command_count",
+        "random_morphology_teleop_qp_infeasible_count",
+        "random_morphology_teleop_clipped_count",
+        "random_morphology_teleop_unresolved_target_count",
+        "random_morphology_teleop_raw_contact_count",
+        "random_morphology_teleop_raw_contact_saturation_count",
+        "random_morphology_teleop_final_target_pose_world",
+        "random_morphology_teleop_config",
+        "warp_cpu_pinned_allocator_fallback",
+        "error_type",
+        "error",
+        "traceback_tail",
+    )
+    compact = {key: report[key] for key in keys if key in report}
+    compact["report_mode"] = "random_morphology_teleop_summary"
+    return compact
 
 
 def _patch_warp_cpu_pinned_allocator_for_cpu_only() -> bool:
@@ -345,6 +526,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     from isaaclab.actuators import ImplicitActuatorCfg
     from isaaclab.assets import Articulation, RigidObject, RigidObjectCfg
     from isaaclab.assets.articulation import ArticulationCfg
+    from isaaclab.sensors import ContactSensor, ContactSensorCfg
     from isaaclab.sim import SimulationContext
     from isaaclab.sim.converters import UrdfConverter, UrdfConverterCfg
     import torch
@@ -365,6 +547,15 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     from amsrr.schemas.morphology import MorphologyGraph
     from amsrr.schemas.policies import ContactWrenchTrajectory
     from amsrr.simulation.isaac_lab_backend import IsaacLabBackend, load_isaac_lab_backend_config
+    from amsrr.simulation.random_morphology_takeoff import (
+        ORDER2_FLOOR_POSE_WORLD,
+        ORDER2_FLOOR_SIZE_M,
+        RandomMorphologyTakeoffConfig,
+        compute_floor_contact_placement,
+    )
+    from amsrr.simulation.random_morphology_teleop import (
+        RandomMorphologyTeleopConfig,
+    )
     from amsrr.simulation.p4_control_controller_smoke import (
         bridge_supported_controller_command,
         build_fixed_morphology,
@@ -388,10 +579,31 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         or args.fixed_morphology_articulated_hover_smoke
         or args.fixed_morphology_waypoint_smoke
     )
+    random_takeoff_requested = bool(args.random_morphology_takeoff)
+    random_teleop_requested = bool(args.random_morphology_teleop)
+    if random_teleop_requested and not random_takeoff_requested:
+        raise RuntimeError(
+            "--random-morphology-teleop requires --random-morphology-takeoff"
+        )
     fixed_smoke_requested = bool(
         fixed_control_smoke_requested
+        or random_takeoff_requested
         or args.p4_1_full_scene_backend_smoke
         or args.p4_2_deterministic_rollout
+    )
+    random_morphology_graph_json = (
+        args.random_morphology_graph_json
+        or _read_optional_text(args.random_morphology_graph_json_path)
+    )
+    random_morphology_graph = (
+        MorphologyGraph.from_json(random_morphology_graph_json)
+        if random_takeoff_requested and random_morphology_graph_json
+        else None
+    )
+    random_mesh_search_dirs = (
+        [_expand_path(path) for path in args.random_morphology_mesh_search_dir]
+        if args.random_morphology_mesh_search_dir
+        else _holon_mesh_search_dirs()
     )
     p4_2_morphology_graph = (
         MorphologyGraph.from_json(args.p4_2_morphology_graph_json)
@@ -417,11 +629,26 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         else None
     )
     fixed_module_poses = None
+    random_floor_placement = None
     articulated_connections = []
     converted = False
 
+    if random_takeoff_requested:
+        if random_morphology_graph is None:
+            raise RuntimeError(
+                "random morphology takeoff requires --random-morphology-graph-json or its path form"
+            )
+        random_floor_placement = compute_floor_contact_placement(
+            random_morphology_graph,
+            physical_model,
+            mesh_search_dirs=random_mesh_search_dirs,
+            floor_z_m=0.0,
+            clearance_m=float(args.floor_clearance_m),
+        )
+        args.spawn_height = float(random_floor_placement.root_pose_world[2])
+
     if args.force_convert or fixed_smoke_requested or (args.convert_if_missing and not usd_path.exists()):
-        mesh_search_dirs = _holon_mesh_search_dirs()
+        mesh_search_dirs = random_mesh_search_dirs if random_takeoff_requested else _holon_mesh_search_dirs()
         if fixed_smoke_requested:
             if args.p4_2_deterministic_rollout:
                 if p4_2_morphology_graph is None:
@@ -434,13 +661,26 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
                     morphology_graph=p4_2_morphology_graph,
                     mesh_search_dirs=mesh_search_dirs,
                 )
+            elif random_takeoff_requested:
+                if random_morphology_graph is None:
+                    raise RuntimeError("random morphology takeoff graph is missing")
+                graph_name = random_morphology_graph.stable_hash()[:12]
+                graph_urdf_path = (
+                    usd_dir / "graph_morphology_urdf" / f"holon_random_takeoff_{graph_name}.urdf"
+                )
+                urdf_path = write_fixed_morphology_graph_urdf(
+                    urdf_path,
+                    graph_urdf_path,
+                    morphology_graph=random_morphology_graph,
+                    mesh_search_dirs=mesh_search_dirs,
+                )
             else:
                 fixed_module_poses = fixed_morphology_module_poses(
                     urdf_path,
                     module_count=int(args.fixed_module_count),
                     module_spacing_m=float(args.fixed_module_spacing_m),
                 )
-            if args.p4_2_deterministic_rollout:
+            if args.p4_2_deterministic_rollout or random_takeoff_requested:
                 pass
             elif args.fixed_morphology_articulated_hover_smoke:
                 articulated_connections = articulated_morphology_connections(
@@ -508,11 +748,15 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     sim.set_camera_view(eye=[1.0, 1.0, 1.0], target=[0.0, 0.0, args.spawn_height])
 
     ground_cfg = sim_utils.CuboidCfg(
-        size=(100.0, 100.0, 0.05),
+        size=ORDER2_FLOOR_SIZE_M,
         collision_props=sim_utils.CollisionPropertiesCfg(),
         visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.18, 0.18, 0.18)),
     )
-    ground_cfg.func("/World/defaultGroundPlane", ground_cfg, translation=(0.0, 0.0, -0.025))
+    ground_cfg.func(
+        "/World/defaultGroundPlane",
+        ground_cfg,
+        translation=ORDER2_FLOOR_POSE_WORLD[:3],
+    )
     light_cfg = sim_utils.DistantLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75))
     light_cfg.func("/World/Light", light_cfg)
 
@@ -520,13 +764,14 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         prim_path="/World/Holon",
         spawn=sim_utils.UsdFileCfg(
             usd_path=str(usd_path),
+            activate_contact_sensors=random_takeoff_requested,
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 disable_gravity=False,
                 max_depenetration_velocity=10.0,
                 enable_gyroscopic_forces=True,
             ),
             articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-                enabled_self_collisions=False,
+                enabled_self_collisions=random_takeoff_requested,
                 solver_position_iteration_count=4,
                 solver_velocity_iteration_count=0,
                 sleep_threshold=0.005,
@@ -558,6 +803,43 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         },
     )
     robot = Articulation(robot_cfg)
+    random_floor_contact_sensor = None
+    random_self_collision_filter_info = None
+    random_initial_exact_collision_info = None
+    random_cross_module_contact_views = None
+    if random_takeoff_requested:
+        # Random-takeoff scenes contain no external collider other than the floor.
+        # Same-module pairs and exactly one intended dock-body pair per graph
+        # edge are filtered below; any remaining robot/robot event is an
+        # exact-collision failure.  The reset-time
+        # collider query and per-step PhysX tensor force matrices independently
+        # verify that no non-adjacent module contact occurred, so an accepted
+        # run's aggregate ContactSensor force is attributable to the floor.
+        if random_morphology_graph is None:
+            raise RuntimeError("random morphology graph is missing for collision filtering")
+        random_self_collision_filter_info = _configure_random_morphology_collision_filters(
+            sim.stage,
+            morphology_graph=random_morphology_graph,
+            physical_model=physical_model,
+            root_prim_path="/World/Holon",
+        )
+        _activate_nested_contact_reports(sim.stage, root_prim_path="/World/Holon")
+        random_initial_exact_collision_info = (
+            _initial_random_morphology_exact_collision_check(
+                sim.stage,
+                morphology_graph=random_morphology_graph,
+                root_prim_path="/World/Holon",
+            )
+        )
+        random_floor_contact_sensor = ContactSensor(
+            cfg=ContactSensorCfg(
+                prim_path="/World/Holon/.*",
+                update_period=0.0,
+                history_length=2,
+                max_contact_data_count_per_prim=16,
+                debug_vis=False,
+            )
+        )
     p4_1_object = None
     if args.p4_1_full_scene_backend_smoke or args.p4_2_deterministic_rollout:
         object_pose = tuple(
@@ -590,6 +872,21 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
 
     sim.reset()
     sim_dt = sim.get_physics_dt()
+    if random_takeoff_requested:
+        if random_morphology_graph is None or random_self_collision_filter_info is None:
+            raise RuntimeError("random morphology collision views lack graph/filter data")
+        random_cross_module_contact_views = _create_cross_module_contact_views(
+            sim.physics_manager.get_physics_sim_view(),
+            morphology_graph=random_morphology_graph,
+            body_paths_by_module=random_self_collision_filter_info[
+                "body_paths_by_module"
+            ],
+            max_patches_per_body_pair=int(
+                args.takeoff_exact_cross_module_contact_max_patches_per_body_pair
+            ),
+        )
+    if random_floor_contact_sensor is not None:
+        random_floor_contact_sensor.update(sim_dt, force_recompute=True)
     if p4_1_object is not None:
         p4_1_object.update(sim_dt)
     thrust_body_ids, thrust_body_names = robot.find_bodies(".*thrust_.*")
@@ -602,7 +899,12 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             raise RuntimeError("Cannot compute hover force without thrust bodies.")
         force_per_rotor_n = robot_mass * gravity * float(args.hover_force_scale) / len(thrust_body_ids)
     command_applied = force_per_rotor_n != 0.0 or args.gimbal_target_rad != 0.0
-    expected_thrust_bodies = 4 * int(args.fixed_module_count) if fixed_smoke_requested else 4
+    effective_fixed_module_count = (
+        len(random_morphology_graph.modules)
+        if random_morphology_graph is not None
+        else int(args.fixed_module_count)
+    )
+    expected_thrust_bodies = 4 * effective_fixed_module_count if fixed_smoke_requested else 4
     if force_per_rotor_n != 0.0 and len(thrust_body_ids) != expected_thrust_bodies:
         raise RuntimeError(
             f"Expected {expected_thrust_bodies} thrust bodies, found {len(thrust_body_ids)}: {thrust_body_names}"
@@ -723,6 +1025,116 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             articulated_joint_tracking_tolerance_rad=float(args.articulated_joint_tracking_tolerance_rad),
             articulated_assembly=bool(args.fixed_morphology_articulated_hover_smoke),
         )
+    if random_takeoff_requested:
+        if random_morphology_graph is None or random_floor_placement is None:
+            raise RuntimeError("random morphology takeoff graph/floor placement was not initialized")
+        takeoff_config = RandomMorphologyTakeoffConfig(
+            backend_config_path=str(args.config),
+            robot_model_config_path=backend_config.robot_model_config_path,
+            mesh_search_dirs=[str(path) for path in random_mesh_search_dirs],
+            simulation_dt_s=float(args.dt),
+            floor_clearance_m=float(args.floor_clearance_m),
+            floor_contact_force_threshold_n=float(
+                args.takeoff_floor_contact_force_threshold_n
+            ),
+            floor_contact_dwell_duration_s=float(
+                args.takeoff_floor_contact_dwell_duration_s
+            ),
+            exact_cross_module_contact_force_threshold_n=float(
+                args.takeoff_exact_cross_module_contact_force_threshold_n
+            ),
+            exact_cross_module_contact_max_patches_per_body_pair=int(
+                args.takeoff_exact_cross_module_contact_max_patches_per_body_pair
+            ),
+            initial_root_position_tolerance_m=float(
+                args.takeoff_initial_root_position_tolerance_m
+            ),
+            initial_root_attitude_tolerance_rad=float(
+                args.takeoff_initial_root_attitude_tolerance_rad
+            ),
+            settle_duration_s=float(args.takeoff_settle_duration_s),
+            settle_dwell_duration_s=float(args.takeoff_settle_dwell_duration_s),
+            takeoff_ramp_duration_s=float(args.takeoff_ramp_duration_s),
+            hover_hold_duration_s=float(args.hover_hold_duration_s),
+            hover_acquisition_timeout_s=float(
+                args.takeoff_hover_acquisition_timeout_s
+            ),
+            hover_height_delta_m=float(args.takeoff_hover_height_delta_m),
+            position_error_threshold_m=float(args.hover_position_tolerance_m),
+            attitude_error_threshold_rad=float(args.hover_attitude_tolerance_rad),
+            settle_linear_speed_threshold_mps=float(args.takeoff_settle_linear_speed_threshold_mps),
+            settle_angular_speed_threshold_rad_s=float(args.takeoff_settle_angular_speed_threshold_rad_s),
+            hover_linear_speed_threshold_mps=float(
+                args.takeoff_hover_linear_speed_threshold_mps
+            ),
+            hover_angular_speed_threshold_rad_s=float(
+                args.takeoff_hover_angular_speed_threshold_rad_s
+            ),
+            max_vertical_speed_mps=float(args.takeoff_max_vertical_speed_mps),
+            min_height_gain_ratio=float(args.takeoff_min_height_gain_ratio),
+            allocation_mode=str(args.allocation_mode),
+            stop_on_hover_hold=bool(args.hover_stop_on_hold),
+        )
+        hover_smoke_report = _run_random_morphology_takeoff_smoke(
+            robot=robot,
+            sim=sim,
+            sim_dt=sim_dt,
+            backend_config_hash=backend_config.stable_hash(),
+            physical_model=physical_model,
+            device=sim.device,
+            steps=max(0, args.steps),
+            morphology_graph=random_morphology_graph,
+            floor_placement=random_floor_placement,
+            floor_contact_sensor=random_floor_contact_sensor,
+            self_collision_filter_info=random_self_collision_filter_info,
+            initial_exact_collision_info=random_initial_exact_collision_info,
+            cross_module_contact_views=random_cross_module_contact_views,
+            config=takeoff_config,
+            bridge_supported_controller_command=bridge_supported_controller_command,
+            split_fixed_module_name=split_fixed_module_name,
+            realtime_playback=bool(args.realtime_playback),
+        )
+        if random_teleop_requested:
+            if not hover_smoke_report.get(
+                "random_morphology_takeoff_smoke_passed"
+            ):
+                raise RuntimeError(
+                    "terminal teleop requires a passing takeoff/hover gate"
+                )
+            teleop_report = _run_random_morphology_teleop(
+                robot=robot,
+                sim=sim,
+                simulation_app=simulation_app,
+                sim_dt=sim_dt,
+                physical_model=physical_model,
+                device=sim.device,
+                morphology_graph=random_morphology_graph,
+                floor_contact_sensor=random_floor_contact_sensor,
+                cross_module_contact_views=random_cross_module_contact_views,
+                hover_pose_world=tuple(
+                    hover_smoke_report[
+                        "random_morphology_takeoff_hover_target_pose_world"
+                    ]
+                ),
+                settled_pose_world=tuple(
+                    hover_smoke_report[
+                        "random_morphology_takeoff_settled_pose_world"
+                    ]
+                ),
+                takeoff_config=takeoff_config,
+                teleop_config=RandomMorphologyTeleopConfig(
+                    translation_step_m=float(args.teleop_translation_step_m),
+                    rotation_step_rad=float(args.teleop_rotation_step_rad),
+                    max_roll_pitch_rad=float(args.teleop_max_roll_pitch_rad),
+                    max_position_lead_m=float(args.teleop_max_position_lead_m),
+                    minimum_height_above_settled_m=float(
+                        args.teleop_minimum_height_above_settled_m
+                    ),
+                ),
+                bridge_supported_controller_command=bridge_supported_controller_command,
+                split_fixed_module_name=split_fixed_module_name,
+            )
+            hover_smoke_report.update(teleop_report)
     if args.p4_1_full_scene_backend_smoke:
         if p4_1_object is None:
             raise RuntimeError("P4.1 full-scene backend smoke requested without a spawned object.")
@@ -844,6 +1256,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
                 "fixed_morphology_hover_smoke_passed",
                 "fixed_morphology_articulated_hover_smoke_passed",
                 "fixed_morphology_waypoint_smoke_passed",
+                "random_morphology_takeoff_smoke_passed",
             )
         )
 
@@ -936,6 +1349,380 @@ def _holon_mesh_search_dirs() -> list[Path]:
         REPO_ROOT / "module_urdf",
         REPO_ROOT / "module_urdf" / "mesh",
     ]
+
+
+def _module_id_from_prim_path(path: str) -> int | None:
+    matches = re.findall(r"(?:^|/)module_(\d+)__", str(path))
+    if not matches:
+        return None
+    # Fixed dock joints nest a child module below its parent module's root in
+    # USD.  The deepest/last module-prefixed rigid body therefore owns the
+    # collider path.
+    return int(matches[-1])
+
+
+def _configure_random_morphology_collision_filters(
+    stage,
+    *,
+    morphology_graph,
+    physical_model,
+    root_prim_path: str,
+) -> dict[str, object]:
+    """Enable exact cross-module physics while filtering intended contacts.
+
+    Internal link pairs of each module are filtered, as are the two dock
+    mechanism bodies named by each occupied port pair.  Every other
+    cross-module body pair remains physically active and is a hard-failure
+    contact, including unintended contacts between adjacent modules.
+    """
+
+    from pxr import UsdPhysics
+
+    from amsrr.simulation.random_morphology_takeoff import (
+        intended_dock_body_link_pairs,
+    )
+
+    root_prefix = root_prim_path.rstrip("/") + "/"
+    bodies_by_module: dict[int, list] = {
+        module.module_id: [] for module in morphology_graph.modules
+    }
+    for prim in stage.Traverse():
+        prim_path = prim.GetPath().pathString
+        if not prim_path.startswith(root_prefix):
+            continue
+        if not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+            continue
+        module_id = _module_id_from_prim_path(prim_path)
+        if module_id in bodies_by_module:
+            bodies_by_module[module_id].append(prim)
+    missing_modules = sorted(
+        module_id for module_id, prims in bodies_by_module.items() if not prims
+    )
+    if missing_modules:
+        raise RuntimeError(
+            f"random morphology collision filtering found no rigid bodies for modules {missing_modules}"
+        )
+
+    adjacent_module_pairs = {
+        tuple(sorted((edge.src_module_id, edge.dst_module_id)))
+        for edge in morphology_graph.dock_edges
+    }
+    module_ids = sorted(bodies_by_module)
+    filtered_body_pair_count = 0
+
+    def filter_body_pair(src_prim, dst_prim) -> None:
+        nonlocal filtered_body_pair_count
+        filtered_pairs_api = UsdPhysics.FilteredPairsAPI.Apply(src_prim)
+        filtered_pairs_api.CreateFilteredPairsRel().AddTarget(dst_prim.GetPath())
+        filtered_body_pair_count += 1
+
+    same_module_filtered_body_pair_count = 0
+    for module_id in module_ids:
+        module_prims = sorted(
+            bodies_by_module[module_id],
+            key=lambda prim: prim.GetPath().pathString,
+        )
+        for src_index, src_prim in enumerate(module_prims):
+            for dst_prim in module_prims[src_index + 1 :]:
+                filter_body_pair(src_prim, dst_prim)
+                same_module_filtered_body_pair_count += 1
+
+    body_prim_by_module_link = {
+        (module_id, str(prim.GetName()).removeprefix(f"module_{module_id}__")): prim
+        for module_id, prims in bodies_by_module.items()
+        for prim in prims
+        if str(prim.GetName()).startswith(f"module_{module_id}__")
+    }
+    intended_dock_path_pairs: list[tuple[str, str]] = []
+    intended_dock_link_pairs = intended_dock_body_link_pairs(
+        morphology_graph, physical_model
+    )
+    for src_module_id, src_link, dst_module_id, dst_link in intended_dock_link_pairs:
+        src_prim = body_prim_by_module_link.get((src_module_id, src_link))
+        dst_prim = body_prim_by_module_link.get((dst_module_id, dst_link))
+        if src_prim is None or dst_prim is None:
+            raise RuntimeError(
+                "random morphology intended dock body did not resolve to rigid prims: "
+                f"({src_module_id}, {src_link}) -> ({dst_module_id}, {dst_link})"
+            )
+        filter_body_pair(src_prim, dst_prim)
+        intended_dock_path_pairs.append(
+            tuple(
+                sorted(
+                    (
+                        src_prim.GetPath().pathString,
+                        dst_prim.GetPath().pathString,
+                    )
+                )
+            )
+        )
+
+    module_pair_count = len(module_ids) * (len(module_ids) - 1) // 2
+    return {
+        "rigid_body_count": sum(len(prims) for prims in bodies_by_module.values()),
+        "filtered_body_pair_count": filtered_body_pair_count,
+        "same_module_filtered_body_pair_count": same_module_filtered_body_pair_count,
+        "intended_dock_filtered_body_pair_count": len(intended_dock_path_pairs),
+        "intended_dock_body_link_pairs": intended_dock_link_pairs,
+        "intended_dock_body_path_pairs": sorted(intended_dock_path_pairs),
+        "adjacent_module_pair_count": len(adjacent_module_pairs),
+        "cross_module_pair_count": module_pair_count,
+        "nonadjacent_module_pair_count": module_pair_count
+        - len(adjacent_module_pairs),
+        "body_paths_by_module": {
+            module_id: sorted(prim.GetPath().pathString for prim in prims)
+            for module_id, prims in bodies_by_module.items()
+        },
+    }
+
+
+def _initial_random_morphology_exact_collision_check(
+    stage,
+    *,
+    morphology_graph,
+    root_prim_path: str,
+) -> dict[str, object]:
+    """Run Isaac Sim's exact initial-collider query on the configured stage.
+
+    The official collision-detector utility temporarily disables Fabric, runs
+    one PhysX step, and returns collider pairs from the engine's contact report.
+    This catches unintended reset-time contacts; per-step tensor contact views
+    independently cover the complete takeoff and hover trajectory.
+    """
+
+    from omni.physx.scripts.physicsUtils import get_initial_collider_pairs
+
+    adjacent_module_pairs = {
+        tuple(sorted((edge.src_module_id, edge.dst_module_id)))
+        for edge in morphology_graph.dock_edges
+    }
+    raw_pairs = sorted(get_initial_collider_pairs(stage))
+    robot_pairs: list[tuple[str, str]] = []
+    nonadjacent_pairs: list[tuple[str, str]] = []
+    adjacent_unintended_pairs: list[tuple[str, str]] = []
+    filtered_scope_pairs: list[tuple[str, str]] = []
+    unclassified_pairs: list[tuple[str, str]] = []
+    for path0, path1 in raw_pairs:
+        holon0 = path0 == root_prim_path or path0.startswith(root_prim_path + "/")
+        holon1 = path1 == root_prim_path or path1.startswith(root_prim_path + "/")
+        if not (holon0 and holon1):
+            continue
+        pair = tuple(sorted((path0, path1)))
+        robot_pairs.append(pair)
+        module0 = _module_id_from_prim_path(path0)
+        module1 = _module_id_from_prim_path(path1)
+        if module0 is None or module1 is None:
+            unclassified_pairs.append(pair)
+            continue
+        module_pair = tuple(sorted((module0, module1)))
+        if module0 == module1:
+            filtered_scope_pairs.append(pair)
+        elif module_pair in adjacent_module_pairs:
+            adjacent_unintended_pairs.append(pair)
+        else:
+            nonadjacent_pairs.append(pair)
+    return {
+        "method": "isaac_physx_get_initial_collider_pairs_v1",
+        "fixed_module_root_pose_invariant": True,
+        "raw_pair_count": len(raw_pairs),
+        "robot_pair_count": len(robot_pairs),
+        "nonadjacent_robot_contact_pairs": sorted(set(nonadjacent_pairs)),
+        "adjacent_unintended_robot_contact_pairs": sorted(
+            set(adjacent_unintended_pairs)
+        ),
+        "filtered_scope_robot_contact_pairs": sorted(set(filtered_scope_pairs)),
+        "unclassified_robot_contact_pairs": sorted(set(unclassified_pairs)),
+    }
+
+
+def _create_cross_module_contact_views(
+    physics_sim_view,
+    *,
+    morphology_graph,
+    body_paths_by_module,
+    max_patches_per_body_pair: int,
+) -> list[dict[str, object]]:
+    """Create one PhysX tensor contact matrix per cross-module pair."""
+
+    if max_patches_per_body_pair <= 0:
+        raise RuntimeError("cross-module raw contact capacity multiplier must be positive")
+    module_ids = sorted(int(module_id) for module_id in body_paths_by_module)
+    views: list[dict[str, object]] = []
+    for src_index, src_module_id in enumerate(module_ids):
+        for dst_module_id in module_ids[src_index + 1 :]:
+            module_pair = (src_module_id, dst_module_id)
+            sensor_paths = sorted(body_paths_by_module[src_module_id])
+            filter_paths = sorted(body_paths_by_module[dst_module_id])
+            raw_contact_capacity = (
+                len(sensor_paths)
+                * len(filter_paths)
+                * max_patches_per_body_pair
+            )
+            contact_view = physics_sim_view.create_rigid_contact_view(
+                sensor_paths,
+                filter_patterns=[list(filter_paths) for _ in sensor_paths],
+                max_contact_data_count=raw_contact_capacity,
+            )
+            if contact_view.sensor_count != len(sensor_paths):
+                raise RuntimeError(
+                    "cross-module contact view sensor count mismatch for modules "
+                    f"{module_pair}: {contact_view.sensor_count} != {len(sensor_paths)}"
+                )
+            if contact_view.filter_count != len(filter_paths):
+                raise RuntimeError(
+                    "cross-module contact view filter count mismatch for modules "
+                    f"{module_pair}: {contact_view.filter_count} != {len(filter_paths)}"
+                )
+            if contact_view.max_contact_data_count != raw_contact_capacity:
+                raise RuntimeError(
+                    "cross-module raw contact capacity mismatch for modules "
+                    f"{module_pair}: {contact_view.max_contact_data_count} "
+                    f"!= {raw_contact_capacity}"
+                )
+            views.append(
+                {
+                    "module_pair": module_pair,
+                    "view": contact_view,
+                    "sensor_count": int(contact_view.sensor_count),
+                    "filter_count": int(contact_view.filter_count),
+                    "raw_contact_capacity": int(
+                        contact_view.max_contact_data_count
+                    ),
+                }
+            )
+    return views
+
+
+def _measure_cross_module_contact_views(
+    contact_views: list[dict[str, object]],
+    *,
+    sim_dt: float,
+) -> dict[str, object]:
+    """Read aggregate and non-aggregated contact data from PhysX tensor views."""
+
+    import torch
+    import warp as wp
+
+    max_force_n = 0.0
+    pair_max_forces_n: dict[str, float] = {}
+    raw_contact_count = 0
+    raw_contact_capacity = 0
+    raw_contact_max_force_n = 0.0
+    raw_contact_min_separation_m: float | None = None
+    raw_contact_saturated = False
+    pair_raw_contact_counts: dict[str, int] = {}
+    for entry in contact_views:
+        contact_view = entry["view"]
+        matrix = contact_view.get_contact_force_matrix(sim_dt)
+        matrix_tensor = wp.to_torch(matrix)
+        force_norms = torch.linalg.vector_norm(matrix_tensor.reshape(-1, 3), dim=-1)
+        pair_max_force_n = (
+            float(force_norms.max().detach().cpu())
+            if force_norms.numel() > 0
+            else 0.0
+        )
+        module_pair = entry["module_pair"]
+        pair_key = f"{module_pair[0]}-{module_pair[1]}"
+        pair_max_forces_n[pair_key] = pair_max_force_n
+        max_force_n = max(max_force_n, pair_max_force_n)
+
+        (
+            force_buffer,
+            _point_buffer,
+            _normal_buffer,
+            separation_buffer,
+            contact_count_buffer,
+            start_indices_buffer,
+        ) = contact_view.get_contact_data(sim_dt)
+        contact_counts = wp.to_torch(contact_count_buffer).reshape(-1).to(torch.int64)
+        start_indices = wp.to_torch(start_indices_buffer).reshape(-1).to(torch.int64)
+        pair_raw_count = int(contact_counts.sum().detach().cpu())
+        pair_capacity = int(entry["raw_contact_capacity"])
+        pair_raw_contact_counts[pair_key] = pair_raw_count
+        raw_contact_count += pair_raw_count
+        raw_contact_capacity += pair_capacity
+        if pair_raw_count >= pair_capacity or bool(
+            torch.any(start_indices + contact_counts > pair_capacity).detach().cpu()
+        ):
+            raw_contact_saturated = True
+
+        if pair_raw_count > 0:
+            active_indices: list[int] = []
+            for start, count in zip(
+                start_indices.detach().cpu().tolist(),
+                contact_counts.detach().cpu().tolist(),
+                strict=True,
+            ):
+                if count <= 0:
+                    continue
+                stop = min(int(start + count), pair_capacity)
+                active_indices.extend(range(int(start), stop))
+            if active_indices:
+                index_tensor = torch.tensor(
+                    active_indices,
+                    dtype=torch.long,
+                    device=wp.to_torch(force_buffer).device,
+                )
+                active_forces = wp.to_torch(force_buffer).reshape(-1).index_select(
+                    0, index_tensor
+                )
+                active_separations = wp.to_torch(separation_buffer).reshape(
+                    -1
+                ).index_select(0, index_tensor)
+                raw_contact_max_force_n = max(
+                    raw_contact_max_force_n,
+                    float(active_forces.abs().max().detach().cpu()),
+                )
+                pair_min_separation = float(
+                    active_separations.min().detach().cpu()
+                )
+                raw_contact_min_separation_m = (
+                    pair_min_separation
+                    if raw_contact_min_separation_m is None
+                    else min(raw_contact_min_separation_m, pair_min_separation)
+                )
+    return {
+        "max_force_n": max_force_n,
+        "pair_max_forces_n": pair_max_forces_n,
+        "raw_contact_count": raw_contact_count,
+        "raw_contact_capacity": raw_contact_capacity,
+        "raw_contact_max_force_n": raw_contact_max_force_n,
+        "raw_contact_min_separation_m": (
+            0.0
+            if raw_contact_min_separation_m is None
+            else raw_contact_min_separation_m
+        ),
+        "raw_contact_saturated": raw_contact_saturated,
+        "pair_raw_contact_counts": pair_raw_contact_counts,
+    }
+
+
+def _activate_nested_contact_reports(stage, *, root_prim_path: str) -> int:
+    """Apply PhysX contact reporting to every articulation rigid body.
+
+    Isaac Lab's generic subtree helper intentionally stops at the first rigid
+    body.  A converted articulation has further rigid bodies below its root, so
+    the probe must explicitly visit all of them before creating ContactSensor.
+    """
+
+    from pxr import PhysxSchema, UsdPhysics
+
+    root_prefix = root_prim_path.rstrip("/") + "/"
+    applied_count = 0
+    for prim in stage.Traverse():
+        prim_path = prim.GetPath().pathString
+        if prim_path != root_prim_path and not prim_path.startswith(root_prefix):
+            continue
+        if not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+            continue
+        report_api = PhysxSchema.PhysxContactReportAPI.Apply(prim)
+        report_api.CreateThresholdAttr().Set(0.0)
+        applied_count += 1
+    if applied_count == 0:
+        raise RuntimeError(
+            f"no rigid bodies found for contact reporting below {root_prim_path}"
+        )
+    return applied_count
 
 
 def _vectoring_velocity_overrides(physical_model, velocity_limit_rad_s: float) -> dict[str, float]:
@@ -1733,6 +2520,1073 @@ def _run_fixed_morphology_smoke(
         f"{report_prefix}_articulated_last_joint_targets": dict(last_joint_targets),
         f"{report_prefix}_last_controller_status": last_controller_status,
         f"{report_prefix}_last_bridge_metrics": last_bridge_metrics,
+    }
+
+
+def _run_random_morphology_takeoff_smoke(
+    *,
+    robot,
+    sim,
+    sim_dt: float,
+    backend_config_hash: str,
+    physical_model,
+    device: str,
+    steps: int,
+    morphology_graph,
+    floor_placement,
+    floor_contact_sensor,
+    self_collision_filter_info,
+    initial_exact_collision_info,
+    cross_module_contact_views,
+    config,
+    bridge_supported_controller_command,
+    split_fixed_module_name,
+    realtime_playback: bool,
+) -> dict[str, object]:
+    """Real-Isaac gate for a reset-time fixed random morphology.
+
+    The settle phase deliberately sends no rotor/controller command.  Once the
+    measured base ``fc`` pose has settled, deterministic QPID ramps that pose
+    to an upright hover target.  No learned policy participates in this gate.
+    """
+
+    from amsrr.controllers.actuator_mapping import build_actuator_mapping
+    from amsrr.controllers.controller_base import ControllerContext
+    from amsrr.controllers.isaac_controller_bridge import IsaacControllerBridge
+    from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
+    from amsrr.feasibility.morphology_flight import collision_geometry_content_hash
+    from amsrr.schemas.policies import (
+        ControllerCommand,
+        ControllerStatus,
+        InteractionKnot,
+        PolicyCommand,
+    )
+    from amsrr.simulation.random_morphology_takeoff import (
+        DeterministicTakeoffScheduler,
+        TakeoffPhase,
+    )
+
+    module_count = len(morphology_graph.modules)
+    if floor_contact_sensor is None:
+        raise RuntimeError("random morphology takeoff requires an Isaac contact sensor")
+    if not isinstance(self_collision_filter_info, dict):
+        raise RuntimeError("random morphology takeoff requires collision-filter evidence")
+    if not isinstance(initial_exact_collision_info, dict):
+        raise RuntimeError("random morphology takeoff requires exact initial-collider evidence")
+    if not isinstance(cross_module_contact_views, list):
+        raise RuntimeError("random morphology takeoff requires tensor contact views")
+    scheduler = DeterministicTakeoffScheduler(config)
+    collision_geometry_hash = collision_geometry_content_hash(
+        physical_model,
+        mesh_search_dirs=config.mesh_search_dirs,
+    )
+    actuator_mapping = build_actuator_mapping(morphology_graph, physical_model)
+    bridge = IsaacControllerBridge()
+    controller = QPIDController(
+        config=QPIDControllerConfig(
+            allocation_mode=config.allocation_mode,
+            control_dt_s=config.simulation_dt_s,
+        )
+    )
+    resolved_fc_body_count = sum(
+        1
+        for module_id in range(module_count)
+        if _module_body_pose(robot, module_id=module_id, local_body_name="fc") is not None
+    )
+    initial_root_pose_actual = tuple(_tensor_row(robot.data.root_pose_w.torch))
+    initial_root_position_error = _position_error_norm(
+        initial_root_pose_actual[:3], floor_placement.root_pose_world[:3]
+    )
+    initial_root_attitude_error = _quat_error_norm(
+        initial_root_pose_actual[3:7], floor_placement.root_pose_world[3:7]
+    )
+    initial_base_fc_pose = _module_body_pose(robot, module_id=0, local_body_name="fc")
+    if initial_base_fc_pose is None:
+        initial_base_fc_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
+    settled_pose = None
+    settled_linear_speed = float("inf")
+    settled_angular_speed = float("inf")
+    settle_low_speed_steps = 0
+    max_settle_low_speed_steps = 0
+    settle_low_speed_steps_at_completion = 0
+    floor_contact_steps = 0
+    max_floor_contact_steps = 0
+    floor_contact_steps_at_completion = 0
+    floor_contact_dwell_steps_required = max(
+        1,
+        int(
+            math.ceil(
+                config.floor_contact_dwell_duration_s / max(sim_dt, 1.0e-9)
+            )
+        ),
+    )
+    current_floor_contact = _contact_sensor_measurement(
+        floor_contact_sensor,
+        force_threshold_n=config.floor_contact_force_threshold_n,
+    )
+    max_floor_contact_aggregate_force_n = float(
+        current_floor_contact["aggregate_force_n"]
+    )
+    max_floor_contact_active_body_count = int(current_floor_contact["active_body_count"])
+    previous_command = None
+    phase_counts = {phase.value: 0 for phase in TakeoffPhase}
+    phase_transitions: list[dict[str, object]] = []
+    previous_phase = None
+    runtime_observations: list[dict[str, object]] = []
+    policy_commands: list[dict[str, object]] = []
+    controller_commands: list[dict[str, object]] = []
+    actuator_target_records: list[dict[str, object]] = []
+    root_pose_history: list[list[float]] = []
+    qp_infeasible_count = 0
+    controller_clipped_count = 0
+    missing_actuator_count = 0
+    unsupported_actuator_count = 0
+    clipped_target_count = 0
+    application_requested_target_count = 0
+    application_applied_target_count = 0
+    application_unresolved_target_count = 0
+    reaction_torque_target_count = 0
+    reaction_torque_abs_sum_nm = 0.0
+    dynamic_cross_module_contact_max_force_n = 0.0
+    dynamic_cross_module_contact_violation_step_count = 0
+    dynamic_cross_module_contact_view_update_count = 0
+    dynamic_cross_module_pair_max_forces_n: dict[str, float] = {}
+    dynamic_raw_contact_view_update_count = 0
+    dynamic_raw_contact_observation_count = 0
+    dynamic_raw_contact_observed_step_count = 0
+    dynamic_raw_contact_max_force_n = 0.0
+    dynamic_raw_contact_min_separation_m: float | None = None
+    dynamic_raw_contact_saturation_step_count = 0
+    dynamic_pair_raw_contact_counts: dict[str, int] = {}
+    dynamic_raw_contact_capacity = sum(
+        int(entry["raw_contact_capacity"])
+        for entry in cross_module_contact_views
+    )
+    finite_state = True
+    max_vertical_speed = 0.0
+    max_position_error = 0.0
+    max_attitude_error = 0.0
+    final_position_error = float("inf")
+    final_attitude_error = float("inf")
+    final_linear_speed = float("inf")
+    final_angular_speed = float("inf")
+    hold_steps = 0
+    max_hold_steps = 0
+    hold_steps_required = max(1, int(math.ceil(config.hover_hold_duration_s / max(sim_dt, 1.0e-9))))
+    settle_dwell_steps_required = max(
+        1, int(math.ceil(config.settle_dwell_duration_s / max(sim_dt, 1.0e-9)))
+    )
+    executed_steps = 0
+    ramp_max_progress = 0.0
+    last_controller_status = None
+    last_bridge_metrics: dict[str, float] = {}
+
+    for step_idx in range(max(0, steps)):
+        executed_steps = step_idx + 1
+        time_s = step_idx * sim_dt
+        root_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
+        root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch)
+        runtime_observation = _build_articulated_runtime_observation(
+            morphology_graph,
+            time_s=time_s,
+            robot=robot,
+            root_pose_world=root_pose,  # type: ignore[arg-type]
+            root_twist_world=root_twist,
+            joint_names=robot.joint_names,
+            joint_positions_tensor=robot.data.joint_pos.torch,
+            joint_velocities_tensor=robot.data.joint_vel.torch,
+            module_count=module_count,
+            split_fixed_module_name=split_fixed_module_name,
+        )
+        runtime_observation.contact_states = _floor_contact_runtime_states(
+            current_floor_contact,
+            morphology_graph_id=morphology_graph.graph_id,
+        )
+        current_base_state = runtime_observation.module_states[0]
+        if settled_pose is None and time_s + 1.0e-9 >= config.settle_duration_s:
+            settled_pose = current_base_state.pose_world
+            settled_linear_speed = _vector_norm(current_base_state.twist_world[:3])
+            settled_angular_speed = _vector_norm(current_base_state.twist_world[3:6])
+            settle_low_speed_steps_at_completion = settle_low_speed_steps
+            floor_contact_steps_at_completion = floor_contact_steps
+        schedule_reference = settled_pose or initial_base_fc_pose
+        target = scheduler.target_at(time_s, settled_pose_world=schedule_reference)
+        phase_counts[target.phase.value] += 1
+        ramp_max_progress = max(ramp_max_progress, target.ramp_progress)
+        if target.phase != previous_phase:
+            phase_transitions.append(
+                {
+                    "from_phase": previous_phase.value if previous_phase is not None else None,
+                    "to_phase": target.phase.value,
+                    "time_s": time_s,
+                    "reason": "deterministic_schedule",
+                }
+            )
+            previous_phase = target.phase
+        if target.phase == TakeoffPhase.SETTLE:
+            settle_status = ControllerStatus(
+                status="ok",
+                qp_feasible=True,
+                active_mode="floor_settle_zero_thrust",
+                message="zero-thrust floor settle",
+                metrics={
+                    "settle_zero_thrust": 1.0,
+                    "residual_norm": 0.0,
+                    "clipped": 0.0,
+                },
+            )
+            runtime_observation.controller_status = settle_status
+            policy_commands.append(PolicyCommand().to_dict())
+            controller_commands.append(
+                ControllerCommand(
+                    rotor_thrusts_n={},
+                    vectoring_joint_targets={},
+                    joint_torque_commands={},
+                    dock_mechanism_commands={},
+                    controller_status=settle_status,
+                ).to_dict()
+            )
+            actuator_target_records.append(
+                {
+                    "time_s": time_s,
+                    "backend": "isaac_lab",
+                    "morphology_graph_id": morphology_graph.graph_id,
+                    "command_index": step_idx,
+                    "actuator_targets": [],
+                    "clipped_targets": [],
+                    "missing_actuators": [],
+                    "unsupported_actuators": [],
+                    "allocation_residual_norm": 0.0,
+                    "qp_status": "ok",
+                    "metrics": {
+                        "settle_zero_thrust": 1.0,
+                        "rotor_thrust_target_count": 0.0,
+                        "allocation_residual_norm": 0.0,
+                        "clipped_target_count": 0.0,
+                        "missing_actuator_count": 0.0,
+                        "unsupported_actuator_count": 0.0,
+                    },
+                    "metadata": {"phase": target.phase.value},
+                }
+            )
+            robot.write_data_to_sim()
+        else:
+            if target.desired_pose_world is None:
+                raise RuntimeError("takeoff scheduler enabled thrust without a desired pose")
+            policy_command = PolicyCommand(
+                desired_body_pose=target.desired_pose_world,
+                desired_body_twist=[0.0] * 6,
+            )
+            controller_command = controller.compute(
+                ControllerContext(
+                    runtime_observation=runtime_observation,
+                    morphology_graph=morphology_graph,
+                    physical_model=physical_model,
+                    active_knot=InteractionKnot(t_rel_s=time_s, contact_assignments=[]),
+                    policy_command=policy_command,
+                    previous_command=previous_command,
+                    control_dt_s=config.simulation_dt_s,
+                )
+            )
+            bridged_command = bridge_supported_controller_command(controller_command)
+            actuator_record = bridge.convert(
+                bridged_command,
+                actuator_mapping,
+                time_s=time_s,
+                command_index=step_idx,
+            )
+            policy_commands.append(policy_command.to_dict())
+            controller_commands.append(bridged_command.to_dict())
+            application = _apply_actuator_record(
+                robot, actuator_record, physical_model, device
+            )
+            application_requested_target_count += int(
+                application["requested_target_count"]
+            )
+            application_applied_target_count += int(
+                application["applied_target_count"]
+            )
+            application_unresolved_target_count += int(
+                application["unresolved_target_count"]
+            )
+            reaction_torque_target_count += int(
+                application["reaction_torque_target_count"]
+            )
+            reaction_torque_abs_sum_nm += float(
+                application["reaction_torque_abs_sum_nm"]
+            )
+            actuator_record.metrics.update(
+                {
+                    "application_requested_target_count": float(
+                        application["requested_target_count"]
+                    ),
+                    "application_applied_target_count": float(
+                        application["applied_target_count"]
+                    ),
+                    "application_unresolved_target_count": float(
+                        application["unresolved_target_count"]
+                    ),
+                    "reaction_torque_target_count": float(
+                        application["reaction_torque_target_count"]
+                    ),
+                    "reaction_torque_abs_sum_nm": float(
+                        application["reaction_torque_abs_sum_nm"]
+                    ),
+                }
+            )
+            actuator_record.metadata["application_unresolved_targets"] = list(
+                application["unresolved_targets"]
+            )
+            actuator_target_records.append(actuator_record.to_dict())
+            robot.write_data_to_sim()
+            status = bridged_command.controller_status
+            runtime_observation.controller_status = status
+            last_controller_status = status.to_dict()
+            last_bridge_metrics = dict(actuator_record.metrics)
+            if not status.qp_feasible:
+                qp_infeasible_count += 1
+            if status.metrics.get("clipped", 0.0) > 0.0:
+                controller_clipped_count += 1
+            missing_actuator_count += len(actuator_record.missing_actuators)
+            unsupported_actuator_count += len(actuator_record.unsupported_actuators)
+            clipped_target_count += len(actuator_record.clipped_targets)
+            previous_command = bridged_command
+
+        runtime_observations.append(runtime_observation.to_dict())
+
+        sim.step()
+        dynamic_contact_measurement = _measure_cross_module_contact_views(
+            cross_module_contact_views,
+            sim_dt=sim_dt,
+        )
+        dynamic_cross_module_contact_view_update_count += len(
+            cross_module_contact_views
+        )
+        dynamic_raw_contact_view_update_count += len(
+            cross_module_contact_views
+        )
+        step_dynamic_max_force_n = float(
+            dynamic_contact_measurement["max_force_n"]
+        )
+        step_raw_contact_count = int(
+            dynamic_contact_measurement["raw_contact_count"]
+        )
+        step_raw_contact_saturated = bool(
+            dynamic_contact_measurement["raw_contact_saturated"]
+        )
+        dynamic_raw_contact_observation_count += step_raw_contact_count
+        if step_raw_contact_count > 0:
+            dynamic_raw_contact_observed_step_count += 1
+            step_min_separation = float(
+                dynamic_contact_measurement["raw_contact_min_separation_m"]
+            )
+            dynamic_raw_contact_min_separation_m = (
+                step_min_separation
+                if dynamic_raw_contact_min_separation_m is None
+                else min(
+                    dynamic_raw_contact_min_separation_m,
+                    step_min_separation,
+                )
+            )
+        if step_raw_contact_saturated:
+            dynamic_raw_contact_saturation_step_count += 1
+        dynamic_raw_contact_max_force_n = max(
+            dynamic_raw_contact_max_force_n,
+            float(dynamic_contact_measurement["raw_contact_max_force_n"]),
+        )
+        dynamic_cross_module_contact_max_force_n = max(
+            dynamic_cross_module_contact_max_force_n,
+            step_dynamic_max_force_n,
+        )
+        if (
+            step_dynamic_max_force_n
+            > config.exact_cross_module_contact_force_threshold_n
+            or step_raw_contact_count > 0
+            or step_raw_contact_saturated
+        ):
+            dynamic_cross_module_contact_violation_step_count += 1
+        for pair_key, force_n in dynamic_contact_measurement[
+            "pair_max_forces_n"
+        ].items():
+            dynamic_cross_module_pair_max_forces_n[pair_key] = max(
+                dynamic_cross_module_pair_max_forces_n.get(pair_key, 0.0),
+                float(force_n),
+            )
+        for pair_key, count in dynamic_contact_measurement[
+            "pair_raw_contact_counts"
+        ].items():
+            dynamic_pair_raw_contact_counts[pair_key] = (
+                dynamic_pair_raw_contact_counts.get(pair_key, 0) + int(count)
+            )
+        robot.update(sim_dt)
+        floor_contact_sensor.update(sim_dt, force_recompute=True)
+        current_floor_contact = _contact_sensor_measurement(
+            floor_contact_sensor,
+            force_threshold_n=config.floor_contact_force_threshold_n,
+        )
+        max_floor_contact_aggregate_force_n = max(
+            max_floor_contact_aggregate_force_n,
+            float(current_floor_contact["aggregate_force_n"]),
+        )
+        max_floor_contact_active_body_count = max(
+            max_floor_contact_active_body_count,
+            int(current_floor_contact["active_body_count"]),
+        )
+        if realtime_playback:
+            time.sleep(max(0.0, sim_dt))
+
+        base_fc_pose = _module_body_pose(robot, module_id=0, local_body_name="fc")
+        base_fc_twist = _module_body_twist(robot, module_id=0, local_body_name="fc")
+        if base_fc_pose is None:
+            base_fc_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
+        if base_fc_twist is None:
+            base_fc_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch)
+        root_pose_history.append(list(base_fc_pose))
+        finite_state = finite_state and all(_is_finite(value) for value in base_fc_pose)
+        finite_state = finite_state and all(_is_finite(value) for value in base_fc_twist)
+        max_vertical_speed = max(max_vertical_speed, abs(float(base_fc_twist[2])))
+        final_linear_speed = _vector_norm(base_fc_twist[:3])
+        final_angular_speed = _vector_norm(base_fc_twist[3:6])
+        if target.phase == TakeoffPhase.SETTLE:
+            if bool(current_floor_contact["active"]):
+                floor_contact_steps += 1
+            else:
+                floor_contact_steps = 0
+            max_floor_contact_steps = max(max_floor_contact_steps, floor_contact_steps)
+            if (
+                bool(current_floor_contact["active"])
+                and
+                final_linear_speed <= config.settle_linear_speed_threshold_mps
+                and final_angular_speed <= config.settle_angular_speed_threshold_rad_s
+            ):
+                settle_low_speed_steps += 1
+            else:
+                settle_low_speed_steps = 0
+            max_settle_low_speed_steps = max(
+                max_settle_low_speed_steps, settle_low_speed_steps
+            )
+        if settled_pose is not None:
+            final_target = scheduler.final_hover_pose(settled_pose)
+            position_error = _position_error_norm(base_fc_pose[:3], final_target[:3])
+            attitude_error = _quat_error_norm(base_fc_pose[3:7], final_target[3:7])
+            final_position_error = position_error
+            final_attitude_error = attitude_error
+            max_position_error = max(max_position_error, position_error)
+            max_attitude_error = max(max_attitude_error, attitude_error)
+            if (
+                target.phase in {TakeoffPhase.HOVER_HOLD, TakeoffPhase.COMPLETE}
+                and position_error <= config.position_error_threshold_m
+                and attitude_error <= config.attitude_error_threshold_rad
+                and final_linear_speed <= config.hover_linear_speed_threshold_mps
+                and final_angular_speed <= config.hover_angular_speed_threshold_rad_s
+            ):
+                hold_steps += 1
+            else:
+                hold_steps = 0
+            max_hold_steps = max(max_hold_steps, hold_steps)
+            if config.stop_on_hover_hold and max_hold_steps >= hold_steps_required:
+                break
+
+    if settled_pose is None:
+        settled_pose = initial_base_fc_pose
+        settled_linear_speed = final_linear_speed
+        settled_angular_speed = final_angular_speed
+        settle_low_speed_steps_at_completion = settle_low_speed_steps
+        floor_contact_steps_at_completion = floor_contact_steps
+    final_base_fc_pose = (
+        tuple(root_pose_history[-1])
+        if root_pose_history
+        else settled_pose
+    )
+    final_target = scheduler.final_hover_pose(settled_pose)
+    height_gain = float(final_base_fc_pose[2]) - float(settled_pose[2])
+    height_gain_ratio = height_gain / max(config.hover_height_delta_m, 1.0e-9)
+    hold_time_s = max_hold_steps * sim_dt
+    floor_pose_evidenced = (
+        abs(float(floor_placement.floor_gap_m) - float(config.floor_clearance_m)) <= 1.0e-6
+        and floor_placement.collision_bounds_root.collision_geometry_count > 0
+        and initial_root_position_error <= config.initial_root_position_tolerance_m
+        and initial_root_attitude_error <= config.initial_root_attitude_tolerance_rad
+    )
+    floor_contact_evidenced = (
+        int(floor_contact_sensor.num_sensors) > 0
+        and floor_contact_steps_at_completion >= floor_contact_dwell_steps_required
+        and max_floor_contact_aggregate_force_n
+        >= config.floor_contact_force_threshold_n
+    )
+    exact_nonadjacent_contact_pairs = sorted(
+        initial_exact_collision_info["nonadjacent_robot_contact_pairs"]
+    )
+    exact_adjacent_unintended_contact_pairs = sorted(
+        initial_exact_collision_info["adjacent_unintended_robot_contact_pairs"]
+    )
+    filtered_scope_contact_pairs = sorted(
+        initial_exact_collision_info["filtered_scope_robot_contact_pairs"]
+    )
+    unclassified_robot_contact_pairs = sorted(
+        initial_exact_collision_info["unclassified_robot_contact_pairs"]
+    )
+    exact_cross_module_collision_passed = (
+        int(self_collision_filter_info["rigid_body_count"])
+        == int(floor_contact_sensor.num_sensors)
+        and int(self_collision_filter_info["filtered_body_pair_count"]) > 0
+        and int(self_collision_filter_info["intended_dock_filtered_body_pair_count"])
+        == len(morphology_graph.dock_edges)
+        and int(self_collision_filter_info["filtered_body_pair_count"])
+        == int(self_collision_filter_info["same_module_filtered_body_pair_count"])
+        + int(self_collision_filter_info["intended_dock_filtered_body_pair_count"])
+        and initial_exact_collision_info["method"]
+        == "isaac_physx_get_initial_collider_pairs_v1"
+        and initial_exact_collision_info["fixed_module_root_pose_invariant"] is True
+        and len(cross_module_contact_views)
+        == int(self_collision_filter_info["cross_module_pair_count"])
+        and dynamic_cross_module_contact_view_update_count
+        == executed_steps * len(cross_module_contact_views)
+        and dynamic_raw_contact_view_update_count
+        == executed_steps * len(cross_module_contact_views)
+        and dynamic_raw_contact_capacity > 0
+        and dynamic_raw_contact_observation_count == 0
+        and dynamic_raw_contact_observed_step_count == 0
+        and dynamic_raw_contact_max_force_n
+        <= config.exact_cross_module_contact_force_threshold_n
+        and dynamic_raw_contact_saturation_step_count == 0
+        and all(
+            count == 0
+            for count in dynamic_pair_raw_contact_counts.values()
+        )
+        and dynamic_cross_module_contact_max_force_n
+        <= config.exact_cross_module_contact_force_threshold_n
+        and dynamic_cross_module_contact_violation_step_count == 0
+        and not exact_nonadjacent_contact_pairs
+        and not exact_adjacent_unintended_contact_pairs
+        and not filtered_scope_contact_pairs
+        and not unclassified_robot_contact_pairs
+    )
+    settle_passed = (
+        phase_counts[TakeoffPhase.SETTLE.value] > 0
+        and settled_linear_speed <= config.settle_linear_speed_threshold_mps
+        and settled_angular_speed <= config.settle_angular_speed_threshold_rad_s
+        and settle_low_speed_steps_at_completion >= settle_dwell_steps_required
+    )
+    ramp_passed = (
+        phase_counts[TakeoffPhase.TAKEOFF_RAMP.value] > 0
+        and ramp_max_progress >= 1.0 - 2.0 * sim_dt / max(config.takeoff_ramp_duration_s, sim_dt)
+        and height_gain_ratio + 1.0e-9 >= config.min_height_gain_ratio
+    )
+    hover_passed = (
+        final_position_error <= config.position_error_threshold_m
+        and final_attitude_error <= config.attitude_error_threshold_rad
+        and final_linear_speed <= config.hover_linear_speed_threshold_mps
+        and final_angular_speed <= config.hover_angular_speed_threshold_rad_s
+        and hold_time_s + 1.0e-9 >= config.hover_hold_duration_s
+    )
+    logging_passed = (
+        len(runtime_observations) == executed_steps
+        and len(policy_commands) == executed_steps
+        and len(controller_commands) == executed_steps
+        and len(actuator_target_records) == executed_steps
+    )
+    passed = (
+        executed_steps > 0
+        and finite_state
+        and resolved_fc_body_count == module_count
+        and floor_pose_evidenced
+        and floor_contact_evidenced
+        and exact_cross_module_collision_passed
+        and settle_passed
+        and ramp_passed
+        and hover_passed
+        and max_vertical_speed <= config.max_vertical_speed_mps
+        and qp_infeasible_count == 0
+        and controller_clipped_count == 0
+        and missing_actuator_count == 0
+        and unsupported_actuator_count == 0
+        and clipped_target_count == 0
+        and application_unresolved_target_count == 0
+        and application_requested_target_count == application_applied_target_count
+        and reaction_torque_target_count > 0
+        and reaction_torque_abs_sum_nm > 0.0
+        and math.isclose(sim_dt, config.simulation_dt_s, rel_tol=0.0, abs_tol=1.0e-12)
+        and logging_passed
+    )
+    return {
+        "random_morphology_takeoff_smoke": True,
+        "random_morphology_takeoff_smoke_passed": bool(passed),
+        "random_morphology_takeoff_graph_id": morphology_graph.graph_id,
+        "random_morphology_takeoff_morphology_hash": morphology_graph.stable_hash(),
+        "random_morphology_takeoff_backend_config_hash": backend_config_hash,
+        "random_morphology_takeoff_physical_model_hash": physical_model.stable_hash(),
+        "random_morphology_takeoff_collision_geometry_hash": collision_geometry_hash,
+        "random_morphology_takeoff_module_count": module_count,
+        "random_morphology_takeoff_dock_edge_count": len(morphology_graph.dock_edges),
+        "random_morphology_takeoff_single_articulation": True,
+        "random_morphology_takeoff_assembly_representation": "reset_time_fixed_dock_tree",
+        "random_morphology_takeoff_learned_policy_used": False,
+        "random_morphology_takeoff_controller": "deterministic_qpid",
+        "random_morphology_takeoff_allocation_mode": config.allocation_mode,
+        "random_morphology_takeoff_sim_dt_s": sim_dt,
+        "random_morphology_takeoff_sim_dt_matches_config": math.isclose(
+            sim_dt, config.simulation_dt_s, rel_tol=0.0, abs_tol=1.0e-12
+        ),
+        "random_morphology_takeoff_floor_spawned": True,
+        "random_morphology_takeoff_floor_pose_evidenced": bool(floor_pose_evidenced),
+        "random_morphology_takeoff_floor_contact_evidenced": bool(
+            floor_contact_evidenced
+        ),
+        "random_morphology_takeoff_floor_contact_force_threshold_n": config.floor_contact_force_threshold_n,
+        "random_morphology_takeoff_floor_contact_max_aggregate_force_n": max_floor_contact_aggregate_force_n,
+        "random_morphology_takeoff_floor_contact_max_active_body_count": max_floor_contact_active_body_count,
+        "random_morphology_takeoff_floor_contact_dwell_time_s": floor_contact_steps_at_completion
+        * sim_dt,
+        "random_morphology_takeoff_floor_contact_dwell_required_s": config.floor_contact_dwell_duration_s,
+        "random_morphology_takeoff_contact_sensor_body_count": int(
+            floor_contact_sensor.num_sensors
+        ),
+        "random_morphology_takeoff_contact_external_collider_scope": "floor_only",
+        "random_morphology_takeoff_self_collisions_enabled": True,
+        "random_morphology_takeoff_exact_cross_module_collision_passed": bool(
+            exact_cross_module_collision_passed
+        ),
+        "random_morphology_takeoff_exact_nonadjacent_collision_passed": bool(
+            exact_cross_module_collision_passed
+        ),
+        "random_morphology_takeoff_exact_collision_rigid_body_count": int(
+            self_collision_filter_info["rigid_body_count"]
+        ),
+        "random_morphology_takeoff_exact_collision_filtered_body_pair_count": int(
+            self_collision_filter_info["filtered_body_pair_count"]
+        ),
+        "random_morphology_takeoff_exact_collision_same_module_filtered_body_pair_count": int(
+            self_collision_filter_info["same_module_filtered_body_pair_count"]
+        ),
+        "random_morphology_takeoff_exact_collision_intended_dock_body_pair_count": int(
+            self_collision_filter_info["intended_dock_filtered_body_pair_count"]
+        ),
+        "random_morphology_takeoff_exact_collision_intended_dock_body_link_pairs": [
+            list(pair)
+            for pair in self_collision_filter_info["intended_dock_body_link_pairs"]
+        ],
+        "random_morphology_takeoff_exact_collision_intended_dock_body_pairs": [
+            list(pair)
+            for pair in self_collision_filter_info["intended_dock_body_path_pairs"]
+        ],
+        "random_morphology_takeoff_exact_collision_adjacent_module_pair_count": int(
+            self_collision_filter_info["adjacent_module_pair_count"]
+        ),
+        "random_morphology_takeoff_exact_collision_nonadjacent_module_pair_count": int(
+            self_collision_filter_info["nonadjacent_module_pair_count"]
+        ),
+        "random_morphology_takeoff_exact_collision_check_method": str(
+            initial_exact_collision_info["method"]
+        ),
+        "random_morphology_takeoff_exact_collision_fixed_module_root_pose_invariant": bool(
+            initial_exact_collision_info["fixed_module_root_pose_invariant"]
+        ),
+        "random_morphology_takeoff_exact_collision_raw_pair_count": int(
+            initial_exact_collision_info["raw_pair_count"]
+        ),
+        "random_morphology_takeoff_exact_collision_robot_pair_count": int(
+            initial_exact_collision_info["robot_pair_count"]
+        ),
+        "random_morphology_takeoff_dynamic_exact_collision_check_method": "omni_physics_tensors_force_matrix_and_contact_data_v2",
+        "random_morphology_takeoff_dynamic_exact_contact_scope": "all_cross_module_except_intended_dock_body_pairs",
+        "random_morphology_takeoff_dynamic_exact_contact_view_count": len(
+            cross_module_contact_views
+        ),
+        "random_morphology_takeoff_dynamic_exact_contact_view_update_count": dynamic_cross_module_contact_view_update_count,
+        "random_morphology_takeoff_dynamic_exact_contact_force_threshold_n": config.exact_cross_module_contact_force_threshold_n,
+        "random_morphology_takeoff_dynamic_exact_contact_max_force_n": dynamic_cross_module_contact_max_force_n,
+        "random_morphology_takeoff_dynamic_exact_contact_violation_step_count": dynamic_cross_module_contact_violation_step_count,
+        "random_morphology_takeoff_dynamic_exact_pair_max_forces_n": dict(
+            sorted(dynamic_cross_module_pair_max_forces_n.items())
+        ),
+        "random_morphology_takeoff_dynamic_exact_raw_contact_method": "omni_physics_tensors_get_contact_data_v1",
+        "random_morphology_takeoff_dynamic_exact_raw_contact_max_patches_per_body_pair": config.exact_cross_module_contact_max_patches_per_body_pair,
+        "random_morphology_takeoff_dynamic_exact_raw_contact_capacity": dynamic_raw_contact_capacity,
+        "random_morphology_takeoff_dynamic_exact_raw_contact_view_update_count": dynamic_raw_contact_view_update_count,
+        "random_morphology_takeoff_dynamic_exact_raw_contact_observation_count": dynamic_raw_contact_observation_count,
+        "random_morphology_takeoff_dynamic_exact_raw_contact_observed_step_count": dynamic_raw_contact_observed_step_count,
+        "random_morphology_takeoff_dynamic_exact_raw_contact_max_force_n": dynamic_raw_contact_max_force_n,
+        "random_morphology_takeoff_dynamic_exact_raw_contact_min_separation_m": (
+            0.0
+            if dynamic_raw_contact_min_separation_m is None
+            else dynamic_raw_contact_min_separation_m
+        ),
+        "random_morphology_takeoff_dynamic_exact_raw_contact_saturation_step_count": dynamic_raw_contact_saturation_step_count,
+        "random_morphology_takeoff_dynamic_exact_raw_contact_observed": dynamic_raw_contact_observation_count
+        > 0,
+        "random_morphology_takeoff_dynamic_exact_raw_contact_buffer_saturated": dynamic_raw_contact_saturation_step_count
+        > 0,
+        "random_morphology_takeoff_dynamic_exact_pair_raw_contact_counts": dict(
+            sorted(dynamic_pair_raw_contact_counts.items())
+        ),
+        "random_morphology_takeoff_exact_nonadjacent_contact_count": len(
+            exact_nonadjacent_contact_pairs
+        ),
+        "random_morphology_takeoff_exact_nonadjacent_contact_pairs": [
+            list(pair) for pair in exact_nonadjacent_contact_pairs
+        ],
+        "random_morphology_takeoff_exact_adjacent_unintended_contact_count": len(
+            exact_adjacent_unintended_contact_pairs
+        ),
+        "random_morphology_takeoff_exact_adjacent_unintended_contact_pairs": [
+            list(pair) for pair in exact_adjacent_unintended_contact_pairs
+        ],
+        "random_morphology_takeoff_filtered_scope_contact_count": len(
+            filtered_scope_contact_pairs
+        ),
+        "random_morphology_takeoff_unclassified_robot_contact_count": len(
+            unclassified_robot_contact_pairs
+        ),
+        "random_morphology_takeoff_floor_placement": floor_placement.to_dict(),
+        "random_morphology_takeoff_initial_root_pose_world": list(floor_placement.root_pose_world),
+        "random_morphology_takeoff_initial_root_pose_actual": list(initial_root_pose_actual),
+        "random_morphology_takeoff_initial_root_position_error_m": initial_root_position_error,
+        "random_morphology_takeoff_initial_root_attitude_error_rad": initial_root_attitude_error,
+        "random_morphology_takeoff_initial_root_position_tolerance_m": config.initial_root_position_tolerance_m,
+        "random_morphology_takeoff_initial_root_attitude_tolerance_rad": config.initial_root_attitude_tolerance_rad,
+        "random_morphology_takeoff_initial_base_fc_pose_world": list(initial_base_fc_pose),
+        "random_morphology_takeoff_resolved_fc_body_count": resolved_fc_body_count,
+        "random_morphology_takeoff_settle_zero_thrust": True,
+        "random_morphology_takeoff_settle_duration_s": config.settle_duration_s,
+        "random_morphology_takeoff_settle_passed": bool(settle_passed),
+        "random_morphology_takeoff_settled_pose_world": list(settled_pose),
+        "random_morphology_takeoff_settled_linear_speed_mps": settled_linear_speed,
+        "random_morphology_takeoff_settled_angular_speed_rad_s": settled_angular_speed,
+        "random_morphology_takeoff_settle_low_speed_dwell_time_s": settle_low_speed_steps_at_completion
+        * sim_dt,
+        "random_morphology_takeoff_settle_low_speed_max_dwell_time_s": max_settle_low_speed_steps
+        * sim_dt,
+        "random_morphology_takeoff_settle_low_speed_dwell_required_s": config.settle_dwell_duration_s,
+        "random_morphology_takeoff_settle_linear_speed_threshold_mps": config.settle_linear_speed_threshold_mps,
+        "random_morphology_takeoff_settle_angular_speed_threshold_rad_s": config.settle_angular_speed_threshold_rad_s,
+        "random_morphology_takeoff_ramp_passed": bool(ramp_passed),
+        "random_morphology_takeoff_takeoff_ramp_duration_s": config.takeoff_ramp_duration_s,
+        "random_morphology_takeoff_ramp_max_progress": ramp_max_progress,
+        "random_morphology_takeoff_hover_passed": bool(hover_passed),
+        "random_morphology_takeoff_hover_height_delta_m": config.hover_height_delta_m,
+        "random_morphology_takeoff_stop_on_hover_hold": config.stop_on_hover_hold,
+        "random_morphology_takeoff_hover_target_pose_world": list(final_target),
+        "random_morphology_takeoff_final_base_fc_pose_world": list(final_base_fc_pose),
+        "random_morphology_takeoff_height_gain_m": height_gain,
+        "random_morphology_takeoff_height_gain_ratio": height_gain_ratio,
+        "random_morphology_takeoff_min_height_gain_ratio": config.min_height_gain_ratio,
+        "random_morphology_takeoff_final_position_error_m": final_position_error,
+        "random_morphology_takeoff_position_error_threshold_m": config.position_error_threshold_m,
+        "random_morphology_takeoff_final_attitude_error_rad": final_attitude_error,
+        "random_morphology_takeoff_attitude_error_threshold_rad": config.attitude_error_threshold_rad,
+        "random_morphology_takeoff_final_linear_speed_mps": final_linear_speed,
+        "random_morphology_takeoff_final_angular_speed_rad_s": final_angular_speed,
+        "random_morphology_takeoff_hover_linear_speed_threshold_mps": config.hover_linear_speed_threshold_mps,
+        "random_morphology_takeoff_hover_angular_speed_threshold_rad_s": config.hover_angular_speed_threshold_rad_s,
+        "random_morphology_takeoff_max_position_error_m": max_position_error,
+        "random_morphology_takeoff_max_attitude_error_rad": max_attitude_error,
+        "random_morphology_takeoff_hover_hold_time_s": hold_time_s,
+        "random_morphology_takeoff_hover_hold_required_s": config.hover_hold_duration_s,
+        "random_morphology_takeoff_hover_acquisition_timeout_s": config.hover_acquisition_timeout_s,
+        "random_morphology_takeoff_max_vertical_speed_mps": max_vertical_speed,
+        "random_morphology_takeoff_max_vertical_speed_threshold_mps": config.max_vertical_speed_mps,
+        "random_morphology_takeoff_finite_state": bool(finite_state),
+        "random_morphology_takeoff_qp_infeasible_count": qp_infeasible_count,
+        "random_morphology_takeoff_controller_clipped_count": controller_clipped_count,
+        "random_morphology_takeoff_missing_actuator_count": missing_actuator_count,
+        "random_morphology_takeoff_unsupported_actuator_count": unsupported_actuator_count,
+        "random_morphology_takeoff_clipped_target_count": clipped_target_count,
+        "random_morphology_takeoff_application_requested_target_count": application_requested_target_count,
+        "random_morphology_takeoff_application_applied_target_count": application_applied_target_count,
+        "random_morphology_takeoff_application_unresolved_target_count": application_unresolved_target_count,
+        "random_morphology_takeoff_reaction_torque_target_count": reaction_torque_target_count,
+        "random_morphology_takeoff_reaction_torque_abs_sum_nm": reaction_torque_abs_sum_nm,
+        "random_morphology_takeoff_steps": executed_steps,
+        "random_morphology_takeoff_requested_steps": max(0, steps),
+        "random_morphology_takeoff_duration_s": executed_steps * sim_dt,
+        "random_morphology_takeoff_phase_counts": phase_counts,
+        "random_morphology_takeoff_phase_transitions": phase_transitions,
+        "random_morphology_takeoff_runtime_observations": runtime_observations,
+        "random_morphology_takeoff_policy_commands": policy_commands,
+        "random_morphology_takeoff_controller_commands": controller_commands,
+        "random_morphology_takeoff_actuator_target_records": actuator_target_records,
+        "random_morphology_takeoff_root_pose_history": root_pose_history,
+        "random_morphology_takeoff_logging_passed": bool(logging_passed),
+        "random_morphology_takeoff_last_controller_status": last_controller_status,
+        "random_morphology_takeoff_last_bridge_metrics": last_bridge_metrics,
+        "random_morphology_takeoff_artifacts": {
+            "phase": "P4-full-order2",
+            "backend": "isaac_lab",
+            "isaac_backed": True,
+            "dry_run": False,
+            "is_p4_full_completion": False,
+            "physical_success_claim": "floor_takeoff_hover_only",
+            "object_task_claim": False,
+            "learned_policy_claim": False,
+        },
+    }
+
+
+class _TerminalKeyReader:
+    def __init__(self, stream) -> None:
+        self._stream = stream
+        self._fd: int | None = None
+        self._original_settings = None
+
+    def __enter__(self) -> "_TerminalKeyReader":
+        import termios
+        import tty
+
+        if not self._stream.isatty():
+            raise RuntimeError("terminal teleop requires stdin to be a TTY")
+        self._fd = self._stream.fileno()
+        self._original_settings = termios.tcgetattr(self._fd)
+        tty.setcbreak(self._fd)
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> None:
+        import termios
+
+        if self._fd is not None and self._original_settings is not None:
+            termios.tcsetattr(
+                self._fd,
+                termios.TCSADRAIN,
+                self._original_settings,
+            )
+
+    def read_available(self) -> list[str]:
+        import select
+
+        if self._fd is None:
+            return []
+        keys: list[str] = []
+        while select.select([self._fd], [], [], 0.0)[0]:
+            data = os.read(self._fd, 64).decode("utf-8", errors="ignore")
+            if not data:
+                break
+            data = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", data)
+            keys.extend(data)
+        return keys
+
+
+def _run_random_morphology_teleop(
+    *,
+    robot,
+    sim,
+    simulation_app,
+    sim_dt: float,
+    physical_model,
+    device: str,
+    morphology_graph,
+    floor_contact_sensor,
+    cross_module_contact_views,
+    hover_pose_world,
+    settled_pose_world,
+    takeoff_config,
+    teleop_config,
+    bridge_supported_controller_command,
+    split_fixed_module_name,
+) -> dict[str, object]:
+    """Terminal waypoint teleop using deterministic QPID/QP only."""
+
+    from amsrr.controllers.actuator_mapping import build_actuator_mapping
+    from amsrr.controllers.controller_base import ControllerContext
+    from amsrr.controllers.isaac_controller_bridge import IsaacControllerBridge
+    from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
+    from amsrr.schemas.policies import InteractionKnot, PolicyCommand
+    from amsrr.simulation.random_morphology_teleop import (
+        RANDOM_MORPHOLOGY_TELEOP_VERSION,
+        TELEOP_HELP,
+        RandomMorphologyTeleopTarget,
+        format_teleop_pose,
+    )
+
+    teleop_config.validate()
+    if floor_contact_sensor is None:
+        raise RuntimeError("random morphology teleop requires the takeoff contact sensor")
+    if not isinstance(cross_module_contact_views, list):
+        raise RuntimeError("random morphology teleop requires cross-module contact views")
+
+    target = RandomMorphologyTeleopTarget.from_hover_pose(
+        hover_pose_world,
+        settled_height_m=float(settled_pose_world[2]),
+        config=teleop_config,
+    )
+    actuator_mapping = build_actuator_mapping(morphology_graph, physical_model)
+    controller = QPIDController(
+        config=QPIDControllerConfig(
+            allocation_mode=takeoff_config.allocation_mode,
+            control_dt_s=takeoff_config.simulation_dt_s,
+        )
+    )
+    bridge = IsaacControllerBridge()
+    previous_command = None
+    step_count = 0
+    command_count = 0
+    qp_infeasible_count = 0
+    clipped_count = 0
+    unresolved_target_count = 0
+    raw_contact_count = 0
+    raw_contact_saturation_count = 0
+    safety_failure: str | None = None
+    quit_reason = "window_closed"
+    module_count = len(morphology_graph.modules)
+    current_floor_contact = _contact_sensor_measurement(
+        floor_contact_sensor,
+        force_threshold_n=takeoff_config.floor_contact_force_threshold_n,
+    )
+
+    print("\nTakeoff/hover passed. Terminal teleop is active.", flush=True)
+    print(TELEOP_HELP, flush=True)
+    print(f"target: {format_teleop_pose(target.target_pose_world)}", flush=True)
+
+    with _TerminalKeyReader(sys.stdin) as key_reader:
+        while simulation_app.is_running():
+            base_pose = _module_body_pose(robot, module_id=0, local_body_name="fc")
+            base_twist = _module_body_twist(robot, module_id=0, local_body_name="fc")
+            if base_pose is None:
+                base_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
+            if base_twist is None:
+                base_twist = _tensor_row(
+                    robot.data.root_lin_vel_w.torch
+                ) + _tensor_row(robot.data.root_ang_vel_w.torch)
+
+            quit_requested = False
+            for key in key_reader.read_available():
+                update = target.apply_key(key, current_pose_world=base_pose)
+                if not update.recognized:
+                    continue
+                if update.print_help:
+                    print(TELEOP_HELP, flush=True)
+                elif update.print_pose:
+                    print(
+                        f"target: {format_teleop_pose(update.target_pose_world)}",
+                        flush=True,
+                    )
+                elif update.quit_requested:
+                    quit_requested = True
+                    quit_reason = "user_quit"
+                else:
+                    command_count += 1
+                    print(
+                        f"[{update.action}] "
+                        f"{format_teleop_pose(update.target_pose_world)}",
+                        flush=True,
+                    )
+            if quit_requested:
+                break
+
+            time_s = step_count * sim_dt
+            observation = _build_articulated_runtime_observation(
+                morphology_graph,
+                time_s=time_s,
+                robot=robot,
+                root_pose_world=base_pose,
+                root_twist_world=base_twist,
+                joint_names=robot.joint_names,
+                joint_positions_tensor=robot.data.joint_pos.torch,
+                joint_velocities_tensor=robot.data.joint_vel.torch,
+                module_count=module_count,
+                split_fixed_module_name=split_fixed_module_name,
+            )
+            observation.contact_states = _floor_contact_runtime_states(
+                current_floor_contact,
+                morphology_graph_id=morphology_graph.graph_id,
+            )
+            policy_command = PolicyCommand(
+                desired_body_pose=target.target_pose_world,
+                desired_body_twist=[0.0] * 6,
+            )
+            controller_command = controller.compute(
+                ControllerContext(
+                    runtime_observation=observation,
+                    morphology_graph=morphology_graph,
+                    physical_model=physical_model,
+                    active_knot=InteractionKnot(
+                        t_rel_s=time_s,
+                        contact_assignments=[],
+                    ),
+                    policy_command=policy_command,
+                    previous_command=previous_command,
+                    control_dt_s=takeoff_config.simulation_dt_s,
+                )
+            )
+            bridged_command = bridge_supported_controller_command(controller_command)
+            if not bridged_command.controller_status.qp_feasible:
+                qp_infeasible_count += 1
+                safety_failure = "controller_qp_infeasible"
+                break
+            if bridged_command.controller_status.metrics.get("clipped", 0.0) > 0.0:
+                clipped_count += 1
+                safety_failure = "controller_command_clipped"
+                break
+            actuator_record = bridge.convert(
+                bridged_command,
+                actuator_mapping,
+                time_s=time_s,
+                command_index=step_count,
+            )
+            if (
+                actuator_record.clipped_targets
+                or actuator_record.missing_actuators
+                or actuator_record.unsupported_actuators
+            ):
+                clipped_count += len(actuator_record.clipped_targets)
+                safety_failure = "actuator_bridge_target_failure"
+                break
+            application = _apply_actuator_record(
+                robot,
+                actuator_record,
+                physical_model,
+                device,
+            )
+            unresolved_target_count += int(application["unresolved_target_count"])
+            if int(application["unresolved_target_count"]) > 0:
+                safety_failure = "unresolved_actuator_target"
+                break
+
+            robot.write_data_to_sim()
+            sim.step()
+            contact_measurement = _measure_cross_module_contact_views(
+                cross_module_contact_views,
+                sim_dt=sim_dt,
+            )
+            raw_contact_count += int(contact_measurement["raw_contact_count"])
+            if bool(contact_measurement["raw_contact_saturated"]):
+                raw_contact_saturation_count += 1
+                safety_failure = "raw_contact_buffer_saturated"
+                break
+            if int(contact_measurement["raw_contact_count"]) > 0:
+                safety_failure = "unintended_cross_module_contact"
+                break
+            robot.update(sim_dt)
+            floor_contact_sensor.update(sim_dt, force_recompute=True)
+            current_floor_contact = _contact_sensor_measurement(
+                floor_contact_sensor,
+                force_threshold_n=takeoff_config.floor_contact_force_threshold_n,
+            )
+            previous_command = bridged_command
+            step_count += 1
+            time.sleep(max(0.0, sim_dt))
+
+    if safety_failure is not None:
+        quit_reason = safety_failure
+        print(f"Teleop stopped by safety gate: {safety_failure}", flush=True)
+    else:
+        print(f"Teleop finished: {quit_reason}", flush=True)
+    return {
+        "random_morphology_teleop": True,
+        "random_morphology_teleop_version": RANDOM_MORPHOLOGY_TELEOP_VERSION,
+        "random_morphology_teleop_passed": safety_failure is None,
+        "random_morphology_teleop_no_learning": True,
+        "random_morphology_teleop_quit_reason": quit_reason,
+        "random_morphology_teleop_steps": step_count,
+        "random_morphology_teleop_command_count": command_count,
+        "random_morphology_teleop_qp_infeasible_count": qp_infeasible_count,
+        "random_morphology_teleop_clipped_count": clipped_count,
+        "random_morphology_teleop_unresolved_target_count": unresolved_target_count,
+        "random_morphology_teleop_raw_contact_count": raw_contact_count,
+        "random_morphology_teleop_raw_contact_saturation_count": raw_contact_saturation_count,
+        "random_morphology_teleop_final_target_pose_world": list(
+            target.target_pose_world
+        ),
+        "random_morphology_teleop_config": teleop_config.to_dict(),
     }
 
 
@@ -3408,6 +5262,73 @@ def _position_error_norm(position: list[float], target: tuple[float, float, floa
     return sum((float(position[idx]) - float(target[idx])) ** 2 for idx in range(3)) ** 0.5
 
 
+def _vector_norm(values) -> float:
+    return sum(float(value) ** 2 for value in values) ** 0.5
+
+
+def _contact_sensor_measurement(contact_sensor, *, force_threshold_n: float) -> dict[str, object]:
+    """Return aggregate external-contact evidence from an Isaac Lab sensor."""
+
+    force_tensor = contact_sensor.data.net_forces_w.torch
+    if force_tensor is None or force_tensor.numel() == 0:
+        return {
+            "active": False,
+            "aggregate_force_n": 0.0,
+            "max_body_force_n": 0.0,
+            "active_body_count": 0,
+            "net_force_world": [0.0, 0.0, 0.0],
+        }
+    body_forces = force_tensor[0]
+    body_force_norms = body_forces.norm(dim=-1)
+    aggregate_force_n = float(body_force_norms.sum().detach().cpu())
+    max_body_force_n = float(body_force_norms.max().detach().cpu())
+    active_body_count = int(
+        (body_force_norms >= float(force_threshold_n)).sum().detach().cpu()
+    )
+    net_force_world = [
+        float(value)
+        for value in body_forces.sum(dim=0).detach().cpu().tolist()
+    ]
+    return {
+        "active": aggregate_force_n >= float(force_threshold_n),
+        "aggregate_force_n": aggregate_force_n,
+        "max_body_force_n": max_body_force_n,
+        "active_body_count": active_body_count,
+        "net_force_world": net_force_world,
+    }
+
+
+def _floor_contact_runtime_states(
+    measurement: dict[str, object],
+    *,
+    morphology_graph_id: str,
+):
+    """Translate measured floor contact into the typed runtime-observation schema."""
+
+    if not bool(measurement["active"]):
+        return []
+    from amsrr.schemas.runtime import ContactState
+
+    force = [float(value) for value in measurement["net_force_world"]]
+    return [
+        ContactState(
+            contact_id="isaac:holon-floor",
+            entity_a=f"morphology:{morphology_graph_id}",
+            entity_b="floor:/World/defaultGroundPlane",
+            normal_world=(0.0, 0.0, 1.0),
+            wrench_world=[force[0], force[1], force[2], 0.0, 0.0, 0.0],
+            active=True,
+            metadata={
+                "source": "isaac_lab_contact_sensor",
+                "external_collider_scope": "floor_only",
+                "aggregate_force_n": float(measurement["aggregate_force_n"]),
+                "max_body_force_n": float(measurement["max_body_force_n"]),
+                "active_body_count": int(measurement["active_body_count"]),
+            },
+        )
+    ]
+
+
 def _quat_error_norm(current_xyzw: list[float], target_xyzw: tuple[float, float, float, float]) -> float:
     cx, cy, cz, cw = _normalize_quat(tuple(float(value) for value in current_xyzw))
     tx, ty, tz, tw = _normalize_quat(target_xyzw)
@@ -3474,14 +5395,17 @@ def _is_finite(value: float) -> bool:
     return math.isfinite(value)
 
 
-def _apply_actuator_record(robot, actuator_record, physical_model, device: str) -> None:
+def _apply_actuator_record(robot, actuator_record, physical_model, device: str) -> dict[str, object]:
     import torch
 
     rotors_by_id = {rotor.rotor_id: rotor for rotor in physical_model.rotors}
     force_body_ids: list[int] = []
     force_rows: list[list[float]] = []
+    torque_rows: list[list[float]] = []
     joint_ids: list[int] = []
     joint_targets: list[float] = []
+    unresolved_targets: list[str] = []
+    reaction_torque_abs_sum_nm = 0.0
 
     for target in actuator_record.actuator_targets:
         local_id = str(target.metadata.get("local_id", target.command_key))
@@ -3490,19 +5414,31 @@ def _apply_actuator_record(robot, actuator_record, physical_model, device: str) 
             rotor = rotors_by_id.get(local_id)
             body_name = _resolve_module_name(robot.body_names, module_id, local_id)
             if rotor is None or body_name is None:
+                unresolved_targets.append(target.command_key)
                 continue
             force_body_ids.append(robot.body_names.index(body_name))
             force_rows.append([float(axis) * target.target_value for axis in rotor.thrust_axis_local])
+            reaction_torque = [
+                float(axis)
+                * float(rotor.reaction_torque_coeff_nm_per_n)
+                * float(target.target_value)
+                for axis in rotor.thrust_axis_local
+            ]
+            torque_rows.append(reaction_torque)
+            reaction_torque_abs_sum_nm += _vector_norm(reaction_torque)
         elif target.actuator_type in {"vectoring_joint_position", "dock_joint_position"}:
             joint_name = _resolve_module_name(robot.joint_names, module_id, local_id)
             if joint_name is None:
+                unresolved_targets.append(target.command_key)
                 continue
             joint_ids.append(robot.joint_names.index(joint_name))
             joint_targets.append(target.target_value)
+        else:
+            unresolved_targets.append(target.command_key)
 
     if force_body_ids:
         forces = torch.tensor([force_rows], dtype=torch.float32, device=device)
-        torques = torch.zeros_like(forces)
+        torques = torch.tensor([torque_rows], dtype=torch.float32, device=device)
         body_ids = torch.tensor(force_body_ids, dtype=torch.int32, device=device)
         robot.permanent_wrench_composer.set_forces_and_torques_index(
             forces=forces,
@@ -3514,6 +5450,17 @@ def _apply_actuator_record(robot, actuator_record, physical_model, device: str) 
         target_tensor = torch.tensor([joint_targets], dtype=torch.float32, device=device)
         joint_ids_tensor = torch.tensor(joint_ids, dtype=torch.int32, device=device)
         robot.set_joint_position_target_index(target=target_tensor, joint_ids=joint_ids_tensor)
+    applied_target_count = len(force_body_ids) + len(joint_ids)
+    return {
+        "requested_target_count": len(actuator_record.actuator_targets),
+        "applied_target_count": applied_target_count,
+        "applied_rotor_target_count": len(force_body_ids),
+        "applied_joint_target_count": len(joint_ids),
+        "unresolved_target_count": len(unresolved_targets),
+        "unresolved_targets": sorted(unresolved_targets),
+        "reaction_torque_target_count": len(torque_rows),
+        "reaction_torque_abs_sum_nm": reaction_torque_abs_sum_nm,
+    }
 
 
 def _resolve_module_name(names: list[str], module_id: int, local_id: str) -> str | None:

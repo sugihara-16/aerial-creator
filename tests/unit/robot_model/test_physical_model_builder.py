@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from amsrr.geometry.pose_math import FACE_TO_FACE_DOCK_RELATION, compose_pose, dock_module_relative_pose
@@ -16,7 +18,9 @@ def test_physical_model_total_mass_positive() -> None:
     assert physical_model.urdf_path.endswith("assets/robots/holon/holon.urdf")
     assert len(physical_model.links) == 29
     assert len(physical_model.joints) == 28
-    assert physical_model.aggregate_mass_kg > 0.0
+    assert physical_model.aggregate_mass_kg == math.fsum(
+        link.mass_kg for link in physical_model.links
+    )
     assert physical_model.metadata["frame_tree_valid"] is True
     assert physical_model.metadata["root_links"] == ["root"]
 
