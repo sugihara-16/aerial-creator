@@ -3,6 +3,40 @@
 ## Global Worklog
 
 ### 2026-07-10
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4, especially Sections 22.3-22.4, 24.5.5, 26.10, and implementation-order items 25-26
+- Work package / Agent label: Agent K P4.3 minimum learning bootstrap, Agent J learned `pi_L` Isaac injection boundary, Agent L P4.3 artifact/acceptance audit
+- Summary: Completed the ordered P4.3a-d minimum learning bootstrap without starting joint RL. Added task-disjoint real-Isaac datasets and reward alignment, trained bounded `pi_L`, teacher-imitation `pi_H`, and outcome-conditioned `pi_D`, ran one checkpoint-bound online `pi_L` Isaac rollout, and wrote a fail-closed acceptance/summary archive. Deterministic `pi_D`/`pi_H`/`pi_L` fallbacks, `FeasibilityChecker`, controller/QP, and actuator ownership remain intact. This is P4.3 minimum completion only, not P4 full completion.
+- Files changed:
+  - `amsrr/schemas/datasets.py`, `amsrr/schemas/__init__.py`
+  - `amsrr/training/p4_2_deterministic_rollout_runner.py`, `p4_3_reward.py`, `p4_3_rollout_runner.py`, `p4_3_dataset_builder.py`, `p4_3_pi_l_training.py`, `p4_3_pi_h_training.py`, `p4_3_pi_d_training.py`, `p4_3_learning_archive.py`
+  - `amsrr/policies/learned_low_level_policy.py`, `contact_candidate_encoder.py`, `learned_high_level_policy.py`, `learned_design_selector.py`
+  - `amsrr/simulation/isaac_lab_backend.py`, `amsrr/simulation/p4_2_isaac_env.py`
+  - `amsrr/acceptance/p4_3_acceptance.py`, `amsrr/acceptance/__init__.py`
+  - `configs/training/p4_3_learning_bootstrap.yaml`
+  - `scripts/p4_3_collect_dataset.py`, `p4_3_build_dataset.py`, `p4_3_learning_bootstrap.py`, `p4_control_holon_spawn_probe.py`
+  - P4.3 schema/policy/training/acceptance tests and the P4.2 environment propagation test
+  - `for_codex/AMSRR_design_modification_by_codex.md`, `for_codex/WORKLOG.md`
+- Schema/interface changes: Added the additive `p4_3_dataset_v1` schemas (`StageDecisionMasks`, low-level, interaction-trajectory, design-outcome records, shards, and manifest). Existing persisted schemas are unchanged. The existing P4.2 environment/backend/probe interface gains optional learned-`pi_L` checkpoint and runtime blend inputs; behavior is unchanged when no checkpoint is supplied.
+- Upstream dependencies used: P2/P2.5 deterministic candidate generation and scorer checkpoint, deterministic `FeasibilityChecker`, P3 assembled morphology, P4.2 `ContactCandidateSet` / deterministic trajectory / kinematic payload-coupled real Isaac rollout, `BaselineLowLevelPolicy`, controller/QP, actuator bridge, EpisodeArchive hashing/provenance, and TaskSpec full-goal tolerances.
+- Dataset/reward result: Collected 24 real-Isaac rollouts from six seeds and four hard-feasible designs per task. P4.2 bounded-carry outcomes were 17 pass / 7 fail and all outcomes were retained. Task split is 4 train / 1 validation / 1 held-out. Final shards contain 24 rollout, 24 interaction-trajectory, 24 design-outcome, and 4,486 low-level records at effective 50 Hz. Reward uses `obs[i] -> obs[i+1]` with `command[i]`; terminal belongs to `N-2`, final command state terms are unavailable, and stride aggregation preserves the full 200 Hz return.
+- Learning result: `pi_L` final train/validation normalized MSE is 0.0009354 / 0.0027732 with zero clipped and zero unrepresentable target values. Its manifest-held-out real-Isaac gate passed with 680 learned non-zero subset overlays, blend 0.10, fallback 0, max overlay norm 0.10750, and zero drop/collision/controller-QP terminal. `pi_H` validation exact selection, schema, and assignment-feasible rates are 1.0 with fallback rate 0; evaluation remains offline teacher decode. `pi_D` used the compatible P2.5 initializer, has 20 train / 5 validation within-task ranking pairs, and validation pairwise ranking accuracy 0.8; evaluation remains offline held-out outcome regression.
+- Acceptance/artifacts: Final report has `dataset_passed`, `pi_l_passed`, `pi_h_passed`, `pi_d_passed`, deterministic fallbacks, no-mislabeling, and `completion_passed` all true for 24 source episodes. The gate binds all shard hashes/counts/splits/masks, head-specific checkpoint/config/dataset metadata, and a held-out online checkpoint/archive. It recomputes command-level non-learned-field/orientation preservation, active-knot guards, and overlay norms from pre/post evidence and rejects P4-full/natural-contact claims. The P4.3-only summary removes copied step logs, fixes task/metric phase metadata, and post-validates its hashes/flags. Local ignored artifacts are under `artifacts/p4_3/`, including `p4_3_minimum_learning_summary.jsonl`.
+- Commands run:
+  - `/home/leus/.local/bin/micromamba run -n isaaclab3 python scripts/p4_3_collect_dataset.py --real` (first two candidates per task)
+  - `/home/leus/.local/bin/micromamba run -n isaaclab3 python scripts/p4_3_collect_dataset.py --real --candidate-offset 2 --candidates-per-task 2 --archive-path artifacts/p4_3/rollouts/deterministic_isaac_extra.jsonl`
+  - `PYTHONPATH=. python scripts/p4_3_build_dataset.py artifacts/p4_3/rollouts/deterministic_isaac.jsonl artifacts/p4_3/rollouts/deterministic_isaac_extra.jsonl`
+  - `PYTHONPATH=. python scripts/p4_3_learning_bootstrap.py`
+  - `/home/leus/.local/bin/micromamba run -n isaaclab3 python scripts/p4_3_collect_dataset.py --real --task-start-index 4 --task-count 1 --candidates-per-task 1 --archive-path artifacts/p4_3/pi_l/online_rollout_archive.jsonl --pi-l-checkpoint artifacts/p4_3/pi_l/checkpoint.pt`
+  - `PYTHONPATH=. python scripts/p4_3_learning_bootstrap.py --acceptance-only`
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=. pytest -q` for the 94-test P4.2/P4.3 focused set
+  - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=. pytest -qq tests/unit tests/acceptance`
+  - `python -m py_compile ...`, `git diff --check`
+- Tests run: Focused P4.2/P4.3 regression passed: 94 passed. Full unit/acceptance suite passed: 259 passed, 1 skipped (260 collected). Real Isaac dataset collection, learned `pi_L` online rollout, final acceptance, and summary archive creation all exited 0.
+- Assumptions: `ModuleCapabilityToken` fields are the minimum serialized PhysicalModel summary for `pi_L`. The minimum `pi_H` ranker learns candidate/group tokens while envelope/morphology/runtime/cache stay runtime/decode/safety context. The `pi_L` deployment trust region is 0.10 and changes only twist, body-position, and residual-wrench intent; the P4.2 controller knot and non-learned command fields are preserved.
+- Blockers / open questions: None for the bounded P4.3a-d minimum run. Production learned-policy quality is not established; `pi_H` and `pi_D` are not online-deployed, and the minimum `pi_H` candidate-head top-k recall is 0.0 even though its learned group branch decodes the exact feasible teacher assignments. Natural contact, slip/friction quality, full TaskSpec delivery, and P4 full completion remain unproven.
+- Next steps: Commit/review P4.3a-d. Then treat P4.3e joint fine-tuning as a separate later work package, run P4.4 natural-contact validation, and only then evaluate P4 full acceptance.
+
+### 2026-07-10
 - Spec version: A-MSRR_codex_ready_spec_v0_4_ja.md v0.4 plus approved P4.2 payload-coupled deterministic rollout clarification
 - Work package / Agent label: Agent J/K/L boundary: P4.2 GUI observation launcher
 - Summary: Added a hand-executable Kit viewer launcher for the existing real P4.2 deterministic rollout. The P4.2 parent CLI now forwards optional viewer, real-time playback, and post-rollout hold settings through the environment/backend command boundary to the existing Isaac probe; the default headless acceptance path is unchanged.
@@ -2548,6 +2582,42 @@
 ---
 
 ## Work Package Logs
+
+### Agent J: P4.3 learned pi_L Isaac execution boundary
+
+#### 2026-07-10
+- Scope: Add an optional learned low-level policy to the existing P4.2 Isaac path without changing controller/QP/actuator ownership or the default deterministic rollout.
+- Files changed: `amsrr/simulation/isaac_lab_backend.py`, `amsrr/simulation/p4_2_isaac_env.py`, `scripts/p4_control_holon_spawn_probe.py`, `amsrr/policies/learned_low_level_policy.py`, and related tests.
+- Upstream dependencies: P4.2 graph-specific probe, dynamic controller knot, deterministic P4.2 `PolicyCommand`, `BaselineLowLevelPolicy`, QPID controller, and actuator bridge.
+- Implemented: Checkpoint loading with load-failure fallback; source-trajectory feature context; learned twist/body-position/residual subset overlay; preservation of the P4.2 controller knot and all non-learned command fields; configurable 0.10 trust-region blend; per-step learned/fallback/non-zero-overlay metrics.
+- Not implemented: Learned actuator commands, learned QP/safety replacement, online `pi_H`/`pi_D`, or natural-contact control.
+- Schema/interface changes: Optional P4.2 checkpoint/blend arguments only; default P4.2 behavior remains deterministic.
+- Tests passed: Included in the 94 focused and 259-pass full suites. Final held-out real-Isaac learned rollout passed with 680 non-zero learned overlays and zero safety terminals.
+- Handoff notes: Acceptance binds the checkpoint and online archive hashes and cross-checks episode-level metrics. Keep the command-field and controller-knot separation in future fine-tuning.
+
+### Agent K: P4.3 minimum learning bootstrap and artifacts
+
+#### 2026-07-10
+- Scope: Implement v0.4 P4.3a-d in order: datasets/reward, `pi_L`, `pi_H`, then outcome-conditioned `pi_D`.
+- Files changed: P4.3 schemas, reward/dataset/runner/training/archive modules, learned policy modules, training config/CLIs, and nearby tests listed in the Global Worklog.
+- Upstream dependencies: P2/P2.5 candidates/checkpoint, hard feasibility, P3 morphology, P4.2 deterministic real-Isaac archives, contact/trajectory schemas, controller status, and TaskSpec goal semantics.
+- Implemented: 24-episode task-disjoint real-Isaac dataset; causal reward and return-preserving stride; bounded `pi_L` checkpoint/metrics/reward curve; `pi_H` teacher imitation and feasible decode; P2-initialized `pi_D` outcome regression/ranking; hashes/fallback metadata; acceptance-gated summary archive.
+- Not implemented: P4.3e joint fine-tuning, RL, production learned-policy claim, online `pi_H`/`pi_D`, natural-contact grasp, or P4 full completion.
+- Schema/interface changes: Additive `p4_3_dataset_v1`; no breaking upstream schema change.
+- Tests passed: 94 focused; full suite 259 passed / 1 skipped; all real Isaac and final artifact commands exited 0.
+- Handoff notes: Preserve task-disjoint splits and within-task candidate outcomes. Do not collapse P4.2 bounded carry into full TaskSpec success.
+
+### Agent L: P4.3 artifact completeness and no-mislabeling gate
+
+#### 2026-07-10
+- Scope: Fail closed unless real data, meaningful head-specific training evidence, deterministic fallbacks, and checkpoint-bound online `pi_L` safety evidence are all present.
+- Files changed: `amsrr/acceptance/p4_3_acceptance.py`, `amsrr/acceptance/__init__.py`, `tests/acceptance/test_p4_3_acceptance.py`, and summary-archive integration.
+- Upstream dependencies: `P4_3DatasetManifest`, P4.3 head checkpoint contracts, hashes, online EpisodeArchive fields, fallback metadata, and no-mislabeling flags.
+- Implemented: Dataset shard hash/count/split/mask/provenance checks; head-specific checkpoint metadata/config hashes; `pi_H` zero-fallback decode gate; `pi_D` within-task/validation ranking gate; held-out online `pi_L` archive/checkpoint/aggregate/safety cross-check; command-level overlay/knot recomputation; sanitized self-validating acceptance-only summary creation.
+- Not implemented: P4 full acceptance or natural-contact success acceptance.
+- Schema/interface changes: No persisted schema change; new P4.3 report type only.
+- Tests passed: Acceptance positive and negative/tamper cases are included in the 94 focused and full 259-pass suites. Final report has no failures.
+- Handoff notes: A file-presence-only gate is insufficient. Future learned heads must add equivalent online evidence before their deployment flags can become true.
 
 ### P4.2 Implementation: Isaac Deterministic Grasp-Carry Rollout
 
