@@ -2,6 +2,19 @@
 
 This file records implementation-time supplements or deviations from `A-MSRR_codex_ready_spec_v0_4_ja.md`.
 
+## 2026-07-11
+
+### P4 Full Order 0 Joint Actuator Performance Supplement
+
+- Context: Before randomized morphology takeoff/hover and later P4 full work, vectoring and dock joint performance values must reflect the installed actuators instead of the previous generic `6.6 Nm / 3 rad/s` limits and hard-coded Isaac drive gains.
+- Motor identity decision: Resolve the user-reported DYNAMIXEL `SC330-T181` to the official ROBOTIS model `XC330-T181-T`; ROBOTIS publishes no `SC330-T181` model. Use CubeMars `AK40-10 KV170` for all dock mechanism joints.
+- Limit decision: Keep the mechanism-derived position bounds unchanged. Set vectoring URDF effort/velocity hard limits to the XC330-T181-T 11.1 V stall torque and no-load speed (`0.76 Nm`, `10.890854 rad/s`). Set dock URDF hard limits to the AK40-10 manufacturer peak torque and no-load speed (`4.1 Nm`, `45.553093 rad/s`). These peak/no-load limits are not continuous operating targets.
+- Continuous-operation decision: Store vectoring continuous torque as the ROBOTIS US conservative estimate `0.152 Nm` (20% of 11.1 V stall torque), explicitly marked as an estimate because ROBOTIS does not publish a continuous rating. Store AK40-10 manufacturer rated torque/speed as `1.3 Nm` and `38.746309 rad/s`. Store protocol limits separately and cap safety at manufacturer peak torque rather than the AK MIT packet range.
+- Config decision: Add `configs/robot/joint_actuators.yaml` as the joint actuator performance/config provenance source. The runtime URDF remains the source for mechanism axis/position and hard effort/velocity limits. `robot_model.yaml` references the actuator config; `PhysicalModel` metadata records the config hash, actuator assignments, full specifications, and per-dock mechanical metadata.
+- Isaac decision: Preserve the previously validated `20.0` stiffness, `1.0` damping, and `3.0 rad/s` safe motion limit as simulation/control tuning, explicitly not manufacturer specifications. The Isaac probe reads stiffness/damping from the joint actuator config unless CLI overrides are supplied.
+- Compatibility impact: No persisted base schema change. `PhysicalModel.metadata`, `DockPortSpec.mechanical_limits`, and actuator-channel metadata receive additive actuator provenance/performance fields. Existing mechanism position limits and rotor thrust configuration are unchanged.
+- Scope boundary: This completes P4 full Order 0 only. Random morphology generation, floor takeoff/hover, policy training, assembly control bridge, dynamic constraints, contact smoke, and full TaskSpec delivery are not started.
+
 ## 2026-07-10
 
 ### P4.3 Minimum Isaac Learning Bootstrap Supplement

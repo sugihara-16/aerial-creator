@@ -38,10 +38,10 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--gimbal-target-rad", type=float, default=0.0, help="Position target for gimbal joints.")
     parser.add_argument("--gimbal-tolerance-rad", type=float, default=0.02, help="Probe pass tolerance for gimbal joints.")
-    parser.add_argument("--gimbal-stiffness", type=float, default=20.0, help="Implicit actuator stiffness.")
-    parser.add_argument("--gimbal-damping", type=float, default=1.0, help="Implicit actuator damping.")
-    parser.add_argument("--dock-stiffness", type=float, default=20.0, help="Implicit dock mechanism hold stiffness.")
-    parser.add_argument("--dock-damping", type=float, default=1.0, help="Implicit dock mechanism hold damping.")
+    parser.add_argument("--gimbal-stiffness", type=float, default=None, help="Override configured vectoring drive stiffness.")
+    parser.add_argument("--gimbal-damping", type=float, default=None, help="Override configured vectoring drive damping.")
+    parser.add_argument("--dock-stiffness", type=float, default=None, help="Override configured dock drive stiffness.")
+    parser.add_argument("--dock-damping", type=float, default=None, help="Override configured dock drive damping.")
     parser.add_argument(
         "--controller-command-smoke",
         action="store_true",
@@ -324,6 +324,22 @@ def _read_optional_text(path: str | None) -> str | None:
     return Path(path).read_text(encoding="utf-8")
 
 
+def _joint_drive_parameter(
+    physical_model,
+    role: str,
+    key: str,
+    override: float | None,
+    fallback: float,
+) -> float:
+    if override is not None:
+        return float(override)
+    specs = physical_model.metadata.get("joint_actuator_specs", {})
+    spec = specs.get(role, {}) if isinstance(specs, dict) else {}
+    drive = spec.get("simulation_drive", {}) if isinstance(spec, dict) else {}
+    value = drive.get(key) if isinstance(drive, dict) else None
+    return float(value) if isinstance(value, (int, float)) else float(fallback)
+
+
 def run_probe(args: argparse.Namespace) -> dict[str, object]:
     import isaaclab.sim as sim_utils
     from isaaclab.actuators import ImplicitActuatorCfg
@@ -360,6 +376,10 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     backend_config = load_isaac_lab_backend_config(args.config)
     backend = IsaacLabBackend(backend_config)
     physical_model = build_physical_model_from_config(backend_config.robot_model_config_path)
+    gimbal_stiffness = _joint_drive_parameter(physical_model, "vectoring", "stiffness", args.gimbal_stiffness, 20.0)
+    gimbal_damping = _joint_drive_parameter(physical_model, "vectoring", "damping", args.gimbal_damping, 1.0)
+    dock_stiffness = _joint_drive_parameter(physical_model, "dock", "stiffness", args.dock_stiffness, 20.0)
+    dock_damping = _joint_drive_parameter(physical_model, "dock", "damping", args.dock_damping, 1.0)
     urdf_path = _expand_path(backend_config.holon_urdf_path)
     usd_dir = _expand_path(args.generated_usd_dir or backend_config.generated_usd_dir)
     usd_path = _expand_path(args.generated_usd_path or backend_config.generated_usd_path)
@@ -470,8 +490,8 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             force_usd_conversion=True,
             joint_drive=UrdfConverterCfg.JointDriveCfg(
                 gains=UrdfConverterCfg.JointDriveCfg.PDGainsCfg(
-                    stiffness=100.0,
-                    damping=1.0,
+                    stiffness=gimbal_stiffness,
+                    damping=gimbal_damping,
                 ),
                 target_type="position",
             ),
@@ -522,13 +542,13 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         actuators={
             "gimbal_joints": ImplicitActuatorCfg(
                 joint_names_expr=[".*gimbal.*"],
-                stiffness=args.gimbal_stiffness,
-                damping=args.gimbal_damping,
+                stiffness=gimbal_stiffness,
+                damping=gimbal_damping,
             ),
             "dock_joints": ImplicitActuatorCfg(
                 joint_names_expr=[".*dock_mech.*"],
-                stiffness=args.dock_stiffness,
-                damping=args.dock_damping,
+                stiffness=dock_stiffness,
+                damping=dock_damping,
             ),
             "rotor_spinner_joints": ImplicitActuatorCfg(
                 joint_names_expr=[".*rotor.*"],
@@ -869,6 +889,10 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         "total_commanded_force_n": force_per_rotor_n * len(thrust_body_ids),
         "gimbal_target_rad": float(args.gimbal_target_rad),
         "gimbal_tolerance_rad": float(args.gimbal_tolerance_rad),
+        "gimbal_drive_stiffness": gimbal_stiffness,
+        "gimbal_drive_damping": gimbal_damping,
+        "dock_drive_stiffness": dock_stiffness,
+        "dock_drive_damping": dock_damping,
         "gimbal_target_error_rad": gimbal_target_error_rad,
         "gimbal_joint_pos": gimbal_joint_pos,
         "gimbal_joint_pos_target": gimbal_joint_pos_target,

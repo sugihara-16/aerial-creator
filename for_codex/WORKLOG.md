@@ -2,6 +2,24 @@
 
 ## Global Worklog
 
+### 2026-07-11
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus approved P4 full Order 0 joint-actuator performance clarification
+- Work package / Agent label: Agent B/I/J boundary: P4 full Order 0 joint actuator model and Isaac drive configuration
+- Summary: Completed Order 0 only. Replaced generic vectoring/dock URDF performance limits with installed-motor values, added a validated joint actuator performance config with official-source provenance, integrated it into PhysicalModel and actuator-channel metadata, and made the Isaac probe consume configured drive gains by default. No random morphology, takeoff/hover, learning, assembly bridge, dynamic docking, natural contact, or P4 full rollout work was started.
+- Motor identity and limits: Resolved user-reported DYNAMIXEL `SC330-T181` to official `XC330-T181-T`. Vectoring hard limits are `0.76 Nm` and `10.890854 rad/s` at the recommended 11.1 V operating point; its `0.152 Nm` continuous value is explicitly a conservative ROBOTIS US estimate, not a published continuous rating. Dock joints use CubeMars AK40-10 KV170 rated `1.3 Nm / 38.746309 rad/s`, peak `4.1 Nm`, and no-load `45.553093 rad/s`; the MIT protocol `5.0 Nm` range is recorded but not used as the safety hard limit.
+- Files changed:
+  - `configs/robot/joint_actuators.yaml`, `configs/robot/robot_model.yaml`
+  - `module_urdf/holon.urdf.xacro`, `assets/robots/holon/holon.urdf`, `module_urdf/README_for_codex.md`
+  - `amsrr/robot_model/joint_actuator_model.py`, `amsrr/robot_model/physical_model_builder.py`
+  - `amsrr/controllers/actuator_mapping.py`, `scripts/p4_control_holon_spawn_probe.py`
+  - joint actuator, PhysicalModel, and actuator mapping unit tests
+  - `for_codex/AMSRR_design_modification_by_codex.md`, `for_codex/WORKLOG.md`
+- Schema/interface changes: No persisted schema change. Added an internal validated YAML config and additive nested PhysicalModel/DockPort/ActuatorChannel metadata. `build_physical_model` and `build_physical_model_from_config` gain optional joint-actuator config path inputs. Probe drive-gain CLI arguments now default to the actuator config while retaining explicit overrides.
+- Source provenance: ROBOTIS official XC330-T181-T model reference and product page; CubeMars official AK40-10 product specification and AK-series driver manual. URLs and basis notes are persisted in `configs/robot/joint_actuators.yaml`.
+- Tests run: Targeted joint actuator/robot model/controller mapping regression passed: 26 passed; final source/runtime URDF consistency focus passed: 10 passed. Full unit/acceptance suite passed: 262 passed, 1 skipped before the final additive consistency test was added.
+- Assumptions: The typed model name supplied as `SC330-T181` is a typo/alias for official `XC330-T181-T`. Existing `20/1` Isaac stiffness/damping and `3 rad/s` safe motion limits are retained as simulation tuning rather than inferred manufacturer data.
+- Next steps: Stop after Order 0. Begin random feasible connected morphology distribution only on a later explicit request.
+
 ### 2026-07-10
 - Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4, especially Sections 22.3-22.4, 24.5.5, 26.10, and implementation-order items 25-26
 - Work package / Agent label: Agent K P4.3 minimum learning bootstrap, Agent J learned `pi_L` Isaac injection boundary, Agent L P4.3 artifact/acceptance audit

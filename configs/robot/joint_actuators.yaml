@@ -1,0 +1,88 @@
+joint_actuator_model:
+  version: joint_actuator_model_v1
+  actuator_roles:
+    vectoring:
+      manufacturer: ROBOTIS
+      model: XC330-T181-T
+      user_reported_model: SC330-T181
+      model_resolution_note: >-
+        ROBOTIS has no official SC330-T181 listing. The user-reported DYNAMIXEL
+        model is resolved to the official XC330-T181-T model.
+      joint_name_patterns: ["gimbal*"]
+      command_interface: position_with_current_limit
+      nominal_voltage_v: 11.1
+      voltage_range_v: [6.5, 12.0]
+      continuous_torque_limit_nm: 0.152
+      continuous_torque_basis: >-
+        Conservative ROBOTIS US estimate equal to 20 percent of the 11.1 V
+        stall torque; ROBOTIS does not publish a continuous torque rating.
+      peak_torque_nm: 0.76
+      peak_torque_basis: stall torque at 11.1 V and 0.80 A
+      rated_speed_rad_s: null
+      no_load_speed_rad_s: 10.890854
+      no_load_speed_basis: 104 rpm at 11.1 V
+      protocol_velocity_limit_rad_s: 12.230383
+      protocol_velocity_limit_basis: default register value 510 at 0.229 rpm per unit
+      rated_current_a: null
+      peak_current_a: 0.80
+      gear_ratio: 180.62
+      encoder_resolution_counts: 4096
+      operating_temperature_c: [-5.0, 70.0]
+      actuator_mass_kg: 0.023
+      supported_control_modes:
+        - current
+        - velocity
+        - position
+        - extended_position
+        - current_based_position
+        - pwm
+      simulation_drive:
+        stiffness: 20.0
+        damping: 1.0
+        safe_velocity_limit_rad_s: 3.0
+        provenance: retained P4-control tuning; not a manufacturer specification
+      sources:
+        - https://docs.robotis.com/docs/dxl/model_reference/x_series/xc_series/xc330-t181/
+        - https://www.robotis.us/dynamixel-xc330-t181-t/
+
+    dock:
+      manufacturer: CubeMars
+      model: AK40-10 KV170
+      user_reported_model: AK40-10
+      model_resolution_note: Official CubeMars AK40-10 KV170 integrated actuator.
+      joint_name_patterns: ["*dock_mech_joint*"]
+      command_interface: position_velocity_kp_kd_with_torque_offset
+      nominal_voltage_v: 24.0
+      voltage_range_v: null
+      continuous_torque_limit_nm: 1.3
+      continuous_torque_basis: manufacturer rated torque
+      peak_torque_nm: 4.1
+      peak_torque_basis: manufacturer peak torque
+      protocol_torque_limit_nm: 5.0
+      protocol_torque_limit_basis: AK driver MIT-mode command range; safety is capped at peak torque
+      rated_speed_rad_s: 38.746309
+      rated_speed_basis: 370 rpm
+      no_load_speed_rad_s: 45.553093
+      no_load_speed_basis: 435 rpm
+      protocol_velocity_limit_rad_s: 45.5
+      protocol_velocity_limit_basis: AK driver MIT-mode command range
+      rated_current_a: 2.7
+      peak_current_a: 7.3
+      gear_ratio: 10.0
+      encoder_resolution_counts: 16384
+      operating_temperature_c: [-20.0, 50.0]
+      actuator_mass_kg: 0.185
+      backlash_rad: 0.005236
+      backdrive_torque_nm: 0.06
+      mechanical_time_constant_s: 0.0022
+      supported_control_modes:
+        - servo
+        - mit
+      simulation_drive:
+        stiffness: 20.0
+        damping: 1.0
+        safe_velocity_limit_rad_s: 3.0
+        provenance: retained P4-control tuning; not a manufacturer specification
+      sources:
+        - https://www.cubemars.com/product/ak40-10-robotic-actuator.html
+        - https://www.cubemars.com/images/file/20250522/1747899365958473.pdf

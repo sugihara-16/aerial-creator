@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from amsrr.robot_model.joint_actuator_model import JointActuatorModel, JointActuatorSpec, load_joint_actuator_model
 from amsrr.robot_model.thrust_model import ThrustModel, ThrustModelEntry, load_thrust_model, normalize_rotor_id
 from amsrr.robot_model.urdf_loader import URDFJoint, URDFModel, load_urdf
 from amsrr.robot_model.urdf_transforms import link_poses_in_module_frame
@@ -131,7 +132,10 @@ def _mechanism_joint_for_port(urdf_model: URDFModel, parent_link: str) -> URDFJo
     return None
 
 
-def _build_dock_ports(urdf_model: URDFModel) -> list[DockPortSpec]:
+def _build_dock_ports(
+    urdf_model: URDFModel,
+    joint_actuator_model: JointActuatorModel | None = None,
+) -> list[DockPortSpec]:
     ports: list[DockPortSpec] = []
     joints_by_name = _joint_by_name(urdf_model)
     link_poses_module = link_poses_in_module_frame(urdf_model)
@@ -148,6 +152,13 @@ def _build_dock_ports(urdf_model: URDFModel) -> list[DockPortSpec]:
                 "effort_limit": mechanism_joint.effort_limit,
                 "velocity_limit": mechanism_joint.velocity_limit,
             }
+            actuator_spec = (
+                joint_actuator_model.spec_for_joint(mechanism_joint.name)
+                if joint_actuator_model is not None
+                else None
+            )
+            if actuator_spec is not None:
+                mechanical_limits.update(_actuator_limit_metadata(actuator_spec))
         ports.append(
             DockPortSpec(
                 port_id=joint.name,
@@ -195,6 +206,7 @@ def build_physical_model(
     rotor_joint_patterns: list[str] | None = None,
     dock_link_patterns: list[str] | None = None,
     dock_joint_patterns: list[str] | None = None,
+    joint_actuator_model_path: str | Path | None = None,
 ) -> PhysicalModel:
     urdf_model = load_urdf(
         urdf_path,
@@ -204,6 +216,13 @@ def build_physical_model(
         dock_joint_patterns=dock_joint_patterns,
     )
     thrust_model = load_thrust_model(thrust_model_path)
+    joint_actuator_model = (
+        load_joint_actuator_model(joint_actuator_model_path)
+        if joint_actuator_model_path is not None
+        else None
+    )
+    if joint_actuator_model is not None:
+        _validate_joint_actuator_limits(urdf_model, joint_actuator_model)
     links = [
         LinkModel(
             link_id=link.name,
@@ -246,13 +265,31 @@ def build_physical_model(
         "candidate_dock_links": urdf_model.candidate_dock_links,
         "candidate_dock_joints": urdf_model.candidate_dock_joints,
     }
+    if joint_actuator_model is not None and joint_actuator_model_path is not None:
+        assignments = {
+            joint.name: spec.role
+            for joint in urdf_model.joints
+            if (spec := joint_actuator_model.spec_for_joint(joint.name)) is not None
+        }
+        metadata.update(
+            {
+                "joint_actuator_model_path": str(joint_actuator_model_path),
+                "joint_actuator_model_hash": hash_file(joint_actuator_model_path),
+                "joint_actuator_model_version": joint_actuator_model.version,
+                "joint_actuator_assignments": assignments,
+                "joint_actuator_specs": {
+                    role: spec.to_dict()
+                    for role, spec in sorted(joint_actuator_model.actuator_roles.items())
+                },
+            }
+        )
     return PhysicalModel(
         model_id=model_id or urdf_model.robot_name,
         urdf_path=str(urdf_path),
         links=links,
         joints=joints,
         rotors=_build_rotor_models(urdf_model, thrust_model),
-        dock_ports=_build_dock_ports(urdf_model),
+        dock_ports=_build_dock_ports(urdf_model, joint_actuator_model),
         collision_primitives=_build_collision_primitives(urdf_model),
         aggregate_mass_kg=aggregate_mass,
         aggregate_inertia_body=_aggregate_inertia(urdf_model),
@@ -281,6 +318,7 @@ def build_physical_model_from_config(
     project_root: str | Path | None = None,
     urdf_path_override: str | Path | None = None,
     thrust_model_path_override: str | Path | None = None,
+    joint_actuator_model_path_override: str | Path | None = None,
 ) -> PhysicalModel:
     config_path = Path(robot_model_config_path)
     root = Path(project_root) if project_root is not None else config_path.resolve().parents[2]
@@ -293,6 +331,16 @@ def build_physical_model_from_config(
         Path(thrust_model_path_override)
         if thrust_model_path_override is not None
         else _resolve_project_path(robot_model_config["thrust_model_path"], config_path=config_path, project_root=root)
+    )
+    joint_actuator_model_value = robot_model_config.get("joint_actuator_model_path")
+    joint_actuator_model_path = (
+        Path(joint_actuator_model_path_override)
+        if joint_actuator_model_path_override is not None
+        else (
+            _resolve_project_path(joint_actuator_model_value, config_path=config_path, project_root=root)
+            if isinstance(joint_actuator_model_value, str) and joint_actuator_model_value
+            else None
+        )
     )
 
     rotor_detection = robot_model_config.get("rotor_detection", {})
@@ -308,7 +356,42 @@ def build_physical_model_from_config(
         rotor_joint_patterns=[rotor_patterns.get("rotor_joint", "rotor")],
         dock_link_patterns=[dock_patterns.get("pitch", "pitch_dock"), dock_patterns.get("yaw", "yaw_dock")],
         dock_joint_patterns=["dock_mech_joint", "connect_point"],
+        joint_actuator_model_path=joint_actuator_model_path,
     )
+
+
+def _actuator_limit_metadata(spec: JointActuatorSpec) -> dict[str, Any]:
+    return {
+        "actuator_role": spec.role,
+        "actuator_manufacturer": spec.manufacturer,
+        "actuator_model": spec.model,
+        "continuous_torque_limit_nm": spec.continuous_torque_limit_nm,
+        "peak_torque_limit_nm": spec.peak_torque_nm,
+        "no_load_speed_rad_s": spec.no_load_speed_rad_s,
+        "simulation_safe_velocity_limit_rad_s": spec.simulation_drive.safe_velocity_limit_rad_s,
+    }
+
+
+def _validate_joint_actuator_limits(urdf_model: URDFModel, model: JointActuatorModel) -> None:
+    matched_roles: set[str] = set()
+    for joint in urdf_model.joints:
+        spec = model.spec_for_joint(joint.name)
+        if spec is None:
+            continue
+        matched_roles.add(spec.role)
+        if joint.effort_limit is None or abs(float(joint.effort_limit) - spec.peak_torque_nm) > 1.0e-6:
+            raise SchemaValidationError(
+                f"URDF joint {joint.name!r} effort limit must equal {spec.role} peak torque "
+                f"{spec.peak_torque_nm} Nm"
+            )
+        if joint.velocity_limit is None or abs(float(joint.velocity_limit) - spec.no_load_speed_rad_s) > 1.0e-6:
+            raise SchemaValidationError(
+                f"URDF joint {joint.name!r} velocity limit must equal {spec.role} no-load speed "
+                f"{spec.no_load_speed_rad_s} rad/s"
+            )
+    missing_roles = sorted(set(model.actuator_roles) - matched_roles)
+    if missing_roles:
+        raise SchemaValidationError(f"Joint actuator roles did not match any URDF joint: {missing_roles}")
 
 
 def build_module_capability_token(physical_model: PhysicalModel, *, module_type: str = "holon") -> ModuleCapabilityToken:

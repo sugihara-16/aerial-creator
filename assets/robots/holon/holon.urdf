@@ -115,7 +115,7 @@
     <parent link="rotor_arm1" />
     <child link="gimbal_link1" />
     <axis xyz="1 0 0" />
-    <limit lower="-2.0" upper="2.0" effort="6.6" velocity="3.0" />
+    <limit lower="-2.0" upper="2.0" effort="0.76" velocity="10.890854" />
     <dynamics damping="0.8" friction="0.0" />
   </joint>
 
@@ -208,7 +208,7 @@
     <parent link="rotor_arm1" />
     <child link="pitch_dock_mech1" />
     <axis xyz="0 1 0" />
-    <limit lower="-1.5708" upper="1.5708" effort="6.6" velocity="3.0" />
+    <limit lower="-1.5708" upper="1.5708" effort="4.1" velocity="45.553093" />
     <dynamics damping="0.8" friction="0.0" />
   </joint>
 
@@ -291,7 +291,7 @@
     <parent link="rotor_arm2" />
     <child link="gimbal_link2" />
     <axis xyz="1 0 0" />
-    <limit lower="-2.0" upper="2.0" effort="6.6" velocity="3.0" />
+    <limit lower="-2.0" upper="2.0" effort="0.76" velocity="10.890854" />
     <dynamics damping="0.8" friction="0.0" />
   </joint>
 
@@ -394,7 +394,7 @@
     <parent link="rotor_arm2" />
     <child link="yaw_dock_mech1" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.5708" upper="1.5708" effort="6.6" velocity="3.0" />
+    <limit lower="-1.5708" upper="1.5708" effort="4.1" velocity="45.553093" />
     <dynamics damping="0.8" friction="0.0" />
   </joint>
 
@@ -466,7 +466,7 @@
     <parent link="rotor_arm3" />
     <child link="gimbal_link3" />
     <axis xyz="1 0 0" />
-    <limit lower="-2.0" upper="2.0" effort="6.6" velocity="3.0" />
+    <limit lower="-2.0" upper="2.0" effort="0.76" velocity="10.890854" />
     <dynamics damping="0.8" friction="0.0" />
   </joint>
 
@@ -559,7 +559,7 @@
     <parent link="rotor_arm3" />
     <child link="yaw_dock_mech2" />
     <axis xyz="0 0 1" />
-    <limit lower="-1.5708" upper="1.5708" effort="6.6" velocity="3.0" />
+    <limit lower="-1.5708" upper="1.5708" effort="4.1" velocity="45.553093" />
     <dynamics damping="0.8" friction="0.0" />
   </joint>
 
@@ -641,7 +641,7 @@
     <parent link="rotor_arm4" />
     <child link="gimbal_link4" />
     <axis xyz="1 0 0" />
-    <limit lower="-2.0" upper="2.0" effort="6.6" velocity="3.0" />
+    <limit lower="-2.0" upper="2.0" effort="0.76" velocity="10.890854" />
     <dynamics damping="0.8" friction="0.0" />
   </joint>
 
@@ -745,7 +745,7 @@
     <parent link="rotor_arm4" />
     <child link="pitch_dock_mech2" />
     <axis xyz="0 1 0" />
-    <limit lower="-1.5708" upper="1.5708" effort="6.6" velocity="3.0" />
+    <limit lower="-1.5708" upper="1.5708" effort="4.1" velocity="45.553093" />
     <dynamics damping="0.8" friction="0.0" />
   </joint>
 

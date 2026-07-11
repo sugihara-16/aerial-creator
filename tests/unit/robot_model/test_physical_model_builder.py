@@ -36,6 +36,9 @@ def test_physical_model_rotors_and_dock_ports() -> None:
         [-0.0172, 0.0172, -0.0172, 0.0172]
     )
     assert physical_model.rotors[0].vectoring_joint_ids == ["gimbal1"]
+    gimbal = next(joint for joint in physical_model.joints if joint.joint_id == "gimbal1")
+    assert gimbal.effort_limit == pytest.approx(0.76)
+    assert gimbal.velocity_limit == pytest.approx(10.890854)
     assert len(physical_model.dock_ports) == 4
     assert sorted(port.port_type for port in physical_model.dock_ports) == [
         "pitch_dock",
@@ -50,6 +53,22 @@ def test_physical_model_rotors_and_dock_ports() -> None:
     assert pitch.local_pose[0] > 0.2
     assert yaw.local_pose[0] < -0.2
     assert compose_pose(relative, yaw.local_pose) == pytest.approx(compose_pose(pitch.local_pose, FACE_TO_FACE_DOCK_RELATION))
+    assert pitch.mechanical_limits["actuator_model"] == "AK40-10 KV170"
+    assert pitch.mechanical_limits["continuous_torque_limit_nm"] == pytest.approx(1.3)
+    assert pitch.mechanical_limits["peak_torque_limit_nm"] == pytest.approx(4.1)
+
+
+def test_physical_model_records_joint_actuator_provenance() -> None:
+    physical_model = build_physical_model_from_config("configs/robot/robot_model.yaml")
+
+    assert physical_model.metadata["joint_actuator_model_version"] == "joint_actuator_model_v1"
+    assert physical_model.metadata["joint_actuator_model_hash"]
+    assignments = physical_model.metadata["joint_actuator_assignments"]
+    assert assignments["gimbal1"] == "vectoring"
+    assert assignments["pitch_dock_mech_joint1"] == "dock"
+    specs = physical_model.metadata["joint_actuator_specs"]
+    assert specs["vectoring"]["model"] == "XC330-T181-T"
+    assert specs["dock"]["model"] == "AK40-10 KV170"
 
 
 def test_module_capability_token_from_physical_model() -> None:

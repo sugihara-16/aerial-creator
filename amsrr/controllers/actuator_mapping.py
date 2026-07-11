@@ -111,7 +111,11 @@ class ActuatorMappingBuilder:
                     velocity=joint.velocity_limit,
                     effort=joint.effort_limit,
                     single_module=single_module,
-                    metadata={"source": "RotorModel.vectoring_joint_ids"},
+                    metadata=_joint_actuator_channel_metadata(
+                        physical_model,
+                        joint_id,
+                        source="RotorModel.vectoring_joint_ids",
+                    ),
                 )
 
             for joint_id in dock_joint_ids:
@@ -127,7 +131,11 @@ class ActuatorMappingBuilder:
                     velocity=joint.velocity_limit,
                     effort=joint.effort_limit,
                     single_module=single_module,
-                    metadata={"source": "DockPortSpec.mechanical_limits"},
+                    metadata=_joint_actuator_channel_metadata(
+                        physical_model,
+                        joint_id,
+                        source="DockPortSpec.mechanical_limits",
+                    ),
                 )
 
             for joint in sorted(physical_model.joints, key=lambda item: item.joint_id):
@@ -202,6 +210,34 @@ class ActuatorMappingBuilder:
 
 def build_actuator_mapping(morphology_graph: MorphologyGraph, physical_model: PhysicalModel) -> ActuatorMapping:
     return ActuatorMappingBuilder().build(morphology_graph, physical_model)
+
+
+def _joint_actuator_channel_metadata(
+    physical_model: PhysicalModel,
+    joint_id: str,
+    *,
+    source: str,
+) -> dict[str, str | int | float | bool]:
+    metadata: dict[str, str | int | float | bool] = {"source": source}
+    assignments = physical_model.metadata.get("joint_actuator_assignments")
+    specs = physical_model.metadata.get("joint_actuator_specs")
+    if not isinstance(assignments, dict) or not isinstance(specs, dict):
+        return metadata
+    role = assignments.get(joint_id)
+    spec = specs.get(role) if isinstance(role, str) else None
+    if not isinstance(spec, dict):
+        return metadata
+    metadata.update(
+        {
+            "actuator_role": role,
+            "actuator_manufacturer": str(spec.get("manufacturer", "")),
+            "actuator_model": str(spec.get("model", "")),
+            "continuous_torque_limit_nm": float(spec.get("continuous_torque_limit_nm", 0.0)),
+            "peak_torque_limit_nm": float(spec.get("peak_torque_nm", 0.0)),
+            "no_load_speed_rad_s": float(spec.get("no_load_speed_rad_s", 0.0)),
+        }
+    )
+    return metadata
 
 
 def clip_to_channel(value: float, channel: ActuatorChannel) -> tuple[float, bool]:

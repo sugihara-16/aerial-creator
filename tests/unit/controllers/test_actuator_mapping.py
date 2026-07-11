@@ -48,6 +48,12 @@ def test_actuator_mapping_builds_single_module_aliases_and_limits() -> None:
     assert rotor.upper == pytest.approx(20.0)
     assert mapping.channel_for_command("module_0:gimbal1").actuator_type == "vectoring_joint_position"  # type: ignore[union-attr]
     assert mapping.channel_for_command("pitch_dock_mech_joint1").actuator_type == "dock_joint_position"  # type: ignore[union-attr]
+    gimbal = mapping.channel_for_command("gimbal1")
+    dock = mapping.channel_for_command("pitch_dock_mech_joint1")
+    assert gimbal is not None and gimbal.metadata["actuator_model"] == "XC330-T181-T"
+    assert dock is not None and dock.metadata["actuator_model"] == "AK40-10 KV170"
+    assert gimbal.effort == pytest.approx(0.76)
+    assert dock.effort == pytest.approx(4.1)
     assert mapping.metadata["builder_version"] == "actuator_mapping_v1"
 
 
