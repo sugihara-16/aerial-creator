@@ -135,6 +135,17 @@ def parse_args() -> argparse.Namespace:
         help="Path to serialized deterministic ContactWrenchTrajectory JSON for P4.2 phase rollout.",
     )
     parser.add_argument(
+        "--p4-3-pi-l-checkpoint-path",
+        default=None,
+        help="Optional learned P4.3 pi_L checkpoint; deterministic pi_L remains fallback.",
+    )
+    parser.add_argument(
+        "--p4-3-pi-l-runtime-blend-factor",
+        type=float,
+        default=0.10,
+        help="Trust-region blend for the learned pi_L command subset in (0, 1].",
+    )
+    parser.add_argument(
         "--p4-2-object-size-m",
         type=float,
         nargs=3,
@@ -748,6 +759,10 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             attach_relative_velocity_threshold_mps=float(args.p4_2_attach_relative_velocity_threshold_mps),
             attach_snap_distance_threshold_m=float(args.p4_2_attach_snap_distance_threshold_m),
             pregrasp_alignment_distance_m=float(args.p4_2_pregrasp_alignment_distance_m),
+            learned_pi_l_checkpoint_path=args.p4_3_pi_l_checkpoint_path,
+            learned_pi_l_runtime_blend_factor=float(
+                args.p4_3_pi_l_runtime_blend_factor
+            ),
         )
     for _ in range(
         0
@@ -1930,11 +1945,18 @@ def _run_p4_2_deterministic_rollout_probe(
     attach_relative_velocity_threshold_mps: float,
     attach_snap_distance_threshold_m: float,
     pregrasp_alignment_distance_m: float,
+    learned_pi_l_checkpoint_path: str | None = None,
+    learned_pi_l_runtime_blend_factor: float = 0.10,
 ) -> dict[str, object]:
     from amsrr.controllers.actuator_mapping import build_actuator_mapping
     from amsrr.controllers.controller_base import ControllerContext, PayloadCoupling
     from amsrr.controllers.isaac_controller_bridge import IsaacControllerBridge
     from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
+    from amsrr.policies.learned_low_level_policy import (
+        LearnedLowLevelPolicy,
+        overlay_learned_pi_l_subset,
+    )
+    from amsrr.policies.low_level_policy_base import LowLevelPolicyContext
     from amsrr.schemas.policies import InteractionKnot, PolicyCommand
     from amsrr.simulation.p4_2_rollout import (
         P4_2AttachEvent,
@@ -1961,6 +1983,26 @@ def _run_p4_2_deterministic_rollout_probe(
             control_dt_s=control_dt_s,
         )
     )
+    learned_pi_l = None
+    learned_pi_l_checkpoint_load_error: str | None = None
+    if learned_pi_l_checkpoint_path is not None:
+        try:
+            learned_pi_l = LearnedLowLevelPolicy.from_checkpoint(
+                learned_pi_l_checkpoint_path
+            )
+        except (OSError, KeyError, TypeError, ValueError, RuntimeError) as exc:
+            # A learned checkpoint is never allowed to take ownership away from
+            # the deterministic P4.2 command path.  Record only the exception
+            # type (paths and framework messages can contain host details) and
+            # continue with that existing command path.
+            learned_pi_l_checkpoint_load_error = type(exc).__name__
+    if not 0.0 < learned_pi_l_runtime_blend_factor <= 1.0:
+        raise ValueError("learned pi_L runtime blend factor must be in (0, 1]")
+    learned_pi_l_decision_count = 0
+    learned_pi_l_fallback_count = 0
+    learned_pi_l_overlay_nonzero_count = 0
+    learned_pi_l_overlay_delta_norm_sum = 0.0
+    learned_pi_l_overlay_delta_norm_max = 0.0
     object_pose_initial, _ = _p4_1_object_pose_and_twist(p4_2_object)
     pre_attach_object_pose = tuple(float(value) for value in object_pose_initial)
     target_twist = [0.0] * 6
@@ -1968,6 +2010,8 @@ def _run_p4_2_deterministic_rollout_probe(
     runtime_observation_objects = []
     runtime_observations: list[dict[str, object]] = []
     policy_commands: list[dict[str, object]] = []
+    learned_pi_l_pre_overlay_policy_commands: list[dict[str, object]] = []
+    learned_pi_l_controller_active_knots: list[dict[str, object]] = []
     controller_commands: list[dict[str, object]] = []
     actuator_target_records: list[dict[str, object]] = []
     object_pose_history: list[list[float]] = []
@@ -2292,6 +2336,81 @@ def _run_p4_2_deterministic_rollout_probe(
                 },
             ],
         )
+        if learned_pi_l is not None:
+            learned_source_knot = next(
+                (
+                    knot
+                    for knot in contact_wrench_trajectory.knots
+                    if any(
+                        guard.get("type") == "p4_2_phase"
+                        and guard.get("phase") == current_phase.value
+                        for guard in knot.guard_conditions
+                    )
+                ),
+                active_knot,
+            )
+            learned_policy_command = learned_pi_l.command(
+                LowLevelPolicyContext(
+                    runtime_observation=runtime_observation,
+                    morphology_graph=morphology_graph,
+                    physical_model=physical_model,
+                    contact_wrench_trajectory=contact_wrench_trajectory,
+                    active_knot=learned_source_knot,
+                    controller_status=runtime_observation.controller_status,
+                )
+            )
+            # Keep the P4.2 controller knot and every non-learned command field
+            # on the existing deterministic path.  The learned policy was
+            # trained only for this bounded PolicyCommand subset, using the
+            # source pi_H knot as its feature/baseline context.
+            deterministic_policy_command = policy_command
+            learned_pi_l_pre_overlay_policy_commands.append(
+                deterministic_policy_command.to_dict()
+            )
+            learned_pi_l_controller_active_knots.append(active_knot.to_dict())
+            policy_command = overlay_learned_pi_l_subset(
+                policy_command,
+                learned_policy_command,
+                blend_factor=learned_pi_l_runtime_blend_factor,
+            )
+            overlay_values: list[float] = []
+            for deterministic_values, overlaid_values in (
+                (
+                    deterministic_policy_command.desired_body_twist,
+                    policy_command.desired_body_twist,
+                ),
+                (
+                    deterministic_policy_command.desired_body_pose[:3]
+                    if deterministic_policy_command.desired_body_pose is not None
+                    else None,
+                    policy_command.desired_body_pose[:3]
+                    if policy_command.desired_body_pose is not None
+                    else None,
+                ),
+                (
+                    deterministic_policy_command.residual_wrench_body,
+                    policy_command.residual_wrench_body,
+                ),
+            ):
+                if deterministic_values is not None and overlaid_values is not None:
+                    overlay_values.extend(
+                        float(after) - float(before)
+                        for before, after in zip(deterministic_values, overlaid_values)
+                    )
+            overlay_delta_norm = math.sqrt(
+                sum(value * value for value in overlay_values)
+            )
+            learned_pi_l_overlay_delta_norm_sum += overlay_delta_norm
+            learned_pi_l_overlay_delta_norm_max = max(
+                learned_pi_l_overlay_delta_norm_max,
+                overlay_delta_norm,
+            )
+            if overlay_delta_norm > 1.0e-9:
+                learned_pi_l_overlay_nonzero_count += 1
+            if learned_pi_l.last_diagnostics.used_learned_delta:
+                learned_pi_l_decision_count += 1
+            else:
+                learned_pi_l_fallback_count += 1
         policy_commands.append(policy_command.to_dict())
         payload_coupling = None
         if attached and object_relative_to_root_at_attach is not None:
@@ -2600,6 +2719,19 @@ def _run_p4_2_deterministic_rollout_probe(
             "p4_2_link_backed_anchor_pose_used": 1.0 if link_backed_anchor_pose_used else 0.0,
             "p4_2_release_event_count": float(len(release_events)),
             "p4_2_actuator_channel_count": float(len(actuator_mapping.channels)),
+            "p4_3_pi_l_checkpoint_loaded": 1.0 if learned_pi_l is not None else 0.0,
+            "p4_3_pi_l_checkpoint_requested": (
+                1.0 if learned_pi_l_checkpoint_path is not None else 0.0
+            ),
+            "p4_3_pi_l_checkpoint_load_failed": (
+                1.0 if learned_pi_l_checkpoint_load_error is not None else 0.0
+            ),
+            "p4_3_pi_l_learned_decision_count": float(learned_pi_l_decision_count),
+            "p4_3_pi_l_fallback_count": float(learned_pi_l_fallback_count),
+            "p4_3_pi_l_runtime_blend_factor": float(learned_pi_l_runtime_blend_factor),
+            "p4_3_pi_l_overlay_nonzero_count": float(learned_pi_l_overlay_nonzero_count),
+            "p4_3_pi_l_overlay_delta_norm_sum": float(learned_pi_l_overlay_delta_norm_sum),
+            "p4_3_pi_l_overlay_delta_norm_max": float(learned_pi_l_overlay_delta_norm_max),
             **payload_metric_summary,
         }
     )
@@ -2630,6 +2762,19 @@ def _run_p4_2_deterministic_rollout_probe(
         "p4_2_actuator_mapping_reflected": bool(actuator_mapping_reflected),
         "p4_2_actuator_mapping_graph_id": actuator_mapping.graph_id,
         "p4_2_actuator_channel_count": len(actuator_mapping.channels),
+        "p4_3_pi_l_checkpoint_loaded": learned_pi_l is not None,
+        "p4_3_pi_l_checkpoint_requested": learned_pi_l_checkpoint_path is not None,
+        "p4_3_pi_l_checkpoint_load_failed": learned_pi_l_checkpoint_load_error is not None,
+        "p4_3_pi_l_checkpoint_load_error": learned_pi_l_checkpoint_load_error,
+        "p4_3_pi_l_learned_decision_count": learned_pi_l_decision_count,
+        "p4_3_pi_l_fallback_count": learned_pi_l_fallback_count,
+        "p4_3_pi_l_runtime_blend_factor": learned_pi_l_runtime_blend_factor,
+        "p4_3_pi_l_overlay_nonzero_count": learned_pi_l_overlay_nonzero_count,
+        "p4_3_pi_l_overlay_delta_norm_sum": learned_pi_l_overlay_delta_norm_sum,
+        "p4_3_pi_l_overlay_delta_norm_max": learned_pi_l_overlay_delta_norm_max,
+        "p4_3_pi_l_online_inference": learned_pi_l is not None,
+        "p4_3_pi_l_pre_overlay_policy_commands": learned_pi_l_pre_overlay_policy_commands,
+        "p4_3_pi_l_controller_active_knots": learned_pi_l_controller_active_knots,
         "p4_2_object_attach_release_only": True,
         "p4_2_module_attach_detach_claim": False,
         "p4_2_dynamic_morphology_update_claim": False,

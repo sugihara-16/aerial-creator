@@ -537,6 +537,8 @@ class IsaacLabBackend:
         viewer: str | None = None,
         realtime_playback: bool = False,
         keep_open_after_smoke_s: float = 0.0,
+        learned_pi_l_checkpoint_path: str | Path | None = None,
+        learned_pi_l_runtime_blend_factor: float = 0.10,
     ) -> list[str]:
         command = self.holon_spawn_probe_command(
             config_path=config_path,
@@ -590,6 +592,14 @@ class IsaacLabBackend:
             command.extend(["--p4-2-contact-wrench-trajectory-json", contact_wrench_trajectory_json])
         if contact_wrench_trajectory_json_path is not None:
             command.extend(["--p4-2-contact-wrench-trajectory-json-path", str(contact_wrench_trajectory_json_path)])
+        if learned_pi_l_checkpoint_path is not None:
+            command.extend(["--p4-3-pi-l-checkpoint-path", str(learned_pi_l_checkpoint_path)])
+            command.extend(
+                [
+                    "--p4-3-pi-l-runtime-blend-factor",
+                    str(learned_pi_l_runtime_blend_factor),
+                ]
+            )
         return command
 
     def run_holon_single_module_hover_smoke(
@@ -822,6 +832,8 @@ class IsaacLabBackend:
         realtime_playback: bool = False,
         keep_open_after_smoke_s: float = 0.0,
         timeout_s: float | None = None,
+        learned_pi_l_checkpoint_path: str | Path | None = None,
+        learned_pi_l_runtime_blend_factor: float = 0.10,
     ) -> dict[str, Any]:
         with tempfile.TemporaryDirectory(prefix="amsrr_p4_2_inputs_") as input_dir:
             candidate_path = None
@@ -854,6 +866,8 @@ class IsaacLabBackend:
                 viewer=viewer,
                 realtime_playback=realtime_playback,
                 keep_open_after_smoke_s=keep_open_after_smoke_s,
+                learned_pi_l_checkpoint_path=learned_pi_l_checkpoint_path,
+                learned_pi_l_runtime_blend_factor=learned_pi_l_runtime_blend_factor,
             )
             return _run_json_command(command, timeout_s=timeout_s)
 

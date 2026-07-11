@@ -53,6 +53,8 @@ def test_p4_2_backend_command_uses_morphology_graph_json_not_module_count_only()
         viewer="kit",
         realtime_playback=True,
         keep_open_after_smoke_s=12.0,
+        learned_pi_l_checkpoint_path="artifacts/p4_3/pi_l/checkpoint.pt",
+        learned_pi_l_runtime_blend_factor=0.10,
     )
 
     assert "--p4-2-deterministic-rollout" in command
@@ -77,6 +79,10 @@ def test_p4_2_backend_command_uses_morphology_graph_json_not_module_count_only()
     assert command[command.index("--viz") + 1] == "kit"
     assert "--realtime-playback" in command
     assert command[command.index("--keep-open-after-smoke-s") + 1] == "12.0"
+    assert command[command.index("--p4-3-pi-l-checkpoint-path") + 1] == (
+        "artifacts/p4_3/pi_l/checkpoint.pt"
+    )
+    assert command[command.index("--p4-3-pi-l-runtime-blend-factor") + 1] == "0.1"
 
 
 def test_p4_2_dry_run_and_missing_morphology_do_not_attempt_rollout() -> None:
@@ -111,6 +117,8 @@ def test_p4_2_fake_backend_report_parses_rollout_logs_and_attach_event() -> None
         morphology_graph=morphology,
         uses_p2_selected_design=True,
         uses_p3_assembled_morphology=True,
+        learned_pi_l_checkpoint_path="artifacts/p4_3/pi_l/checkpoint.pt",
+        learned_pi_l_runtime_blend_factor=0.10,
     )
 
     assert result.attempted is True
@@ -142,6 +150,10 @@ def test_p4_2_fake_backend_report_parses_rollout_logs_and_attach_event() -> None
     assert backend.calls[0]["viewer"] == "kit"
     assert backend.calls[0]["realtime_playback"] is True
     assert backend.calls[0]["keep_open_after_smoke_s"] == 12.0
+    assert backend.calls[0]["learned_pi_l_checkpoint_path"] == (
+        "artifacts/p4_3/pi_l/checkpoint.pt"
+    )
+    assert backend.calls[0]["learned_pi_l_runtime_blend_factor"] == 0.10
 
 
 def test_p4_2_report_with_reflected_graph_but_no_attach_event_cannot_pass() -> None:

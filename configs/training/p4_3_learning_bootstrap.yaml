@@ -1,0 +1,76 @@
+phase: P4.3
+
+collection:
+  seed: 0
+  task_start_index: 0
+  task_count: 6
+  candidates_per_task: 2
+  candidate_offset: 0
+  learned_pi_l_runtime_blend_factor: 0.10
+  dry_run: true
+  p4_2_config_path: configs/training/p4_2_deterministic_rollout.yaml
+  robot_model_config_path: configs/robot/robot_model.yaml
+  archive_path: artifacts/p4_3/rollouts/deterministic_isaac.jsonl
+  dataset_dir: artifacts/p4_3/datasets
+  split_fractions:
+    train: 0.6666666667
+    validation: 0.1666666667
+    held_out: 0.1666666666
+  contact_model: kinematic_payload_coupled_attach_v1
+
+reward:
+  w_progress: 1.0
+  w_pose: 1.0
+  w_grasp: 0.5
+  w_stable: 0.5
+  w_energy: 0.01
+  w_qp: 0.25
+  w_slip: 1.0
+  w_collision: 2.0
+  w_saturation: 0.25
+  success_bonus: 10.0
+  failure_penalty: 10.0
+  progress_scale_m: 0.05
+  pose_position_scale_m: 0.25
+  pose_rotation_scale_rad: 0.5
+  centroidal_linear_speed_scale_mps: 1.0
+  centroidal_angular_speed_scale_radps: 1.0
+  rotor_thrust_scale_n: 20.0
+  joint_torque_scale_nm: 5.0
+  qp_residual_scale: 10.0
+  slip_speed_scale_mps: 0.1
+  default_goal_tolerance_pos_m: 0.05
+  default_goal_tolerance_rot_rad: 0.2
+
+pi_l:
+  epochs: 20
+  learning_rate: 0.001
+  hidden_dim: 64
+  batch_size: 256
+  seed: 11
+  output_mode: bounded_policy_command_delta
+  checkpoint_dir: artifacts/p4_3/pi_l
+
+pi_h:
+  epochs: 20
+  learning_rate: 0.001
+  hidden_dim: 64
+  batch_size: 64
+  seed: 13
+  update_rate_hz: 2.0
+  checkpoint_dir: artifacts/p4_3/pi_h
+
+pi_d:
+  epochs: 20
+  learning_rate: 0.001
+  hidden_dim: 24
+  seed: 17
+  initializer_checkpoint: outputs/p2_5/training/pi_d_scorer/checkpoint.pt
+  checkpoint_dir: artifacts/p4_3/pi_d
+
+acceptance:
+  require_real_isaac_dataset: true
+  require_task_disjoint_splits: true
+  require_all_deterministic_fallbacks: true
+  require_checkpoint_hashes: true
+  p4_full_completion_claim: false

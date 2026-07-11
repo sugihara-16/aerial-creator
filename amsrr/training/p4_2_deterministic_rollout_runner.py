@@ -285,6 +285,12 @@ class P4_2DeterministicRolloutRunner:
                 "anchor_link_id": rollout_result.rollout_artifacts.get("anchor_link_id", ""),
                 "anchor_resolved_body_name": rollout_result.rollout_artifacts.get("anchor_resolved_body_name", ""),
                 "anchor_debug_samples": rollout_result.rollout_artifacts.get("anchor_debug_samples", []),
+                "p4_3_pi_l_pre_overlay_policy_commands": rollout_result.rollout_artifacts.get(
+                    "p4_3_pi_l_pre_overlay_policy_commands", []
+                ),
+                "p4_3_pi_l_controller_active_knots": rollout_result.rollout_artifacts.get(
+                    "p4_3_pi_l_controller_active_knots", []
+                ),
                 "object_attach_release_only": bool(
                     rollout_result.rollout_artifacts.get("object_attach_release_only", True)
                 ),

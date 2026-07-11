@@ -69,6 +69,8 @@ class P4_2IsaacEnv:
         object_mass_kg: float | None = None,
         uses_p2_selected_design: bool = True,
         uses_p3_assembled_morphology: bool = True,
+        learned_pi_l_checkpoint_path: str | Path | None = None,
+        learned_pi_l_runtime_blend_factor: float = 0.10,
     ) -> P4_2DeterministicRolloutResult:
         if dry_run:
             return P4_2DeterministicRolloutResult(
@@ -142,6 +144,8 @@ class P4_2IsaacEnv:
                 viewer=self.viewer,
                 realtime_playback=self.realtime_playback,
                 keep_open_after_smoke_s=self.keep_open_after_rollout_s,
+                learned_pi_l_checkpoint_path=learned_pi_l_checkpoint_path,
+                learned_pi_l_runtime_blend_factor=learned_pi_l_runtime_blend_factor,
             )
         except Exception as exc:  # pragma: no cover - real subprocess failures are environment-specific.
             return P4_2DeterministicRolloutResult(
@@ -265,6 +269,18 @@ def p4_2_result_from_report(
             "anchor_link_id": str(report.get("p4_2_anchor_link_id", "")),
             "anchor_resolved_body_name": str(report.get("p4_2_anchor_resolved_body_name", "")),
             "anchor_debug_samples": list(report.get("p4_2_anchor_debug_samples", [])),
+            "p4_3_pi_l_checkpoint_loaded": bool(report.get("p4_3_pi_l_checkpoint_loaded", False)),
+            "p4_3_pi_l_online_inference": bool(report.get("p4_3_pi_l_online_inference", False)),
+            "p4_3_pi_l_learned_decision_count": int(
+                report.get("p4_3_pi_l_learned_decision_count", 0)
+            ),
+            "p4_3_pi_l_fallback_count": int(report.get("p4_3_pi_l_fallback_count", 0)),
+            "p4_3_pi_l_pre_overlay_policy_commands": list(
+                report.get("p4_3_pi_l_pre_overlay_policy_commands", [])
+            ),
+            "p4_3_pi_l_controller_active_knots": list(
+                report.get("p4_3_pi_l_controller_active_knots", [])
+            ),
             "is_p4_full_completion": False,
             "p4_3_learning_bootstrap": False,
             "learning_claim": False,
