@@ -79,6 +79,12 @@ def parse_args() -> argparse.Namespace:
         help="Run graph-specific floor settle, takeoff ramp, and hover hold with deterministic control.",
     )
     parser.add_argument(
+        "--control-contract-version",
+        default="legacy_contact_bias_v1",
+        choices=("legacy_contact_bias_v1", "centroidal_local_joint_v2"),
+        help="Versioned PolicyCommand/QPID contract used by compatible controller smokes.",
+    )
+    parser.add_argument(
         "--random-morphology-teleop",
         action="store_true",
         help="Continue a passing random-morphology hover with terminal keyboard pose commands.",
@@ -1074,6 +1080,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             min_height_gain_ratio=float(args.takeoff_min_height_gain_ratio),
             allocation_mode=str(args.allocation_mode),
             stop_on_hover_hold=bool(args.hover_stop_on_hold),
+            control_contract_version=str(args.control_contract_version),
         )
         hover_smoke_report = _run_random_morphology_takeoff_smoke(
             robot=robot,
@@ -2546,16 +2553,19 @@ def _run_random_morphology_takeoff_smoke(
     """Real-Isaac gate for a reset-time fixed random morphology.
 
     The settle phase deliberately sends no rotor/controller command.  Once the
-    measured base ``fc`` pose has settled, deterministic QPID ramps that pose
-    to an upright hover target.  No learned policy participates in this gate.
+    selected legacy-base or versioned centroidal control pose has settled,
+    deterministic QPID ramps that pose to an upright hover target.  No learned
+    policy participates in this gate.
     """
 
     from amsrr.controllers.actuator_mapping import build_actuator_mapping
     from amsrr.controllers.controller_base import ControllerContext
     from amsrr.controllers.isaac_controller_bridge import IsaacControllerBridge
     from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
+    from amsrr.controllers.rigid_body_model import RigidBodyControlModelBuilder
     from amsrr.feasibility.morphology_flight import collision_geometry_content_hash
     from amsrr.schemas.policies import (
+        POLICY_COMMAND_CONTRACT_CENTROIDAL,
         ControllerCommand,
         ControllerStatus,
         InteractionKnot,
@@ -2567,6 +2577,9 @@ def _run_random_morphology_takeoff_smoke(
     )
 
     module_count = len(morphology_graph.modules)
+    centroidal_contract = (
+        config.control_contract_version == POLICY_COMMAND_CONTRACT_CENTROIDAL
+    )
     if floor_contact_sensor is None:
         raise RuntimeError("random morphology takeoff requires an Isaac contact sensor")
     if not isinstance(self_collision_filter_info, dict):
@@ -2588,6 +2601,7 @@ def _run_random_morphology_takeoff_smoke(
             control_dt_s=config.simulation_dt_s,
         )
     )
+    rigid_body_model_builder = RigidBodyControlModelBuilder()
     resolved_fc_body_count = sum(
         1
         for module_id in range(module_count)
@@ -2603,6 +2617,7 @@ def _run_random_morphology_takeoff_smoke(
     initial_base_fc_pose = _module_body_pose(robot, module_id=0, local_body_name="fc")
     if initial_base_fc_pose is None:
         initial_base_fc_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
+    initial_control_pose = None
     settled_pose = None
     settled_linear_speed = float("inf")
     settled_angular_speed = float("inf")
@@ -2637,6 +2652,7 @@ def _run_random_morphology_takeoff_smoke(
     controller_commands: list[dict[str, object]] = []
     actuator_target_records: list[dict[str, object]] = []
     root_pose_history: list[list[float]] = []
+    control_pose_history: list[list[float]] = []
     qp_infeasible_count = 0
     controller_clipped_count = 0
     missing_actuator_count = 0
@@ -2703,13 +2719,26 @@ def _run_random_morphology_takeoff_smoke(
             morphology_graph_id=morphology_graph.graph_id,
         )
         current_base_state = runtime_observation.module_states[0]
+        if centroidal_contract:
+            current_control_model = rigid_body_model_builder.build(
+                morphology_graph,
+                physical_model,
+                runtime_observation,
+            )
+            current_control_pose = current_control_model.body_pose_world
+            current_control_twist = current_control_model.body_twist_world
+        else:
+            current_control_pose = current_base_state.pose_world
+            current_control_twist = current_base_state.twist_world
+        if initial_control_pose is None:
+            initial_control_pose = current_control_pose
         if settled_pose is None and time_s + 1.0e-9 >= config.settle_duration_s:
-            settled_pose = current_base_state.pose_world
-            settled_linear_speed = _vector_norm(current_base_state.twist_world[:3])
-            settled_angular_speed = _vector_norm(current_base_state.twist_world[3:6])
+            settled_pose = current_control_pose
+            settled_linear_speed = _vector_norm(current_control_twist[:3])
+            settled_angular_speed = _vector_norm(current_control_twist[3:6])
             settle_low_speed_steps_at_completion = settle_low_speed_steps
             floor_contact_steps_at_completion = floor_contact_steps
-        schedule_reference = settled_pose or initial_base_fc_pose
+        schedule_reference = settled_pose or initial_control_pose or initial_base_fc_pose
         target = scheduler.target_at(time_s, settled_pose_world=schedule_reference)
         phase_counts[target.phase.value] += 1
         ramp_max_progress = max(ramp_max_progress, target.ramp_progress)
@@ -2736,7 +2765,11 @@ def _run_random_morphology_takeoff_smoke(
                 },
             )
             runtime_observation.controller_status = settle_status
-            policy_commands.append(PolicyCommand().to_dict())
+            policy_commands.append(
+                PolicyCommand(
+                    control_contract_version=config.control_contract_version,
+                ).to_dict()
+            )
             controller_commands.append(
                 ControllerCommand(
                     rotor_thrusts_n={},
@@ -2744,6 +2777,7 @@ def _run_random_morphology_takeoff_smoke(
                     joint_torque_commands={},
                     dock_mechanism_commands={},
                     controller_status=settle_status,
+                    control_contract_version=config.control_contract_version,
                 ).to_dict()
             )
             actuator_target_records.append(
@@ -2776,6 +2810,7 @@ def _run_random_morphology_takeoff_smoke(
             policy_command = PolicyCommand(
                 desired_body_pose=target.desired_pose_world,
                 desired_body_twist=[0.0] * 6,
+                control_contract_version=config.control_contract_version,
             )
             controller_command = controller.compute(
                 ControllerContext(
@@ -2941,12 +2976,40 @@ def _run_random_morphology_takeoff_smoke(
             base_fc_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
         if base_fc_twist is None:
             base_fc_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch)
+        if centroidal_contract:
+            post_root_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
+            post_root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(
+                robot.data.root_ang_vel_w.torch
+            )
+            post_observation = _build_articulated_runtime_observation(
+                morphology_graph,
+                time_s=time_s + sim_dt,
+                robot=robot,
+                root_pose_world=post_root_pose,
+                root_twist_world=post_root_twist,
+                joint_names=robot.joint_names,
+                joint_positions_tensor=robot.data.joint_pos.torch,
+                joint_velocities_tensor=robot.data.joint_vel.torch,
+                module_count=module_count,
+                split_fixed_module_name=split_fixed_module_name,
+            )
+            post_model = rigid_body_model_builder.build(
+                morphology_graph,
+                physical_model,
+                post_observation,
+            )
+            control_pose = post_model.body_pose_world
+            control_twist = post_model.body_twist_world
+        else:
+            control_pose = base_fc_pose
+            control_twist = base_fc_twist
         root_pose_history.append(list(base_fc_pose))
-        finite_state = finite_state and all(_is_finite(value) for value in base_fc_pose)
-        finite_state = finite_state and all(_is_finite(value) for value in base_fc_twist)
-        max_vertical_speed = max(max_vertical_speed, abs(float(base_fc_twist[2])))
-        final_linear_speed = _vector_norm(base_fc_twist[:3])
-        final_angular_speed = _vector_norm(base_fc_twist[3:6])
+        control_pose_history.append(list(control_pose))
+        finite_state = finite_state and all(_is_finite(value) for value in control_pose)
+        finite_state = finite_state and all(_is_finite(value) for value in control_twist)
+        max_vertical_speed = max(max_vertical_speed, abs(float(control_twist[2])))
+        final_linear_speed = _vector_norm(control_twist[:3])
+        final_angular_speed = _vector_norm(control_twist[3:6])
         if target.phase == TakeoffPhase.SETTLE:
             if bool(current_floor_contact["active"]):
                 floor_contact_steps += 1
@@ -2967,8 +3030,8 @@ def _run_random_morphology_takeoff_smoke(
             )
         if settled_pose is not None:
             final_target = scheduler.final_hover_pose(settled_pose)
-            position_error = _position_error_norm(base_fc_pose[:3], final_target[:3])
-            attitude_error = _quat_error_norm(base_fc_pose[3:7], final_target[3:7])
+            position_error = _position_error_norm(control_pose[:3], final_target[:3])
+            attitude_error = _quat_error_norm(control_pose[3:7], final_target[3:7])
             final_position_error = position_error
             final_attitude_error = attitude_error
             max_position_error = max(max_position_error, position_error)
@@ -2988,7 +3051,7 @@ def _run_random_morphology_takeoff_smoke(
                 break
 
     if settled_pose is None:
-        settled_pose = initial_base_fc_pose
+        settled_pose = initial_control_pose or initial_base_fc_pose
         settled_linear_speed = final_linear_speed
         settled_angular_speed = final_angular_speed
         settle_low_speed_steps_at_completion = settle_low_speed_steps
@@ -2998,8 +3061,13 @@ def _run_random_morphology_takeoff_smoke(
         if root_pose_history
         else settled_pose
     )
+    final_control_pose = (
+        tuple(control_pose_history[-1])
+        if control_pose_history
+        else settled_pose
+    )
     final_target = scheduler.final_hover_pose(settled_pose)
-    height_gain = float(final_base_fc_pose[2]) - float(settled_pose[2])
+    height_gain = float(final_control_pose[2]) - float(settled_pose[2])
     height_gain_ratio = height_gain / max(config.hover_height_delta_m, 1.0e-9)
     hold_time_s = max_hold_steps * sim_dt
     floor_pose_evidenced = (
@@ -3123,6 +3191,16 @@ def _run_random_morphology_takeoff_smoke(
         "random_morphology_takeoff_assembly_representation": "reset_time_fixed_dock_tree",
         "random_morphology_takeoff_learned_policy_used": False,
         "random_morphology_takeoff_controller": "deterministic_qpid",
+        "random_morphology_takeoff_control_contract_version": config.control_contract_version,
+        "random_morphology_takeoff_tracking_state_source": (
+            "true_morphology_centroidal_frame"
+            if centroidal_contract
+            else "legacy_base_module_fc"
+        ),
+        "random_morphology_takeoff_true_centroidal_tracking": bool(centroidal_contract),
+        "random_morphology_takeoff_contact_wrench_tracking_claim": False,
+        "random_morphology_takeoff_internal_wrench_tracking_claim": False,
+        "random_morphology_takeoff_qp_actuator_variable_scope": "rotor_thrust_vectoring_and_slack_only",
         "random_morphology_takeoff_allocation_mode": config.allocation_mode,
         "random_morphology_takeoff_sim_dt_s": sim_dt,
         "random_morphology_takeoff_sim_dt_matches_config": math.isclose(
@@ -3268,6 +3346,7 @@ def _run_random_morphology_takeoff_smoke(
         "random_morphology_takeoff_stop_on_hover_hold": config.stop_on_hover_hold,
         "random_morphology_takeoff_hover_target_pose_world": list(final_target),
         "random_morphology_takeoff_final_base_fc_pose_world": list(final_base_fc_pose),
+        "random_morphology_takeoff_final_control_pose_world": list(final_control_pose),
         "random_morphology_takeoff_height_gain_m": height_gain,
         "random_morphology_takeoff_height_gain_ratio": height_gain_ratio,
         "random_morphology_takeoff_min_height_gain_ratio": config.min_height_gain_ratio,
@@ -3307,6 +3386,7 @@ def _run_random_morphology_takeoff_smoke(
         "random_morphology_takeoff_controller_commands": controller_commands,
         "random_morphology_takeoff_actuator_target_records": actuator_target_records,
         "random_morphology_takeoff_root_pose_history": root_pose_history,
+        "random_morphology_takeoff_control_pose_history": control_pose_history,
         "random_morphology_takeoff_logging_passed": bool(logging_passed),
         "random_morphology_takeoff_last_controller_status": last_controller_status,
         "random_morphology_takeoff_last_bridge_metrics": last_bridge_metrics,
@@ -5402,8 +5482,12 @@ def _apply_actuator_record(robot, actuator_record, physical_model, device: str) 
     force_body_ids: list[int] = []
     force_rows: list[list[float]] = []
     torque_rows: list[list[float]] = []
-    joint_ids: list[int] = []
-    joint_targets: list[float] = []
+    joint_position_ids: list[int] = []
+    joint_position_targets: list[float] = []
+    joint_velocity_ids: list[int] = []
+    joint_velocity_targets: list[float] = []
+    joint_effort_ids: list[int] = []
+    joint_effort_targets: list[float] = []
     unresolved_targets: list[str] = []
     reaction_torque_abs_sum_nm = 0.0
 
@@ -5426,13 +5510,31 @@ def _apply_actuator_record(robot, actuator_record, physical_model, device: str) 
             ]
             torque_rows.append(reaction_torque)
             reaction_torque_abs_sum_nm += _vector_norm(reaction_torque)
-        elif target.actuator_type in {"vectoring_joint_position", "dock_joint_position"}:
+        elif target.actuator_type in {
+            "vectoring_joint_position",
+            "dock_joint_position",
+            "joint_position",
+        }:
             joint_name = _resolve_module_name(robot.joint_names, module_id, local_id)
             if joint_name is None:
                 unresolved_targets.append(target.command_key)
                 continue
-            joint_ids.append(robot.joint_names.index(joint_name))
-            joint_targets.append(target.target_value)
+            joint_position_ids.append(robot.joint_names.index(joint_name))
+            joint_position_targets.append(target.target_value)
+        elif target.actuator_type == "joint_velocity":
+            joint_name = _resolve_module_name(robot.joint_names, module_id, local_id)
+            if joint_name is None:
+                unresolved_targets.append(target.command_key)
+                continue
+            joint_velocity_ids.append(robot.joint_names.index(joint_name))
+            joint_velocity_targets.append(target.target_value)
+        elif target.actuator_type in {"joint_effort", "joint_effort_bias"}:
+            joint_name = _resolve_module_name(robot.joint_names, module_id, local_id)
+            if joint_name is None:
+                unresolved_targets.append(target.command_key)
+                continue
+            joint_effort_ids.append(robot.joint_names.index(joint_name))
+            joint_effort_targets.append(target.target_value)
         else:
             unresolved_targets.append(target.command_key)
 
@@ -5446,16 +5548,30 @@ def _apply_actuator_record(robot, actuator_record, physical_model, device: str) 
             body_ids=body_ids,
             is_global=False,
         )
-    if joint_ids:
-        target_tensor = torch.tensor([joint_targets], dtype=torch.float32, device=device)
-        joint_ids_tensor = torch.tensor(joint_ids, dtype=torch.int32, device=device)
+    if joint_position_ids:
+        target_tensor = torch.tensor([joint_position_targets], dtype=torch.float32, device=device)
+        joint_ids_tensor = torch.tensor(joint_position_ids, dtype=torch.int32, device=device)
         robot.set_joint_position_target_index(target=target_tensor, joint_ids=joint_ids_tensor)
-    applied_target_count = len(force_body_ids) + len(joint_ids)
+    if joint_velocity_ids:
+        target_tensor = torch.tensor([joint_velocity_targets], dtype=torch.float32, device=device)
+        joint_ids_tensor = torch.tensor(joint_velocity_ids, dtype=torch.int32, device=device)
+        robot.set_joint_velocity_target_index(target=target_tensor, joint_ids=joint_ids_tensor)
+    if joint_effort_ids:
+        target_tensor = torch.tensor([joint_effort_targets], dtype=torch.float32, device=device)
+        joint_ids_tensor = torch.tensor(joint_effort_ids, dtype=torch.int32, device=device)
+        robot.set_joint_effort_target_index(target=target_tensor, joint_ids=joint_ids_tensor)
+    applied_joint_target_count = (
+        len(joint_position_ids) + len(joint_velocity_ids) + len(joint_effort_ids)
+    )
+    applied_target_count = len(force_body_ids) + applied_joint_target_count
     return {
         "requested_target_count": len(actuator_record.actuator_targets),
         "applied_target_count": applied_target_count,
         "applied_rotor_target_count": len(force_body_ids),
-        "applied_joint_target_count": len(joint_ids),
+        "applied_joint_target_count": applied_joint_target_count,
+        "applied_joint_position_target_count": len(joint_position_ids),
+        "applied_joint_velocity_target_count": len(joint_velocity_ids),
+        "applied_joint_effort_target_count": len(joint_effort_ids),
         "unresolved_target_count": len(unresolved_targets),
         "unresolved_targets": sorted(unresolved_targets),
         "reaction_torque_target_count": len(torque_rows),

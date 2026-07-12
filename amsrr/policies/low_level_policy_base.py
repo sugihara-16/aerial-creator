@@ -7,6 +7,8 @@ from amsrr.schemas.common import Pose7D, SchemaValidationError
 from amsrr.schemas.morphology import MorphologyGraph
 from amsrr.schemas.physical_model import PhysicalModel
 from amsrr.schemas.policies import (
+    POLICY_COMMAND_CONTRACT_CENTROIDAL,
+    POLICY_COMMAND_CONTRACT_LEGACY,
     ContactAssignment,
     ContactWrenchTrajectory,
     ControllerStatus,
@@ -48,6 +50,14 @@ class BaselineLowLevelPolicyConfig:
     contact_bias_limit: float = 0.25
     controller_warning_residual_scale: float = 0.5
     controller_infeasible_residual_scale: float = 0.0
+    control_contract_version: str = POLICY_COMMAND_CONTRACT_LEGACY
+
+    def __post_init__(self) -> None:
+        if self.control_contract_version not in {
+            POLICY_COMMAND_CONTRACT_LEGACY,
+            POLICY_COMMAND_CONTRACT_CENTROIDAL,
+        }:
+            raise ValueError("BaselineLowLevelPolicyConfig.control_contract_version is unsupported")
 
 
 class BaselineLowLevelPolicy:
@@ -65,6 +75,8 @@ class BaselineLowLevelPolicy:
         active_knot = select_active_knot(context)
         residual = _object_tracking_residual(active_knot, context.runtime_observation, self.config)
         residual = _scale_residual_for_controller_status(residual, _controller_status(context), self.config)
+        centroidal_contract = self.config.control_contract_version == POLICY_COMMAND_CONTRACT_CENTROIDAL
+        posture = active_knot.posture_target
         return PolicyCommand(
             desired_body_twist=_desired_body_twist(active_knot),
             desired_body_pose=_desired_body_pose(active_knot),
@@ -72,8 +84,28 @@ class BaselineLowLevelPolicy:
             joint_position_bias={},
             joint_velocity_bias={},
             residual_wrench_body=residual,
-            contact_tracking_bias=_contact_tracking_bias(active_knot.contact_assignments, self.config),
+            contact_tracking_bias=(
+                {}
+                if centroidal_contract
+                else _contact_tracking_bias(active_knot.contact_assignments, self.config)
+            ),
             priority_weights=_low_level_priority_weights(active_knot, _controller_status(context)),
+            control_contract_version=(
+                POLICY_COMMAND_CONTRACT_CENTROIDAL
+                if centroidal_contract
+                else POLICY_COMMAND_CONTRACT_LEGACY
+            ),
+            joint_position_targets=(
+                dict(posture.joint_pos_target or {})
+                if centroidal_contract and posture is not None
+                else {}
+            ),
+            joint_velocity_targets=(
+                dict(posture.joint_vel_target or {})
+                if centroidal_contract and posture is not None
+                else {}
+            ),
+            joint_torque_bias={},
         )
 
 

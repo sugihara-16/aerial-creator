@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Literal
 
 from amsrr.schemas.common import ContactMode, Condition, Pose7D, SchemaBase, Vector3, require_len, require_non_empty
+
+
+POLICY_COMMAND_CONTRACT_LEGACY = "legacy_contact_bias_v1"
+POLICY_COMMAND_CONTRACT_CENTROIDAL = "centroidal_local_joint_v2"
+PolicyCommandContractVersion = Literal[
+    "legacy_contact_bias_v1",
+    "centroidal_local_joint_v2",
+]
 
 
 @dataclass
@@ -105,6 +114,10 @@ class PolicyCommand(SchemaBase):
     residual_wrench_body: list[float] | None = None
     contact_tracking_bias: dict[int, list[float]] = field(default_factory=dict)
     priority_weights: dict[str, float] = field(default_factory=dict)
+    control_contract_version: PolicyCommandContractVersion = POLICY_COMMAND_CONTRACT_LEGACY
+    joint_position_targets: dict[str, float] = field(default_factory=dict)
+    joint_velocity_targets: dict[str, float] = field(default_factory=dict)
+    joint_torque_bias: dict[str, float] = field(default_factory=dict)
 
     def validate(self) -> None:
         if self.desired_body_twist is not None:
@@ -113,6 +126,26 @@ class PolicyCommand(SchemaBase):
             require_len(self.desired_body_pose, 7, "PolicyCommand.desired_body_pose")
         if self.residual_wrench_body is not None:
             require_len(self.residual_wrench_body, 6, "PolicyCommand.residual_wrench_body")
+        for field_name in (
+            "joint_position_bias",
+            "joint_velocity_bias",
+            "joint_position_targets",
+            "joint_velocity_targets",
+            "joint_torque_bias",
+            "priority_weights",
+        ):
+            _require_finite_mapping(getattr(self, field_name), f"PolicyCommand.{field_name}")
+        for candidate_id, wrench in self.contact_tracking_bias.items():
+            if candidate_id < 0:
+                from amsrr.schemas.common import SchemaValidationError
+
+                raise SchemaValidationError("PolicyCommand.contact_tracking_bias ids must be non-negative")
+            if not all(math.isfinite(float(value)) for value in wrench):
+                from amsrr.schemas.common import SchemaValidationError
+
+                raise SchemaValidationError(
+                    f"PolicyCommand.contact_tracking_bias[{candidate_id}] must contain finite values"
+                )
 
 
 @dataclass
@@ -131,4 +164,29 @@ class ControllerCommand(SchemaBase):
     joint_torque_commands: dict[str, float]
     dock_mechanism_commands: dict[str, float]
     controller_status: ControllerStatus
+    control_contract_version: PolicyCommandContractVersion = POLICY_COMMAND_CONTRACT_LEGACY
+    joint_position_targets: dict[str, float] = field(default_factory=dict)
+    joint_velocity_targets: dict[str, float] = field(default_factory=dict)
+    joint_torque_bias: dict[str, float] = field(default_factory=dict)
 
+    def validate(self) -> None:
+        for field_name in (
+            "rotor_thrusts_n",
+            "vectoring_joint_targets",
+            "joint_torque_commands",
+            "dock_mechanism_commands",
+            "joint_position_targets",
+            "joint_velocity_targets",
+            "joint_torque_bias",
+        ):
+            _require_finite_mapping(getattr(self, field_name), f"ControllerCommand.{field_name}")
+
+
+def _require_finite_mapping(values: dict[object, float], path: str) -> None:
+    from amsrr.schemas.common import SchemaValidationError
+
+    for key, value in values.items():
+        if isinstance(key, str) and not key:
+            raise SchemaValidationError(f"{path} keys must be non-empty")
+        if not math.isfinite(float(value)):
+            raise SchemaValidationError(f"{path}[{key!r}] must be finite")

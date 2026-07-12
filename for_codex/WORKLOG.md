@@ -2,6 +2,21 @@
 
 ## Global Worklog
 
+### 2026-07-12 (Order 2.5 centroidal controller contract implemented)
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus normative `A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md` Section 14
+- Work package / Agent label: Agent I/J boundary, Order 2.5: versioned `pi_L` command contract, centroidal QPID, local joint servo/bridge, privileged-contact boundary, and detach-only estimator
+- Summary: Implemented `centroidal_local_joint_v2` without changing historical `legacy_contact_bias_v1` semantics. The v2 normal path tracks true morphology CoM pose/twist, applies policy CoM wrench bias through the rotor/vectoring allocator, ignores contact-wrench bias, keeps vectoring allocator-owned, and routes absolute non-vectoring position/velocity plus bounded offset torque through validated controller/Isaac bridge targets. Added follower-subtree detach wrench estimation and a fail-closed unload dwell gate.
+- Files changed: `amsrr/schemas/policies.py`; controller modules `policy_command_builder.py`, `rigid_body_model.py`, `qpid_controller.py`, `actuator_mapping.py`, `isaac_controller_bridge.py`, and new `detach_wrench_estimator.py`; `amsrr/policies/low_level_policy_base.py`; shared controller smoke/takeoff simulation; Isaac probe; legacy and Order 2.5 configs; focused schema/controller/policy/simulation tests; normative controller supplement; design supplement; and this worklog.
+- Schema/interface changes: Additive versioned fields `control_contract_version`, `joint_position_targets`, `joint_velocity_targets`, and `joint_torque_bias` on policy/controller commands. Added CoM-origin `RigidBodyControlModel.body_twist_world`. Added bridge actuator modes `joint_position`, `joint_velocity`, and `joint_effort_bias`. Old serialized commands parse with the legacy version/default-empty new fields.
+- Upstream dependencies used: user-approved Section 14 contract; v0.4 controller responsibility boundary; Order 0 motor limits/control modes; Order 1 feasible morphology sampler; Order 2 graph-specific floor takeoff runner; current rigid-body QP and Isaac articulation APIs.
+- Downstream impact: Order 3 can now generate/train a new morphology-conditioned `pi_L` against v2 absolute joint targets without contact-wrench actor leakage. Existing v1 checkpoints/artifacts remain legacy and are not v2 evidence. Dynamic `pi_A` detach still needs to invoke the new estimator/gate and implement latch/post-release execution.
+- Tests added or run: Added round-trip/non-finite schema tests; v2 builder/contact no-op; true CoM pose/twist and QPID tracking; vectoring ownership; current joint hold; dock position/velocity/continuous-torque-bias mapping and unsupported-mode failure; privileged contact-wrench non-leakage; follower cut sign/gravity/frame behavior; and unload dwell/reset tests. Full `tests/unit tests/acceptance` passed 395 tests with 1 skipped in 282.41 s; after adding the final pure CoM-to-dock moment-shift sign regression, the final focused set passed 122 tests. Python compilation and `git diff --check` passed.
+- Commands run: focused/full pytest with plugin autoload disabled and `PYTHONPATH=.`; `python -m compileall`; two real Isaac invocations through `micromamba run -n isaaclab3`; Git status/diff/whitespace inspection.
+- Real Isaac evidence: Seed 25 sampled an accepted three-module graph on attempt 1. The final v2 run passed 917 steps / 4.585 s with 1.0 s hover dwell; final position/attitude error 0.062446 m / 0.000368 rad; final linear/angular speed 0.047828 m/s / 0.000657 rad/s; zero QP infeasibility, controller/bridge clipping, missing/unsupported/unresolved actuator target, unintended cross-module contact, and report-validation failures. Ignored artifacts are `artifacts/p4_full/order2_5_centroidal_control.json{,l}`.
+- Assumptions: Version 1 non-vectoring motion remains quasi-static; offset torque uses the configured continuous dock torque limit (1.3 Nm); default detach thresholds are provisional configurable values pending measured noise/load characterization; `external_contact_free` must be independently evidenced and unknown fails closed.
+- Blockers / open questions: None for the Order 2.5 controller migration. Actual `pi_A` latch release and post-release stability execution are intentionally downstream, as are v2 `pi_L` training and natural-contact TaskSpec completion.
+- Next steps: Begin Order 3 morphology-conditioned `pi_L` training only on explicit request, using `centroidal_local_joint_v2` and a new checkpoint version.
+
 ### 2026-07-12 (Centroidal-only QPID design revision)
 - Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus user-approved `A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md` Section 14 and the matching design-modification entry
 - Work package / Agent label: Agent I/J boundary: `π_L` PolicyCommand, centroidal QPID, local joint servo, controller bridge, contact-reward, and detach-unload design contract
@@ -2666,6 +2681,19 @@
 ## Work Package Logs
 
 ### Agent I/J: Centroidal QPID and Local Joint Servo Contract
+
+#### 2026-07-12 (Order 2.5 implementation)
+- Scope: Implement and validate the approved Section 14 migration before Order 3.
+- Files changed: versioned policy/controller schemas; policy reference builder; rigid-body model/QPID; actuator mapping/Isaac bridge/probe; baseline policy v2 option; detach estimator/gate; Order 2.5 takeoff config/report gate; tests; design/worklog records.
+- Upstream dependencies: approved controller supplement Section 14, Order 0 actuator capabilities, existing rotor/vectoring QP, Order 1 sampler, and Order 2 real Isaac runner.
+- Implemented: Legacy-compatible v2 command fields; true centroidal pose/twist; contact bias no-op; rotor/vectoring-only QP reporting; allocator-owned vectoring; deterministic non-vectoring hold and absolute targets; native dock position/velocity/offset torque with continuous-limit clipping; privileged wrench non-leak test; follower-subtree cut estimator; fail-closed unload dwell gate; dedicated real-Isaac v2 evidence.
+- Not implemented: New learned v2 checkpoint/training, dynamic `pi_A` latch release, post-release separation execution, natural-contact task completion, or P4 full acceptance.
+- Schema/interface changes: Additive and versioned as recorded in the global entry; omitted version fields resolve to `legacy_contact_bias_v1`.
+- Downstream impact: Order 3 must explicitly select `centroidal_local_joint_v2`; v1 checkpoints and prior base-`fc` takeoff artifacts cannot be relabelled.
+- Tests added: schema/round-trip, reference semantics, centroidal kinematics/control, actuator modes/limits, policy privileged-data isolation, detach estimator/sign/gate, and real-report no-mislabeling coverage.
+- Tests passed: final focused 122; full unit/acceptance 395 passed and 1 skipped before the final isolated frame-sign regression; real three-module Isaac v2 takeoff/hover passed with no report failures.
+- Handoff notes: Keep vectoring allocator-owned and normal contact/internal wrench outside QPID. Use the estimator only on an independently contact-free follower subtree and keep release fail-closed.
+- Open questions: Detach threshold hardware tuning remains future empirical work; no method-level blocker for starting Order 3.
 
 #### 2026-07-12
 - Scope: Record the approved normal-operation controller simplification and detach-only internal-wrench boundary before Order 3 learning implementation.

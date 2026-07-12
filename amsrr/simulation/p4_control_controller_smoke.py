@@ -185,6 +185,10 @@ def bridge_supported_controller_command(controller_command: ControllerCommand) -
         joint_torque_commands={},
         dock_mechanism_commands=dock_commands,
         controller_status=controller_command.controller_status,
+        control_contract_version=controller_command.control_contract_version,
+        joint_position_targets=dict(controller_command.joint_position_targets),
+        joint_velocity_targets=dict(controller_command.joint_velocity_targets),
+        joint_torque_bias=dict(controller_command.joint_torque_bias),
     )
 
 
@@ -194,6 +198,9 @@ def _command_module_ids(controller_command: ControllerCommand) -> list[int]:
         controller_command.rotor_thrusts_n,
         controller_command.vectoring_joint_targets,
         controller_command.dock_mechanism_commands,
+        controller_command.joint_position_targets,
+        controller_command.joint_velocity_targets,
+        controller_command.joint_torque_bias,
     ):
         for command_key in command_values:
             module_id = _module_id_from_global_key(command_key)

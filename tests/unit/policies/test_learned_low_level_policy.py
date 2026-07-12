@@ -21,6 +21,7 @@ from amsrr.schemas.policies import (
     ObjectTarget,
 )
 from amsrr.schemas.runtime import (
+    ContactState,
     ModuleRuntimeState,
     ObjectRuntimeState,
     RuntimeObservation,
@@ -145,6 +146,29 @@ def test_runtime_overlay_preserves_all_nonlearned_deterministic_intent() -> None
     assert overlaid.desired_anchor_pose_offsets == template.desired_anchor_pose_offsets
     assert overlaid.contact_tracking_bias == template.contact_tracking_bias
     assert overlaid.priority_weights == template.priority_weights
+
+
+def test_privileged_contact_wrench_values_do_not_leak_into_actor_feature_vector() -> None:
+    first = _context()
+    second = _context()
+    first.runtime_observation.contact_states = [
+        ContactState(
+            contact_id="contact-0",
+            entity_a="robot",
+            entity_b="box",
+            wrench_world=[1.0, 2.0, 3.0, 0.1, 0.2, 0.3],
+        )
+    ]
+    second.runtime_observation.contact_states = [
+        ContactState(
+            contact_id="contact-0",
+            entity_a="robot",
+            entity_b="box",
+            wrench_world=[100.0, -200.0, 300.0, 10.0, -20.0, 30.0],
+        )
+    ]
+
+    assert pi_l_feature_vector(first) == pi_l_feature_vector(second)
 
 
 def _policy(model: nn.Module, feature_mean: list[float]) -> LearnedLowLevelPolicy:

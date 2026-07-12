@@ -62,6 +62,7 @@ class RigidBodyControlModel(SchemaBase):
     dock_actuator_ids: list[str]
     active_actuator_limits: dict[str, dict[str, float | None]]
     current_joint_positions: dict[str, float] = field(default_factory=dict)
+    body_twist_world: list[float] = field(default_factory=lambda: [0.0] * 6)
     metadata: dict[str, float | int | str | bool] = field(default_factory=dict)
 
     def validate(self) -> None:
@@ -70,6 +71,7 @@ class RigidBodyControlModel(SchemaBase):
         require_len(self.body_pose_world, 7, "RigidBodyControlModel.body_pose_world")
         require_len(self.center_of_mass_body, 3, "RigidBodyControlModel.center_of_mass_body")
         require_len(self.inertia_body, 6, "RigidBodyControlModel.inertia_body")
+        require_len(self.body_twist_world, 6, "RigidBodyControlModel.body_twist_world")
         if self.total_mass_kg <= 0.0:
             raise SchemaValidationError("RigidBodyControlModel.total_mass_kg must be positive")
         require_len(self.allocation_matrix_body, 6, "RigidBodyControlModel.allocation_matrix_body")
@@ -148,6 +150,15 @@ class RigidBodyControlModelBuilder:
             base_state.pose_world[5],
             base_state.pose_world[6],
         )
+        base_twist_world = (list(base_state.twist_world) + [0.0] * 6)[:6]
+        base_linear_velocity_world = tuple(float(value) for value in base_twist_world[:3])
+        angular_velocity_world = tuple(float(value) for value in base_twist_world[3:6])
+        base_origin_world = _pose_translation(base_state.pose_world)
+        com_linear_velocity_world = _add(
+            base_linear_velocity_world,
+            _cross(angular_velocity_world, _sub(com_world, base_origin_world)),
+        )
+        body_twist_world = [*com_linear_velocity_world, *angular_velocity_world]
         inertia_body_matrix = _zero_matrix()
         for item in link_kinematics:
             inertia_body_at_link_com = _matmul(
@@ -191,13 +202,15 @@ class RigidBodyControlModelBuilder:
             dock_actuator_ids=dock_actuator_ids,
             active_actuator_limits=actuator_limits,
             current_joint_positions=current_joint_positions,
+            body_twist_world=body_twist_world,
             metadata={
                 "active_module_count": len(active_module_ids),
                 "active_link_count": len(link_kinematics),
                 "active_rotor_count": len(rotor_elements),
                 "body_frame_origin": "com",
                 "body_frame_orientation_source": f"module:{morphology_graph.base_module_id}",
-                "builder_version": "p4_control_rigid_body_model_v1",
+                "twist_frame_origin": "com",
+                "builder_version": "p4_control_rigid_body_model_v2",
             },
         )
 

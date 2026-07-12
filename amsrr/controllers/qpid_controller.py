@@ -17,7 +17,13 @@ from amsrr.controllers.qp_allocator_interface import (
 from amsrr.controllers.rigid_body_model import RigidBodyControlModelBuilder
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.physical_model import JointModel, PhysicalModel
-from amsrr.schemas.policies import ControllerCommand, ControllerStatus, InteractionKnot, PolicyCommand
+from amsrr.schemas.policies import (
+    POLICY_COMMAND_CONTRACT_CENTROIDAL,
+    ControllerCommand,
+    ControllerStatus,
+    InteractionKnot,
+    PolicyCommand,
+)
 from amsrr.schemas.runtime import RuntimeObservation
 
 
@@ -71,23 +77,58 @@ class QPIDController:
         refs = context.desired_references or self._build_references(context)
         allocation = self.allocator.allocate(self._allocation_problem(context, refs))
         self._commit_or_freeze_integrators(allocation)
-        vectoring_targets = _vectoring_joint_targets(refs, context.physical_model)
-        vectoring_targets.update(allocation.vectoring_joint_targets)
-        joint_torques = _pd_joint_torques(refs, context.runtime_observation, context.physical_model, self.config)
-        dock_commands = _dock_mechanism_hold_commands(
-            refs,
-            context.physical_model,
-            active_module_ids=sorted(module.module_id for module in context.morphology_graph.modules),
-            commanded_joint_ids=_commanded_joint_position_ids(context.active_knot, context.policy_command),
+        centroidal_contract = (
+            context.policy_command.control_contract_version == POLICY_COMMAND_CONTRACT_CENTROIDAL
         )
+        if centroidal_contract:
+            vectoring_targets = dict(allocation.vectoring_joint_targets)
+            joint_torques: dict[str, float] = {}
+            dock_commands: dict[str, float] = {}
+            joint_position_targets, joint_velocity_targets, joint_torque_bias = _local_joint_targets(
+                refs,
+                context.policy_command,
+                context.physical_model,
+            )
+        else:
+            vectoring_targets = _vectoring_joint_targets(refs, context.physical_model)
+            vectoring_targets.update(allocation.vectoring_joint_targets)
+            joint_torques = _pd_joint_torques(
+                refs,
+                context.runtime_observation,
+                context.physical_model,
+                self.config,
+            )
+            dock_commands = _dock_mechanism_hold_commands(
+                refs,
+                context.physical_model,
+                active_module_ids=sorted(module.module_id for module in context.morphology_graph.modules),
+                commanded_joint_ids=_commanded_joint_position_ids(context.active_knot, context.policy_command),
+            )
+            joint_position_targets = {}
+            joint_velocity_targets = {}
+            joint_torque_bias = {}
         controller_status = _controller_status(allocation, self.config)
         controller_status.metrics.update(self._reference_metrics)
+        controller_status.metrics.update(
+            {
+                "centroidal_local_joint_contract": 1.0 if centroidal_contract else 0.0,
+                "contact_tracking_ref_count": float(len(refs.contact_tracking_refs)),
+                "qp_contact_wrench_variable_count": 0.0,
+                "qp_internal_wrench_variable_count": 0.0,
+                "qp_generic_joint_variable_count": 0.0,
+                "vectoring_allocator_owned": 1.0 if centroidal_contract else 0.0,
+            }
+        )
         return ControllerCommand(
             rotor_thrusts_n=allocation.rotor_thrusts_n,
             vectoring_joint_targets=vectoring_targets,
             joint_torque_commands=joint_torques,
             dock_mechanism_commands=dock_commands,
             controller_status=controller_status,
+            control_contract_version=context.policy_command.control_contract_version,
+            joint_position_targets=joint_position_targets,
+            joint_velocity_targets=joint_velocity_targets,
+            joint_torque_bias=joint_torque_bias,
         )
 
     def reset_integrators(self) -> None:
@@ -108,11 +149,20 @@ class QPIDController:
         self._reference_metrics = {}
         self._pending_position_error_integral_world = None
         self._pending_attitude_error_integral_body = None
-        current_q = _current_joint_positions(context.runtime_observation)
-        current_qdot = _current_joint_velocities(context.runtime_observation)
+        centroidal_contract = (
+            context.policy_command.control_contract_version == POLICY_COMMAND_CONTRACT_CENTROIDAL
+        )
+        current_q = _current_joint_positions(
+            context.runtime_observation,
+            global_ids=centroidal_contract,
+        )
+        current_qdot = _current_joint_velocities(
+            context.runtime_observation,
+            global_ids=centroidal_contract,
+        )
         nominal_q = dict(current_q)
         nominal_qdot = dict(current_qdot)
-        if context.active_knot.posture_target is not None:
+        if not centroidal_contract and context.active_knot.posture_target is not None:
             if context.active_knot.posture_target.joint_pos_target is not None:
                 nominal_q.update(context.active_knot.posture_target.joint_pos_target)
             if context.active_knot.posture_target.joint_vel_target is not None:
@@ -122,8 +172,22 @@ class QPIDController:
             context.active_knot,
             nominal_joint_positions=nominal_q,
             nominal_joint_velocities=nominal_qdot,
-            joint_limits=_joint_position_limits(context.physical_model),
-            velocity_limits=_joint_velocity_limits(context.physical_model),
+            joint_limits=_joint_position_limits(
+                context.physical_model,
+                active_module_ids=(
+                    sorted(module.module_id for module in context.morphology_graph.modules)
+                    if centroidal_contract
+                    else None
+                ),
+            ),
+            velocity_limits=_joint_velocity_limits(
+                context.physical_model,
+                active_module_ids=(
+                    sorted(module.module_id for module in context.morphology_graph.modules)
+                    if centroidal_contract
+                    else None
+                ),
+            ),
         )
         target_wrench = self._target_wrench_from_body_reference(context, refs)
         if target_wrench is not None:
@@ -139,8 +203,21 @@ class QPIDController:
             return None
         if not context.runtime_observation.module_states:
             return None
-        state = context.runtime_observation.module_states[0]
-        current_pose = state.pose_world
+        rigid_body_model = self.rigid_body_model_builder.build(
+            context.morphology_graph,
+            context.physical_model,
+            context.runtime_observation,
+        )
+        centroidal_contract = (
+            context.policy_command.control_contract_version == POLICY_COMMAND_CONTRACT_CENTROIDAL
+        )
+        if centroidal_contract:
+            current_pose = rigid_body_model.body_pose_world
+            current_twist = list(rigid_body_model.body_twist_world)
+        else:
+            state = context.runtime_observation.module_states[0]
+            current_pose = state.pose_world
+            current_twist = list(state.twist_world or [0.0] * 6)
         target_pose = refs.desired_body_pose or current_pose
         target_twist = refs.desired_body_twist or [0.0] * 6
         dt = max(float(context.control_dt_s or self.config.control_dt_s), 1.0e-9)
@@ -149,7 +226,6 @@ class QPIDController:
             float(target_pose[idx]) - float(current_pose[idx])
             for idx in range(3)
         ]
-        current_twist = list(state.twist_world or [0.0] * 6)
         current_twist = (current_twist + [0.0] * 6)[:6]
         target_twist = (list(target_twist) + [0.0] * 6)[:6]
         velocity_error_world = [
@@ -189,11 +265,6 @@ class QPIDController:
             + self.config.z_i_gain * position_integral[2]
             + self.config.z_d_gain * velocity_error_world[2],
         ]
-        rigid_body_model = self.rigid_body_model_builder.build(
-            context.morphology_graph,
-            context.physical_model,
-            context.runtime_observation,
-        )
         control_mass_kg = rigid_body_model.total_mass_kg
         desired_force_world = (
             control_mass_kg * desired_acc_world[0],
@@ -238,6 +309,7 @@ class QPIDController:
             "target_velocity_error_norm": math.sqrt(sum(value * value for value in velocity_error_world)),
             "target_angular_velocity_error_norm": math.sqrt(sum(value * value for value in angular_velocity_error_body)),
             "pid_target_builder_active": 1.0,
+            "tracking_state_is_true_centroidal": 1.0 if centroidal_contract else 0.0,
             **_wrench_metrics("target_wrench_body_before_payload", target_wrench_before_payload),
             **_wrench_metrics("target_wrench_body_after_payload", target_wrench_after_payload),
         }
@@ -356,6 +428,64 @@ def _vectoring_joint_targets(
     return targets
 
 
+def _local_joint_targets(
+    refs: DesiredBiasReferences,
+    policy_command: PolicyCommand,
+    physical_model: PhysicalModel,
+) -> tuple[dict[str, float], dict[str, float], dict[str, float]]:
+    """Return non-vectoring local-servo targets for the v2 controller contract."""
+
+    vectoring_joint_ids = {
+        joint_id
+        for rotor in physical_model.rotors
+        for joint_id in rotor.vectoring_joint_ids
+    }
+
+    def is_vectoring(command_id: str) -> bool:
+        split = _split_global_joint_id(command_id)
+        local_id = split[1] if split is not None else command_id
+        return local_id in vectoring_joint_ids
+
+    actuator_assignments = physical_model.metadata.get("joint_actuator_assignments", {})
+    modeled_local_joint_ids = (
+        {
+            str(joint_id)
+            for joint_id, role in actuator_assignments.items()
+            if role != "vectoring"
+        }
+        if isinstance(actuator_assignments, dict)
+        else set()
+    )
+
+    def is_modeled_local_joint(command_id: str) -> bool:
+        split = _split_global_joint_id(command_id)
+        local_id = split[1] if split is not None else command_id
+        return local_id in modeled_local_joint_ids and not is_vectoring(command_id)
+
+    # Every observed modeled joint receives an explicit current-position hold.
+    # An absolute pi_L target overwrites that hold in the reference builder.
+    position_targets = {
+        joint_id: float(value)
+        for joint_id, value in sorted(refs.joint_position_ref.items())
+        if is_modeled_local_joint(joint_id)
+    }
+    velocity_targets = {
+        joint_id: float(refs.joint_velocity_ref.get(joint_id, 0.0))
+        if joint_id in policy_command.joint_velocity_targets
+        else 0.0
+        for joint_id in position_targets
+    }
+    for joint_id in sorted(policy_command.joint_velocity_targets):
+        if joint_id in refs.joint_velocity_ref and is_modeled_local_joint(joint_id):
+            velocity_targets[joint_id] = float(refs.joint_velocity_ref[joint_id])
+    torque_bias = {
+        joint_id: float(value)
+        for joint_id, value in sorted(refs.joint_torque_bias.items())
+        if not is_vectoring(joint_id)
+    }
+    return position_targets, velocity_targets, torque_bias
+
+
 def _pd_joint_torques(
     refs: DesiredBiasReferences,
     runtime_observation: RuntimeObservation,
@@ -446,35 +576,74 @@ def _global_id(module_id: int, local_id: str) -> str:
     return f"module_{module_id}:{local_id}"
 
 
-def _current_joint_positions(runtime_observation: RuntimeObservation) -> dict[str, float]:
+def _current_joint_positions(
+    runtime_observation: RuntimeObservation,
+    *,
+    global_ids: bool = False,
+) -> dict[str, float]:
     values: dict[str, float] = {}
     for state in runtime_observation.module_states:
-        values.update({joint_id: float(value) for joint_id, value in state.joint_positions.items()})
+        for joint_id, value in state.joint_positions.items():
+            key = _global_id(state.module_id, joint_id) if global_ids else joint_id
+            values[key] = float(value)
     return values
 
 
-def _current_joint_velocities(runtime_observation: RuntimeObservation) -> dict[str, float]:
+def _current_joint_velocities(
+    runtime_observation: RuntimeObservation,
+    *,
+    global_ids: bool = False,
+) -> dict[str, float]:
     values: dict[str, float] = {}
     for state in runtime_observation.module_states:
-        values.update({joint_id: float(value) for joint_id, value in state.joint_velocities.items()})
+        for joint_id, value in state.joint_velocities.items():
+            key = _global_id(state.module_id, joint_id) if global_ids else joint_id
+            values[key] = float(value)
     return values
 
 
-def _joint_position_limits(physical_model: PhysicalModel) -> dict[str, tuple[float, float]]:
-    return {
+def _joint_position_limits(
+    physical_model: PhysicalModel,
+    *,
+    active_module_ids: list[int] | None = None,
+) -> dict[str, tuple[float, float]]:
+    limits = {
         joint.joint_id: limit
         for joint in physical_model.joints
         if (limit := _limit_tuple(joint)) is not None
     }
+    if active_module_ids is not None:
+        limits.update(
+            {
+                _global_id(module_id, joint_id): limit
+                for module_id in active_module_ids
+                for joint_id, limit in list(limits.items())
+                if _split_global_joint_id(joint_id) is None
+            }
+        )
+    return limits
 
 
-def _joint_velocity_limits(physical_model: PhysicalModel) -> dict[str, tuple[float, float]]:
+def _joint_velocity_limits(
+    physical_model: PhysicalModel,
+    *,
+    active_module_ids: list[int] | None = None,
+) -> dict[str, tuple[float, float]]:
     limits: dict[str, tuple[float, float]] = {}
     for joint in physical_model.joints:
         if joint.velocity_limit is None:
             continue
         limit = abs(float(joint.velocity_limit))
         limits[joint.joint_id] = (-limit, limit)
+    if active_module_ids is not None:
+        limits.update(
+            {
+                _global_id(module_id, joint_id): limit
+                for module_id in active_module_ids
+                for joint_id, limit in list(limits.items())
+                if _split_global_joint_id(joint_id) is None
+            }
+        )
     return limits
 
 

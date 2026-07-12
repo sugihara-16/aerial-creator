@@ -13,13 +13,16 @@ SUPPORTED_COMMAND_TYPES = {
     "vectoring_joint_position": "vectoring_joint_position",
     "dock_joint_position": "dock_joint_position",
     "joint_effort": "joint_effort",
+    "joint_position": "joint_position",
+    "joint_velocity": "joint_velocity",
+    "joint_effort_bias": "joint_effort_bias",
 }
 
 
 @dataclass(frozen=True)
 class IsaacControllerBridgeConfig:
     backend: str = "isaac_lab"
-    bridge_version: str = "isaac_controller_bridge_v1"
+    bridge_version: str = "isaac_controller_bridge_v2"
 
 
 @dataclass
@@ -124,6 +127,33 @@ class IsaacControllerBridge:
             missing_actuators=missing_actuators,
             unsupported_actuators=unsupported_actuators,
         )
+        self._append_command_targets(
+            controller_command.joint_position_targets,
+            actuator_mapping,
+            expected_type="joint_position",
+            actuator_targets=actuator_targets,
+            clipped_targets=clipped_targets,
+            missing_actuators=missing_actuators,
+            unsupported_actuators=unsupported_actuators,
+        )
+        self._append_command_targets(
+            controller_command.joint_velocity_targets,
+            actuator_mapping,
+            expected_type="joint_velocity",
+            actuator_targets=actuator_targets,
+            clipped_targets=clipped_targets,
+            missing_actuators=missing_actuators,
+            unsupported_actuators=unsupported_actuators,
+        )
+        self._append_command_targets(
+            controller_command.joint_torque_bias,
+            actuator_mapping,
+            expected_type="joint_effort_bias",
+            actuator_targets=actuator_targets,
+            clipped_targets=clipped_targets,
+            missing_actuators=missing_actuators,
+            unsupported_actuators=unsupported_actuators,
+        )
 
         status_metrics = controller_command.controller_status.metrics
         allocation_residual_norm = float(
@@ -134,6 +164,9 @@ class IsaacControllerBridge:
             + len(controller_command.vectoring_joint_targets)
             + len(controller_command.dock_mechanism_commands)
             + len(controller_command.joint_torque_commands)
+            + len(controller_command.joint_position_targets)
+            + len(controller_command.joint_velocity_targets)
+            + len(controller_command.joint_torque_bias)
         )
         return IsaacActuatorTargetRecord(
             time_s=time_s,
@@ -159,6 +192,7 @@ class IsaacControllerBridge:
             metadata={
                 "bridge_version": self.config.bridge_version,
                 "controller_active_mode": controller_command.controller_status.active_mode,
+                "control_contract_version": controller_command.control_contract_version,
             },
         )
 
@@ -178,10 +212,13 @@ class IsaacControllerBridge:
             if channel is None:
                 missing_actuators.append(command_key)
                 continue
-            if channel.actuator_type != expected_type:
+            if (
+                channel.actuator_type != expected_type
+                and expected_type not in channel.supported_command_types
+            ):
                 unsupported_actuators.append(command_key)
                 continue
-            target = _target_from_channel(channel, command_key, float(value))
+            target = _target_from_channel(channel, command_key, float(value), expected_type=expected_type)
             actuator_targets.append(target)
             if target.clipped:
                 clipped_targets.append(channel.actuator_id)
@@ -191,12 +228,18 @@ def actuator_target_record_to_dict(record: IsaacActuatorTargetRecord) -> dict[st
     return record.to_dict()
 
 
-def _target_from_channel(channel: ActuatorChannel, command_key: str, value: float) -> IsaacActuatorTarget:
-    clipped_value, clipped = clip_to_channel(value, channel)
+def _target_from_channel(
+    channel: ActuatorChannel,
+    command_key: str,
+    value: float,
+    *,
+    expected_type: str,
+) -> IsaacActuatorTarget:
+    clipped_value, clipped = clip_to_channel(value, channel, expected_type)
     return IsaacActuatorTarget(
         actuator_id=channel.actuator_id,
         isaac_target_name=channel.isaac_target_name,
-        actuator_type=SUPPORTED_COMMAND_TYPES[channel.actuator_type],
+        actuator_type=SUPPORTED_COMMAND_TYPES[expected_type],
         command_key=command_key,
         target_value=clipped_value,
         unclipped_value=value,
@@ -204,5 +247,6 @@ def _target_from_channel(channel: ActuatorChannel, command_key: str, value: floa
         metadata={
             "module_id": channel.module_id,
             "local_id": channel.local_id,
+            "channel_primary_type": channel.actuator_type,
         },
     )

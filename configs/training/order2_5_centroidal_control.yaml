@@ -1,11 +1,11 @@
 runner:
-  seed: 0
-  module_count: null
-  dry_run: true
-  source_hash: random_morphology_takeoff
+  seed: 25
+  module_count: 3
+  dry_run: false
+  source_hash: order2_5_centroidal_control
   runner_version: random_morphology_takeoff_runner_v1
-  report_path: artifacts/p4_full/random_morphology_takeoff.json
-  archive_path: artifacts/p4_full/random_morphology_takeoff.jsonl
+  report_path: artifacts/p4_full/order2_5_centroidal_control.json
+  archive_path: artifacts/p4_full/order2_5_centroidal_control.jsonl
   max_sampling_attempts: 256
 
 takeoff:
@@ -37,4 +37,4 @@ takeoff:
   allocation_mode: rigid_body_qp
   stop_on_hover_hold: true
   command_timeout_s: 300.0
-  control_contract_version: legacy_contact_bias_v1
+  control_contract_version: centroidal_local_joint_v2

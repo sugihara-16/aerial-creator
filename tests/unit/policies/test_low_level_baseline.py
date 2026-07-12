@@ -9,9 +9,19 @@ from amsrr.policies.contact_candidate_sampler import ContactCandidateSampler
 from amsrr.policies.contact_wrench_trajectory import GraspCarryBaselinePlanner
 from amsrr.policies.design_policy_base import DesignPolicyContext, FixedSimpleDesignPolicy
 from amsrr.policies.high_level_policy_base import HighLevelPolicyContext
-from amsrr.policies.low_level_policy_base import BaselineLowLevelPolicy, LowLevelPolicyContext, select_active_knot
+from amsrr.policies.low_level_policy_base import (
+    BaselineLowLevelPolicy,
+    BaselineLowLevelPolicyConfig,
+    LowLevelPolicyContext,
+    select_active_knot,
+)
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
-from amsrr.schemas.policies import ContactWrenchTrajectory, ControllerStatus
+from amsrr.schemas.policies import (
+    POLICY_COMMAND_CONTRACT_CENTROIDAL,
+    ContactWrenchTrajectory,
+    ControllerStatus,
+    PostureTarget,
+)
 from amsrr.schemas.runtime import ModuleRuntimeState, ObjectRuntimeState, RuntimeObservation, TaskProgressState
 from amsrr.schemas.task_spec import TaskSpec
 
@@ -138,6 +148,29 @@ def test_baseline_low_level_policy_selects_knot_from_runtime_time(grasp_carry_di
     assert active_knot.object_targets
     assert command.residual_wrench_body is not None
     assert command.residual_wrench_body[0] > 0.0
+
+
+def test_centroidal_baseline_emits_absolute_posture_targets_without_contact_bias(
+    grasp_carry_dict: dict,
+) -> None:
+    context = _low_level_context(grasp_carry_dict, active_knot_index=3)
+    assert context.active_knot is not None
+    context.active_knot.posture_target = PostureTarget(
+        joint_pos_target={"module_0:pitch_dock_mech_joint1": 0.2},
+        joint_vel_target={"module_0:pitch_dock_mech_joint1": 0.0},
+    )
+    policy = BaselineLowLevelPolicy(
+        BaselineLowLevelPolicyConfig(
+            control_contract_version=POLICY_COMMAND_CONTRACT_CENTROIDAL,
+        )
+    )
+
+    command = policy.command(context)
+
+    assert command.control_contract_version == POLICY_COMMAND_CONTRACT_CENTROIDAL
+    assert command.joint_position_targets == {"module_0:pitch_dock_mech_joint1": 0.2}
+    assert command.joint_velocity_targets == {"module_0:pitch_dock_mech_joint1": 0.0}
+    assert command.contact_tracking_bias == {}
 
 
 def test_baseline_low_level_policy_suppresses_residual_when_controller_infeasible(

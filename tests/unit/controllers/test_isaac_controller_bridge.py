@@ -6,7 +6,11 @@ from amsrr.controllers.actuator_mapping import build_actuator_mapping
 from amsrr.controllers.isaac_controller_bridge import IsaacControllerBridge, actuator_target_record_to_dict
 from amsrr.robot_model.physical_model_builder import build_module_capability_token, build_physical_model_from_config
 from amsrr.schemas.morphology import ModuleNode, MorphologyGraph
-from amsrr.schemas.policies import ControllerCommand, ControllerStatus
+from amsrr.schemas.policies import (
+    POLICY_COMMAND_CONTRACT_CENTROIDAL,
+    ControllerCommand,
+    ControllerStatus,
+)
 
 
 def _physical_model():
@@ -90,3 +94,34 @@ def test_isaac_controller_bridge_record_round_trips_as_archive_dict() -> None:
     assert data["backend"] == "isaac_lab"
     assert data["morphology_graph_id"] == "bridge-test"
     assert data["metrics"]["actuator_target_count"] == 4.0
+
+
+def test_centroidal_bridge_maps_native_dock_servo_and_fails_closed_for_vectoring_override() -> None:
+    mapping = build_actuator_mapping(_morphology_graph(), _physical_model())
+    command = ControllerCommand(
+        rotor_thrusts_n={},
+        vectoring_joint_targets={},
+        joint_torque_commands={},
+        dock_mechanism_commands={},
+        controller_status=ControllerStatus(status="ok", qp_feasible=True),
+        control_contract_version=POLICY_COMMAND_CONTRACT_CENTROIDAL,
+        joint_position_targets={
+            "pitch_dock_mech_joint1": 0.3,
+            "gimbal1": 0.1,
+        },
+        joint_velocity_targets={"pitch_dock_mech_joint1": 100.0},
+        joint_torque_bias={"pitch_dock_mech_joint1": 4.0},
+    )
+
+    record = IsaacControllerBridge().convert(command, mapping, time_s=0.0, command_index=0)
+    dock_targets = {
+        target.actuator_type: target
+        for target in record.actuator_targets
+        if target.actuator_id == "module_0:pitch_dock_mech_joint1"
+    }
+
+    assert dock_targets["joint_position"].target_value == pytest.approx(0.3)
+    assert dock_targets["joint_velocity"].clipped is True
+    assert dock_targets["joint_effort_bias"].target_value == pytest.approx(1.3)
+    assert "gimbal1" in record.unsupported_actuators
+    assert record.metadata["control_contract_version"] == POLICY_COMMAND_CONTRACT_CENTROIDAL

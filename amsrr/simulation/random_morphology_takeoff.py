@@ -23,6 +23,10 @@ from amsrr.robot_model.urdf_transforms import link_poses_in_root_frame
 from amsrr.schemas.common import Pose7D, SchemaBase, SchemaValidationError, Vector3, require_non_empty
 from amsrr.schemas.morphology import MorphologyGraph
 from amsrr.schemas.physical_model import PhysicalModel
+from amsrr.schemas.policies import (
+    POLICY_COMMAND_CONTRACT_CENTROIDAL,
+    POLICY_COMMAND_CONTRACT_LEGACY,
+)
 from amsrr.simulation.isaac_lab_backend import IsaacLabBackend, IsaacLabBackendConfig
 from amsrr.utils.hashing import stable_hash
 
@@ -70,6 +74,7 @@ class RandomMorphologyTakeoffConfig(SchemaBase):
     allocation_mode: str = "rigid_body_qp"
     stop_on_hover_hold: bool = True
     command_timeout_s: float = 300.0
+    control_contract_version: str = POLICY_COMMAND_CONTRACT_LEGACY
 
     def validate(self) -> None:
         for name in (
@@ -123,6 +128,13 @@ class RandomMorphologyTakeoffConfig(SchemaBase):
         if self.allocation_mode != "rigid_body_qp":
             raise SchemaValidationError(
                 "random morphology takeoff acceptance requires allocation_mode='rigid_body_qp'"
+            )
+        if self.control_contract_version not in {
+            POLICY_COMMAND_CONTRACT_LEGACY,
+            POLICY_COMMAND_CONTRACT_CENTROIDAL,
+        }:
+            raise SchemaValidationError(
+                "RandomMorphologyTakeoffConfig.control_contract_version is unsupported"
             )
 
     @property
@@ -486,6 +498,8 @@ class RandomMorphologyTakeoffEnv:
                 str(self.config.min_height_gain_ratio),
                 "--allocation-mode",
                 self.config.allocation_mode,
+                "--control-contract-version",
+                self.config.control_contract_version,
             ]
         )
         for mesh_search_dir in self.config.mesh_search_dirs:
@@ -723,6 +737,27 @@ def _random_morphology_takeoff_report_failures(
     )
     require_false("random_morphology_takeoff_learned_policy_used")
     require_exact("random_morphology_takeoff_controller", "deterministic_qpid")
+    reported_contract = report.get(
+        "random_morphology_takeoff_control_contract_version",
+        POLICY_COMMAND_CONTRACT_LEGACY,
+    )
+    if reported_contract != expected_config.control_contract_version:
+        failures.append("mismatch:random_morphology_takeoff_control_contract_version")
+    if expected_config.control_contract_version == POLICY_COMMAND_CONTRACT_CENTROIDAL:
+        require_true("random_morphology_takeoff_true_centroidal_tracking")
+        require_false("random_morphology_takeoff_contact_wrench_tracking_claim")
+        require_false("random_morphology_takeoff_internal_wrench_tracking_claim")
+        require_exact(
+            "random_morphology_takeoff_qp_actuator_variable_scope",
+            "rotor_thrust_vectoring_and_slack_only",
+        )
+        require_exact(
+            "random_morphology_takeoff_tracking_state_source",
+            "true_morphology_centroidal_frame",
+        )
+        control_pose_history = report.get("random_morphology_takeoff_control_pose_history")
+        if not isinstance(control_pose_history, list) or not control_pose_history:
+            failures.append("invalid_or_missing:random_morphology_takeoff_control_pose_history")
     require_exact(
         "random_morphology_takeoff_sim_dt_s", expected_config.simulation_dt_s
     )

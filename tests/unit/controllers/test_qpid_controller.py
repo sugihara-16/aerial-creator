@@ -18,10 +18,21 @@ from amsrr.controllers.qp_allocator_interface import (
     VirtualThrustQPAllocator,
 )
 from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
-from amsrr.controllers.rigid_body_model import RigidBodyControlModel, RotorControlElement
+from amsrr.controllers.rigid_body_model import (
+    RigidBodyControlModel,
+    RigidBodyControlModelBuilder,
+    RotorControlElement,
+)
 from amsrr.robot_model.physical_model_builder import build_module_capability_token, build_physical_model_from_config
 from amsrr.schemas.morphology import ModuleNode, MorphologyGraph
-from amsrr.schemas.policies import CentroidalTarget, ControllerStatus, InteractionKnot, PolicyCommand, PostureTarget
+from amsrr.schemas.policies import (
+    POLICY_COMMAND_CONTRACT_CENTROIDAL,
+    CentroidalTarget,
+    ControllerStatus,
+    InteractionKnot,
+    PolicyCommand,
+    PostureTarget,
+)
 from amsrr.schemas.runtime import ModuleRuntimeState, RuntimeObservation, TaskProgressState
 
 
@@ -389,6 +400,79 @@ def test_qpid_controller_can_target_dock_mechanism_on_one_module() -> None:
     assert controller_command.dock_mechanism_commands["module_0:pitch_dock_mech_joint1"] == pytest.approx(0.2)
     assert controller_command.dock_mechanism_commands["module_1:pitch_dock_mech_joint1"] == pytest.approx(0.0)
     assert "pitch_dock_mech_joint1" not in controller_command.dock_mechanism_commands
+
+
+def test_centroidal_contract_routes_only_non_vectoring_absolute_joint_references() -> None:
+    physical_model = _physical_model()
+    runtime = _multi_module_runtime_observation()
+    allocator = _RecordingAllocator()
+    controller = QPIDController(allocator=allocator)
+    command = PolicyCommand(
+        control_contract_version=POLICY_COMMAND_CONTRACT_CENTROIDAL,
+        residual_wrench_body=[1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        joint_position_targets={
+            "module_1:pitch_dock_mech_joint1": 0.3,
+            "module_1:gimbal1": 0.5,
+        },
+        joint_velocity_targets={"module_1:pitch_dock_mech_joint1": 0.2},
+        joint_torque_bias={"module_1:pitch_dock_mech_joint1": 0.4},
+    )
+
+    output = controller.compute(
+        ControllerContext(
+            runtime_observation=runtime,
+            morphology_graph=runtime.morphology_graph,
+            physical_model=physical_model,
+            active_knot=_active_knot(wrench_z=10.0),
+            policy_command=command,
+        )
+    )
+
+    assert allocator.problem is not None
+    assert allocator.problem.desired_wrench_body == [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+    assert output.vectoring_joint_targets == {}
+    assert output.joint_torque_commands == {}
+    assert output.dock_mechanism_commands == {}
+    assert output.joint_position_targets["module_1:pitch_dock_mech_joint1"] == pytest.approx(0.3)
+    assert output.joint_velocity_targets["module_1:pitch_dock_mech_joint1"] == pytest.approx(0.2)
+    assert output.joint_position_targets["module_0:pitch_dock_mech_joint1"] == pytest.approx(0.0)
+    assert "module_1:gimbal1" not in output.joint_position_targets
+    assert output.joint_torque_bias == {"module_1:pitch_dock_mech_joint1": 0.4}
+    assert output.controller_status.metrics["contact_tracking_ref_count"] == 0.0
+
+
+def test_centroidal_contract_tracks_true_morphology_com_not_base_module_origin() -> None:
+    physical_model = _physical_model()
+    runtime = _multi_module_runtime_observation()
+    model = RigidBodyControlModelBuilder().build(
+        runtime.morphology_graph,
+        physical_model,
+        runtime,
+    )
+    allocator = _RecordingAllocator()
+    controller = QPIDController(allocator=allocator)
+    target_pose = list(model.body_pose_world)
+    target_pose[0] = 0.0
+
+    output = controller.compute(
+        ControllerContext(
+            runtime_observation=runtime,
+            morphology_graph=runtime.morphology_graph,
+            physical_model=physical_model,
+            active_knot=InteractionKnot(t_rel_s=0.0, contact_assignments=[]),
+            policy_command=PolicyCommand(
+                control_contract_version=POLICY_COMMAND_CONTRACT_CENTROIDAL,
+                desired_body_pose=tuple(target_pose),
+                desired_body_twist=[0.0] * 6,
+            ),
+        )
+    )
+
+    assert model.body_pose_world[0] > 0.0
+    assert allocator.problem is not None
+    assert allocator.problem.desired_wrench_body is not None
+    assert allocator.problem.desired_wrench_body[0] < 0.0
+    assert output.controller_status.metrics["tracking_state_is_true_centroidal"] == 1.0
 
 
 def test_qpid_controller_default_hover_uses_rigid_body_total_mass_for_multi_module() -> None:

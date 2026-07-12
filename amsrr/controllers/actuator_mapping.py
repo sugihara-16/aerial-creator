@@ -8,7 +8,15 @@ from amsrr.schemas.morphology import MorphologyGraph
 from amsrr.schemas.physical_model import JointModel, PhysicalModel
 
 
-ActuatorType = Literal["rotor_thrust", "vectoring_joint_position", "dock_joint_position", "joint_effort"]
+ActuatorType = Literal[
+    "rotor_thrust",
+    "vectoring_joint_position",
+    "dock_joint_position",
+    "joint_effort",
+    "joint_position",
+    "joint_velocity",
+    "joint_effort_bias",
+]
 
 
 @dataclass
@@ -23,6 +31,7 @@ class ActuatorChannel(SchemaBase):
     velocity: float | None = None
     effort: float | None = None
     aliases: list[str] = field(default_factory=list)
+    supported_command_types: list[ActuatorType] = field(default_factory=list)
     metadata: dict[str, str | int | float | bool] = field(default_factory=dict)
 
     def validate(self) -> None:
@@ -51,10 +60,19 @@ class ActuatorMapping(SchemaBase):
         if unknown_alias_targets:
             raise SchemaValidationError(f"ActuatorMapping has aliases to unknown channels: {unknown_alias_targets}")
 
-    def channel_for_command(self, command_key: str) -> ActuatorChannel | None:
+    def channel_for_command(
+        self,
+        command_key: str,
+        expected_type: str | None = None,
+    ) -> ActuatorChannel | None:
         actuator_id = self.command_key_aliases.get(command_key, command_key)
         channels_by_id = {channel.actuator_id: channel for channel in self.channels}
-        return channels_by_id.get(actuator_id)
+        channel = channels_by_id.get(actuator_id)
+        if channel is None or expected_type is None:
+            return channel
+        if expected_type == channel.actuator_type or expected_type in channel.supported_command_types:
+            return channel
+        return None
 
 
 class ActuatorMappingBuilder:
@@ -136,6 +154,11 @@ class ActuatorMappingBuilder:
                         joint_id,
                         source="DockPortSpec.mechanical_limits",
                     ),
+                    supported_command_types=[
+                        "joint_position",
+                        "joint_velocity",
+                        "joint_effort_bias",
+                    ],
                 )
 
             for joint in sorted(physical_model.joints, key=lambda item: item.joint_id):
@@ -165,7 +188,7 @@ class ActuatorMappingBuilder:
             metadata={
                 "active_module_count": len(module_ids),
                 "channel_count": len(channels),
-                "builder_version": "actuator_mapping_v1",
+                "builder_version": "actuator_mapping_v2",
             },
         )
 
@@ -183,6 +206,7 @@ class ActuatorMappingBuilder:
         effort: float | None = None,
         single_module: bool,
         metadata: dict[str, str | int | float | bool] | None = None,
+        supported_command_types: list[ActuatorType] | None = None,
     ) -> None:
         actuator_id = _global_id(module_id, local_id)
         isaac_target_name = f"module_{module_id}/{local_id}"
@@ -201,6 +225,7 @@ class ActuatorMappingBuilder:
                 velocity=velocity,
                 effort=effort,
                 aliases=channel_aliases,
+                supported_command_types=supported_command_types or [],
                 metadata=metadata or {},
             )
         )
@@ -240,16 +265,39 @@ def _joint_actuator_channel_metadata(
     return metadata
 
 
-def clip_to_channel(value: float, channel: ActuatorChannel) -> tuple[float, bool]:
+def clip_to_channel(
+    value: float,
+    channel: ActuatorChannel,
+    command_type: str | None = None,
+) -> tuple[float, bool]:
     clipped_value = float(value)
     clipped = False
-    if channel.lower is not None and clipped_value < channel.lower:
-        clipped_value = float(channel.lower)
+    lower, upper = _command_limits(channel, command_type or channel.actuator_type)
+    if lower is not None and clipped_value < lower:
+        clipped_value = float(lower)
         clipped = True
-    if channel.upper is not None and clipped_value > channel.upper:
-        clipped_value = float(channel.upper)
+    if upper is not None and clipped_value > upper:
+        clipped_value = float(upper)
         clipped = True
     return clipped_value, clipped
+
+
+def _command_limits(channel: ActuatorChannel, command_type: str) -> tuple[float | None, float | None]:
+    if command_type == "joint_velocity":
+        if channel.velocity is None:
+            return None, None
+        limit = abs(float(channel.velocity))
+        return -limit, limit
+    if command_type == "joint_effort_bias":
+        continuous_limit = channel.metadata.get("continuous_torque_limit_nm")
+        if isinstance(continuous_limit, (int, float)) and float(continuous_limit) > 0.0:
+            limit = abs(float(continuous_limit))
+            return -limit, limit
+        if channel.effort is None:
+            return None, None
+        limit = abs(float(channel.effort))
+        return -limit, limit
+    return channel.lower, channel.upper
 
 
 def _require_joint(joints_by_id: dict[str, JointModel], joint_id: str) -> JointModel:

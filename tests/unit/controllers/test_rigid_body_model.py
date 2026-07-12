@@ -165,6 +165,24 @@ def test_rigid_body_model_handles_multiple_modules_with_unique_actuator_ids() ->
     assert any(key.startswith("module_1:gimbal") for key in model.active_actuator_limits)
 
 
+def test_rigid_body_model_shifts_control_body_twist_to_true_com() -> None:
+    physical_model = _physical_model()
+    runtime = _runtime(module_count=2)
+    runtime.module_states[0].twist_world = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0]
+
+    model = RigidBodyControlModelBuilder().build(
+        _morphology(module_count=2),
+        physical_model,
+        runtime,
+    )
+
+    com_x, com_y = model.body_pose_world[:2]
+    assert model.body_twist_world == pytest.approx(
+        [1.0 - com_y, com_x, 0.0, 0.0, 0.0, 1.0]
+    )
+    assert model.metadata["twist_frame_origin"] == "com"
+
+
 def test_rigid_body_model_updates_assembly_terms_from_module_pose_change() -> None:
     physical_model = _physical_model()
     builder = RigidBodyControlModelBuilder()

@@ -4,13 +4,18 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from amsrr.schemas.common import Pose7D, SchemaBase, SchemaValidationError, require_len
-from amsrr.schemas.policies import InteractionKnot, PolicyCommand
+from amsrr.schemas.policies import (
+    POLICY_COMMAND_CONTRACT_CENTROIDAL,
+    InteractionKnot,
+    PolicyCommand,
+)
 
 
 @dataclass
 class DesiredBiasReferences(SchemaBase):
     joint_position_ref: dict[str, float] = field(default_factory=dict)
     joint_velocity_ref: dict[str, float] = field(default_factory=dict)
+    joint_torque_bias: dict[str, float] = field(default_factory=dict)
     desired_wrench_body: list[float] | None = None
     desired_body_twist: list[float] | None = None
     desired_body_pose: Pose7D | None = None
@@ -42,12 +47,32 @@ class PolicyCommandBiasBuilder:
     ) -> DesiredBiasReferences:
         q_nom = nominal_joint_positions or {}
         qdot_nom = nominal_joint_velocities or {}
-        q_ref = _apply_bias_and_clip(q_nom, policy_command.joint_position_bias, joint_limits or {})
-        qdot_ref = _apply_bias_and_clip(qdot_nom, policy_command.joint_velocity_bias, velocity_limits or {})
-        desired_wrench = _sum_wrenches(
-            _centroidal_wrench_from_knot(active_knot),
-            policy_command.residual_wrench_body,
-        )
+        centroidal_contract = policy_command.control_contract_version == POLICY_COMMAND_CONTRACT_CENTROIDAL
+        if centroidal_contract:
+            q_ref = _apply_absolute_targets_and_clip(
+                q_nom,
+                policy_command.joint_position_targets,
+                joint_limits or {},
+            )
+            qdot_ref = _apply_absolute_targets_and_clip(
+                qdot_nom,
+                policy_command.joint_velocity_targets,
+                velocity_limits or {},
+            )
+            desired_wrench = (
+                list(policy_command.residual_wrench_body)
+                if policy_command.residual_wrench_body is not None
+                else None
+            )
+            contact_tracking_refs: dict[int, dict[str, Any]] = {}
+        else:
+            q_ref = _apply_bias_and_clip(q_nom, policy_command.joint_position_bias, joint_limits or {})
+            qdot_ref = _apply_bias_and_clip(qdot_nom, policy_command.joint_velocity_bias, velocity_limits or {})
+            desired_wrench = _sum_wrenches(
+                _centroidal_wrench_from_knot(active_knot),
+                policy_command.residual_wrench_body,
+            )
+            contact_tracking_refs = _contact_tracking_refs(policy_command, active_knot)
         priority_weights = {
             **active_knot.priority_weights,
             **policy_command.priority_weights,
@@ -55,11 +80,12 @@ class PolicyCommandBiasBuilder:
         return DesiredBiasReferences(
             joint_position_ref=q_ref,
             joint_velocity_ref=qdot_ref,
+            joint_torque_bias=dict(policy_command.joint_torque_bias) if centroidal_contract else {},
             desired_wrench_body=desired_wrench,
             desired_body_twist=policy_command.desired_body_twist,
             desired_body_pose=policy_command.desired_body_pose,
-            anchor_pose_refs=policy_command.desired_anchor_pose_offsets,
-            contact_tracking_refs=_contact_tracking_refs(policy_command, active_knot),
+            anchor_pose_refs=(dict(policy_command.desired_anchor_pose_offsets) if not centroidal_contract else {}),
+            contact_tracking_refs=contact_tracking_refs,
             priority_weights=priority_weights,
         )
 
@@ -73,6 +99,23 @@ def _apply_bias_and_clip(
     refs: dict[str, float] = {}
     for key in keys:
         value = float(nominal.get(key, 0.0)) + float(bias.get(key, 0.0))
+        if key in limits:
+            lower, upper = limits[key]
+            if lower > upper:
+                raise SchemaValidationError(f"Invalid limits for {key!r}: lower > upper")
+            value = min(max(value, lower), upper)
+        refs[key] = value
+    return refs
+
+
+def _apply_absolute_targets_and_clip(
+    nominal: dict[str, float],
+    targets: dict[str, float],
+    limits: dict[str, tuple[float, float]],
+) -> dict[str, float]:
+    refs = {key: float(value) for key, value in nominal.items()}
+    for key, target in targets.items():
+        value = float(target)
         if key in limits:
             lower, upper = limits[key]
             if lower > upper:

@@ -596,7 +596,8 @@ desired_body_pose:
   assembled morphology centroidal control frame の world pose target
 
 desired_body_twist:
-  assembled morphology centroidal control frame の world/body convention が明示された twist target
+  assembled morphology centroidal control frame の twist target
+  Version 1 の convention は linear [0:3] が world frame、angular [3:6] が control-body frame
 
 residual_wrench_body:
   body-aligned centroidal control frame における additive CoM wrench bias

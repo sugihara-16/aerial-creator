@@ -54,7 +54,7 @@ def test_actuator_mapping_builds_single_module_aliases_and_limits() -> None:
     assert dock is not None and dock.metadata["actuator_model"] == "AK40-10 KV170"
     assert gimbal.effort == pytest.approx(0.76)
     assert dock.effort == pytest.approx(4.1)
-    assert mapping.metadata["builder_version"] == "actuator_mapping_v1"
+    assert mapping.metadata["builder_version"] == "actuator_mapping_v2"
 
 
 def test_actuator_mapping_uses_global_keys_for_multiple_modules() -> None:
@@ -76,3 +76,24 @@ def test_clip_to_channel_reports_clipped_value() -> None:
 
     assert clipped is True
     assert clipped_value == pytest.approx(2.0)
+
+
+def test_dock_channel_supports_position_velocity_and_continuous_torque_bias_limits() -> None:
+    mapping = build_actuator_mapping(_morphology(), _physical_model())
+    dock = mapping.channel_for_command("pitch_dock_mech_joint1")
+    assert dock is not None
+    assert set(dock.supported_command_types) == {
+        "joint_position",
+        "joint_velocity",
+        "joint_effort_bias",
+    }
+    assert mapping.channel_for_command("pitch_dock_mech_joint1", "joint_effort_bias") is dock
+    assert mapping.channel_for_command("gimbal1", "joint_effort_bias") is None
+
+    torque, torque_clipped = clip_to_channel(4.0, dock, "joint_effort_bias")
+    velocity, velocity_clipped = clip_to_channel(100.0, dock, "joint_velocity")
+
+    assert torque_clipped is True
+    assert torque == pytest.approx(1.3)
+    assert velocity_clipped is True
+    assert velocity == pytest.approx(dock.velocity)
