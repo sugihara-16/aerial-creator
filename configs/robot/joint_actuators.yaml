@@ -79,10 +79,13 @@ joint_actuator_model:
         - servo
         - mit
       simulation_drive:
-        stiffness: 20.0
+        stiffness: 200.0
         damping: 1.0
         safe_velocity_limit_rad_s: 3.0
-        provenance: retained P4-control tuning; not a manufacturer specification
+        provenance: >-
+          P4 fixed-dock neutral-hold tuning; 200 Nm/rad keeps the torque at the
+          0.005236 rad specified backlash below the 1.3 Nm rated torque. This is
+          a simulation control setting, not a manufacturer stiffness specification.
       sources:
         - https://www.cubemars.com/product/ak40-10-robotic-actuator.html
         - https://www.cubemars.com/images/file/20250522/1747899365958473.pdf

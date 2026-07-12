@@ -18,6 +18,7 @@ from amsrr.simulation.random_morphology_takeoff import (
     RandomMorphologyTakeoffEnv,
     TakeoffPhase,
     compute_floor_contact_placement,
+    fixed_dock_connect_frame_alignment,
     intended_dock_body_link_pairs,
     random_morphology_takeoff_result_from_report,
 )
@@ -74,6 +75,41 @@ def test_intended_dock_body_pairs_bind_graph_ports_to_physical_links() -> None:
         )
         for edge in sorted(morphology.dock_edges, key=lambda item: item.edge_id)
     ]
+
+
+def test_takeoff_env_rejects_graph_generated_from_stale_dock_frames() -> None:
+    physical_model, morphology = _sample(module_count=3)
+    alignment = fixed_dock_connect_frame_alignment(morphology, physical_model)
+    assert alignment.max_position_error_m < 1.0e-9
+    assert alignment.max_attitude_error_rad < 1.0e-9
+
+    graph_ports = {port.port_global_id: port for port in morphology.ports}
+    selected_port_id = graph_ports[
+        morphology.dock_edges[0].src_port_id
+    ].port_local_id
+    first_port = next(
+        port for port in physical_model.dock_ports if port.port_id == selected_port_id
+    )
+    shifted_pose = (
+        float(first_port.local_pose[0]) + 0.002,
+        *first_port.local_pose[1:],
+    )
+    stale_model = replace(
+        physical_model,
+        dock_ports=[
+            replace(port, local_pose=shifted_pose)
+            if port.port_id == selected_port_id
+            else port
+            for port in physical_model.dock_ports
+        ],
+    )
+    env = RandomMorphologyTakeoffEnv(
+        config=RandomMorphologyTakeoffConfig(),
+        physical_model=stale_model,
+    )
+
+    with pytest.raises(SchemaValidationError, match="regenerate the morphology pool"):
+        env.run(morphology, dry_run=True)
 
 
 def test_takeoff_scheduler_is_settle_ramp_hover_complete() -> None:
@@ -247,6 +283,15 @@ def _valid_takeoff_report(*, physical_model, morphology, placement) -> dict[str,
         "random_morphology_takeoff_assembly_representation": "reset_time_fixed_dock_tree",
         "random_morphology_takeoff_learned_policy_used": False,
         "random_morphology_takeoff_controller": "deterministic_qpid",
+        "random_morphology_takeoff_fixed_dock_neutral_hold_passed": True,
+        "random_morphology_takeoff_fixed_dock_joint_count": 4
+        * len(morphology.modules),
+        "random_morphology_takeoff_dock_joint_position_tolerance_rad": 0.0053,
+        "random_morphology_takeoff_max_abs_dock_joint_position_rad": 0.001,
+        "random_morphology_takeoff_final_max_abs_dock_joint_position_rad": 0.001,
+        "random_morphology_takeoff_max_abs_dock_position_target_rad": 0.0,
+        "random_morphology_takeoff_max_abs_dock_velocity_target_rad_s": 0.0,
+        "random_morphology_takeoff_max_abs_dock_torque_bias_nm": 0.0,
         "random_morphology_takeoff_sim_dt_s": 0.005,
         "random_morphology_takeoff_sim_dt_matches_config": True,
         "random_morphology_takeoff_floor_spawned": True,
@@ -442,6 +487,56 @@ def test_takeoff_report_accepts_only_complete_graph_bound_real_isaac_evidence() 
     assert result.real_isaac_passed is True
     assert result.isaac_backed is True
     assert result.failure_reason is None
+    assert result.metrics["random_morphology_takeoff_report_validation_failures"] == []
+
+
+@pytest.mark.parametrize(
+    ("learned", "baseline", "phase"),
+    [
+        (True, False, "P4-full-order3-pi-l"),
+        (False, True, "P4-full-order3-deterministic-baseline"),
+    ],
+)
+def test_takeoff_report_accepts_order3_artifact_scope(
+    learned: bool,
+    baseline: bool,
+    phase: str,
+) -> None:
+    physical_model, morphology = _sample(module_count=2)
+    placement = compute_floor_contact_placement(
+        morphology,
+        physical_model,
+        mesh_search_dirs=["module_urdf"],
+    )
+    report = _valid_takeoff_report(
+        physical_model=physical_model,
+        morphology=morphology,
+        placement=placement,
+    )
+    report["random_morphology_takeoff_learned_policy_used"] = learned
+    report["random_morphology_takeoff_controller"] = (
+        "order3_morphology_conditioned_pi_l_plus_deterministic_qpid"
+        if learned
+        else "deterministic_qpid"
+    )
+    report["order3_deterministic_baseline_rollout"] = baseline
+    report["random_morphology_takeoff_artifacts"]["phase"] = phase
+    report["random_morphology_takeoff_artifacts"]["learned_policy_claim"] = learned
+
+    result = random_morphology_takeoff_result_from_report(
+        morphology,
+        placement=placement,
+        report=report,
+        expected_backend_config_hash=_backend_config_hash(),
+        expected_physical_model_hash=physical_model.stable_hash(),
+        expected_collision_geometry_hash=collision_geometry_content_hash(
+            physical_model, mesh_search_dirs=["module_urdf"]
+        ),
+        expected_config=RandomMorphologyTakeoffConfig(),
+        expected_learned_policy=learned,
+    )
+
+    assert result.real_isaac_passed is True
     assert result.metrics["random_morphology_takeoff_report_validation_failures"] == []
 
 

@@ -130,6 +130,55 @@ def parse_args() -> argparse.Namespace:
         help="Path to a serialized feasible connected MorphologyGraph for takeoff.",
     )
     parser.add_argument(
+        "--order3-pi-l-checkpoint-path",
+        default=None,
+        help="Order-3 centroidal graph/GRU pi_L checkpoint applied during random-morphology takeoff.",
+    )
+    parser.add_argument(
+        "--order3-pi-l-stochastic",
+        action="store_true",
+        help="Sample the Order-3 actor distribution instead of using its deterministic mean.",
+    )
+    parser.add_argument(
+        "--order3-rollout-condition-json",
+        default=None,
+        help=(
+            "Canonical hash-bound Order3RolloutCondition JSON. This single flag "
+            "controls task mode, reset perturbation, waypoint, disturbance, and model scales."
+        ),
+    )
+    parser.add_argument(
+        "--order3-deterministic-baseline-evaluation",
+        action="store_true",
+        help="Apply the Order-3 disturbance to deterministic v2 QPID without a learned checkpoint.",
+    )
+    parser.add_argument(
+        "--order3-record-policy-transitions",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include aligned actor action/recurrent/value traces in the Order-3 report.",
+    )
+    parser.add_argument(
+        "--order3-external-wrench-body",
+        type=float,
+        nargs=6,
+        default=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        metavar=("FX", "FY", "FZ", "TX", "TY", "TZ"),
+        help="Training/evaluation disturbance wrench in the centroidal control-body frame.",
+    )
+    parser.add_argument(
+        "--order3-disturbance-start-s",
+        type=float,
+        default=3.0,
+        help="Simulation time at which the Order-3 external wrench starts.",
+    )
+    parser.add_argument(
+        "--order3-disturbance-duration-s",
+        type=float,
+        default=0.0,
+        help="External-wrench duration; zero keeps it active through the episode.",
+    )
+    parser.add_argument(
         "--random-morphology-mesh-search-dir",
         action="append",
         default=None,
@@ -312,6 +361,12 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=8,
         help="Raw PhysX contact-patch buffer capacity multiplier per body pair.",
+    )
+    parser.add_argument(
+        "--takeoff-dock-joint-position-tolerance-rad",
+        type=float,
+        default=0.0053,
+        help="Maximum absolute dock-joint displacement allowed for fixed morphology.",
     )
     parser.add_argument(
         "--takeoff-initial-root-position-tolerance-m",
@@ -549,8 +604,10 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         write_resolved_mesh_urdf,
     )
     from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
+    from amsrr.schemas.common import SchemaValidationError
     from amsrr.schemas.contact_candidates import ContactCandidateSet
     from amsrr.schemas.morphology import MorphologyGraph
+    from amsrr.schemas.order3_rollout_condition import Order3RolloutCondition
     from amsrr.schemas.policies import ContactWrenchTrajectory
     from amsrr.simulation.isaac_lab_backend import IsaacLabBackend, load_isaac_lab_backend_config
     from amsrr.simulation.random_morphology_takeoff import (
@@ -569,6 +626,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         build_single_module_controller_command_smoke,
         build_single_module_morphology,
     )
+    from amsrr.utils.hashing import hash_file, stable_hash
 
     backend_config = load_isaac_lab_backend_config(args.config)
     backend = IsaacLabBackend(backend_config)
@@ -586,6 +644,15 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         or args.fixed_morphology_waypoint_smoke
     )
     random_takeoff_requested = bool(args.random_morphology_takeoff)
+    order3_rollout_condition = (
+        Order3RolloutCondition.from_json(args.order3_rollout_condition_json)
+        if args.order3_rollout_condition_json
+        else None
+    )
+    if order3_rollout_condition is not None and not random_takeoff_requested:
+        raise RuntimeError(
+            "--order3-rollout-condition-json requires --random-morphology-takeoff"
+        )
     random_teleop_requested = bool(args.random_morphology_teleop)
     if random_teleop_requested and not random_takeoff_requested:
         raise RuntimeError(
@@ -636,6 +703,8 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     )
     fixed_module_poses = None
     random_floor_placement = None
+    random_initial_root_pose = None
+    random_initial_root_twist = None
     articulated_connections = []
     converted = False
 
@@ -651,7 +720,43 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             floor_z_m=0.0,
             clearance_m=float(args.floor_clearance_m),
         )
-        args.spawn_height = float(random_floor_placement.root_pose_world[2])
+        if (
+            order3_rollout_condition is not None
+            and order3_rollout_condition.task_mode != "takeoff"
+        ):
+            from amsrr.simulation.order3_rollout_condition import rpy_to_quat_xyzw
+
+            position = (
+                float(random_floor_placement.root_pose_world[0])
+                + float(order3_rollout_condition.initial_position_offset_world[0]),
+                float(random_floor_placement.root_pose_world[1])
+                + float(order3_rollout_condition.initial_position_offset_world[1]),
+                float(random_floor_placement.root_pose_world[2])
+                + float(args.takeoff_hover_height_delta_m)
+                + float(order3_rollout_condition.initial_position_offset_world[2]),
+            )
+            orientation = rpy_to_quat_xyzw(
+                order3_rollout_condition.initial_orientation_rpy_rad
+            )
+            angular_velocity_world = _matvec(
+                _quat_to_matrix(orientation),
+                tuple(
+                    float(value)
+                    for value in order3_rollout_condition.initial_angular_velocity_body
+                ),
+            )
+            random_initial_root_pose = (*position, *orientation)
+            random_initial_root_twist = (
+                *tuple(
+                    float(value)
+                    for value in order3_rollout_condition.initial_linear_velocity_world
+                ),
+                *angular_velocity_world,
+            )
+        else:
+            random_initial_root_pose = tuple(random_floor_placement.root_pose_world)
+            random_initial_root_twist = (0.0,) * 6
+        args.spawn_height = float(random_initial_root_pose[2])
 
     if args.force_convert or fixed_smoke_requested or (args.convert_if_missing and not usd_path.exists()):
         mesh_search_dirs = random_mesh_search_dirs if random_takeoff_requested else _holon_mesh_search_dirs()
@@ -733,7 +838,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             usd_dir=str(usd_dir),
             fix_base=False,
             merge_fixed_joints=False,
-            force_usd_conversion=True,
+            force_usd_conversion=bool(args.force_convert),
             joint_drive=UrdfConverterCfg.JointDriveCfg(
                 gains=UrdfConverterCfg.JointDriveCfg.PDGainsCfg(
                     stiffness=gimbal_stiffness,
@@ -766,6 +871,18 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     light_cfg = sim_utils.DistantLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75))
     light_cfg.func("/World/Light", light_cfg)
 
+    if random_initial_root_pose is None:
+        random_initial_root_pose = (
+            0.0,
+            0.0,
+            float(args.spawn_height),
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+        )
+    if random_initial_root_twist is None:
+        random_initial_root_twist = (0.0,) * 6
     robot_cfg = ArticulationCfg(
         prim_path="/World/Holon",
         spawn=sim_utils.UsdFileCfg(
@@ -786,7 +903,10 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             copy_from_source=False,
         ),
         init_state=ArticulationCfg.InitialStateCfg(
-            pos=(0.0, 0.0, args.spawn_height),
+            pos=tuple(float(value) for value in random_initial_root_pose[:3]),
+            rot=tuple(float(value) for value in random_initial_root_pose[3:7]),
+            lin_vel=tuple(float(value) for value in random_initial_root_twist[:3]),
+            ang_vel=tuple(float(value) for value in random_initial_root_twist[3:6]),
             joint_pos={".*": 0.0},
             joint_vel={".*": 0.0},
         ),
@@ -878,6 +998,29 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
 
     sim.reset()
     sim_dt = sim.get_physics_dt()
+    order3_dynamics_realization = _apply_order3_dynamics_randomization(
+        robot,
+        condition=order3_rollout_condition,
+    )
+    # ``SimulationContext.reset()`` advances the freshly spawned articulation
+    # far enough for gravity to alter an in-air root state.  Re-apply the
+    # canonical condition after reset so the first policy observation and the
+    # realization evidence refer to the requested state, not to a hidden
+    # reset/warm-up integration step.  Legacy BC floor-takeoff rollouts have no
+    # Order-3 condition and therefore retain their established reset path.
+    if order3_rollout_condition is not None:
+        root_pose_tensor = torch.tensor(
+            [random_initial_root_pose],
+            dtype=torch.float32,
+            device=sim.device,
+        )
+        root_velocity_tensor = torch.tensor(
+            [random_initial_root_twist],
+            dtype=torch.float32,
+            device=sim.device,
+        )
+        robot.write_root_pose_to_sim_index(root_pose=root_pose_tensor)
+        robot.write_root_velocity_to_sim_index(root_velocity=root_velocity_tensor)
     if random_takeoff_requested:
         if random_morphology_graph is None or random_self_collision_filter_info is None:
             raise RuntimeError("random morphology collision views lack graph/filter data")
@@ -1052,6 +1195,9 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             exact_cross_module_contact_max_patches_per_body_pair=int(
                 args.takeoff_exact_cross_module_contact_max_patches_per_body_pair
             ),
+            dock_joint_position_tolerance_rad=float(
+                args.takeoff_dock_joint_position_tolerance_rad
+            ),
             initial_root_position_tolerance_m=float(
                 args.takeoff_initial_root_position_tolerance_m
             ),
@@ -1100,6 +1246,25 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             bridge_supported_controller_command=bridge_supported_controller_command,
             split_fixed_module_name=split_fixed_module_name,
             realtime_playback=bool(args.realtime_playback),
+            order3_checkpoint_path=(
+                str(args.order3_pi_l_checkpoint_path)
+                if args.order3_pi_l_checkpoint_path
+                else None
+            ),
+            order3_stochastic=bool(args.order3_pi_l_stochastic),
+            order3_deterministic_baseline_evaluation=bool(
+                args.order3_deterministic_baseline_evaluation
+            ),
+            order3_record_transitions=bool(args.order3_record_policy_transitions),
+            order3_external_wrench_body=tuple(
+                float(value) for value in args.order3_external_wrench_body
+            ),
+            order3_disturbance_start_s=float(args.order3_disturbance_start_s),
+            order3_disturbance_duration_s=float(args.order3_disturbance_duration_s),
+            order3_rollout_condition=order3_rollout_condition,
+            order3_requested_initial_root_pose=random_initial_root_pose,
+            order3_requested_initial_root_twist=random_initial_root_twist,
+            order3_dynamics_realization=order3_dynamics_realization,
         )
         if random_teleop_requested:
             if not hover_smoke_report.get(
@@ -1264,6 +1429,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
                 "fixed_morphology_articulated_hover_smoke_passed",
                 "fixed_morphology_waypoint_smoke_passed",
                 "random_morphology_takeoff_smoke_passed",
+                "order3_free_flight_passed",
             )
         )
 
@@ -1288,6 +1454,18 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         ),
         "controller_command_smoke": controller_bundle is not None,
         "converted": converted,
+        "asset_cache_reuse_enabled": bool(fixed_smoke_requested and not args.force_convert),
+        "asset_cache_key": stable_hash(
+            {
+                "urdf_sha256": hash_file(urdf_path),
+                "gimbal_stiffness": gimbal_stiffness,
+                "gimbal_damping": gimbal_damping,
+                "dock_stiffness": dock_stiffness,
+                "dock_damping": dock_damping,
+                "merge_fixed_joints": False,
+            }
+        ),
+        "generated_urdf_sha256": hash_file(urdf_path),
         "usd_path": str(usd_path),
         "urdf_path": str(urdf_path),
         "prim_path": robot_cfg.prim_path,
@@ -2549,13 +2727,33 @@ def _run_random_morphology_takeoff_smoke(
     bridge_supported_controller_command,
     split_fixed_module_name,
     realtime_playback: bool,
+    order3_checkpoint_path: str | None = None,
+    order3_stochastic: bool = False,
+    order3_deterministic_baseline_evaluation: bool = False,
+    order3_record_transitions: bool = True,
+    order3_external_wrench_body: tuple[float, float, float, float, float, float] = (
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    ),
+    order3_disturbance_start_s: float = 3.0,
+    order3_disturbance_duration_s: float = 0.0,
+    order3_rollout_condition=None,
+    order3_requested_initial_root_pose=None,
+    order3_requested_initial_root_twist=None,
+    order3_dynamics_realization=None,
 ) -> dict[str, object]:
     """Real-Isaac gate for a reset-time fixed random morphology.
 
-    The settle phase deliberately sends no rotor/controller command.  Once the
-    selected legacy-base or versioned centroidal control pose has settled,
-    deterministic QPID ramps that pose to an upright hover target.  No learned
-    policy participates in this gate.
+    TAKEOFF retains the floor-settle/ramp/hover gate.  A hash-bound Order-3
+    HOVER or WAYPOINT condition instead starts the exact graph-specific rigid
+    assembly in air, applies its reset/model/disturbance realization, and
+    tracks a centroidal target without claiming floor initialization evidence.
+    An optional versioned pi_L may add bounded intent through PolicyCommand;
+    QPID and the bridge remain the only actuator authority.
     """
 
     from amsrr.controllers.actuator_mapping import build_actuator_mapping
@@ -2564,8 +2762,16 @@ def _run_random_morphology_takeoff_smoke(
     from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
     from amsrr.controllers.rigid_body_model import RigidBodyControlModelBuilder
     from amsrr.feasibility.morphology_flight import collision_geometry_content_hash
+    from amsrr.morphology.random_connected import morphology_structural_hash
+    from amsrr.policies.low_level_policy_base import LowLevelPolicyContext
+    from amsrr.policies.morphology_conditioned_low_level_policy import (
+        MorphologyConditionedLowLevelPolicy,
+    )
+    from amsrr.schemas.common import SchemaValidationError
     from amsrr.schemas.policies import (
         POLICY_COMMAND_CONTRACT_CENTROIDAL,
+        CentroidalTarget,
+        ContactWrenchTrajectory,
         ControllerCommand,
         ControllerStatus,
         InteractionKnot,
@@ -2575,11 +2781,58 @@ def _run_random_morphology_takeoff_smoke(
         DeterministicTakeoffScheduler,
         TakeoffPhase,
     )
+    from amsrr.simulation.order3_rollout_condition import (
+        ORDER3_FREE_FLIGHT_REPORT_VERSION,
+        Order3ConditionRealization,
+        Order3ConditionTargetScheduler,
+        order3_terminal_evidence_start_s as terminal_evidence_start_for_condition,
+        order3_tracking_window_start_s as tracking_window_start_for_condition,
+        rpy_to_quat_xyzw,
+    )
 
     module_count = len(morphology_graph.modules)
     centroidal_contract = (
         config.control_contract_version == POLICY_COMMAND_CONTRACT_CENTROIDAL
     )
+    if order3_rollout_condition is not None:
+        order3_external_wrench_body = tuple(
+            float(value) for value in order3_rollout_condition.external_wrench_body
+        )
+        order3_disturbance_start_s = float(
+            order3_rollout_condition.disturbance_start_s
+        )
+        order3_disturbance_duration_s = float(
+            order3_rollout_condition.disturbance_duration_s
+        )
+    order3_task_mode = (
+        str(order3_rollout_condition.task_mode)
+        if order3_rollout_condition is not None
+        else "takeoff"
+    )
+    order3_in_air = order3_task_mode in {"hover", "waypoint"}
+    if order3_rollout_condition is not None and (
+        order3_checkpoint_path is None
+        and not order3_deterministic_baseline_evaluation
+    ):
+        raise RuntimeError(
+            "Order-3 rollout conditions require a learned or deterministic-baseline rollout"
+        )
+    if order3_checkpoint_path is not None and not centroidal_contract:
+        raise RuntimeError(
+            "Order-3 pi_L requires --control-contract-version centroidal_local_joint_v2"
+        )
+    if order3_checkpoint_path is not None and order3_deterministic_baseline_evaluation:
+        raise RuntimeError(
+            "Order-3 learned and deterministic-baseline rollout modes are mutually exclusive"
+        )
+    if (
+        order3_checkpoint_path is None
+        and not order3_deterministic_baseline_evaluation
+        and any(abs(float(value)) > 0.0 for value in order3_external_wrench_body)
+    ):
+        raise RuntimeError("Order-3 external disturbance requires an Order-3 pi_L checkpoint")
+    if order3_disturbance_start_s < 0.0 or order3_disturbance_duration_s < 0.0:
+        raise RuntimeError("Order-3 disturbance timing must be non-negative")
     if floor_contact_sensor is None:
         raise RuntimeError("random morphology takeoff requires an Isaac contact sensor")
     if not isinstance(self_collision_filter_info, dict):
@@ -2588,6 +2841,30 @@ def _run_random_morphology_takeoff_smoke(
         raise RuntimeError("random morphology takeoff requires exact initial-collider evidence")
     if not isinstance(cross_module_contact_views, list):
         raise RuntimeError("random morphology takeoff requires tensor contact views")
+    if order3_in_air and not centroidal_contract:
+        raise RuntimeError("Order-3 in-air rollout requires centroidal_local_joint_v2")
+    if order3_requested_initial_root_pose is None:
+        order3_requested_initial_root_pose = tuple(floor_placement.root_pose_world)
+    if order3_requested_initial_root_twist is None:
+        order3_requested_initial_root_twist = (0.0,) * 6
+    if order3_dynamics_realization is None:
+        order3_dynamics_realization = {
+            "requested_mass_scale": 1.0,
+            "applied_mass_scale": 1.0,
+            "requested_inertia_scale": 1.0,
+            "applied_inertia_scale": 1.0,
+            "requested_thrust_scale": 1.0,
+            "applied_thrust_scale": 1.0,
+            "mass_randomization_applied": True,
+            "inertia_randomization_applied": True,
+            "thrust_randomization_applied": True,
+        }
+    order3_thrust_scale = float(order3_dynamics_realization["applied_thrust_scale"])
+    order3_seed_applied = _seed_order3_rollout(
+        int(order3_rollout_condition.seed)
+        if order3_rollout_condition is not None
+        else 0
+    )
     scheduler = DeterministicTakeoffScheduler(config)
     collision_geometry_hash = collision_geometry_content_hash(
         physical_model,
@@ -2602,12 +2879,48 @@ def _run_random_morphology_takeoff_smoke(
         )
     )
     rigid_body_model_builder = RigidBodyControlModelBuilder()
+    learned_policy = (
+        MorphologyConditionedLowLevelPolicy.from_checkpoint(
+            order3_checkpoint_path,
+            physical_model=physical_model,
+            deterministic=not order3_stochastic,
+            device="cpu",
+        )
+        if order3_checkpoint_path is not None
+        else None
+    )
+    policy_update_stride = (
+        max(
+            1,
+            int(
+                round(
+                    1.0
+                    / max(
+                        learned_policy.config.update_rate_hz * sim_dt,
+                        1.0e-9,
+                    )
+                )
+            ),
+        )
+        if learned_policy is not None
+        else 1
+    )
+    order3_transition_traces: list[dict[str, object]] = []
+    order3_policy_decision_count = 0
+    order3_policy_applied_count = 0
+    order3_fallback_count = 0
+    last_order3_policy_command = None
+    last_order3_policy_step = -1
     resolved_fc_body_count = sum(
         1
         for module_id in range(module_count)
         if _module_body_pose(robot, module_id=module_id, local_body_name="fc") is not None
     )
     initial_root_pose_actual = tuple(_tensor_row(robot.data.root_pose_w.torch))
+    initial_root_twist_actual = tuple(
+        _tensor_row(robot.data.root_lin_vel_w.torch)
+        + _tensor_row(robot.data.root_ang_vel_w.torch)
+    )
     initial_root_position_error = _position_error_norm(
         initial_root_pose_actual[:3], floor_placement.root_pose_world[:3]
     )
@@ -2618,6 +2931,8 @@ def _run_random_morphology_takeoff_smoke(
     if initial_base_fc_pose is None:
         initial_base_fc_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
     initial_control_pose = None
+    order3_nominal_hover_pose = None
+    order3_condition_scheduler = None
     settled_pose = None
     settled_linear_speed = float("inf")
     settled_angular_speed = float("inf")
@@ -2663,6 +2978,29 @@ def _run_random_morphology_takeoff_smoke(
     application_unresolved_target_count = 0
     reaction_torque_target_count = 0
     reaction_torque_abs_sum_nm = 0.0
+    fixed_dock_joint_ids = sorted(
+        {
+            str(port.mechanical_limits["mechanism_joint_id"])
+            for port in physical_model.dock_ports
+            if port.mechanical_limits.get("mechanism_joint_id")
+        }
+    )
+    neutral_dock_position_targets = {
+        f"module_{module_id}:{joint_id}": 0.0
+        for module_id in range(module_count)
+        for joint_id in fixed_dock_joint_ids
+    }
+    neutral_dock_velocity_targets = {
+        key: 0.0 for key in neutral_dock_position_targets
+    }
+    neutral_dock_torque_bias = {
+        key: 0.0 for key in neutral_dock_position_targets
+    }
+    max_abs_dock_joint_position_rad = 0.0
+    final_max_abs_dock_joint_position_rad = 0.0
+    max_abs_dock_position_target_rad = 0.0
+    max_abs_dock_velocity_target_rad_s = 0.0
+    max_abs_dock_torque_bias_nm = 0.0
     dynamic_cross_module_contact_max_force_n = 0.0
     dynamic_cross_module_contact_violation_step_count = 0
     dynamic_cross_module_contact_view_update_count = 0
@@ -2674,6 +3012,7 @@ def _run_random_morphology_takeoff_smoke(
     dynamic_raw_contact_min_separation_m: float | None = None
     dynamic_raw_contact_saturation_step_count = 0
     dynamic_pair_raw_contact_counts: dict[str, int] = {}
+    order3_in_air_floor_contact_violation_count = 0
     dynamic_raw_contact_capacity = sum(
         int(entry["raw_contact_capacity"])
         for entry in cross_module_contact_views
@@ -2688,7 +3027,12 @@ def _run_random_morphology_takeoff_smoke(
     final_angular_speed = float("inf")
     hold_steps = 0
     max_hold_steps = 0
-    hold_steps_required = max(1, int(math.ceil(config.hover_hold_duration_s / max(sim_dt, 1.0e-9))))
+    required_hold_s = (
+        float(order3_rollout_condition.hold_s)
+        if order3_in_air
+        else float(config.hover_hold_duration_s)
+    )
+    hold_steps_required = max(1, int(math.ceil(required_hold_s / max(sim_dt, 1.0e-9))))
     settle_dwell_steps_required = max(
         1, int(math.ceil(config.settle_dwell_duration_s / max(sim_dt, 1.0e-9)))
     )
@@ -2696,6 +3040,20 @@ def _run_random_morphology_takeoff_smoke(
     ramp_max_progress = 0.0
     last_controller_status = None
     last_bridge_metrics: dict[str, float] = {}
+    final_target_twist = [0.0] * 6
+    current_target_hold_active = False
+    order3_terminal_evidence_start_s = (
+        terminal_evidence_start_for_condition(order3_rollout_condition)
+        if order3_rollout_condition is not None
+        else 0.0
+    )
+    order3_tracking_window_start_s = (
+        tracking_window_start_for_condition(order3_rollout_condition)
+        if order3_rollout_condition is not None
+        else 0.0
+    )
+    order3_tracking_cost_sum = 0.0
+    order3_tracking_sample_count = 0
 
     for step_idx in range(max(0, steps)):
         executed_steps = step_idx + 1
@@ -2714,10 +3072,32 @@ def _run_random_morphology_takeoff_smoke(
             module_count=module_count,
             split_fixed_module_name=split_fixed_module_name,
         )
+        step_dock_positions = [
+            abs(float(state.joint_positions[joint_id]))
+            for state in runtime_observation.module_states
+            for joint_id in fixed_dock_joint_ids
+            if joint_id in state.joint_positions
+        ]
+        final_max_abs_dock_joint_position_rad = max(
+            step_dock_positions,
+            default=0.0,
+        )
+        max_abs_dock_joint_position_rad = max(
+            max_abs_dock_joint_position_rad,
+            final_max_abs_dock_joint_position_rad,
+        )
         runtime_observation.contact_states = _floor_contact_runtime_states(
             current_floor_contact,
             morphology_graph_id=morphology_graph.graph_id,
         )
+        # The actor and QPID both consume the status produced by the previous
+        # control step.  Preserve that exact causal input in the serialized
+        # observation used for PPO; the current command's outcome belongs to
+        # the next observation and must not leak backwards into old_log_prob.
+        if previous_command is not None:
+            runtime_observation.controller_status = (
+                previous_command.controller_status
+            )
         current_base_state = runtime_observation.module_states[0]
         if centroidal_contract:
             current_control_model = rigid_body_model_builder.build(
@@ -2732,14 +3112,81 @@ def _run_random_morphology_takeoff_smoke(
             current_control_twist = current_base_state.twist_world
         if initial_control_pose is None:
             initial_control_pose = current_control_pose
-        if settled_pose is None and time_s + 1.0e-9 >= config.settle_duration_s:
+            if order3_in_air:
+                initial_delta_quat = rpy_to_quat_xyzw(
+                    order3_rollout_condition.initial_orientation_rpy_rad
+                )
+                inverse_delta_quat = (
+                    -initial_delta_quat[0],
+                    -initial_delta_quat[1],
+                    -initial_delta_quat[2],
+                    initial_delta_quat[3],
+                )
+                nominal_quat = _quat_multiply(
+                    inverse_delta_quat, tuple(current_control_pose[3:7])
+                )
+                centroid_offset_current = tuple(
+                    float(current_control_pose[index]) - float(root_pose[index])
+                    for index in range(3)
+                )
+                centroid_offset_nominal = _matvec(
+                    _quat_to_matrix(inverse_delta_quat),
+                    centroid_offset_current,
+                )
+                nominal_root_position = tuple(
+                    float(root_pose[index])
+                    - float(
+                        order3_rollout_condition.initial_position_offset_world[index]
+                    )
+                    for index in range(3)
+                )
+                order3_nominal_hover_pose = (
+                    nominal_root_position[0] + centroid_offset_nominal[0],
+                    nominal_root_position[1] + centroid_offset_nominal[1],
+                    nominal_root_position[2] + centroid_offset_nominal[2],
+                    *nominal_quat,
+                )
+                order3_condition_scheduler = Order3ConditionTargetScheduler(
+                    order3_rollout_condition,
+                    nominal_hover_pose_world=order3_nominal_hover_pose,
+                )
+                order3_terminal_evidence_start_s = (
+                    order3_condition_scheduler.terminal_evidence_start_s
+                )
+        if (
+            not order3_in_air
+            and settled_pose is None
+            and time_s + 1.0e-9 >= config.settle_duration_s
+        ):
             settled_pose = current_control_pose
             settled_linear_speed = _vector_norm(current_control_twist[:3])
             settled_angular_speed = _vector_norm(current_control_twist[3:6])
             settle_low_speed_steps_at_completion = settle_low_speed_steps
             floor_contact_steps_at_completion = floor_contact_steps
         schedule_reference = settled_pose or initial_control_pose or initial_base_fc_pose
-        target = scheduler.target_at(time_s, settled_pose_world=schedule_reference)
+        if order3_in_air:
+            if order3_condition_scheduler is None:
+                raise RuntimeError("Order-3 in-air target scheduler was not initialized")
+            condition_target = order3_condition_scheduler.target_at(time_s)
+            target = type(
+                "_Order3InAirSchedulerTarget",
+                (),
+                {
+                    "phase": TakeoffPhase.HOVER_HOLD,
+                    "ramp_progress": condition_target.ramp_progress,
+                    "desired_pose_world": condition_target.desired_pose_world,
+                },
+            )()
+            target_twist = list(condition_target.desired_twist_world)
+            current_target_hold_active = bool(condition_target.hold_active)
+        else:
+            target = scheduler.target_at(time_s, settled_pose_world=schedule_reference)
+            target_twist = [0.0] * 6
+            current_target_hold_active = target.phase in {
+                TakeoffPhase.HOVER_HOLD,
+                TakeoffPhase.COMPLETE,
+            }
+        final_target_twist = list(target_twist)
         phase_counts[target.phase.value] += 1
         ramp_max_progress = max(ramp_max_progress, target.ramp_progress)
         if target.phase != previous_phase:
@@ -2752,6 +3199,12 @@ def _run_random_morphology_takeoff_smoke(
                 }
             )
             previous_phase = target.phase
+        active_order3_wrench_body = _order3_active_disturbance_wrench(
+            time_s,
+            wrench_body=order3_external_wrench_body,
+            start_s=order3_disturbance_start_s,
+            duration_s=order3_disturbance_duration_s,
+        )
         if target.phase == TakeoffPhase.SETTLE:
             settle_status = ControllerStatus(
                 status="ok",
@@ -2764,54 +3217,157 @@ def _run_random_morphology_takeoff_smoke(
                     "clipped": 0.0,
                 },
             )
-            runtime_observation.controller_status = settle_status
-            policy_commands.append(
-                PolicyCommand(
-                    control_contract_version=config.control_contract_version,
-                ).to_dict()
+            settle_policy_command = PolicyCommand(
+                control_contract_version=config.control_contract_version,
+                joint_position_targets=dict(neutral_dock_position_targets),
+                joint_velocity_targets=dict(neutral_dock_velocity_targets),
+                joint_torque_bias=dict(neutral_dock_torque_bias),
             )
-            controller_commands.append(
-                ControllerCommand(
-                    rotor_thrusts_n={},
-                    vectoring_joint_targets={},
-                    joint_torque_commands={},
-                    dock_mechanism_commands={},
-                    controller_status=settle_status,
-                    control_contract_version=config.control_contract_version,
-                ).to_dict()
+            policy_commands.append(settle_policy_command.to_dict())
+            settle_command = ControllerCommand(
+                rotor_thrusts_n={},
+                vectoring_joint_targets={},
+                joint_torque_commands={},
+                dock_mechanism_commands={},
+                controller_status=settle_status,
+                control_contract_version=config.control_contract_version,
+                joint_position_targets=dict(neutral_dock_position_targets),
+                joint_velocity_targets=dict(neutral_dock_velocity_targets),
+                joint_torque_bias=dict(neutral_dock_torque_bias),
             )
-            actuator_target_records.append(
+            controller_commands.append(settle_command.to_dict())
+            settle_actuator_record = bridge.convert(
+                settle_command,
+                actuator_mapping,
+                time_s=time_s,
+                command_index=step_idx,
+            )
+            settle_application = _apply_actuator_record(
+                robot,
+                settle_actuator_record,
+                physical_model,
+                device,
+            )
+            settle_actuator_record.metrics.update(
                 {
-                    "time_s": time_s,
-                    "backend": "isaac_lab",
-                    "morphology_graph_id": morphology_graph.graph_id,
-                    "command_index": step_idx,
-                    "actuator_targets": [],
-                    "clipped_targets": [],
-                    "missing_actuators": [],
-                    "unsupported_actuators": [],
-                    "allocation_residual_norm": 0.0,
-                    "qp_status": "ok",
-                    "metrics": {
-                        "settle_zero_thrust": 1.0,
-                        "rotor_thrust_target_count": 0.0,
-                        "allocation_residual_norm": 0.0,
-                        "clipped_target_count": 0.0,
-                        "missing_actuator_count": 0.0,
-                        "unsupported_actuator_count": 0.0,
-                    },
-                    "metadata": {"phase": target.phase.value},
+                    "settle_zero_thrust": 1.0,
+                    "application_requested_target_count": float(
+                        settle_application["requested_target_count"]
+                    ),
+                    "application_applied_target_count": float(
+                        settle_application["applied_target_count"]
+                    ),
+                    "application_unresolved_target_count": float(
+                        settle_application["unresolved_target_count"]
+                    ),
                 }
             )
+            settle_actuator_record.metadata["phase"] = target.phase.value
+            settle_actuator_record.metadata["application_unresolved_targets"] = list(
+                settle_application["unresolved_targets"]
+            )
+            actuator_target_records.append(settle_actuator_record.to_dict())
+            application_requested_target_count += int(
+                settle_application["requested_target_count"]
+            )
+            application_applied_target_count += int(
+                settle_application["applied_target_count"]
+            )
+            application_unresolved_target_count += int(
+                settle_application["unresolved_target_count"]
+            )
+            missing_actuator_count += len(settle_actuator_record.missing_actuators)
+            unsupported_actuator_count += len(
+                settle_actuator_record.unsupported_actuators
+            )
+            clipped_target_count += len(settle_actuator_record.clipped_targets)
+            _add_order3_external_wrench(
+                robot,
+                wrench_body=active_order3_wrench_body,
+                control_pose_world=current_control_pose,
+                split_fixed_module_name=split_fixed_module_name,
+                device=device,
+                replace=True,
+            )
             robot.write_data_to_sim()
+            previous_command = settle_command
         else:
             if target.desired_pose_world is None:
                 raise RuntimeError("takeoff scheduler enabled thrust without a desired pose")
-            policy_command = PolicyCommand(
+            deterministic_policy_command = PolicyCommand(
                 desired_body_pose=target.desired_pose_world,
-                desired_body_twist=[0.0] * 6,
+                desired_body_twist=target_twist,
                 control_contract_version=config.control_contract_version,
+                joint_position_targets=dict(neutral_dock_position_targets),
+                joint_velocity_targets=dict(neutral_dock_velocity_targets),
+                joint_torque_bias=dict(neutral_dock_torque_bias),
             )
+            if learned_policy is None:
+                policy_command = deterministic_policy_command
+            elif (
+                last_order3_policy_command is None
+                or step_idx - last_order3_policy_step >= policy_update_stride
+            ):
+                active_knot = InteractionKnot(
+                    t_rel_s=time_s,
+                    contact_assignments=[],
+                    centroidal_target=CentroidalTarget(
+                        com_pos_world=tuple(target.desired_pose_world[:3]),
+                        com_vel_world=tuple(target_twist[:3]),
+                        body_orientation_world=tuple(target.desired_pose_world[3:7]),
+                    ),
+                )
+                trajectory = ContactWrenchTrajectory(
+                    horizon_s=max(1.0 / learned_policy.config.update_rate_hz, sim_dt),
+                    dt_s=max(1.0 / learned_policy.config.update_rate_hz, sim_dt),
+                    knots=[active_knot],
+                    derived_mode_label=f"order3_free_flight_{order3_task_mode}",
+                )
+                inference = learned_policy.command_with_trace(
+                    LowLevelPolicyContext(
+                        runtime_observation=runtime_observation,
+                        morphology_graph=morphology_graph,
+                        physical_model=physical_model,
+                        contact_wrench_trajectory=trajectory,
+                        active_knot=active_knot,
+                        controller_status=runtime_observation.controller_status,
+                    ),
+                    privileged_disturbance_body=active_order3_wrench_body,
+                )
+                policy_command = inference.command
+                last_order3_policy_command = policy_command
+                last_order3_policy_step = step_idx
+                order3_policy_decision_count += 1
+                order3_policy_applied_count += int(inference.learned_policy_applied)
+                order3_fallback_count += int(not inference.learned_policy_applied)
+                if order3_record_transitions:
+                    order3_transition_traces.append(
+                        {
+                            "step_index": step_idx,
+                            "time_s": time_s,
+                            "target_pose_world": list(target.desired_pose_world),
+                            "target_twist": list(target_twist),
+                            "previous_action": inference.previous_action,
+                            "action": inference.normalized_action,
+                            "action_mean": inference.action_mean,
+                            "recurrent_state_in": inference.recurrent_state_in,
+                            "recurrent_state_out": inference.recurrent_state_out,
+                            "old_log_prob": inference.log_prob,
+                            "old_value": inference.value,
+                            "policy_applied": inference.learned_policy_applied,
+                            "fallback_reason": inference.fallback_reason,
+                            "privileged_disturbance_body": list(
+                                _order3_active_disturbance_wrench(
+                                    time_s,
+                                    wrench_body=order3_external_wrench_body,
+                                    start_s=order3_disturbance_start_s,
+                                    duration_s=order3_disturbance_duration_s,
+                                )
+                            ),
+                        }
+                    )
+            else:
+                policy_command = last_order3_policy_command
             controller_command = controller.compute(
                 ControllerContext(
                     runtime_observation=runtime_observation,
@@ -2833,7 +3389,19 @@ def _run_random_morphology_takeoff_smoke(
             policy_commands.append(policy_command.to_dict())
             controller_commands.append(bridged_command.to_dict())
             application = _apply_actuator_record(
-                robot, actuator_record, physical_model, device
+                robot,
+                actuator_record,
+                physical_model,
+                device,
+                rotor_thrust_scale=order3_thrust_scale,
+            )
+            _add_order3_external_wrench(
+                robot,
+                wrench_body=active_order3_wrench_body,
+                control_pose_world=current_control_pose,
+                split_fixed_module_name=split_fixed_module_name,
+                device=device,
+                replace=False,
             )
             application_requested_target_count += int(
                 application["requested_target_count"]
@@ -2875,7 +3443,6 @@ def _run_random_morphology_takeoff_smoke(
             actuator_target_records.append(actuator_record.to_dict())
             robot.write_data_to_sim()
             status = bridged_command.controller_status
-            runtime_observation.controller_status = status
             last_controller_status = status.to_dict()
             last_bridge_metrics = dict(actuator_record.metrics)
             if not status.qp_feasible:
@@ -2886,6 +3453,45 @@ def _run_random_morphology_takeoff_smoke(
             unsupported_actuator_count += len(actuator_record.unsupported_actuators)
             clipped_target_count += len(actuator_record.clipped_targets)
             previous_command = bridged_command
+
+        active_policy_command = (
+            settle_policy_command
+            if target.phase == TakeoffPhase.SETTLE
+            else policy_command
+        )
+        max_abs_dock_position_target_rad = max(
+            max_abs_dock_position_target_rad,
+            max(
+                (
+                    abs(float(value))
+                    for key, value in active_policy_command.joint_position_targets.items()
+                    if key.partition(":")[2] in fixed_dock_joint_ids
+                ),
+                default=0.0,
+            ),
+        )
+        max_abs_dock_velocity_target_rad_s = max(
+            max_abs_dock_velocity_target_rad_s,
+            max(
+                (
+                    abs(float(value))
+                    for key, value in active_policy_command.joint_velocity_targets.items()
+                    if key.partition(":")[2] in fixed_dock_joint_ids
+                ),
+                default=0.0,
+            ),
+        )
+        max_abs_dock_torque_bias_nm = max(
+            max_abs_dock_torque_bias_nm,
+            max(
+                (
+                    abs(float(value))
+                    for key, value in active_policy_command.joint_torque_bias.items()
+                    if key.partition(":")[2] in fixed_dock_joint_ids
+                ),
+                default=0.0,
+            ),
+        )
 
         runtime_observations.append(runtime_observation.to_dict())
 
@@ -2959,6 +3565,8 @@ def _run_random_morphology_takeoff_smoke(
             floor_contact_sensor,
             force_threshold_n=config.floor_contact_force_threshold_n,
         )
+        if order3_in_air and bool(current_floor_contact["active"]):
+            order3_in_air_floor_contact_violation_count += 1
         max_floor_contact_aggregate_force_n = max(
             max_floor_contact_aggregate_force_n,
             float(current_floor_contact["aggregate_force_n"]),
@@ -3028,16 +3636,41 @@ def _run_random_morphology_takeoff_smoke(
             max_settle_low_speed_steps = max(
                 max_settle_low_speed_steps, settle_low_speed_steps
             )
-        if settled_pose is not None:
-            final_target = scheduler.final_hover_pose(settled_pose)
+        if settled_pose is not None or order3_in_air:
+            final_target = (
+                tuple(target.desired_pose_world)
+                if order3_in_air
+                else scheduler.final_hover_pose(settled_pose)
+            )
             position_error = _position_error_norm(control_pose[:3], final_target[:3])
             attitude_error = _quat_error_norm(control_pose[3:7], final_target[3:7])
             final_position_error = position_error
             final_attitude_error = attitude_error
             max_position_error = max(max_position_error, position_error)
             max_attitude_error = max(max_attitude_error, attitude_error)
+            instantaneous_tracking_cost = 0.25 * (
+                position_error / max(config.position_error_threshold_m, 1.0e-9)
+                + attitude_error
+                / max(config.attitude_error_threshold_rad, 1.0e-9)
+                + final_linear_speed
+                / max(config.hover_linear_speed_threshold_mps, 1.0e-9)
+                + final_angular_speed
+                / max(config.hover_angular_speed_threshold_rad_s, 1.0e-9)
+            )
             if (
-                target.phase in {TakeoffPhase.HOVER_HOLD, TakeoffPhase.COMPLETE}
+                time_s + sim_dt + 1.0e-12
+                >= order3_tracking_window_start_s
+            ):
+                order3_tracking_cost_sum += instantaneous_tracking_cost
+                order3_tracking_sample_count += 1
+            terminal_evidence_active = (
+                order3_rollout_condition is None
+                or time_s + sim_dt + 1.0e-12
+                >= order3_terminal_evidence_start_s
+            )
+            if (
+                current_target_hold_active
+                and terminal_evidence_active
                 and position_error <= config.position_error_threshold_m
                 and attitude_error <= config.attitude_error_threshold_rad
                 and final_linear_speed <= config.hover_linear_speed_threshold_mps
@@ -3051,7 +3684,11 @@ def _run_random_morphology_takeoff_smoke(
                 break
 
     if settled_pose is None:
-        settled_pose = initial_control_pose or initial_base_fc_pose
+        settled_pose = (
+            order3_nominal_hover_pose
+            if order3_in_air and order3_nominal_hover_pose is not None
+            else initial_control_pose or initial_base_fc_pose
+        )
         settled_linear_speed = final_linear_speed
         settled_angular_speed = final_angular_speed
         settle_low_speed_steps_at_completion = settle_low_speed_steps
@@ -3066,7 +3703,75 @@ def _run_random_morphology_takeoff_smoke(
         if control_pose_history
         else settled_pose
     )
-    final_target = scheduler.final_hover_pose(settled_pose)
+    final_target = (
+        tuple(order3_condition_scheduler.final_pose)
+        if order3_in_air and order3_condition_scheduler is not None
+        else scheduler.final_hover_pose(settled_pose)
+    )
+    if order3_in_air:
+        final_position_error = _position_error_norm(
+            list(final_control_pose[:3]), final_target[:3]
+        )
+        final_attitude_error = _quat_error_norm(
+            list(final_control_pose[3:7]), final_target[3:7]
+        )
+    order3_final_bootstrap_value = None
+    order3_final_runtime_observation = None
+    if learned_policy is not None:
+        final_time_s = executed_steps * sim_dt
+        final_root_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
+        final_root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(
+            robot.data.root_ang_vel_w.torch
+        )
+        final_observation = _build_articulated_runtime_observation(
+            morphology_graph,
+            time_s=final_time_s,
+            robot=robot,
+            root_pose_world=final_root_pose,
+            root_twist_world=final_root_twist,
+            joint_names=robot.joint_names,
+            joint_positions_tensor=robot.data.joint_pos.torch,
+            joint_velocities_tensor=robot.data.joint_vel.torch,
+            module_count=module_count,
+            split_fixed_module_name=split_fixed_module_name,
+        )
+        if previous_command is not None:
+            final_observation.controller_status = previous_command.controller_status
+        order3_final_runtime_observation = final_observation
+        final_knot = InteractionKnot(
+            t_rel_s=final_time_s,
+            contact_assignments=[],
+            centroidal_target=CentroidalTarget(
+                com_pos_world=tuple(final_target[:3]),
+                com_vel_world=tuple(final_target_twist[:3]),
+                body_orientation_world=tuple(final_target[3:7]),
+            ),
+        )
+        final_trajectory = ContactWrenchTrajectory(
+            horizon_s=max(1.0 / learned_policy.config.update_rate_hz, sim_dt),
+            dt_s=max(1.0 / learned_policy.config.update_rate_hz, sim_dt),
+            knots=[final_knot],
+            derived_mode_label=f"order3_free_flight_{order3_task_mode}_terminal_bootstrap",
+        )
+        try:
+            order3_final_bootstrap_value = learned_policy.bootstrap_value(
+                LowLevelPolicyContext(
+                    runtime_observation=final_observation,
+                    morphology_graph=morphology_graph,
+                    physical_model=physical_model,
+                    contact_wrench_trajectory=final_trajectory,
+                    active_knot=final_knot,
+                    controller_status=final_observation.controller_status,
+                ),
+                privileged_disturbance_body=_order3_active_disturbance_wrench(
+                    final_time_s,
+                    wrench_body=order3_external_wrench_body,
+                    start_s=order3_disturbance_start_s,
+                    duration_s=order3_disturbance_duration_s,
+                ),
+            )
+        except (RuntimeError, SchemaValidationError, TypeError, ValueError):
+            order3_final_bootstrap_value = None
     height_gain = float(final_control_pose[2]) - float(settled_pose[2])
     height_gain_ratio = height_gain / max(config.hover_height_delta_m, 1.0e-9)
     hold_time_s = max_hold_steps * sim_dt
@@ -3146,7 +3851,7 @@ def _run_random_morphology_takeoff_smoke(
         and final_attitude_error <= config.attitude_error_threshold_rad
         and final_linear_speed <= config.hover_linear_speed_threshold_mps
         and final_angular_speed <= config.hover_angular_speed_threshold_rad_s
-        and hold_time_s + 1.0e-9 >= config.hover_hold_duration_s
+        and hold_time_s + 1.0e-9 >= required_hold_s
     )
     logging_passed = (
         len(runtime_observations) == executed_steps
@@ -3154,15 +3859,19 @@ def _run_random_morphology_takeoff_smoke(
         and len(controller_commands) == executed_steps
         and len(actuator_target_records) == executed_steps
     )
-    passed = (
+    fixed_dock_neutral_hold_passed = bool(
+        fixed_dock_joint_ids
+        and max_abs_dock_joint_position_rad
+        <= config.dock_joint_position_tolerance_rad
+        and max_abs_dock_position_target_rad <= 1.0e-12
+        and max_abs_dock_velocity_target_rad_s <= 1.0e-12
+        and max_abs_dock_torque_bias_nm <= 1.0e-12
+    )
+    common_control_passed = (
         executed_steps > 0
         and finite_state
         and resolved_fc_body_count == module_count
-        and floor_pose_evidenced
-        and floor_contact_evidenced
         and exact_cross_module_collision_passed
-        and settle_passed
-        and ramp_passed
         and hover_passed
         and max_vertical_speed <= config.max_vertical_speed_mps
         and qp_infeasible_count == 0
@@ -3174,12 +3883,193 @@ def _run_random_morphology_takeoff_smoke(
         and application_requested_target_count == application_applied_target_count
         and reaction_torque_target_count > 0
         and reaction_torque_abs_sum_nm > 0.0
+        and fixed_dock_neutral_hold_passed
         and math.isclose(sim_dt, config.simulation_dt_s, rel_tol=0.0, abs_tol=1.0e-12)
         and logging_passed
     )
+    takeoff_passed = bool(
+        common_control_passed
+        and floor_pose_evidenced
+        and floor_contact_evidenced
+        and settle_passed
+        and ramp_passed
+    )
+    order3_free_flight_passed = bool(
+        common_control_passed
+        and order3_in_air
+        and order3_in_air_floor_contact_violation_count == 0
+        and ramp_max_progress >= 1.0 - 1.0e-9
+    )
+    passed = order3_free_flight_passed if order3_in_air else takeoff_passed
+    requested_initial_root_pose = tuple(
+        float(value) for value in order3_requested_initial_root_pose
+    )
+    requested_initial_root_twist = tuple(
+        float(value) for value in order3_requested_initial_root_twist
+    )
+    initial_state_applied = bool(
+        _position_error_norm(
+            list(initial_root_pose_actual[:3]), requested_initial_root_pose[:3]
+        )
+        <= config.initial_root_position_tolerance_m
+        and _quat_error_norm(
+            list(initial_root_pose_actual[3:7]), requested_initial_root_pose[3:7]
+        )
+        <= config.initial_root_attitude_tolerance_rad
+        and _vector_norm(
+            [
+                float(actual) - float(requested)
+                for actual, requested in zip(
+                    initial_root_twist_actual,
+                    requested_initial_root_twist,
+                    strict=True,
+                )
+            ]
+        )
+        <= 1.0e-4
+    )
+    condition_realization = None
+    if order3_rollout_condition is not None:
+        condition_realization = Order3ConditionRealization(
+            condition_hash=order3_rollout_condition.condition_hash,
+            task_mode=order3_task_mode,
+            requested_initial_root_pose_world=list(requested_initial_root_pose),
+            applied_initial_root_pose_world=list(initial_root_pose_actual),
+            requested_initial_twist_world=list(requested_initial_root_twist),
+            applied_initial_twist_world=list(initial_root_twist_actual),
+            requested_mass_scale=float(
+                order3_dynamics_realization["requested_mass_scale"]
+            ),
+            applied_mass_scale=float(
+                order3_dynamics_realization["applied_mass_scale"]
+            ),
+            requested_inertia_scale=float(
+                order3_dynamics_realization["requested_inertia_scale"]
+            ),
+            applied_inertia_scale=float(
+                order3_dynamics_realization["applied_inertia_scale"]
+            ),
+            requested_thrust_scale=float(
+                order3_dynamics_realization["requested_thrust_scale"]
+            ),
+            applied_thrust_scale=float(
+                order3_dynamics_realization["applied_thrust_scale"]
+            ),
+            mass_randomization_applied=bool(
+                order3_dynamics_realization["mass_randomization_applied"]
+            ),
+            inertia_randomization_applied=bool(
+                order3_dynamics_realization["inertia_randomization_applied"]
+            ),
+            thrust_randomization_applied=bool(
+                order3_dynamics_realization["thrust_randomization_applied"]
+            ),
+            initial_state_applied=initial_state_applied,
+            final_target_pose_world=list(final_target),
+            final_target_twist_world=list(final_target_twist),
+        )
+    if order3_in_air and (
+        not initial_state_applied
+        or not bool(order3_dynamics_realization["mass_randomization_applied"])
+        or not bool(order3_dynamics_realization["inertia_randomization_applied"])
+        or not bool(order3_dynamics_realization["thrust_randomization_applied"])
+    ):
+        order3_free_flight_passed = False
+        passed = False
+    order3_terminal_tracking_cost = 0.25 * (
+        final_position_error / max(config.position_error_threshold_m, 1.0e-9)
+        + final_attitude_error / max(config.attitude_error_threshold_rad, 1.0e-9)
+        + final_linear_speed / max(config.hover_linear_speed_threshold_mps, 1.0e-9)
+        + final_angular_speed
+        / max(config.hover_angular_speed_threshold_rad_s, 1.0e-9)
+    )
+    order3_tracking_cost = (
+        order3_tracking_cost_sum / order3_tracking_sample_count
+        if order3_tracking_sample_count > 0
+        else order3_terminal_tracking_cost
+    )
+    fallback_reasons = sorted(
+        {
+            str(trace["fallback_reason"])
+            for trace in order3_transition_traces
+            if trace.get("fallback_reason")
+        }
+    )
+    terminal_metrics = {
+        "position_error_m": float(final_position_error),
+        "attitude_error_rad": float(final_attitude_error),
+        "linear_velocity_error_mps": float(final_linear_speed),
+        "angular_velocity_error_rad_s": float(final_angular_speed),
+        "within_tolerance_duration_s": float(hold_time_s),
+        "takeoff_height_gain_ratio": (
+            float(height_gain_ratio) if not order3_in_air else None
+        ),
+    }
     return {
-        "random_morphology_takeoff_smoke": True,
-        "random_morphology_takeoff_smoke_passed": bool(passed),
+        "random_morphology_takeoff_smoke": not order3_in_air,
+        "random_morphology_takeoff_smoke_passed": bool(takeoff_passed),
+        "order3_free_flight_report_version": ORDER3_FREE_FLIGHT_REPORT_VERSION,
+        "order3_free_flight_passed": bool(order3_free_flight_passed),
+        "order3_free_flight_floor_initialization": not order3_in_air,
+        "order3_free_flight_floor_evidence_claim": False,
+        "order3_rollout_task_mode": order3_task_mode,
+        "order3_rollout_seed_applied": order3_seed_applied,
+        "order3_rollout_condition": (
+            order3_rollout_condition.to_dict()
+            if order3_rollout_condition is not None
+            else None
+        ),
+        "order3_rollout_condition_hash": (
+            order3_rollout_condition.condition_hash
+            if order3_rollout_condition is not None
+            else None
+        ),
+        "order3_condition_realization": (
+            condition_realization.to_dict() if condition_realization is not None else None
+        ),
+        "order3_terminal_metrics": terminal_metrics,
+        "order3_report_validation_failures": [],
+        "order3_task_mode": order3_task_mode,
+        "order3_structural_hash": morphology_structural_hash(morphology_graph),
+        "order3_free_flight_terminal_metrics": terminal_metrics,
+        "order3_free_flight_tracking_cost": float(order3_tracking_cost),
+        "order3_free_flight_terminal_tracking_cost": float(
+            order3_terminal_tracking_cost
+        ),
+        "order3_tracking_window_start_s": float(
+            order3_tracking_window_start_s
+        ),
+        "order3_tracking_window_end_s": float(executed_steps * sim_dt),
+        "order3_tracking_window_sample_count": int(
+            order3_tracking_sample_count
+        ),
+        "order3_free_flight_success": bool(passed),
+        "order3_qp_infeasible": bool(qp_infeasible_count > 0),
+        "order3_hard_collision": bool(
+            dynamic_cross_module_contact_violation_step_count
+            + order3_in_air_floor_contact_violation_count
+            + int(not exact_cross_module_collision_passed)
+            > 0
+        ),
+        "order3_non_finite_state": bool(not finite_state),
+        "order3_unsupported_actuator": bool(unsupported_actuator_count > 0),
+        "order3_fallback_used": bool(order3_fallback_count > 0),
+        "order3_fallback_reason": (
+            ",".join(fallback_reasons) if fallback_reasons else None
+        ),
+        "order3_free_flight_qp_infeasible_count": int(qp_infeasible_count),
+        "order3_free_flight_hard_collision_count": int(
+            dynamic_cross_module_contact_violation_step_count
+            + order3_in_air_floor_contact_violation_count
+            + int(not exact_cross_module_collision_passed)
+        ),
+        "order3_free_flight_non_finite_state_count": int(not finite_state),
+        "order3_free_flight_unsupported_actuator_count": int(
+            unsupported_actuator_count
+        ),
+        "order3_free_flight_in_air_floor_contact_violation_count": int(
+            order3_in_air_floor_contact_violation_count
+        ),
         "random_morphology_takeoff_graph_id": morphology_graph.graph_id,
         "random_morphology_takeoff_morphology_hash": morphology_graph.stable_hash(),
         "random_morphology_takeoff_backend_config_hash": backend_config_hash,
@@ -3189,9 +4079,37 @@ def _run_random_morphology_takeoff_smoke(
         "random_morphology_takeoff_dock_edge_count": len(morphology_graph.dock_edges),
         "random_morphology_takeoff_single_articulation": True,
         "random_morphology_takeoff_assembly_representation": "reset_time_fixed_dock_tree",
-        "random_morphology_takeoff_learned_policy_used": False,
-        "random_morphology_takeoff_controller": "deterministic_qpid",
+        "random_morphology_takeoff_learned_policy_used": learned_policy is not None,
+        "random_morphology_takeoff_controller": (
+            "order3_morphology_conditioned_pi_l_plus_deterministic_qpid"
+            if learned_policy is not None
+            else "deterministic_qpid"
+        ),
         "random_morphology_takeoff_control_contract_version": config.control_contract_version,
+        "random_morphology_takeoff_fixed_dock_neutral_hold_passed": bool(
+            fixed_dock_neutral_hold_passed
+        ),
+        "random_morphology_takeoff_fixed_dock_joint_count": int(
+            module_count * len(fixed_dock_joint_ids)
+        ),
+        "random_morphology_takeoff_dock_joint_position_tolerance_rad": float(
+            config.dock_joint_position_tolerance_rad
+        ),
+        "random_morphology_takeoff_max_abs_dock_joint_position_rad": float(
+            max_abs_dock_joint_position_rad
+        ),
+        "random_morphology_takeoff_final_max_abs_dock_joint_position_rad": float(
+            final_max_abs_dock_joint_position_rad
+        ),
+        "random_morphology_takeoff_max_abs_dock_position_target_rad": float(
+            max_abs_dock_position_target_rad
+        ),
+        "random_morphology_takeoff_max_abs_dock_velocity_target_rad_s": float(
+            max_abs_dock_velocity_target_rad_s
+        ),
+        "random_morphology_takeoff_max_abs_dock_torque_bias_nm": float(
+            max_abs_dock_torque_bias_nm
+        ),
         "random_morphology_takeoff_tracking_state_source": (
             "true_morphology_centroidal_frame"
             if centroidal_contract
@@ -3317,7 +4235,9 @@ def _run_random_morphology_takeoff_smoke(
             unclassified_robot_contact_pairs
         ),
         "random_morphology_takeoff_floor_placement": floor_placement.to_dict(),
-        "random_morphology_takeoff_initial_root_pose_world": list(floor_placement.root_pose_world),
+        "random_morphology_takeoff_initial_root_pose_world": list(
+            requested_initial_root_pose
+        ),
         "random_morphology_takeoff_initial_root_pose_actual": list(initial_root_pose_actual),
         "random_morphology_takeoff_initial_root_position_error_m": initial_root_position_error,
         "random_morphology_takeoff_initial_root_attitude_error_rad": initial_root_attitude_error,
@@ -3325,7 +4245,7 @@ def _run_random_morphology_takeoff_smoke(
         "random_morphology_takeoff_initial_root_attitude_tolerance_rad": config.initial_root_attitude_tolerance_rad,
         "random_morphology_takeoff_initial_base_fc_pose_world": list(initial_base_fc_pose),
         "random_morphology_takeoff_resolved_fc_body_count": resolved_fc_body_count,
-        "random_morphology_takeoff_settle_zero_thrust": True,
+        "random_morphology_takeoff_settle_zero_thrust": not order3_in_air,
         "random_morphology_takeoff_settle_duration_s": config.settle_duration_s,
         "random_morphology_takeoff_settle_passed": bool(settle_passed),
         "random_morphology_takeoff_settled_pose_world": list(settled_pose),
@@ -3361,7 +4281,7 @@ def _run_random_morphology_takeoff_smoke(
         "random_morphology_takeoff_max_position_error_m": max_position_error,
         "random_morphology_takeoff_max_attitude_error_rad": max_attitude_error,
         "random_morphology_takeoff_hover_hold_time_s": hold_time_s,
-        "random_morphology_takeoff_hover_hold_required_s": config.hover_hold_duration_s,
+        "random_morphology_takeoff_hover_hold_required_s": required_hold_s,
         "random_morphology_takeoff_hover_acquisition_timeout_s": config.hover_acquisition_timeout_s,
         "random_morphology_takeoff_max_vertical_speed_mps": max_vertical_speed,
         "random_morphology_takeoff_max_vertical_speed_threshold_mps": config.max_vertical_speed_mps,
@@ -3385,20 +4305,74 @@ def _run_random_morphology_takeoff_smoke(
         "random_morphology_takeoff_policy_commands": policy_commands,
         "random_morphology_takeoff_controller_commands": controller_commands,
         "random_morphology_takeoff_actuator_target_records": actuator_target_records,
+        "order3_pi_l_rollout": learned_policy is not None,
+        "order3_deterministic_baseline_rollout": bool(
+            order3_deterministic_baseline_evaluation
+        ),
+        "order3_pi_l_checkpoint_sha256": (
+            learned_policy.checkpoint_sha256 if learned_policy is not None else None
+        ),
+        "order3_pi_l_checkpoint_metadata": (
+            learned_policy.checkpoint_metadata.to_dict()
+            if learned_policy is not None
+            and learned_policy.checkpoint_metadata is not None
+            else None
+        ),
+        "order3_pi_l_stochastic": bool(order3_stochastic),
+        "order3_pi_l_policy_update_stride": int(policy_update_stride),
+        "order3_pi_l_policy_decision_count": int(order3_policy_decision_count),
+        "order3_pi_l_policy_applied_count": int(order3_policy_applied_count),
+        "order3_pi_l_fallback_count": int(order3_fallback_count),
+        "order3_pi_l_transition_traces": order3_transition_traces,
+        "order3_pi_l_final_bootstrap_value": order3_final_bootstrap_value,
+        "order3_pi_l_final_runtime_observation": (
+            order3_final_runtime_observation.to_dict()
+            if order3_final_runtime_observation is not None
+            else None
+        ),
+        "order3_privileged_external_wrench_body": list(order3_external_wrench_body),
+        "order3_disturbance_start_s": float(order3_disturbance_start_s),
+        "order3_disturbance_duration_s": float(order3_disturbance_duration_s),
+        "order3_terminal_evidence_start_s": float(
+            order3_terminal_evidence_start_s
+        ),
+        "order3_terminal_evidence_completed": bool(
+            hold_time_s + 1.0e-9 >= required_hold_s
+        ),
         "random_morphology_takeoff_root_pose_history": root_pose_history,
         "random_morphology_takeoff_control_pose_history": control_pose_history,
         "random_morphology_takeoff_logging_passed": bool(logging_passed),
         "random_morphology_takeoff_last_controller_status": last_controller_status,
         "random_morphology_takeoff_last_bridge_metrics": last_bridge_metrics,
         "random_morphology_takeoff_artifacts": {
-            "phase": "P4-full-order2",
+            "phase": (
+                "P4-full-order3-pi-l"
+                if learned_policy is not None
+                else (
+                    "P4-full-order3-deterministic-baseline"
+                    if order3_deterministic_baseline_evaluation
+                    else "P4-full-order2"
+                )
+            ),
             "backend": "isaac_lab",
             "isaac_backed": True,
             "dry_run": False,
             "is_p4_full_completion": False,
-            "physical_success_claim": "floor_takeoff_hover_only",
+            "physical_success_claim": (
+                f"in_air_{order3_task_mode}"
+                if order3_in_air
+                else "floor_takeoff_hover_only"
+            ),
             "object_task_claim": False,
-            "learned_policy_claim": False,
+            "learned_policy_claim": learned_policy is not None,
+            "learned_policy_scope": (
+                f"order3_free_flight_{order3_task_mode}"
+                if learned_policy is not None
+                else None
+            ),
+            "order3_deterministic_baseline_claim": bool(
+                order3_deterministic_baseline_evaluation
+            ),
         },
     }
 
@@ -5475,8 +6449,171 @@ def _is_finite(value: float) -> bool:
     return math.isfinite(value)
 
 
-def _apply_actuator_record(robot, actuator_record, physical_model, device: str) -> dict[str, object]:
+def _order3_active_disturbance_wrench(
+    time_s: float,
+    *,
+    wrench_body,
+    start_s: float,
+    duration_s: float,
+) -> tuple[float, float, float, float, float, float]:
+    values = tuple(float(value) for value in wrench_body)
+    if len(values) != 6 or not all(math.isfinite(value) for value in values):
+        raise RuntimeError("Order-3 external wrench must contain six finite values")
+    active = time_s + 1.0e-12 >= start_s and (
+        duration_s <= 0.0 or time_s < start_s + duration_s - 1.0e-12
+    )
+    return values if active else (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+
+
+def _apply_order3_dynamics_randomization(robot, *, condition) -> dict[str, object]:
+    """Apply model scales through Isaac's articulation property setters.
+
+    The controller and actor retain the nominal PhysicalModel.  These values
+    are simulator-only privileged episode conditions and are never added to a
+    RuntimeObservation.
+    """
+
+    requested_mass_scale = float(condition.mass_scale) if condition is not None else 1.0
+    requested_inertia_scale = (
+        float(condition.inertia_scale) if condition is not None else 1.0
+    )
+    requested_thrust_scale = (
+        float(condition.thrust_scale) if condition is not None else 1.0
+    )
+    for name, value in (
+        ("mass_scale", requested_mass_scale),
+        ("inertia_scale", requested_inertia_scale),
+        ("thrust_scale", requested_thrust_scale),
+    ):
+        if not math.isfinite(value) or value <= 0.0:
+            raise RuntimeError(f"Order-3 {name} must be finite and positive")
+
+    original_masses = robot.data.body_mass.torch.clone()
+    original_inertias = robot.data.body_inertia.torch.clone()
+    mass_applied = math.isclose(requested_mass_scale, 1.0, abs_tol=1.0e-12)
+    inertia_applied = math.isclose(requested_inertia_scale, 1.0, abs_tol=1.0e-12)
+    if not mass_applied:
+        robot.set_masses_index(masses=original_masses * requested_mass_scale)
+        observed = robot.data.body_mass.torch
+        expected = original_masses * requested_mass_scale
+        mass_applied = bool(
+            (observed - expected).abs().max().detach().cpu() <= 1.0e-6
+        )
+    if not inertia_applied:
+        robot.set_inertias_index(inertias=original_inertias * requested_inertia_scale)
+        observed = robot.data.body_inertia.torch
+        expected = original_inertias * requested_inertia_scale
+        inertia_applied = bool(
+            (observed - expected).abs().max().detach().cpu() <= 1.0e-6
+        )
+    if not mass_applied or not inertia_applied:
+        raise RuntimeError("Order-3 Isaac dynamics randomization was not applied exactly")
+    return {
+        "requested_mass_scale": requested_mass_scale,
+        "applied_mass_scale": requested_mass_scale,
+        "requested_inertia_scale": requested_inertia_scale,
+        "applied_inertia_scale": requested_inertia_scale,
+        "requested_thrust_scale": requested_thrust_scale,
+        "applied_thrust_scale": requested_thrust_scale,
+        "mass_randomization_applied": bool(mass_applied),
+        "inertia_randomization_applied": bool(inertia_applied),
+        "thrust_randomization_applied": True,
+    }
+
+
+def _seed_order3_rollout(seed: int) -> dict[str, object]:
+    import random
+
     import torch
+
+    if seed < 0:
+        raise RuntimeError("Order-3 condition seed must be non-negative")
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    try:
+        import numpy
+
+        numpy.random.seed(seed % (2**32))
+        numpy_seeded = True
+    except ImportError:
+        numpy_seeded = False
+    return {
+        "seed": int(seed),
+        "python_random": True,
+        "torch": True,
+        "torch_cuda": bool(torch.cuda.is_available()),
+        "numpy": numpy_seeded,
+    }
+
+
+def _add_order3_external_wrench(
+    robot,
+    *,
+    wrench_body,
+    control_pose_world,
+    split_fixed_module_name,
+    device: str,
+    replace: bool,
+) -> None:
+    import torch
+
+    values = tuple(float(value) for value in wrench_body)
+    if len(values) != 6:
+        raise RuntimeError("Order-3 external wrench must have length six")
+    composer = robot.permanent_wrench_composer
+    if not any(abs(value) > 0.0 for value in values):
+        if replace:
+            composer.reset()
+        return
+    fc_body_ids = []
+    for body_index, body_name in enumerate(robot.body_names):
+        parsed = split_fixed_module_name(body_name)
+        if parsed is not None and parsed[1] == "fc":
+            fc_body_ids.append(body_index)
+    if not fc_body_ids:
+        raise RuntimeError("Order-3 disturbance could not resolve module fc bodies")
+    rotation_world_from_body = _quat_to_matrix(tuple(control_pose_world[3:7]))
+    force_world = _matvec(rotation_world_from_body, values[:3])
+    torque_world = _matvec(rotation_world_from_body, values[3:6])
+    scale = 1.0 / len(fc_body_ids)
+    forces = torch.tensor(
+        [[[scale * value for value in force_world] for _ in fc_body_ids]],
+        dtype=torch.float32,
+        device=device,
+    )
+    torques = torch.tensor(
+        [[[scale * value for value in torque_world] for _ in fc_body_ids]],
+        dtype=torch.float32,
+        device=device,
+    )
+    body_ids = torch.tensor(fc_body_ids, dtype=torch.int32, device=device)
+    method = (
+        composer.set_forces_and_torques_index
+        if replace
+        else composer.add_forces_and_torques_index
+    )
+    method(
+        forces=forces,
+        torques=torques,
+        body_ids=body_ids,
+        is_global=True,
+    )
+
+
+def _apply_actuator_record(
+    robot,
+    actuator_record,
+    physical_model,
+    device: str,
+    *,
+    rotor_thrust_scale: float = 1.0,
+) -> dict[str, object]:
+    import torch
+
+    if not math.isfinite(float(rotor_thrust_scale)) or rotor_thrust_scale <= 0.0:
+        raise RuntimeError("rotor_thrust_scale must be finite and positive")
 
     rotors_by_id = {rotor.rotor_id: rotor for rotor in physical_model.rotors}
     force_body_ids: list[int] = []
@@ -5501,11 +6638,12 @@ def _apply_actuator_record(robot, actuator_record, physical_model, device: str) 
                 unresolved_targets.append(target.command_key)
                 continue
             force_body_ids.append(robot.body_names.index(body_name))
-            force_rows.append([float(axis) * target.target_value for axis in rotor.thrust_axis_local])
+            applied_thrust = float(target.target_value) * float(rotor_thrust_scale)
+            force_rows.append([float(axis) * applied_thrust for axis in rotor.thrust_axis_local])
             reaction_torque = [
                 float(axis)
                 * float(rotor.reaction_torque_coeff_nm_per_n)
-                * float(target.target_value)
+                * applied_thrust
                 for axis in rotor.thrust_axis_local
             ]
             torque_rows.append(reaction_torque)
@@ -5576,6 +6714,7 @@ def _apply_actuator_record(robot, actuator_record, physical_model, device: str) 
         "unresolved_targets": sorted(unresolved_targets),
         "reaction_torque_target_count": len(torque_rows),
         "reaction_torque_abs_sum_nm": reaction_torque_abs_sum_nm,
+        "rotor_thrust_scale": float(rotor_thrust_scale),
     }
 
 

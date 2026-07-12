@@ -1,0 +1,112 @@
+phase: P4-full-order3
+
+pipeline:
+  artifact_root: artifacts/p4_full/order3_pi_l_v2
+  pool_manifest_path: artifacts/p4_full/order3_pi_l_v2/morphology_pool.json
+  bc_dataset_dir: artifacts/p4_full/order3_pi_l_v2/datasets/bc
+  ppo_dataset_dir: artifacts/p4_full/order3_pi_l_v2/datasets/ppo
+  evaluation_path: artifacts/p4_full/order3_pi_l_v2/evaluation/episodes.jsonl
+  takeoff_config_path: configs/training/order2_5_centroidal_control.yaml
+  report_dir: artifacts/p4_full/order3_pi_l_v2/rollouts
+  command_timeout_s: 300.0
+  dataset_shard_size: 100000
+
+pool:
+  master_seed: 3000
+  min_modules: 2
+  max_modules: 8
+  train_per_module_count: 8
+  validation_per_module_count: 2
+  held_out_per_module_count: 2
+  two_module_train_per_module_count: 4
+  max_attempts_per_sample: 256
+  robot_model_config_path: configs/robot/robot_model.yaml
+  mesh_search_dirs:
+    - module_urdf
+    - module_urdf/mesh
+
+policy:
+  graph_hidden_dim: 96
+  graph_message_layers: 3
+  recurrent_hidden_dim: 128
+  max_modules: 8
+  action_size: 12
+  update_rate_hz: 50.0
+  linear_twist_correction_limit_mps: 0.5
+  angular_twist_correction_limit_radps: 0.6
+  residual_force_weight_fraction: 0.15
+  residual_torque_per_module_nm: 0.25
+  joint_position_delta_limit_rad: 0.15
+  joint_velocity_limit_rad_s: 0.5
+  joint_torque_fraction: 0.20
+  free_flight_joint_residual_enabled: false
+  trust_region_blend: 0.10
+  ood_absolute_feature_limit: 1000000.0
+
+training:
+  seed: 3011
+  device: cpu
+  artifact_root: artifacts/p4_full/order3_pi_l_v2
+  bc:
+    epochs: 20
+    batch_size: 64
+    learning_rate: 0.0003
+    sequence_length: 16
+    burn_in_steps: 4
+  ppo:
+    updates: 40
+    rollout_steps_per_update: 2048
+    epochs_per_update: 4
+    minibatch_size: 256
+    learning_rate: 0.0001
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_ratio: 0.20
+    value_loss_weight: 0.5
+    entropy_weight: 0.001
+    max_grad_norm: 0.5
+
+curriculum:
+  stages:
+    - name: in_air_hover
+      floor_takeoff: false
+      translation_waypoints: false
+      attitude_waypoints: false
+      initial_state_randomization_scale: 0.25
+      model_randomization_scale: 0.0
+      disturbance_scale: 0.0
+    - name: in_air_waypoints
+      floor_takeoff: false
+      translation_waypoints: true
+      attitude_waypoints: true
+      initial_state_randomization_scale: 0.50
+      model_randomization_scale: 0.05
+      disturbance_scale: 0.0
+    - name: disturbed_waypoints
+      floor_takeoff: false
+      translation_waypoints: true
+      attitude_waypoints: true
+      initial_state_randomization_scale: 1.0
+      model_randomization_scale: 0.10
+      disturbance_scale: 1.0
+    - name: floor_takeoff_hover
+      floor_takeoff: true
+      translation_waypoints: false
+      attitude_waypoints: false
+      initial_state_randomization_scale: 0.0
+      model_randomization_scale: 0.10
+      disturbance_scale: 1.0
+
+acceptance:
+  held_out_aggregate_success_min: 0.95
+  held_out_per_module_count_success_min: 0.90
+  nominal_baseline_degradation_max: 0.05
+  disturbed_tracking_error_improvement_min: 0.15
+  disturbed_success_improvement_min: 0.10
+  in_distribution_fallback_rate_max: 0.01
+  require_zero_qp_infeasible_terminal: true
+  require_zero_hard_collision_terminal: true
+  require_zero_nonfinite_terminal: true
+  require_zero_unsupported_actuator_terminal: true
+  require_ood_fallback: true
+  p4_full_completion_claim: false

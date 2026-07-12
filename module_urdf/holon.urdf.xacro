@@ -390,7 +390,7 @@
   </gazebo>
 
   <joint name="yaw_dock_mech_joint1" type="revolute">
-    <origin xyz="0.145 0 0" rpy="0 0 0.006433" />
+    <origin xyz="0.145 0 0" rpy="0 0 0" />
     <parent link="rotor_arm2" />
     <child link="yaw_dock_mech1" />
     <axis xyz="0 0 1" />
@@ -555,7 +555,7 @@
   </gazebo>
 
   <joint name="yaw_dock_mech_joint2" type="revolute">
-    <origin xyz="0.145 0 0" rpy="0 0 0.021103" />
+    <origin xyz="0.145 0 0" rpy="0 0 0" />
     <parent link="rotor_arm3" />
     <child link="yaw_dock_mech2" />
     <axis xyz="0 0 1" />
@@ -741,7 +741,7 @@
   </gazebo>
 
   <joint name="pitch_dock_mech_joint2" type="revolute">
-    <origin xyz="0.145 0 0" rpy="0 0.031857 0" />
+    <origin xyz="0.145 0 0" rpy="0 0 0" />
     <parent link="rotor_arm4" />
     <child link="pitch_dock_mech2" />
     <axis xyz="0 1 0" />

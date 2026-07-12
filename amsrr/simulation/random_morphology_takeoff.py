@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from amsrr.geometry.pose_math import (
+    FACE_TO_FACE_DOCK_RELATION,
+    compose_pose,
+    inverse_pose,
     matvec,
     transform_from_pose,
 )
@@ -35,6 +38,9 @@ RANDOM_MORPHOLOGY_TAKEOFF_VERSION = "random_morphology_takeoff_v1"
 FLOOR_PLACEMENT_METHOD = "order1_morphology_collision_aabbs_v1"
 ORDER2_FLOOR_SIZE_M: tuple[float, float, float] = (100.0, 100.0, 0.05)
 ORDER2_FLOOR_POSE_WORLD: Pose7D = (0.0, 0.0, -0.025, 0.0, 0.0, 0.0, 1.0)
+FIXED_DOCK_JOINT_POSITION_TOLERANCE_RAD = 0.0053
+FIXED_DOCK_CONNECT_FRAME_POSITION_TOLERANCE_M = 1.0e-6
+FIXED_DOCK_CONNECT_FRAME_ATTITUDE_TOLERANCE_RAD = 1.0e-6
 
 
 class TakeoffPhase(str, Enum):
@@ -55,6 +61,7 @@ class RandomMorphologyTakeoffConfig(SchemaBase):
     floor_contact_dwell_duration_s: float = 0.10
     exact_cross_module_contact_force_threshold_n: float = 1.0e-3
     exact_cross_module_contact_max_patches_per_body_pair: int = 8
+    dock_joint_position_tolerance_rad: float = FIXED_DOCK_JOINT_POSITION_TOLERANCE_RAD
     initial_root_position_tolerance_m: float = 0.002
     initial_root_attitude_tolerance_rad: float = 0.001
     settle_duration_s: float = 1.0
@@ -89,6 +96,7 @@ class RandomMorphologyTakeoffConfig(SchemaBase):
             "floor_contact_force_threshold_n",
             "floor_contact_dwell_duration_s",
             "exact_cross_module_contact_force_threshold_n",
+            "dock_joint_position_tolerance_rad",
             "initial_root_position_tolerance_m",
             "initial_root_attitude_tolerance_rad",
             "settle_duration_s",
@@ -189,6 +197,64 @@ class FloorContactPlacement:
             "initial_lowest_collision_z_world": self.initial_lowest_collision_z_world,
             "floor_gap_m": self.floor_gap_m,
         }
+
+
+@dataclass(frozen=True)
+class FixedDockConnectFrameAlignment:
+    edge_count: int
+    max_position_error_m: float
+    max_attitude_error_rad: float
+
+
+def fixed_dock_connect_frame_alignment(
+    morphology_graph: MorphologyGraph,
+    physical_model: PhysicalModel,
+) -> FixedDockConnectFrameAlignment:
+    """Check graph module poses against the current PhysicalModel dock frames."""
+
+    validate_takeoff_morphology(morphology_graph)
+    modules = {
+        module.module_id: tuple(module.pose_in_design_frame)
+        for module in morphology_graph.modules
+    }
+    graph_ports = {port.port_global_id: port for port in morphology_graph.ports}
+    physical_ports = {port.port_id: port for port in physical_model.dock_ports}
+    max_position_error = 0.0
+    max_attitude_error = 0.0
+    for edge in morphology_graph.dock_edges:
+        src = graph_ports.get(edge.src_port_id)
+        dst = graph_ports.get(edge.dst_port_id)
+        if src is None or dst is None:
+            raise SchemaValidationError(
+                f"dock edge {edge.edge_id} references a missing graph port"
+            )
+        src_spec = physical_ports.get(src.port_local_id)
+        dst_spec = physical_ports.get(dst.port_local_id)
+        if src_spec is None or dst_spec is None:
+            raise SchemaValidationError(
+                f"dock edge {edge.edge_id} references a missing PhysicalModel port"
+            )
+        expected_dst = compose_pose(
+            compose_pose(modules[edge.src_module_id], tuple(src_spec.local_pose)),
+            FACE_TO_FACE_DOCK_RELATION,
+        )
+        actual_dst = compose_pose(
+            modules[edge.dst_module_id],
+            tuple(dst_spec.local_pose),
+        )
+        error_pose = compose_pose(inverse_pose(expected_dst), actual_dst)
+        position_error = math.sqrt(
+            sum(float(value) ** 2 for value in error_pose[:3])
+        )
+        orientation_w = min(1.0, abs(float(error_pose[6])))
+        attitude_error = 2.0 * math.acos(orientation_w)
+        max_position_error = max(max_position_error, position_error)
+        max_attitude_error = max(max_attitude_error, attitude_error)
+    return FixedDockConnectFrameAlignment(
+        edge_count=len(morphology_graph.dock_edges),
+        max_position_error_m=max_position_error,
+        max_attitude_error_rad=max_attitude_error,
+    )
 
 
 @dataclass(frozen=True)
@@ -428,6 +494,22 @@ class RandomMorphologyTakeoffEnv:
         self.command_executor = command_executor or _run_json_command
 
     def placement_for(self, morphology_graph: MorphologyGraph) -> FloorContactPlacement:
+        alignment = fixed_dock_connect_frame_alignment(
+            morphology_graph,
+            self.physical_model,
+        )
+        if (
+            alignment.max_position_error_m
+            > FIXED_DOCK_CONNECT_FRAME_POSITION_TOLERANCE_M
+            or alignment.max_attitude_error_rad
+            > FIXED_DOCK_CONNECT_FRAME_ATTITUDE_TOLERANCE_RAD
+        ):
+            raise SchemaValidationError(
+                "random morphology graph dock frames do not align under the current "
+                "PhysicalModel; regenerate the morphology pool after changing the URDF "
+                f"(position_error_m={alignment.max_position_error_m:.9g}, "
+                f"attitude_error_rad={alignment.max_attitude_error_rad:.9g})"
+            )
         return compute_floor_contact_placement(
             morphology_graph,
             self.physical_model,
@@ -440,7 +522,8 @@ class RandomMorphologyTakeoffEnv:
         placement = self.placement_for(morphology_graph)
         command = self.backend.holon_spawn_probe_command(
             config_path=self.config.backend_config_path,
-            force_convert=True,
+            convert_if_missing=True,
+            force_convert=False,
             steps=self.config.required_steps,
         )
         command.extend(
@@ -464,6 +547,8 @@ class RandomMorphologyTakeoffEnv:
                 str(
                     self.config.exact_cross_module_contact_max_patches_per_body_pair
                 ),
+                "--takeoff-dock-joint-position-tolerance-rad",
+                str(self.config.dock_joint_position_tolerance_rad),
                 "--takeoff-initial-root-position-tolerance-m",
                 str(self.config.initial_root_position_tolerance_m),
                 "--takeoff-initial-root-attitude-tolerance-rad",
@@ -591,6 +676,7 @@ def random_morphology_takeoff_result_from_report(
     expected_collision_geometry_hash: str,
     expected_config: RandomMorphologyTakeoffConfig,
     unit_metrics: dict[str, Any] | None = None,
+    expected_learned_policy: bool = False,
 ) -> RandomMorphologyTakeoffResult:
     failures = _random_morphology_takeoff_report_failures(
         morphology_graph,
@@ -600,6 +686,7 @@ def random_morphology_takeoff_result_from_report(
         expected_physical_model_hash=expected_physical_model_hash,
         expected_collision_geometry_hash=expected_collision_geometry_hash,
         expected_config=expected_config,
+        expected_learned_policy=expected_learned_policy,
     )
     passed = not failures
     metrics = dict(unit_metrics or {})
@@ -638,6 +725,7 @@ def _random_morphology_takeoff_report_failures(
     expected_physical_model_hash: str,
     expected_collision_geometry_hash: str,
     expected_config: RandomMorphologyTakeoffConfig,
+    expected_learned_policy: bool = False,
 ) -> list[str]:
     """Validate independently reported Order-2 evidence without permissive defaults."""
 
@@ -735,8 +823,51 @@ def _random_morphology_takeoff_report_failures(
         "random_morphology_takeoff_assembly_representation",
         "reset_time_fixed_dock_tree",
     )
-    require_false("random_morphology_takeoff_learned_policy_used")
-    require_exact("random_morphology_takeoff_controller", "deterministic_qpid")
+    require_exact(
+        "random_morphology_takeoff_learned_policy_used",
+        expected_learned_policy,
+    )
+    require_exact(
+        "random_morphology_takeoff_controller",
+        (
+            "order3_morphology_conditioned_pi_l_plus_deterministic_qpid"
+            if expected_learned_policy
+            else "deterministic_qpid"
+        ),
+    )
+    require_true("random_morphology_takeoff_fixed_dock_neutral_hold_passed")
+    require_int(
+        "random_morphology_takeoff_fixed_dock_joint_count",
+        expected=module_count * len(
+            {
+                str(port.mechanical_limits["mechanism_joint_id"])
+                for port in build_physical_model_from_config(
+                    expected_config.robot_model_config_path
+                ).dock_ports
+                if port.mechanical_limits.get("mechanism_joint_id")
+            }
+        ),
+    )
+    require_exact(
+        "random_morphology_takeoff_dock_joint_position_tolerance_rad",
+        expected_config.dock_joint_position_tolerance_rad,
+    )
+    require_not_greater(
+        "random_morphology_takeoff_max_abs_dock_joint_position_rad",
+        "random_morphology_takeoff_dock_joint_position_tolerance_rad",
+    )
+    require_not_greater(
+        "random_morphology_takeoff_final_max_abs_dock_joint_position_rad",
+        "random_morphology_takeoff_dock_joint_position_tolerance_rad",
+    )
+    for key in (
+        "random_morphology_takeoff_max_abs_dock_position_target_rad",
+        "random_morphology_takeoff_max_abs_dock_velocity_target_rad_s",
+        "random_morphology_takeoff_max_abs_dock_torque_bias_nm",
+    ):
+        value = require_number(key)
+        if value is not None and abs(value) > 1.0e-12:
+            failures.append(f"nonzero:{key}")
     reported_contract = report.get(
         "random_morphology_takeoff_control_contract_version",
         POLICY_COMMAND_CONTRACT_LEGACY,
@@ -1394,15 +1525,27 @@ def _random_morphology_takeoff_report_failures(
                 failures.append(f"mismatch:actuator_time:{index}")
 
     artifacts = report.get("random_morphology_takeoff_artifacts")
+    deterministic_order3_baseline = (
+        not expected_learned_policy
+        and report.get("order3_deterministic_baseline_rollout") is True
+    )
     expected_artifacts = {
-        "phase": "P4-full-order2",
+        "phase": (
+            "P4-full-order3-pi-l"
+            if expected_learned_policy
+            else (
+                "P4-full-order3-deterministic-baseline"
+                if deterministic_order3_baseline
+                else "P4-full-order2"
+            )
+        ),
         "backend": "isaac_lab",
         "isaac_backed": True,
         "dry_run": False,
         "is_p4_full_completion": False,
         "physical_success_claim": "floor_takeoff_hover_only",
         "object_task_claim": False,
-        "learned_policy_claim": False,
+        "learned_policy_claim": expected_learned_policy,
     }
     if not isinstance(artifacts, dict):
         failures.append("invalid_or_missing:random_morphology_takeoff_artifacts")

@@ -56,8 +56,8 @@ def test_fixed_morphology_urdf_prefixes_modules_and_keeps_single_tree(tmp_path: 
         module_count=2,
         module_spacing_m=0.45,
     )
-    assert module_poses[1][0] == pytest.approx(0.5358, abs=1.0e-3)
-    assert module_poses[1][1] == pytest.approx(0.5331, abs=1.0e-3)
+    assert module_poses[1][0] == pytest.approx(0.5346, abs=1.0e-3)
+    assert module_poses[1][1] == pytest.approx(0.5346, abs=1.0e-3)
     link_poses = link_poses_in_root_frame(model)
     src_port = link_poses[fixed_module_link_name(0, "pitch_connect_dummy_1")]
     dst_port = link_poses[fixed_module_link_name(1, "yaw_connect_dummy_1")]
