@@ -2,6 +2,84 @@
 
 ## Global Worklog
 
+### 2026-07-12 (P4-full Orders 1-10 roadmap and Order 3 commit handoff)
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the approved centroidal controller, random-morphology, and Order 3 supplements
+- Work package / Agent label: Agent E/F/G/H/I/J/K/L handoff boundary; P4-full roadmap governance
+- Summary: Recorded the canonical local P4-full Order 1-10 roadmap, distinguished it from older P4-control/P4.1/P4.2/P4.3 internal order numbering, marked Orders 1-3 complete at the approved boundary, and made Order 4 the unambiguous next implementation entry point. Split the accumulated Order 3 source into a policy/training-core commit and an Isaac/pipeline/acceptance commit.
+- Files changed: `for_codex/AMSRR_design_modification_by_codex.md`, `for_codex/WORKLOG.md`; source committed separately as listed below.
+- Schema/interface changes: Documentation only in this handoff entry. Order 3 schema/runtime changes are versioned in commits `59aba6d` and `629008c` and described by the preceding worklog entries.
+- Upstream dependencies used: v0.4 P4 full acceptance and ownership sections; completed Order 0, Orders 1-2, Order 2.5, and Order 3 source/evidence; approved separation of natural-contact smoke from full TaskSpec delivery; approved dynamic assembly and controller responsibility boundaries.
+- Downstream impact: A fresh chat should begin at Order 4, not restart Order 3 and not jump directly to dynamic docking or natural contact. Later work can identify exact ownership, entry gates, primary files, and no-mislabeling boundaries for every remaining order from the design-modification roadmap.
+- Tests added or run: Documentation adds no tests. Before this handoff, the focused Order 3/runtime suite passed `166`; the complete `tests/unit tests/acceptance` suite passed `518` with `1` skipped in `296.41 s`; Python compilation and `git diff --check` passed.
+- Commands run: `git log`/status/diff audits; focused and full pytest recorded in the preceding entry; `python3 -m compileall -q amsrr scripts tests`; `git diff --check`; logical staging/commit inspection.
+- Assumptions: `Order 1-10` in this roadmap always means the local P4-full sequence recorded on 2026-07-12. Order 3 completion means source implementation plus representative hash-bound real-Isaac verification; it is not Order 10 and does not assert that ignored local artifacts exist in a fresh clone.
+- Blockers / open questions: No blocker for beginning Order 4. Before Order 8 implementation, configuration-backed numeric natural-contact smoke thresholds must be confirmed in the design log. The additional regenerated disturbed floor-takeoff evaluation ended before producing a report and is not accepted evidence.
+- Next steps: Start Order 4 only after confirming its production deterministic `pi_H` scheduler output contract and simultaneous-reachability inputs. Do not begin Order 5-10 in parallel merely because they are listed.
+
+### 2026-07-12 (corrected dock frames, absolute-zero hold, and Order 3 regeneration)
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the approved centroidal controller and Order 3 supplements
+- Work package / Agent label: Agent B/I/J/K/L boundary, pre-next-order URDF/PhysicalModel/runtime/training regeneration
+- Status: Requested regeneration and representative real-Isaac/GUI verification complete. This is not the configured full Order 3 statistical acceptance matrix and not P4 full completion.
+- User-supplied upstream change: `assets/robots/holon/holon.urdf` and `module_urdf/holon.urdf.xacro` now use neutral yaw-dock origins and zero `pitch_dock_mech_joint2` origin rotation. These edits were consumed as authoritative inputs; they were not authored by this work package.
+- Runtime changes: Added a fail-closed current-PhysicalModel connect-frame alignment gate before placement; complete absolute-zero dock position/velocity/torque-bias commands during settle, deterministic takeoff, and safety-masked learned free flight; measured dock angles and command maxima in real reports; and validation of the one-backlash `0.0053 rad` neutral-hold gate. BC/PPO collectors now accept explicit zero maps and reject non-zero dock intent. Learned decoding no longer ratchets measured deflection into a new target.
+- Drive tuning: Raised only the AK40-10 dock simulation stiffness from `20` to `200 Nm/rad`, retaining damping `1 Nms/rad`. The selected stiffness corresponds to about `1.047 Nm` at the configured `0.005236 rad` backlash, below the `1.3 Nm` rated torque. A real-Isaac A/B run reduced maximum dock deflection from `0.0080748` to `0.00252045 rad`; the passing run ended at `0.000257712 rad`, with all three commanded maxima exactly zero.
+- Files changed: Order 3 policy/collectors, random takeoff environment and Isaac probe, takeoff configs, joint actuator config, focused policy/simulation/collector tests, design supplement, and this worklog. The two URDF/xacro changes are user-owned upstream edits.
+- Regenerated lineage: Pool `7f06399db7b27d495f154aa0dc7223718f755634d5a28c4df0d2f398a296f0ed`, 80 unique structures with split counts `52/14/14`; three real N=3 BC reports, 917 transitions per split; BC dataset hash `2f12c10c...`, checkpoint `8813b03e...`; three stochastic real-Isaac PPO reports, 50 transitions per split; PPO dataset hash `5eb64950...`; exactly one PPO update checkpoint `70e5b88f...`. Previous lineages were preserved under `artifacts/p4_full/order3_pi_l_v2_pre_urdf_fix_20260712/` and `artifacts/p4_full/order3_pi_l_v2_drive20_20260712/`.
+- Real-Isaac evidence: All three regenerated deterministic BC sources passed; maximum/final dock angles were train `0.002520/0.000258`, validation `0.002974/0.000509`, held-out `0.001436/0.000231 rad`. All three checkpoint-bound stochastic PPO sources passed. The PPO held-out deterministic headless evaluation passed with final position/attitude error `0.012502 m / 0.004087 rad`, 50 learned decisions, fallback 0, maximum/final dock angle `0.000234/0.000232 rad`, and zero dock position/velocity/torque-bias command maxima.
+- GUI evidence: Launched the regenerated held-out PPO checkpoint through Kit with real-time playback and a 20 s post-rollout hold. It exited 0 with `real_isaac_passed=true` and no report-validation failures. The GUI and headless reports bind the corrected URDF hash `21dbb35a...`, regenerated USD path, asset cache key `de55c69c...`, and dock stiffness `200`.
+- Tests added or run: Added absolute-zero decoder/fallback tests, stale-frame rejection, fixed-dock report gates, explicit-zero BC/PPO collector acceptance plus non-zero rejection, and updated the fixed-morphology coordinate expectation for the corrected URDF. The final focused Order 3/runtime suite passed `166`; the complete `tests/unit tests/acceptance` regression passed `518` with `1` skipped in `296.41 s`. Python compilation and `git diff --check` passed.
+- Artifacts: Active ignored evidence is under `artifacts/p4_full/order3_pi_l_v2/`; generated USD is under `artifacts/isaac/robots/holon/`. These artifacts are representative integration evidence and are not source-controlled acceptance evidence.
+- Assumptions / limits: The `0.0053 rad` gate is based on the configured AK40-10 backlash and must be revisited with hardware measurements. Automated evidence proves frame consistency, zero commands, bounded measured joint motion, collision/contact gates, and successful Kit execution; final visual judgement of mesh clearance remains a human GUI observation. The full 2-8-module training/evaluation quota remains outstanding.
+- Next steps: The user accepted the GUI result. Preserve the committed Order 3 boundary and begin Order 4 with its scheduler-contract review; do not start later orders in parallel.
+
+### 2026-07-12 (Order 3 learned-policy GUI evaluation)
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the approved Order 3 morphology-conditioned `pi_L` supplement
+- Work package / Agent label: Agent I/K/L boundary, Order 3 real-Isaac learned-policy evaluation UX
+- Summary: Added optional Kit viewer, real-time playback, and post-rollout hold controls to deterministic `evaluate-learned` execution. The public CLI propagates these options through the staged single-rollout command to the existing Isaac probe flags while preserving headless defaults and the same checkpoint/morphology/condition/report-validation path.
+- Files changed: `amsrr/simulation/order3_policy_rollout.py`, `amsrr/training/order3_pipeline_runner.py`, `scripts/order3_morphology_pi_l.py`, focused Order 3 simulation/pipeline tests, design supplement, and this worklog.
+- Schema/interface changes: No persisted schema/checkpoint/dataset/report change. Additive optional runtime constructor/method/CLI arguments only.
+- Upstream dependencies used: Existing Order 3 checkpoint-bound rollout, Order 3 evaluation planner, `RandomMorphologyTakeoffEnv`, Isaac probe `--viz kit` / real-time / keep-open support, and P4.2 viewer-option precedent.
+- Downstream impact: A user can visually inspect the same deterministic learned-policy evaluation used by the headless pipeline. GUI observation remains diagnostic and does not alter acceptance evidence or claim P4 full completion.
+- Tests added or run: Added probe-command propagation/rejection coverage and evaluation-plan propagation/rejection coverage. Focused two-file suite passed `15`; complete Order 3 unit/acceptance suite passed `117` in `18.36 s`; CLI help parsing and Python compilation passed.
+- Commands run: `python3 -m py_compile ...`; focused and complete Order 3 pytest invocations with `PYTHONPATH=.` and plugin autoload disabled; both relevant CLI `--help` commands; `git diff --check`/status inspection.
+- Assumptions: `viewer="kit"` remains the only supported visualizer; the launching desktop session supplies a usable display. Automated training/collection remains headless.
+- Blockers / open questions: No implementation blocker. A GUI process was not launched during automated verification because it requires the user's interactive desktop session.
+- Next steps: Run one held-out checkpoint evaluation with `--real --viewer kit --realtime-playback`; continue full Order 3 curriculum training separately.
+
+### 2026-07-12 (Order 3 morphology-conditioned pi_L started)
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus normative controller supplement Section 14 and the approved Order 3 design-modification entry
+- Work package / Agent label: Agent I/K/L boundary, Order 3 morphology-conditioned `pi_L` free-flight training
+- Status: In progress. User approved the proposed scope, BC-to-PPO sequence, graph encoder, morphology split, safety/fallback boundary, and initial acceptance targets.
+- Fixed decisions: Preserve `MorphologyGraph`; tensorize each morphology as one homogeneous module-node/DockEdge-edge graph with port-derived edge features. Create new v2 dataset/checkpoint/runtime metadata rather than modifying or relabelling P4.3 v1 artifacts. Use true centroidal state, actor-visible deployable observations, privileged critic/reward separation, allocator-owned vectoring, and safety-masked non-vectoring joint decoding during the initial free-flight curriculum.
+- Current work: Auditing existing encoder/workspace, random-morphology Isaac runtime, and P4.3 v1 artifact boundaries before schema-first implementation.
+- Tests run: None yet for this order.
+- Blockers / open questions: None after approval. Full acceptance runtime depends on measured Isaac training throughput; implementation will retain smaller deterministic smoke budgets without weakening the configured full gate.
+- Next steps: Add v2 contracts and graph-disjoint pool, implement morphology encoder/recurrent policy and BC/PPO trainer, integrate online Isaac rollout/evaluation, then run focused/full/real validation.
+
+### 2026-07-12 (Order 3 implementation checkpoint: v2 policy/training and real-Isaac smoke)
+- Status: In progress; this checkpoint is not Order 3 statistical acceptance and not P4 full completion.
+- Implemented so far: Added the hash-disjoint 2-8 module morphology pool (`4/2/2` at N=2 and `8/2/2` at N=3-8), versioned v2 dataset/checkpoint schemas and strict artifact I/O, homogeneous module/DockEdge graph tensorization and message passing, a graph-conditioned GRU actor/critic, bounded centroidal twist/wrench residual decoding, masked absolute dock-joint hold, strict deterministic-v2 fallback, BC and PPO stage APIs, privileged free-flight reward, online decision-trace collection, and Order 3-specific acceptance arithmetic.
+- Runtime/controller boundary: The learned actor passes the centroidal pose target through exactly and emits intent only. QPID/allocator/bridge retain actuator authority. Actor inputs exclude measured contact wrench and simulator disturbance truth; the critic/reward may receive the applied aggregate disturbance. Vectoring remains allocator-owned and the initial free-flight dock decoder remains safety-masked to current-position hold.
+- Provenance hardening added during review: Runtime now validates checkpoint PhysicalModel/URDF/fallback configuration, uses checkpoint morphology hashes as the in-distribution allowlist, and returns explicit `structural_hash_ood` fallback for valid unseen structures. Disturbed rollout `old_value` now uses the same critic-only privileged wrench later consumed by PPO while actor action/recurrent output remains invariant. Production PPO is one fresh checkpoint-matched rollout generation per update; recurrent likelihood/value evaluation is episode-sequential and does not optimize isolated rows using stale recorded hidden states.
+- Evaluation hardening in progress: Acceptance now binds learned and paired deterministic-baseline raw report paths/hashes and canonical rollout conditions, requires held-out morphology x hover/waypoint/takeoff x nominal/randomized coverage, and requires OOD fallback reason `structural_hash_ood`. The executable in-air waypoint/model-randomization runtime and pipeline generation of these enriched evaluation records are still being connected.
+- Representative real-Isaac collection: Deterministic v2 train/validation/held-out N=3 floor takeoff reports each passed 917 steps with zero QP infeasibility, missing/unsupported actuator, clipping, or unintended cross-module contact. They produced a three-split 2,751-transition smoke BC dataset. A two-epoch smoke BC run reduced held-out actor MSE from `0.0385888` to `0.000655133`; this is a representative integration artifact, not the configured full-pool training run.
+- Learned real-Isaac smoke: The first environment-correct learned rollout executed 180 policy decisions with 180 learned applications, zero fallback, final position error `0.0621575 m`, and valid final critic bootstrap. A base-report scope parser initially rejected the correct Order 3 phase label; the parser was fixed and the same raw report revalidated with no failures. The pool/config provenance was then regenerated using both configured mesh search directories, so the smoke checkpoint/report must be rerun against the final regenerated lineage before final handoff.
+- Tests at this checkpoint: Focused graph/policy/schema/dataset/reward/collector/training/rollout/acceptance groups have passed individually; latest policy tests `10 passed`, training tests `8 passed`, raw-bound acceptance tests `20 passed`, and the Order 3 takeoff scope regression `5 passed`. Full repository tests and final real-Isaac learned/PPO verification remain pending.
+- Review findings being resolved: Initial code had schema-only curriculum declarations, takeoff-only online collection, repeated stale-rollout PPO updates, zero-privilege live critic values, no structural OOD allowlist, no paired evaluation producer, and no runtime fallback-config check. The latter four are fixed; executable hover/waypoint/randomization, generalized collection, iterative pipeline orchestration, and final evaluation production remain active work.
+- Ignored verification artifacts: `artifacts/p4_full/order3_pi_l_v2/` contains the regenerated pool, representative graph/report files, smoke datasets, and smoke training checkpoints. These are local validation outputs and are not source-controlled acceptance evidence.
+
+### 2026-07-12 (Order 3 implementation and end-to-end verification)
+- Status: Implementation path complete and representative real-Isaac verification complete. The configured full 2-8-module training/evaluation matrix has not been run, so Order 3 statistical acceptance and P4 full completion are not claimed.
+- Runtime/curriculum completion: Added hash-bound hover/waypoint/takeoff conditions, deterministic initial pose/twist perturbations, full-RPY waypoint ramp, mass/inertia/thrust randomization, scheduled external wrench, post-reset canonical state reapplication, and strict requested/applied realization evidence. Terminal dwell now starts only after target ramp and disturbance completion/onset as appropriate; pre-disturbance dwell cannot terminate an episode. Tracking cost is accumulated over a reported true-centroidal paired window rather than using only the final snapshot.
+- Policy/PPO hardening: The serialized PPO observation is exactly the causal actor input and carries prior, not current, controller status. Production collection replays stored action/log-probability/value/GRU state against the behavior checkpoint. PPO orchestration defaults to the configured curriculum, derives fresh deterministic conditions per update and structural hash, consumes one fresh generation per update, selects complete episodes with seeded module-count balancing before budget truncation, and normalizes advantages only over selected rows.
+- Evaluation/acceptance hardening: Learned/baseline raw reports are paired by structural and condition hash, bind seed/realization/backend/PhysicalModel/collision hashes and raw file hashes, and learned report paths include checkpoint hash. Acceptance independently revalidates applied randomization and seed evidence, binds raw safety fields for both ID and OOD episodes before fallback handling, and requires explicit `structural_hash_ood` evidence.
+- Representative real-Isaac hover: The final BC checkpoint (`d0354f...`) passed a held-out N=3 in-air hover with randomized initial state: 200 physics steps, 50 policy decisions, fallback 0, QP/collision/non-finite/unsupported failures all 0, final position error `0.01073 m`, and exact requested/applied initial pose/twist evidence. Its behavior replay reproduced all 50 transitions. A paired deterministic baseline under the same condition also passed; strict raw pairing produced a smoke evaluation episode with learned/baseline tracking cost `0.09594 / 0.09514`.
+- Representative PPO path: Three real-Isaac stochastic hover reports (train/validation/held-out N=3) all passed and produced 50 transitions per split. The production collector marked behavior replay verified for all three sources. Exactly one fresh PPO update produced checkpoint `ef32cd...` with finite losses, immediate-parent hash match, selected-transition-only advantage normalization, and no held-out optimization. That PPO checkpoint then passed held-out hover with 50 decisions, fallback 0, no safety failures, final position error `0.01347 m`, and tracking cost `0.09927`.
+- Representative floor takeoff: The PPO checkpoint passed the randomized/disturbed floor takeoff-to-hover condition after 999 physics steps. Requested/applied mass, inertia, and thrust scales matched (`1.08262`, `0.99747`, `0.96022`), the external wrench ran from 3-4 s, terminal dwell was collected from 4-5 s, height gain ratio was `0.82448`, fallback/QP/collision/non-finite/unsupported failures were all 0, and the task-specific takeoff gate passed.
+- Honest negative waypoint result: The aggressive disturbed-waypoint smoke applied all requested initial/model/wrench conditions and waited through post-disturbance dwell, but the BC-only checkpoint caused 24 initial QP-infeasible steps and 6 `controller_infeasible` fallbacks. It was correctly rejected despite terminal position error `0.14029 m`. This is expected evidence that the full waypoint/disturbance curriculum still needs actual PPO training; it was not relabelled as acceptance success.
+- Verification: Order 3 focused suite passed `96` tests; the collector/pipeline/acceptance subset passed `45` tests. Final full `tests/unit tests/acceptance` regression passed `513` tests with `1` skipped in `297.06 s`. Python compilation and `git diff --check` passed.
+- Artifacts: Local ignored evidence is under `artifacts/p4_full/order3_pi_l_v2/`, including pool/graphs, BC and PPO smoke datasets/checkpoints, raw rollout plans/reports, and paired smoke episodes. These are integration evidence only and do not satisfy the full held-out matrix/quota gate.
+
 ### 2026-07-12 (Order 2.5 centroidal controller contract implemented)
 - Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus normative `A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md` Section 14
 - Work package / Agent label: Agent I/J boundary, Order 2.5: versioned `pi_L` command contract, centroidal QPID, local joint servo/bridge, privileged-contact boundary, and detach-only estimator
@@ -2679,6 +2757,49 @@
 ---
 
 ## Work Package Logs
+
+### Agent E/F/G/H/I/J/K/L: P4-Full Orders 1-10 Handoff
+
+#### 2026-07-12
+- Scope: Preserve the agreed P4-full implementation sequence and current completion point for future chats.
+- Files changed: design-modification roadmap and WORKLOG handoff records.
+- Upstream dependencies: completed Order 0 actuator model; Orders 1-2 random morphology/takeoff; Order 2.5 controller contract; Order 3 morphology-conditioned `pi_L`; v0.4 P4 full acceptance.
+- Implemented: Canonical local numbering; completion states; ownership; primary files; per-order goals and acceptance boundaries; explicit Order 4 entry checklist.
+- Not implemented: Orders 4-10 code or acceptance evidence.
+- Schema/interface changes: None.
+- Downstream impact: Order 4 is next. Later chats must keep contact/internal wrench outside normal QPID, preserve deterministic safety/fallbacks, and treat Orders 8, 9, and 10 as distinct gates.
+- Tests added: None for documentation.
+- Tests passed: Relies on the immediately preceding clean `518 passed, 1 skipped` repository regression and compile/diff checks.
+- Handoff notes: Read the top roadmap in `AMSRR_design_modification_by_codex.md`. Ignore older local `Order N` labels unless their P4-control/P4.1/P4.2/P4.3 prefix is stated. Do not assume ignored `artifacts/` exist. Begin with the Order 4 scheduler contract review.
+- Open questions: Natural-contact numeric smoke thresholds must be frozen before Order 8; no blocker for Order 4.
+
+### Agent I/K/L: Order 3 Morphology-Conditioned pi_L
+
+#### 2026-07-12 (implementation complete and committed handoff)
+- Scope: Complete the approved morphology-conditioned `pi_L` free-flight implementation and representative real-Isaac verification before advancing to Order 4.
+- Files changed: versioned Order 3 schemas; graph encoder/recurrent policy; datasets/reward/BC/PPO trainers; morphology pool; rollout conditions; online/takeoff collectors; real-Isaac rollout/pipeline/acceptance; CLI/config; corrected Dock neutral runtime; focused tests.
+- Upstream dependencies: Orders 1-2 morphology/takeoff, Order 2.5 `centroidal_local_joint_v2`, current PhysicalModel/URDF, QPID/allocator/Isaac bridge, deterministic safety and fallback contracts.
+- Implemented: Source commits `59aba6d` (`pi_L` contracts/encoder/policy/training core) and `629008c` (Isaac rollout/collectors/pipeline/acceptance and Dock-neutral integration); representative BC, stochastic PPO, one PPO update, held-out headless and GUI evaluation; absolute-zero Dock hold and stale-frame rejection.
+- Not implemented: Production deterministic `pi_H` scheduler, dynamic `pi_A` execution, runtime constraint create/remove, natural object contact, full TaskSpec training/delivery, or P4 full acceptance.
+- Schema/interface changes: New versioned Order 3-only dataset/checkpoint/condition/report contracts; existing MorphologyGraph is unchanged; normal controller remains `centroidal_local_joint_v2` with no contact/internal-wrench targets.
+- Downstream impact: Order 4 may consume the deployed Order 3 actor input/target contract. It must replace only the training target source, not actor/QPID authority. Orders 5-10 remain sequential downstream work.
+- Tests added: graph invariance/masks; policy decoding/fallback; schema/hash/tamper checks; BC/PPO correctness; curriculum conditions; real-report collectors; behavior replay; pipeline planning; acceptance positive/negative cases; Dock zero-hold and stale-frame regressions.
+- Tests passed: focused `166`; full repository `518 passed, 1 skipped`; compilation and whitespace checks passed; representative real-Isaac and Kit GUI reports passed.
+- Handoff notes: Local ignored artifacts are optional evidence, not repository dependencies. Regenerate checkpoints from `configs/training/order3_morphology_pi_l.yaml` when needed. The next code task is Order 4 and should reuse the exact actor target semantics demonstrated by Order 3.
+- Open questions: Full statistical quota remains part of later P4-full evidence aggregation; no method-level blocker for deterministic Order 4 scheduler design review.
+
+#### 2026-07-12 (learned-policy GUI evaluation)
+- Scope: Expose visual observation for a real checkpoint-bound Order 3 evaluation without changing policy/controller semantics.
+- Files changed: Order 3 rollout environment, pipeline runner, CLI, focused tests, design supplement, and worklog.
+- Upstream dependencies: Existing real-Isaac Order 3 execution and probe visualization options.
+- Implemented: Kit viewer propagation; physics-dt-paced playback; configurable post-rollout viewer hold; fail-fast validation for headless misuse; unit coverage from public plan to final probe command.
+- Not implemented: Interactive teleoperation during learned execution, viewport keyboard capture, acceptance changes, or an automated GUI test.
+- Schema/interface changes: Additive runtime arguments only; no persisted schema or artifact change.
+- Downstream impact: The user can inspect checkpoint behavior visually while report validation and safety remain unchanged.
+- Tests added: Order 3 GUI command/plan propagation and invalid-option rejection.
+- Tests passed: Focused `15`; full Order 3 `117`; compile/help checks passed.
+- Handoff notes: Use deterministic `evaluate-learned` with one explicit graph and one selected condition for a single convenient GUI session.
+- Open questions: None.
 
 ### Agent I/J: Centroidal QPID and Local Joint Servo Contract
 
