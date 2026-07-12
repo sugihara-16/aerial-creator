@@ -2,7 +2,7 @@
 
 **対象:** P4-control / P4a low-level flight validation  
 **親仕様:** `A-MSRR_codex_ready_spec_v0_4_ja.md` Sections 20, 23.5, 24.5.2, 25, 26.9-26.10, 27.1  
-**位置づけ:** 全体設計書を補完する制御器専用仕様。全体設計書と矛盾する場合は、全体設計書を優先する。
+**位置づけ:** 全体設計書を補完する制御器専用仕様。原則として全体設計書と矛盾する場合は全体設計書を優先する。ただし、ユーザー承認済みの設計変更として Section 14 と `AMSRR_design_modification_by_codex.md` の 2026-07-12 entry に明記した事項は、その範囲に限り従来記述を supersede する。
 
 ---
 
@@ -524,3 +524,268 @@ tests/acceptance/test_p4_control_acceptance.py
 6. 初期 waypoint threshold は `position_error_m <= 0.20`、`attitude_error_rad <= 0.25`、`hold_duration_s >= 1.0` とし、configurable にする。
 
 追加の未定義事項が実装中に見つかった場合は、互換性のない仮定を置かず、実装前にユーザーへ確認する。
+
+---
+
+## 14. 2026-07-12 承認済み制御契約改訂
+
+### 14.1 改訂の優先順位と目的
+
+本節は、通常実行時の QPID を contact-wrench-aware whole-body QP として拡張する従来案を改め、centroidal flight control と local joint control の責務を分離する。以下の事項について、本書 Sections 2、3、6、7、8、および親仕様 Section 20 の従来記述と矛盾する場合は本節を優先する。
+
+改訂後の通常制御では、`PolicyCommand` と QP のどちらにも以下を含めない。
+
+```text
+per-contact wrench target / bias
+contact wrench allocation variable
+normal-operation dock internal wrench target / bias
+dock internal wrench allocation variable
+```
+
+contact wrench は task requirement、feasibility、reward、contact safety、logging のために残すが、通常 QPID の直接 tracking target にはしない。dock internal wrench は detach 前後の特殊処理だけで扱う。
+
+### 14.2 改訂後の通常制御パイプライン
+
+```text
+π_H:
+  contact assignment / mode / schedule / wrench requirement
+  centroidal target / posture target / object target
+    -> π_L context
+
+π_L PolicyCommand:
+  desired centroidal pose / twist
+  centroidal wrench bias
+  absolute joint position / velocity targets
+  joint torque bias
+    -> deterministic controller
+
+QPID / thrust allocator:
+  centroidal pose/wrench target
+    -> rotor thrust + thrust-vectoring targets
+
+local joint servo:
+  joint position/velocity targets + torque bias
+    -> non-vectoring joint actuator targets
+
+controller bridge:
+  validated/clipped controller outputs
+    -> backend actuator targets
+```
+
+`π_L` は引き続き最終 actuator command を出さない。`PolicyCommand` の joint target と torque bias は低レイヤ参照値であり、controller が actuator existence、control mode、position/rate/effort limit、finite check、安全 override を適用した後にだけ `ControllerCommand` / backend target へ変換する。
+
+### 14.3 `PolicyCommand` の改訂契約
+
+改訂後の規範的な controller-facing fields は次とする。
+
+```python
+class PolicyCommand:
+    desired_body_pose: Pose7D | None
+    desired_body_twist: list[float] | None
+    residual_wrench_body: list[float] | None
+
+    joint_position_targets: dict[str, float]
+    joint_velocity_targets: dict[str, float]
+    joint_torque_bias: dict[str, float]
+```
+
+field semantics:
+
+```text
+desired_body_pose:
+  assembled morphology centroidal control frame の world pose target
+
+desired_body_twist:
+  assembled morphology centroidal control frame の world/body convention が明示された twist target
+
+residual_wrench_body:
+  body-aligned centroidal control frame における additive CoM wrench bias
+  contact wrench または dock internal wrench ではない
+
+joint_position_targets:
+  non-vectoring joint の absolute position target
+
+joint_velocity_targets:
+  non-vectoring joint の absolute velocity target
+
+joint_torque_bias:
+  local position/velocity servo output に加算する bounded offset torque
+  final joint torque command ではない
+```
+
+旧 `joint_position_bias`、`joint_velocity_bias`、`contact_tracking_bias` は既存 archive / checkpoint の読取り互換性のため直ちには削除しない。新 contract 実装後は deprecated fields とし、通常実行 path では `contact_tracking_bias` を no-op とする。旧 checkpoint と新 checkpoint は contract/version metadata で区別し、field meaning を黙って変更してはならない。
+
+`π_H` の `PostureTarget` は π_L への高レベル参照である。通常 path では π_L が `PostureTarget` と runtime state から absolute `joint_position_targets` / `joint_velocity_targets` を生成し、local servo へ渡す。π_L target が欠落または無効な場合は、controller が current-position hold または明示された deterministic posture fallback を使う。
+
+command priority:
+
+```text
+hard safety / actuator limit override
+π_A latch open-close / detach special-mode override
+thrust allocator vectoring-joint target
+π_L non-vectoring joint target / torque bias
+deterministic current-position hold fallback
+```
+
+### 14.4 Centroidal control frame
+
+通常 QPID は base module の `fc` origin ではなく、現在形態の CoM を並進制御する。centroidal control frame `C` は次で定義する。
+
+```text
+origin:
+  RigidBodyControlModel.center_of_mass_body を world へ変換した current morphology CoM
+
+orientation:
+  selected morphology control-body frame と同じ orientation
+
+linear velocity:
+  control-body origin velocity を CoM offset へ移した velocity
+
+angular velocity:
+  control-body angular velocity
+```
+
+各 control step で current joint state と module state から mass、CoM、inertia、rotor geometry を更新する。`desired_body_pose` という既存 field name を維持する場合でも、新 contract では centroidal control-frame pose を意味する。base-module pose tracking を centroidal tracking と報告してはならない。
+
+### 14.5 QP の責務境界
+
+通常 QP の actuator variables は rotor thrust、thrust-vectoring variables / targets、および必要な slack に限定する。generic manipulation joint torque、contact wrench、dock internal wrenchは QP variable に含めない。
+
+```text
+w_target =
+    w_centroidal_pose_tracking
+  + w_centroidal_bias
+  + optional controller-owned aggregate disturbance compensation
+
+min_u
+  || A(q_current) u - w_target ||^2_Q
+  + alpha_u ||u||^2
+  + alpha_delta ||u - u_prev||^2
+  + alpha_slack ||s||^2
+```
+
+`A(q_current)` は current morphology の CoM、inertia、rotor origin、rotor axis、reaction torque を使う。optional disturbance compensation は、個別 contact wrench の分解ではなく、centroidal momentum / state observer から得られる aggregate external wrench に限る。これは controller-owned estimate であり `PolicyCommand` の contact-wrench field ではない。
+
+thrust-vectoring joint は rotor thrust axis を決めるため独立 joint controlにはしない。QP / vectoring allocator が absolute targetを決め、local position servo が追従する。non-vectoring manipulation / dock mechanism jointsだけを Section 14.6 の独立 servoで扱う。
+
+### 14.6 Non-vectoring local joint servo
+
+non-vectoring joint は QP allocation から分離し、actuator-local position/velocity servo と bounded offset torque で制御する。
+
+```text
+tau_servo =
+    Kp (q_target - q)
+  + Kd (qdot_target - qdot)
+
+tau_requested = tau_servo + tau_bias
+```
+
+backend actuator が position command と offset torque を同時に受け付ける場合は、その native path を使ってよい。受け付けない場合は controller が support status を明示し、黙って一方を捨ててはならない。
+
+requirements:
+
+```text
+absolute position / velocity target validation
+position, velocity, effort, torque-bias, and rate limits
+per-actuator supported control-mode check
+non-finite rejection
+command smoothing where configured
+missing / unsupported / clipped logging
+current-position hold fallback
+```
+
+joint motion は Version 1 では準静的とし、joint rate / accelerationを制限する。joint actuation reactionは measured centroidal feedback と更新済み rigid-body modelで補償する。高速 articulated-body feed-forward、Coriolis / centrifugal coupling、contact-aware full-body inverse dynamics は通常 QPID の初期範囲外とする。
+
+### 14.7 Contact requirement、observation、reward
+
+`π_H` の contact assignment、mode、schedule、wrench requirement / bound、centroidal target、posture target、object target の schemaは変更しない。contact wrench requirement は次に使用する。
+
+```text
+π_L context
+design / assignment feasibility
+Isaac privileged training reward
+contact safety and task success evaluation
+archive / diagnostics
+```
+
+通常 QPID は per-contact wrench targetを追跡せず、`PolicyCommand.contact_tracking_bias`を消費しない。actorである π_L が利用できない実機情報へ依存しないよう、Isaac の per-contact force / impulse は policy observation と privileged reward / critic inputを区別する。
+
+多点接触では個別 wrench の一意な分解を要求しない。学習rewardは、厳密なpointwise wrench targetだけでなく、task-equivalentな次の評価を優先する。
+
+```text
+object / environment に対する net desired effect
+contact maintenance
+wrench bound / friction / safety margin satisfaction
+centroidal stability
+object progress / goal accuracy
+slip, penetration, contact break, excessive force, unintended contact
+actuator saturation and control effort
+```
+
+contact existence、slip、penetration、contact break、force upper bound、object dropなどの safety observationは残す。contact wrenchをQP targetから外すことは、contact sensingとsafety gateを削除することを意味しない。
+
+### 14.8 Dock internal wrench は detach 専用
+
+通常 `PolicyCommand` と通常 QP は dock internal wrenchを扱わない。detachでは、対象 `DockEdge` を切った follower-side component に対する専用 unload / release procedureを使う。
+
+follower側に結合部以外のexternal contact / external loadがなく、active rotor / actuator wrench、gravity、mass、CoM、inertia、momentum rateが既知である場合、follower centroidal balanceからcut-edge wrenchを推定できる。
+
+```text
+w_cut_at_follower_com =
+    follower_momentum_rate
+  - follower_known_actuator_wrench
+  - follower_gravity_wrench
+  - follower_other_known_external_wrench
+```
+
+このwrenchをfollower CoMからdock frameへspatial wrench transformし、sign conventionを「parent-side componentがfollower-side componentへ加えるwrench」など一意に固定する。whole assembled morphology のcentroidal estimatorではinternal wrenchが相殺されるため、必ずcandidate edgeで切った follower subtreeに対して推定する。
+
+detach gate:
+
+```text
+follower external-contact-free evidence
+follower estimator validity
+relative pose / velocity threshold
+force threshold and torque threshold
+both components independently QP-feasible
+N consecutive unload dwell steps
+latch release
+post-release separation stability
+```
+
+external contact、unknown load、estimator invalid、threshold超過のいずれかがある場合はfail closedとする。Isaac constraint reaction / virtual sensorはground truth comparisonとestimator validationに使ってよいが、実機で利用できない値をrelease gateの唯一のsourceにしてはならない。
+
+### 14.9 ControllerCommand / bridge migration
+
+新 contract を実装する際は、controller / bridge contractが少なくとも次を表現できなければならない。
+
+```text
+rotor thrust targets
+thrust-vectoring absolute position targets
+non-vectoring joint absolute position targets
+non-vectoring joint absolute velocity targets where supported
+non-vectoring joint bounded offset torque targets
+latch / dock special-mode commands
+```
+
+controllerは π_L targetを検証・clipし、最終 actuator target recordにrequested / applied value、control mode、limit、clip reason、missing / unsupported statusを保存する。π_Lがjoint targetを出すことはfinal actuator authorityの移譲ではない。
+
+### 14.10 実装・acceptanceへの影響
+
+本節は設計契約の改訂であり、追記時点ではPython schema、controller、bridge、policy、training artifactを変更しない。実装はschema-firstで行い、少なくとも以下を検証する。
+
+```text
+PolicyCommand absolute joint target / torque-bias validation and round trip
+legacy field read compatibility and new checkpoint contract versioning
+true centroidal pose/twist construction for asymmetric morphologies
+QP excludes contact/internal wrench and generic non-vectoring joint variables
+vectoring targets remain allocator-owned
+local joint position + offset-torque mapping and limit enforcement
+unsupported actuator control-mode fail-closed behavior
+contact_tracking_bias no-op behavior on the new path
+Isaac privileged contact reward does not leak into actor observation
+follower-subtree detach wrench estimator and frame/sign tests
+normal-operation reports do not claim internal/contact wrench tracking
+```
+
+既存 P4-control / P4.2 / P4.3 artifact は生成時の旧 contract versionに基づく履歴として保持する。新 contract の実装と再検証が完了するまでは、既存成功artifactを新しいcentroidal-only QPID / absolute-joint-target contractの成功証拠として読み替えてはならない。

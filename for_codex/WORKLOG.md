@@ -2,6 +2,24 @@
 
 ## Global Worklog
 
+### 2026-07-12 (Centroidal-only QPID design revision)
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus user-approved `A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md` Section 14 and the matching design-modification entry
+- Work package / Agent label: Agent I/J boundary: `π_L` PolicyCommand, centroidal QPID, local joint servo, controller bridge, contact-reward, and detach-unload design contract
+- Summary: Documented the approved replacement of the normal contact-aware/internal-wrench QP path with a centroidal-only thrust/vectoring QP plus independent non-vectoring joint servo. Normal `PolicyCommand`/QP no longer carries contact or dock internal wrench intent. `π_L` supplies centroidal pose/twist, CoM wrench bias, absolute joint position/velocity targets, and bounded torque bias; contact wrench remains high-level context/reward/safety evidence, while dock internal wrench is detach-only.
+- Files changed: `for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md`, `for_codex/AMSRR_design_modification_by_codex.md`, and `for_codex/WORKLOG.md`.
+- Schema/interface changes: Documentation contract only in this work package; no Python schema or runtime interface was changed. Future schema-first migration adds absolute `joint_position_targets`, `joint_velocity_targets`, and `joint_torque_bias`, clarifies `desired_body_pose`/`desired_body_twist` as centroidal-control-frame targets and `residual_wrench_body` as CoM wrench bias, and deprecates legacy joint/contact bias fields with versioned compatibility.
+- Controller decision: Normal QP variables are rotor thrust, thrust-vectoring variables/targets, and slack only. Generic non-vectoring joints use local position/velocity servo plus offset torque. Vectoring joints remain allocator-owned. Contact/internal wrench variables and tracking objectives are excluded from normal QPID.
+- Centroidal decision: The revised contract requires actual current-morphology CoM pose/twist derived from the quasi-static rigid-body model; existing base-module `fc` tracking must not be reported as true centroidal tracking.
+- Contact/training decision: `π_H` schema remains unchanged. Contact wrench requirements feed `π_L` context, feasibility, privileged Isaac reward/critic, safety, task success, and logging, but not direct QP tracking. Privileged per-contact data must not leak into actor observations.
+- Detach decision: Internal wrench is a special detach-only estimate computed on the contact-free follower subtree from momentum balance, known actuator/gravity loads, and a CoM-to-dock wrench transform. Release remains fail-closed on contact evidence, estimator validity, pose/velocity, force/torque, component feasibility, dwell, and separation stability.
+- Commands run: Inspected existing controller/spec/design/worklog references with `sed` and `rg`; updated documentation with `apply_patch`; checked Markdown structure, supersession wording, staged whitespace, and Git status/diff before commit.
+- Tests run: Documentation-only consistency checks and `git diff --check`; no Python or Isaac behavior changed, so runtime tests were not rerun.
+- Upstream dependencies used: v0.4 Sections 17, 19-20, 22, and 24; QP/PID supplement Sections 2-10; existing `PolicyCommand`, `ControllerCommand`, `RigidBodyControlModel`, QPID/QP, actuator model/bridge, Order 1-2 morphology flight evidence, and the user-approved detach/contact assumptions.
+- Downstream impact: Order 3 morphology-conditioned `π_L` training is paused until the revised schema/controller/bridge path is implemented and versioned. Existing P4 artifacts remain valid only under their recorded legacy contracts and cannot prove this revised design.
+- Assumptions: follower-side dock-wrench observability applies only when the candidate-edge follower component is verified free of other external contacts/loads; Version 1 non-vectoring joint motion remains bounded and quasi-static.
+- Blockers / open questions: No design blocker. Implementation, migration, and new acceptance evidence remain pending and are not part of this documentation commit.
+- Next steps: Implement the revised schema-first controller contract before resuming Order 3 training.
+
 ### 2026-07-11 (Random morphology GUI teleop utility)
 - Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the completed P4 full Orders 1-2 deterministic morphology-flight boundary
 - Work package / Agent label: Agent I/J verification utility for random morphology floor takeoff, hover, and terminal pose-target commands
@@ -2646,6 +2664,21 @@
 ---
 
 ## Work Package Logs
+
+### Agent I/J: Centroidal QPID and Local Joint Servo Contract
+
+#### 2026-07-12
+- Scope: Record the approved normal-operation controller simplification and detach-only internal-wrench boundary before Order 3 learning implementation.
+- Files changed: QP/PID controller supplement, design-modification record, and worklog only.
+- Upstream dependencies: v0.4 policy/controller responsibility split, current QPID/rigid-body model/bridge contracts, installed joint actuator capabilities, and completed random-morphology Orders 1-2.
+- Implemented: Normative documentation for centroidal-control-frame targets; rotor/vectoring-only QP; absolute non-vectoring joint position/velocity targets plus torque bias; local joint servo; contact-wrench privileged reward/safety semantics; follower-subtree detach wrench estimation; legacy contract versioning and no-mislabeling requirements.
+- Not implemented: Python schema changes, true centroidal observation/controller changes, local joint target/offset-torque bridge, contact-bias no-op migration, detach estimator, new reward, policy retraining, or revised acceptance runs.
+- Schema/interface changes: Proposed and approved at documentation level only; runtime schemas are unchanged in this commit.
+- Downstream impact: Agent I/J implementation must precede morphology-conditioned `π_L` training; Agent K/L training/acceptance must bind the new contract version and prevent privileged-contact leakage.
+- Tests added: None; documentation-only change.
+- Tests passed: Markdown/reference consistency and `git diff --check` only.
+- Handoff notes: Do not add normal-operation contact/internal-wrench QP variables. Keep vectoring allocator-owned, non-vectoring joints local-servo-controlled, internal wrench detach-only, and legacy artifacts explicitly versioned.
+- Open questions: None at design level.
 
 ### Agent I/J: Random Morphology GUI Teleop Verification Utility
 
