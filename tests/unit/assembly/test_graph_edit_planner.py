@@ -81,3 +81,28 @@ def test_control_handoff_request_for_docking_step(grasp_carry_dict: dict) -> Non
     assert request.follower_module_id == dock_step.follower_module_id
     assert set(request.active_module_ids) == {0, 1}
     assert request.metadata["step_type"] == "dock"
+
+
+def test_control_handoff_builds_component_scoped_order5_request(grasp_carry_dict: dict) -> None:
+    target_graph = _target_graph(grasp_carry_dict)
+    state = initial_construction_state(target_graph)
+    step = GraphEditAssemblyPlanner().build_plan(target_graph).steps[0]
+
+    request = ControlHandoffManager().build_assembly_control_request(
+        step,
+        state,
+        target_graph,
+    )
+
+    assert request.leader.module_ids == [0]
+    assert request.follower.module_ids == [1]
+    assert request.leader.component_id == "component:0"
+    assert request.follower.component_id == "component:1"
+    leader_port = next(
+        port for port in target_graph.ports if port.port_global_id == request.leader_port_id
+    )
+    follower_port = next(
+        port for port in target_graph.ports if port.port_global_id == request.follower_port_id
+    )
+    assert leader_port.module_id == step.leader_module_id
+    assert follower_port.module_id == step.follower_module_id

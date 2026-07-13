@@ -2,6 +2,21 @@
 
 ## Global Worklog
 
+### 2026-07-13 (P4-full Orders 5-7 dynamic assembly started)
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the approved centroidal-control and Orders 5-7 dynamic-assembly supplement
+- Work package / Agent label: Agent B/G/I/J/K/L boundary; deterministic `pi_A` component control, dynamic attach, unload-gated detach, and Isaac round trip
+- Status: In progress. Order 5 fast gate is complete; Orders 6-7 real-Isaac attach/detach remain active. Orders 5-7 are one sequential workstream but retain independent implementation, test, evidence, and commit gates.
+- Summary: Began schema-first implementation after resolving the assembly semantics. `AssemblyControlBridge` is the implementation name for the v0.4 Section 17.7 bridge. Holon Dock joints are articulated morphology joints, not latch open/close actuators. Module docking uses collision-aware staging, face-to-face pre-alignment at positive connect-frame-X offset, relative-twist dwell, bounded axial surface approach, exact selected-connect-frame dynamic constraint commit, verification, and controller handover. Detach uses the existing follower-subtree unload estimator/gate and exact constraint removal.
+- Files changed so far: Order 5 added `amsrr/assembly/assembly_control_bridge.py`, `assembly_motion_planner.py`, `closed_loop_executor.py`, their focused tests, exports, handoff conversion, and `configs/training/order5_7_dynamic_assembly.yaml`; updated design supplement and this worklog.
+- Schema/interface changes: Added versioned component-control, alignment observation/progress, exact constraint-intent, motion-plan, and stateful runtime boundaries. Existing persisted morphology, policy, checkpoint, and controller fields are unchanged. `ControlHandoffManager` gained an additive typed conversion method.
+- Upstream dependencies used: v0.4 Sections 17, 20, and 24.5; completed Orders 1-4 and 2.5; `centroidal_local_joint_v2`; `FACE_TO_FACE_DOCK_RELATION`; current neutral Dock geometry; existing follower-subtree estimator/unload dwell gate.
+- Downstream impact: Order 8 may use full-chain morphology kinematics and all upstream Dock joints for object grasping, but normal QPID remains quasi-static centroidal thrust allocation plus independent local joint servos.
+- Tests added or run: Order 5 bridge tests cover component v2 intent, canonical joint targets/correction bounds, face-to-face staging, connect-frame twist, contact dwell reset, invalid/early/excessive contact, constraint create/verify, and fail-safe hold. Motion tests cover direct/via/no-path behavior; closed-loop tests cover four-step session and collision-oracle failure. Assembly-only gate passed `27`; assembly plus policy-builder/QPID/mapping/Isaac-bridge regression passed `53`.
+- Commands run: clean-tree/log audit; assembly/controller/simulation source inventory; source-of-truth and supplement re-audit; focused pytest in `isaaclab3`; `compileall`; `git diff --check`.
+- Assumptions: Leader holds while follower moves during initial deterministic assembly; module docking starts at canonical neutral Dock configuration and permits only bounded final alignment correction; the constraint fixes selected connect frames while upstream Dock joints remain articulated.
+- Blockers / open questions: None for Order 5. Local Isaac API audit selected an external `UsdPhysics.FixedJoint` with `excludeFromArticulation=true`, disabled pre-authoring, exact connect-frame local poses, and post-contact activation. The first real gate is intentionally two single-module Articulations; existing fixed-root arbitrary-graph URDFs cannot prove upstream Dock-joint morphing.
+- Next steps: Commit Order 5, then implement and run Order 6 real attach, followed by Order 7 attach-detach round trip. Update this entry continuously with files, tests, failures, and evidence.
+
 ### 2026-07-13 (P4-full Order 4 deterministic free-flight pi_H completed)
 - Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the approved Order 4 free-flight deterministic `pi_H`/trajectory-runtime supplement
 - Work package / Agent label: Agent H/I/K boundary; P4-full Order 4 deterministic free-flight planner, trajectory executor, low-level integration, and GUI verification path
@@ -2776,6 +2791,21 @@
 ---
 
 ## Work Package Logs
+
+### Agent G/I/J: Order 5 AssemblyControlBridge and Component Motion
+
+#### 2026-07-13
+- Scope: Implement the deterministic `pi_A` controller-facing bridge, collision-aware staging planner, and stateful attach-sequence runtime without claiming physical attachment.
+- Files changed: `amsrr/assembly/assembly_control_bridge.py`, `assembly_motion_planner.py`, `closed_loop_executor.py`, `control_handoff.py`, assembly exports and focused tests, `configs/training/order5_7_dynamic_assembly.yaml`, design supplement, and WORKLOG.
+- Upstream dependencies: v0.4 Section 17.7; `AssemblyStep`, `ConstructionState`, and `ControlHandoffRequest`; canonical connect-frame geometry; `centroidal_local_joint_v2`; QPID/local joint/Isaac bridge authority.
+- Implemented: Leader/follower component partitioning; component-scoped PolicyCommands; staging +X and face-to-face targets; axial/transverse/attitude/connect-twist metrics; contact evidence/dwell/force/penetration gates; canonical neutral Dock joint targets with bounded correction; exact constraint intent; direct/bounded-via SE(3) planner; four-step stateful executor compatibility; retry/abort safe hold.
+- Not implemented: Isaac contact observation, dynamic FixedJoint activation, physical graph/controller handover, constraint removal, detach, multi-module preassembled-component physical representation, object contact, or P4-full acceptance.
+- Schema/interface changes: Additive versioned Order 5 contracts and one additive `ControlHandoffManager` conversion method; no existing persisted schema/checkpoint/controller field changed.
+- Downstream impact: Order 6 supplies real component/contact/constraint observations and consumes exact constraint intent. Order 7 supplies unload/release. Later grasping must coordinate all upstream morphology joints, not only a contacting Dock link's adjacent joint.
+- Tests added: Bridge/session/gate/constraint-intent, handoff conversion, direct/via/no-path planning, four-step closed-loop integration, collision-oracle failure.
+- Tests passed: Assembly gate `27 passed`; assembly plus controller boundary regression `53 passed`; compileall and whitespace checks passed.
+- Handoff notes: Dock joints are articulated morphology joints, not latches. The first physical gate must use two single-module Articulations and external exact-connect-frame constraint; existing fixed-root graph assets are not upstream-joint morphing evidence.
+- Open questions: None for Order 5. Numeric physical thresholds remain configurable and require Order 6 tuning/evidence.
 
 ### Agent H/I/K: Order 4 Deterministic Free-Flight pi_H and Trajectory Runtime
 

@@ -1,0 +1,48 @@
+dynamic_assembly:
+  version: dynamic_assembly_roundtrip_v1
+  simulation_dt_s: 0.005
+  command_timeout_s: 600.0
+  floor_settle_duration_s: 1.0
+  takeoff_duration_s: 2.0
+  assembly_height_m: 1.0
+  takeoff_hold_s: 1.0
+  controller_handover_blend_s: 0.25
+  constraint_verify_dwell_s: 0.25
+  attached_hold_s: 1.0
+  post_release_hold_s: 1.0
+  separation_distance_m: 0.20
+  separation_speed_mps: 0.05
+  release_filter_clearance_m: 0.03
+  allocation_mode: rigid_body_qp
+
+  control_bridge:
+    staging_offset_m: 0.15
+    staging_axial_tolerance_m: 0.01
+    transverse_tolerance_m: 0.01
+    attitude_tolerance_rad: 0.05235987755982989
+    relative_linear_speed_tolerance_mps: 0.05
+    relative_angular_speed_tolerance_radps: 0.10
+    prealign_dwell_s: 0.30
+    approach_speed_mps: 0.02
+    fix_axial_tolerance_m: 0.003
+    selected_contact_dwell_s: 0.10
+    max_selected_contact_force_n: 30.0
+    max_selected_contact_penetration_m: 0.002
+    max_joint_correction_rad: 0.08726646259971647
+    step_timeout_s: 30.0
+    require_selected_pair_contact: true
+
+  motion_planner:
+    sample_spacing_m: 0.025
+    angular_sample_spacing_rad: 0.05235987755982989
+    via_offset_m: 0.30
+    maximum_via_depth: 2
+
+  detach_unload:
+    force_threshold_n: 0.5
+    torque_threshold_nm: 0.05
+    relative_position_error_threshold_m: 0.005
+    relative_rotation_error_threshold_rad: 0.03490658503988659
+    relative_linear_speed_threshold_mps: 0.02
+    relative_angular_speed_threshold_radps: 0.10
+    unload_dwell_steps: 20
