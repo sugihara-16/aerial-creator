@@ -48,6 +48,7 @@ DYNAMIC_ASSEMBLY_FILTER_FALLBACK_ACCEPTANCE_CONTRACT = (
     "selected_pair_collision_filter_fallback_v1"
 )
 DYNAMIC_ASSEMBLY_PROGRESS_PREFIX = "[dynamic-assembly]"
+DYNAMIC_ASSEMBLY_PROGRESS_INTERVAL_S = 1.0
 DYNAMIC_ASSEMBLY_LIVE_PHASE_LABELS = {
     "axial_approach": "axial",
     "constraint_enabled": "fixed",
@@ -77,6 +78,38 @@ def format_dynamic_assembly_progress(phase: str, simulation_time_s: float) -> st
         f"simulation_time={float(simulation_time_s):.3f}s "
         f"phase={live_phase} event={phase}"
     )
+
+
+def dynamic_assembly_progress_due(
+    last_emit_time_s: float | None,
+    simulation_time_s: float,
+    *,
+    interval_s: float = DYNAMIC_ASSEMBLY_PROGRESS_INTERVAL_S,
+) -> bool:
+    """Return whether a same-phase live-progress heartbeat is due."""
+
+    current = float(simulation_time_s)
+    interval = float(interval_s)
+    if not math.isfinite(current) or current < 0.0:
+        raise SchemaValidationError(
+            "dynamic assembly progress simulation_time_s must be finite and non-negative"
+        )
+    if not math.isfinite(interval) or interval <= 0.0:
+        raise SchemaValidationError(
+            "dynamic assembly progress interval_s must be finite and positive"
+        )
+    if last_emit_time_s is None:
+        return True
+    previous = float(last_emit_time_s)
+    if not math.isfinite(previous) or previous < 0.0:
+        raise SchemaValidationError(
+            "dynamic assembly progress last_emit_time_s must be finite and non-negative"
+        )
+    if current + 1.0e-12 < previous:
+        raise SchemaValidationError(
+            "dynamic assembly progress simulation time cannot move backwards"
+        )
+    return current - previous + 1.0e-12 >= interval
 
 
 @dataclass
@@ -2136,6 +2169,7 @@ __all__ = [
     "DYNAMIC_ASSEMBLY_MATING_MODES",
     "DYNAMIC_ASSEMBLY_PHYSICAL_ACCEPTANCE_CONTRACT",
     "DYNAMIC_ASSEMBLY_PHYSICAL_MATING_MODE",
+    "DYNAMIC_ASSEMBLY_PROGRESS_INTERVAL_S",
     "DYNAMIC_ASSEMBLY_PROGRESS_PREFIX",
     "DYNAMIC_ASSEMBLY_ROUNDTRIP_GATE",
     "DYNAMIC_ASSEMBLY_ROUNDTRIP_VERSION",
@@ -2144,6 +2178,7 @@ __all__ = [
     "DynamicAssemblyIsaacResult",
     "DynamicSeparationLifecycle",
     "dynamic_assembly_acceptance_contract",
+    "dynamic_assembly_progress_due",
     "dynamic_assembly_report_failures",
     "format_dynamic_assembly_progress",
 ]

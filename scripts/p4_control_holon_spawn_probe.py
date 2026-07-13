@@ -1760,6 +1760,7 @@ def _run_dynamic_assembly_roundtrip_probe(
         DYNAMIC_ASSEMBLY_ROUNDTRIP_VERSION,
         DynamicSeparationLifecycle,
         dynamic_assembly_acceptance_contract,
+        dynamic_assembly_progress_due,
         format_dynamic_assembly_progress,
     )
     from amsrr.simulation.dynamic_contact_evidence import (
@@ -2019,6 +2020,30 @@ def _run_dynamic_assembly_roundtrip_probe(
 
     events: list[dict[str, object]] = []
     event_phase: str | None = None
+    last_live_progress_time_s: float | None = None
+
+    def emit_live_progress(
+        phase: str,
+        time_s: float,
+        *,
+        force: bool = False,
+    ) -> None:
+        nonlocal last_live_progress_time_s
+        if not force and not dynamic_assembly_progress_due(
+            last_live_progress_time_s,
+            time_s,
+        ):
+            return
+        print(
+            format_dynamic_assembly_progress(phase, time_s),
+            file=sys.stderr,
+            flush=True,
+        )
+        last_live_progress_time_s = float(time_s)
+
+    def emit_progress_heartbeat(time_s: float) -> None:
+        if event_phase is not None:
+            emit_live_progress(event_phase, time_s)
 
     def add_event(phase: str, time_s: float, **metrics) -> None:
         nonlocal event_phase
@@ -2026,11 +2051,7 @@ def _run_dynamic_assembly_roundtrip_probe(
             return
         event_phase = phase
         events.append({"phase": phase, "time_s": float(time_s), "metrics": metrics})
-        print(
-            format_dynamic_assembly_progress(phase, time_s),
-            file=sys.stderr,
-            flush=True,
-        )
+        emit_live_progress(phase, time_s, force=True)
 
     joint_ids = sorted(
         {
@@ -3094,6 +3115,7 @@ def _run_dynamic_assembly_roundtrip_probe(
         for robot in robots.values():
             robot.write_data_to_sim()
         sim.step()
+        emit_progress_heartbeat(float(time_s) + sim_dt)
         for robot in robots.values():
             robot.update(sim_dt)
             finite_state = finite_state and all(
@@ -3139,7 +3161,7 @@ def _run_dynamic_assembly_roundtrip_probe(
         )
         for module_id, robot in robots.items()
     }
-    for _ in range(settle_steps):
+    for settle_index in range(settle_steps):
         for module_id, robot in robots.items():
             robot.permanent_wrench_composer.reset()
             zero_joint_targets = torch.zeros_like(robot.data.joint_pos.torch)
@@ -3157,6 +3179,7 @@ def _run_dynamic_assembly_roundtrip_probe(
             )
             robot.write_data_to_sim()
         sim.step()
+        emit_progress_heartbeat(float(settle_index + 1) * sim_dt)
         for robot in robots.values():
             robot.update(sim_dt)
         for sensor in component_contact_sensors.values():
@@ -4075,6 +4098,7 @@ def _run_dynamic_assembly_roundtrip_probe(
                 attached_stable_steps + 1 if attached_step_stable else 0
             )
         current_time_s += sim_dt
+        emit_progress_heartbeat(current_time_s)
         command_index += 1
         assembled_previous = assembled_command
         last_assembled_command = assembled_command
@@ -4393,6 +4417,7 @@ def _run_dynamic_assembly_roundtrip_probe(
                 attach_gate_passed=True,
             )
         current_time_s += sim_dt
+        emit_progress_heartbeat(current_time_s)
         command_index += 1
     split_handover_completed = True
     previous_combined = combined_observation(current_time_s, attached_graph)

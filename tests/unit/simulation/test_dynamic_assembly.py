@@ -10,6 +10,7 @@ import pytest
 from amsrr.feasibility.morphology_flight import collision_geometry_content_hash
 from amsrr.morphology.random_connected import RandomConnectedMorphologyDistribution
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
+from amsrr.schemas.common import SchemaValidationError
 from amsrr.simulation.dynamic_assembly import (
     DYNAMIC_ASSEMBLY_PHYSICAL_ACCEPTANCE_CONTRACT,
     DYNAMIC_ASSEMBLY_PHYSICAL_MATING_MODE,
@@ -18,6 +19,7 @@ from amsrr.simulation.dynamic_assembly import (
     DynamicAssemblyIsaacConfig,
     DynamicAssemblyIsaacEnv,
     _run_json_command,
+    dynamic_assembly_progress_due,
     dynamic_assembly_report_failures,
     format_dynamic_assembly_progress,
 )
@@ -64,6 +66,34 @@ def test_progress_line_exposes_live_phase_and_simulation_time(
     assert "simulation_time=12.346s" in line
     assert f"phase={live_phase}" in line
     assert f"event={event}" in line
+
+
+def test_progress_heartbeat_is_due_once_per_simulation_second() -> None:
+    assert dynamic_assembly_progress_due(None, 0.0)
+    assert not dynamic_assembly_progress_due(5.0, 5.999)
+    assert dynamic_assembly_progress_due(5.0, 6.0)
+
+
+@pytest.mark.parametrize(
+    ("last_emit_time_s", "simulation_time_s", "interval_s"),
+    [
+        (0.0, -0.1, 1.0),
+        (-0.1, 0.0, 1.0),
+        (1.0, 0.5, 1.0),
+        (0.0, 1.0, 0.0),
+    ],
+)
+def test_progress_heartbeat_rejects_invalid_time_inputs(
+    last_emit_time_s: float,
+    simulation_time_s: float,
+    interval_s: float,
+) -> None:
+    with pytest.raises(SchemaValidationError):
+        dynamic_assembly_progress_due(
+            last_emit_time_s,
+            simulation_time_s,
+            interval_s=interval_s,
+        )
 
 
 def test_json_command_forwards_progress_while_preserving_report(
