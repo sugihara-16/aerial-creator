@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import math
+
+import pytest
+
 from amsrr.assembly.assembly_control_bridge import (
     AssemblyComponentObservation,
     AssemblyControlBridge,
     AssemblyControlBridgeConfig,
     AssemblyControlObservation,
 )
-from amsrr.assembly.closed_loop_executor import ClosedLoopAssemblyExecutor
+from amsrr.assembly.closed_loop_executor import (
+    ClosedLoopAssemblyExecutor,
+    _angular_velocity_toward_pose,
+    _attitude_error,
+    _bounded_pose_step,
+    _linear_velocity_toward_pose,
+    _position_error,
+)
 from amsrr.assembly.construction_state import initial_construction_state
 from amsrr.assembly.graph_edit_planner import GraphEditAssemblyPlanner
 from amsrr.geometry.pose_math import compose_pose
@@ -142,3 +153,34 @@ def test_closed_loop_executor_fails_closed_when_collision_oracle_rejects_path() 
     assert result.success is False
     assert result.message is not None
     assert "staging_motion_plan_failed" in result.message
+
+
+def test_staging_reference_is_pose_and_twist_bounded() -> None:
+    current = (0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+    target = (
+        1.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        math.sin(math.pi / 4.0),
+        math.cos(math.pi / 4.0),
+    )
+
+    bounded = _bounded_pose_step(
+        current,
+        target,
+        max_translation_step_m=0.03,
+        max_angular_step_rad=0.05,
+    )
+    linear = _linear_velocity_toward_pose(current, target, max_speed_mps=0.10)
+    angular = _angular_velocity_toward_pose(
+        current,
+        target,
+        max_speed_radps=0.20,
+    )
+
+    assert _position_error(current, bounded) <= 0.03 + 1.0e-9
+    assert _attitude_error(current, bounded) <= 0.05 + 1.0e-9
+    assert math.sqrt(sum(value * value for value in linear)) == pytest.approx(0.10)
+    assert math.sqrt(sum(value * value for value in angular)) == pytest.approx(0.20)

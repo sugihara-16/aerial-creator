@@ -94,7 +94,8 @@ class DeterministicAssemblyMotionPlanner:
                         free = is_pose_collision_free(pose)
                     except Exception as exc:  # noqa: BLE001 - collision evidence must fail closed
                         raise AssemblyMotionPlanningError(
-                            f"collision oracle failed closed: {type(exc).__name__}"
+                            "collision oracle failed closed: "
+                            f"{type(exc).__name__}:{exc}"
                         ) from exc
                     if free is not True:
                         return False

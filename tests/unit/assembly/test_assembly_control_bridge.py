@@ -14,6 +14,7 @@ from amsrr.assembly.assembly_control_bridge import (
     AssemblyControlRequest,
 )
 from amsrr.geometry.pose_math import FACE_TO_FACE_DOCK_RELATION
+from amsrr.geometry.pose_math import compose_pose
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.morphology import ControlGroup, DockEdge, ModuleNode, MorphologyGraph, PortNode
 from amsrr.schemas.physical_model import (
@@ -108,6 +109,151 @@ def test_bridge_runs_staging_dwell_approach_fix_and_verify_state_machine() -> No
     assert not output.progress.failed
 
 
+def test_axial_approach_twist_tracks_leader_connect_minus_x_and_tapers_to_fix_gate() -> None:
+    bridge = _bridge(approach_speed_mps=0.02)
+    bridge.begin(_request(), _observation(time_s=0.0, axial_gap_m=0.25))
+    bridge.tick(_observation(time_s=0.1, axial_gap_m=0.15))
+    output = bridge.tick(_observation(time_s=0.45, axial_gap_m=0.15))
+
+    targets = {target.role: target.policy_command for target in output.commands.component_targets}
+    assert targets["leader"].desired_body_twist == pytest.approx([0.0] * 6)
+    assert targets["follower"].desired_body_twist == pytest.approx(
+        [-0.02, 0.0, 0.0, 0.0, 0.0, 0.0]
+    )
+
+    output = bridge.tick(_observation(time_s=0.50, axial_gap_m=0.008))
+    follower = next(target for target in output.commands.component_targets if target.role == "follower")
+    assert follower.policy_command.desired_body_twist == pytest.approx(
+        [-0.01, 0.0, 0.0, 0.0, 0.0, 0.0]
+    )
+
+    output = bridge.tick(_observation(time_s=0.55, axial_gap_m=0.003))
+    follower = next(target for target in output.commands.component_targets if target.role == "follower")
+    assert follower.policy_command.desired_body_twist == pytest.approx([0.0] * 6)
+
+
+def test_valid_guidance_contact_adds_only_ramped_bounded_follower_centroidal_wrench() -> None:
+    bridge = _bridge(
+        guidance_contact_insertion_force_n=1.0,
+        guidance_contact_insertion_force_ramp_s=0.25,
+    )
+    bridge.begin(_request(), _observation(time_s=0.0, axial_gap_m=0.25))
+    bridge.tick(_observation(time_s=0.1, axial_gap_m=0.15))
+    output = bridge.tick(_observation(time_s=0.45, axial_gap_m=0.15))
+
+    targets = {target.role: target.policy_command for target in output.commands.component_targets}
+    assert targets["leader"].residual_wrench_body == pytest.approx([0.0] * 6)
+    assert targets["follower"].residual_wrench_body == pytest.approx([0.0] * 6)
+
+    output = bridge.tick(
+        _observation(
+            time_s=0.50,
+            axial_gap_m=0.04,
+            selected_pair_contact=True,
+        )
+    )
+    targets = {target.role: target.policy_command for target in output.commands.component_targets}
+    assert targets["leader"].residual_wrench_body == pytest.approx([0.0] * 6)
+    assert targets["follower"].residual_wrench_body == pytest.approx([0.0] * 6)
+
+    output = bridge.tick(
+        _observation(
+            time_s=0.625,
+            axial_gap_m=0.04,
+            selected_pair_contact=True,
+        )
+    )
+    follower = next(target for target in output.commands.component_targets if target.role == "follower")
+    assert follower.policy_command.residual_wrench_body == pytest.approx(
+        [0.5, 0.0, 0.0, 0.0, 0.0, 0.0],
+        abs=1.0e-9,
+    )
+
+    output = bridge.tick(
+        _observation(
+            time_s=0.75,
+            axial_gap_m=0.04,
+            selected_pair_contact=True,
+        )
+    )
+    follower = next(target for target in output.commands.component_targets if target.role == "follower")
+    assert follower.policy_command.residual_wrench_body == pytest.approx(
+        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        abs=1.0e-9,
+    )
+    assert follower.policy_command.contact_tracking_bias == {}
+
+
+def test_axial_approach_twist_uses_world_direction_of_rotated_leader_connect_frame() -> None:
+    bridge = _bridge(approach_speed_mps=0.02)
+    leader_pose = (
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        math.sin(math.pi / 4.0),
+        math.cos(math.pi / 4.0),
+    )
+
+    def rotated_observation(time_s: float, axial_gap_m: float) -> AssemblyControlObservation:
+        observation = _observation(time_s=time_s, axial_gap_m=axial_gap_m)
+        follower_pose = compose_pose(
+            leader_pose,
+            (
+                axial_gap_m,
+                0.0,
+                0.0,
+                *FACE_TO_FACE_DOCK_RELATION[3:],
+            ),
+        )
+        observation.components[0].body_pose_world = leader_pose
+        observation.components[0].selected_connect_pose_world = leader_pose
+        observation.components[1].body_pose_world = follower_pose
+        observation.components[1].selected_connect_pose_world = follower_pose
+        return observation
+
+    bridge.begin(_request(), rotated_observation(0.0, 0.25))
+    bridge.tick(rotated_observation(0.1, 0.15))
+    output = bridge.tick(rotated_observation(0.45, 0.15))
+
+    follower = next(target for target in output.commands.component_targets if target.role == "follower")
+    assert follower.policy_command.desired_body_twist == pytest.approx(
+        [0.0, -0.02, 0.0, 0.0, 0.0, 0.0],
+        abs=1.0e-9,
+    )
+
+
+def test_bridge_timeout_is_phase_relative_not_whole_session_relative() -> None:
+    bridge = _bridge(step_timeout_s=0.5, axial_approach_timeout_s=0.5)
+    bridge.begin(_request(), _observation(time_s=0.0, axial_gap_m=0.25))
+    bridge.tick(_observation(time_s=0.1, axial_gap_m=0.15))
+    bridge.tick(_observation(time_s=0.45, axial_gap_m=0.15))
+
+    output = bridge.tick(_observation(time_s=0.70, axial_gap_m=0.04))
+    assert output.progress.phase == "axial_approach"
+    assert not output.progress.failed
+
+    output = bridge.tick(_observation(time_s=1.0, axial_gap_m=0.04))
+    assert output.progress.phase == "safe_hold"
+    assert output.progress.failure_reason == "assembly_step_timeout"
+
+
+def test_axial_approach_has_an_independent_convergence_timeout() -> None:
+    bridge = _bridge(step_timeout_s=0.5, axial_approach_timeout_s=1.0)
+    bridge.begin(_request(), _observation(time_s=0.0, axial_gap_m=0.25))
+    bridge.tick(_observation(time_s=0.1, axial_gap_m=0.15))
+    bridge.tick(_observation(time_s=0.45, axial_gap_m=0.15))
+
+    output = bridge.tick(_observation(time_s=1.0, axial_gap_m=0.04))
+    assert output.progress.phase == "axial_approach"
+    assert not output.progress.failed
+
+    output = bridge.tick(_observation(time_s=1.5, axial_gap_m=0.04))
+    assert output.progress.phase == "safe_hold"
+    assert output.progress.failure_reason == "assembly_step_timeout"
+
+
 def test_selected_contact_dwell_must_be_continuous() -> None:
     bridge = _bridge()
     bridge.begin(_request(), _observation(time_s=0.0, axial_gap_m=0.15))
@@ -127,6 +273,50 @@ def test_selected_contact_dwell_must_be_continuous() -> None:
         _observation(time_s=0.73, axial_gap_m=0.002, selected_pair_contact=True)
     )
     assert output.progress.phase == "fix_ready"
+
+
+def test_final_dwell_resets_when_strict_gate_is_lost_during_guidance_contact() -> None:
+    bridge = _bridge()
+    bridge.begin(_request(), _observation(time_s=0.0, axial_gap_m=0.15))
+    bridge.tick(_observation(time_s=0.1, axial_gap_m=0.15))
+    bridge.tick(_observation(time_s=0.45, axial_gap_m=0.15))
+    bridge.tick(_observation(time_s=0.50, axial_gap_m=0.002, selected_pair_contact=True))
+
+    output = bridge.tick(
+        _observation(
+            time_s=0.56,
+            axial_gap_m=0.002,
+            transverse_y_m=0.005,
+            selected_pair_contact=True,
+        )
+    )
+    assert output.progress.phase == "axial_approach"
+    assert output.progress.selected_contact_dwell_elapsed_s == pytest.approx(0.0)
+
+    output = bridge.tick(
+        _observation(time_s=0.62, axial_gap_m=0.002, selected_pair_contact=True)
+    )
+    assert output.progress.phase == "axial_approach"
+    output = bridge.tick(
+        _observation(time_s=0.73, axial_gap_m=0.002, selected_pair_contact=True)
+    )
+    assert output.progress.phase == "fix_ready"
+
+
+def test_contactless_fallback_requires_continuous_strict_final_dwell() -> None:
+    bridge = _bridge(require_selected_pair_contact=False)
+    bridge.begin(_request(), _observation(time_s=0.0, axial_gap_m=0.15))
+    bridge.tick(_observation(time_s=0.1, axial_gap_m=0.15))
+    bridge.tick(_observation(time_s=0.45, axial_gap_m=0.15))
+
+    output = bridge.tick(_observation(time_s=0.50, axial_gap_m=0.002))
+    assert output.progress.phase == "axial_approach"
+    assert output.progress.selected_contact_dwell_elapsed_s == pytest.approx(0.0)
+    assert output.commands.constraint_intent.action == "none"
+
+    output = bridge.tick(_observation(time_s=0.61, axial_gap_m=0.002))
+    assert output.progress.phase == "fix_ready"
+    assert output.commands.constraint_intent.action == "create"
 
 
 def test_bridge_splits_axial_transverse_attitude_and_twist_errors() -> None:
@@ -156,7 +346,7 @@ def test_bridge_splits_axial_transverse_attitude_and_twist_errors() -> None:
     assert not output.progress.gate_results["relative_angular_speed"]
 
 
-def test_misaligned_early_contact_fails_closed_without_constraint_intent() -> None:
+def test_valid_funnel_guidance_contact_continues_approach_without_constraint_intent() -> None:
     bridge = _bridge()
     bridge.begin(_request(), _observation(time_s=0.0, axial_gap_m=0.15))
     bridge.tick(_observation(time_s=0.1, axial_gap_m=0.15))
@@ -171,9 +361,67 @@ def test_misaligned_early_contact_fails_closed_without_constraint_intent() -> No
         )
     )
 
+    assert output.progress.phase == "axial_approach"
+    assert not output.progress.failed
+    assert output.progress.failure_reason is None
+    assert output.progress.selected_contact_dwell_elapsed_s == pytest.approx(0.0)
+    assert output.commands.constraint_intent.action == "none"
+
+
+def test_guidance_contact_time_does_not_count_toward_final_seated_dwell() -> None:
+    bridge = _bridge()
+    bridge.begin(_request(), _observation(time_s=0.0, axial_gap_m=0.15))
+    bridge.tick(_observation(time_s=0.1, axial_gap_m=0.15))
+    bridge.tick(_observation(time_s=0.45, axial_gap_m=0.15))
+
+    output = bridge.tick(
+        _observation(
+            time_s=0.50,
+            axial_gap_m=0.04,
+            transverse_y_m=0.005,
+            selected_pair_contact=True,
+        )
+    )
+    assert output.progress.phase == "axial_approach"
+    output = bridge.tick(
+        _observation(
+            time_s=0.80,
+            axial_gap_m=0.04,
+            transverse_y_m=0.005,
+            selected_pair_contact=True,
+        )
+    )
+    assert output.progress.phase == "axial_approach"
+    assert output.progress.selected_contact_dwell_elapsed_s == pytest.approx(0.0)
+
+    output = bridge.tick(
+        _observation(time_s=0.81, axial_gap_m=0.002, selected_pair_contact=True)
+    )
+    assert output.progress.phase == "axial_approach"
+    assert output.progress.selected_contact_dwell_elapsed_s == pytest.approx(0.0)
+    output = bridge.tick(
+        _observation(time_s=0.92, axial_gap_m=0.002, selected_pair_contact=True)
+    )
+    assert output.progress.phase == "fix_ready"
+    assert output.commands.constraint_intent.action == "create"
+
+
+def test_invalid_guidance_contact_evidence_still_fails_closed() -> None:
+    bridge = _bridge()
+    bridge.begin(_request(), _observation(time_s=0.0, axial_gap_m=0.15))
+    bridge.tick(_observation(time_s=0.1, axial_gap_m=0.15))
+    bridge.tick(_observation(time_s=0.45, axial_gap_m=0.15))
+
+    observation = _observation(
+        time_s=0.50,
+        axial_gap_m=0.04,
+        selected_pair_contact=True,
+    )
+    observation.selected_pair_contact_evidence_valid = False
+    output = bridge.tick(observation)
+
     assert output.progress.phase == "safe_hold"
-    assert output.progress.failed
-    assert output.progress.failure_reason == "selected_pair_contact_before_fix_gate"
+    assert output.progress.failure_reason == "selected_pair_contact_evidence_invalid"
     assert output.commands.constraint_intent.action == "none"
 
 
@@ -215,7 +463,7 @@ def test_excessive_selected_contact_force_or_penetration_fails_closed(
     output = bridge.tick(
         _observation(
             time_s=0.5,
-            axial_gap_m=0.002,
+            axial_gap_m=0.04,
             selected_pair_contact=True,
             contact_force_n=contact_force_n,
             penetration_m=penetration_m,
@@ -223,6 +471,39 @@ def test_excessive_selected_contact_force_or_penetration_fails_closed(
     )
     assert output.progress.phase == "safe_hold"
     assert output.progress.failure_reason == failure_reason
+    assert output.commands.constraint_intent.action == "none"
+
+
+@pytest.mark.parametrize(
+    "observation_kwargs",
+    [
+        {"transverse_y_m": 0.005},
+        {"follower_yaw_error_rad": math.radians(1.0)},
+        {"follower_linear_velocity": (0.02, 0.0, 0.0)},
+        {"follower_angular_velocity": (0.0, 0.0, 0.05)},
+    ],
+)
+def test_fix_gate_is_stricter_than_prealign_and_never_snaps(
+    observation_kwargs,
+) -> None:
+    bridge = _bridge()
+    bridge.begin(_request(), _observation(time_s=0.0, axial_gap_m=0.15))
+    bridge.tick(_observation(time_s=0.1, axial_gap_m=0.15))
+    bridge.tick(_observation(time_s=0.45, axial_gap_m=0.15))
+
+    output = bridge.tick(
+        _observation(
+            time_s=0.50,
+            axial_gap_m=0.002,
+            selected_pair_contact=True,
+            **observation_kwargs,
+        )
+    )
+
+    assert output.progress.phase == "axial_approach"
+    assert not output.progress.failed
+    assert output.progress.failure_reason is None
+    assert output.progress.selected_contact_dwell_elapsed_s == pytest.approx(0.0)
     assert output.commands.constraint_intent.action == "none"
 
 
@@ -241,16 +522,58 @@ def test_joint_correction_is_small_absolute_q_zero_offset_not_close_direction() 
         _bridge().begin(invalid, _observation(time_s=0.0, axial_gap_m=0.15))
 
 
-def _bridge() -> AssemblyControlBridge:
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"fix_axial_tolerance_m": 0.011}, "fix_axial_tolerance_m"),
+        ({"fix_transverse_tolerance_m": 0.011}, "fix_transverse_tolerance_m"),
+        (
+            {"fix_attitude_tolerance_rad": math.radians(3.1)},
+            "fix_attitude_tolerance_rad",
+        ),
+        (
+            {"fix_relative_linear_speed_tolerance_mps": 0.051},
+            "fix_relative_linear_speed_tolerance_mps",
+        ),
+        (
+            {"fix_relative_angular_speed_tolerance_radps": 0.101},
+            "fix_relative_angular_speed_tolerance_radps",
+        ),
+    ],
+)
+def test_bridge_config_requires_fix_gate_to_be_stricter_than_prealign(
+    overrides: dict[str, float],
+    message: str,
+) -> None:
+    with pytest.raises(SchemaValidationError, match=message):
+        AssemblyControlBridgeConfig(**overrides)
+
+
+@pytest.mark.parametrize(
+    "insertion_force_n",
+    [-0.1, 31.0],
+)
+def test_bridge_config_bounds_guidance_contact_insertion_force(
+    insertion_force_n: float,
+) -> None:
+    with pytest.raises(SchemaValidationError, match="guidance_contact_insertion_force_n"):
+        AssemblyControlBridgeConfig(
+            guidance_contact_insertion_force_n=insertion_force_n,
+        )
+
+
+def _bridge(**config_overrides) -> AssemblyControlBridge:
     model = _physical_model()
+    config = {
+        "staging_offset_m": 0.15,
+        "prealign_dwell_s": 0.30,
+        "max_joint_correction_rad": 0.05,
+    }
+    config.update(config_overrides)
     return AssemblyControlBridge(
         _morphology(),
         {0: model, 1: model},
-        config=AssemblyControlBridgeConfig(
-            staging_offset_m=0.15,
-            prealign_dwell_s=0.30,
-            max_joint_correction_rad=0.05,
-        ),
+        config=AssemblyControlBridgeConfig(**config),
     )
 
 

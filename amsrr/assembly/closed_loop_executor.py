@@ -48,6 +48,9 @@ class ClosedLoopAssemblyExecutorConfig:
     waypoint_position_tolerance_m: float = 0.03
     waypoint_attitude_tolerance_rad: float = math.radians(5.0)
     waypoint_speed_tolerance_mps: float = 0.10
+    max_translation_speed_mps: float = 0.15
+    max_angular_speed_radps: float = math.radians(20.0)
+    command_lookahead_s: float = 0.30
 
     def __post_init__(self) -> None:
         for name, value in self.__dict__.items():
@@ -141,7 +144,7 @@ class ClosedLoopAssemblyExecutor:
         for tick_index in range(max_ticks):
             if self._output is None:
                 raise RuntimeError("ClosedLoopAssemblyExecutor lost its active bridge output")
-            commands = self._commands_for_current_path(self._output)
+            commands = self._commands_for_current_path(self._output, observation)
             self.runtime.apply_and_step(commands)
             observation = self.runtime.observe()
             self._advance_staging_path(observation)
@@ -208,6 +211,7 @@ class ClosedLoopAssemblyExecutor:
     def _commands_for_current_path(
         self,
         output: AssemblyControlStepOutput,
+        observation: AssemblyControlObservation,
     ) -> AssemblyComponentCommandBundle:
         if (
             output.progress.phase != "staging"
@@ -215,6 +219,36 @@ class ClosedLoopAssemblyExecutor:
         ):
             return output.commands
         waypoint = self._staging_waypoints[self._staging_waypoint_index]
+        follower_target = next(
+            target for target in output.commands.component_targets if target.role == "follower"
+        )
+        follower_observation = next(
+            component
+            for component in observation.components
+            if component.component_id == follower_target.component_id
+        )
+        bounded_waypoint = _bounded_pose_step(
+            follower_observation.body_pose_world,
+            waypoint,
+            max_translation_step_m=(
+                self.config.max_translation_speed_mps
+                * self.config.command_lookahead_s
+            ),
+            max_angular_step_rad=(
+                self.config.max_angular_speed_radps
+                * self.config.command_lookahead_s
+            ),
+        )
+        desired_linear_velocity = _linear_velocity_toward_pose(
+            follower_observation.body_pose_world,
+            waypoint,
+            max_speed_mps=self.config.max_translation_speed_mps,
+        )
+        desired_angular_velocity = _angular_velocity_toward_pose(
+            follower_observation.body_pose_world,
+            waypoint,
+            max_speed_radps=self.config.max_angular_speed_radps,
+        )
         targets = []
         for target in output.commands.component_targets:
             if target.role == "follower":
@@ -223,7 +257,11 @@ class ClosedLoopAssemblyExecutor:
                         target,
                         policy_command=replace(
                             target.policy_command,
-                            desired_body_pose=waypoint,
+                            desired_body_pose=bounded_waypoint,
+                            desired_body_twist=[
+                                *desired_linear_velocity,
+                                *desired_angular_velocity,
+                            ],
                         ),
                     )
                 )
@@ -351,6 +389,95 @@ def _normalize_quat(values) -> tuple[float, float, float, float]:
 
 def _norm(values) -> float:
     return math.sqrt(sum(float(value) ** 2 for value in values))
+
+
+def _bounded_pose_step(
+    current: Pose7D,
+    target: Pose7D,
+    *,
+    max_translation_step_m: float,
+    max_angular_step_rad: float,
+) -> Pose7D:
+    distance = _position_error(current, target)
+    angle = _attitude_error(current, target)
+    ratio = 1.0
+    if distance > max_translation_step_m:
+        ratio = min(ratio, max_translation_step_m / distance)
+    if angle > max_angular_step_rad:
+        ratio = min(ratio, max_angular_step_rad / angle)
+    xyz = tuple(
+        float(current[index])
+        + ratio * (float(target[index]) - float(current[index]))
+        for index in range(3)
+    )
+    left = _normalize_quat(current[3:7])
+    right = _normalize_quat(target[3:7])
+    dot = sum(a * b for a, b in zip(left, right, strict=True))
+    if dot < 0.0:
+        right = tuple(-value for value in right)
+        dot = -dot
+    dot = min(max(dot, -1.0), 1.0)
+    if dot > 0.9995:
+        quat = _normalize_quat(
+            tuple(
+                left[index] + ratio * (right[index] - left[index])
+                for index in range(4)
+            )
+        )
+    else:
+        theta = math.acos(dot)
+        sin_theta = math.sin(theta)
+        quat = tuple(
+            (
+                math.sin((1.0 - ratio) * theta) * left[index]
+                + math.sin(ratio * theta) * right[index]
+            )
+            / sin_theta
+            for index in range(4)
+        )
+    return (*xyz, *quat)  # type: ignore[return-value]
+
+
+def _linear_velocity_toward_pose(
+    current: Pose7D,
+    target: Pose7D,
+    *,
+    max_speed_mps: float,
+    stopping_time_s: float = 0.5,
+) -> tuple[float, float, float]:
+    delta = tuple(float(target[index]) - float(current[index]) for index in range(3))
+    distance = _norm(delta)
+    if distance <= 1.0e-9:
+        return (0.0, 0.0, 0.0)
+    speed = min(max_speed_mps, distance / stopping_time_s)
+    return tuple(speed * value / distance for value in delta)  # type: ignore[return-value]
+
+
+def _angular_velocity_toward_pose(
+    current: Pose7D,
+    target: Pose7D,
+    *,
+    max_speed_radps: float,
+    stopping_time_s: float = 0.5,
+) -> tuple[float, float, float]:
+    current_q = _normalize_quat(current[3:7])
+    target_q = _normalize_quat(target[3:7])
+    cx, cy, cz, cw = current_q
+    tx, ty, tz, tw = target_q
+    error = (
+        cw * tx - cx * tw - cy * tz + cz * ty,
+        cw * ty + cx * tz - cy * tw - cz * tx,
+        cw * tz - cx * ty + cy * tx - cz * tw,
+        cw * tw + cx * tx + cy * ty + cz * tz,
+    )
+    if error[3] < 0.0:
+        error = tuple(-value for value in error)
+    vector_norm = _norm(error[:3])
+    if vector_norm <= 1.0e-9:
+        return (0.0, 0.0, 0.0)
+    angle = 2.0 * math.atan2(vector_norm, min(max(error[3], -1.0), 1.0))
+    speed = min(max_speed_radps, angle / stopping_time_s)
+    return tuple(speed * value / vector_norm for value in error[:3])  # type: ignore[return-value]
 
 
 __all__ = [

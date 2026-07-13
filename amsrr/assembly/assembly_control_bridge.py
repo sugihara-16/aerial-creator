@@ -54,11 +54,18 @@ class AssemblyControlBridgeConfig:
     prealign_dwell_s: float = 0.30
     approach_speed_mps: float = 0.02
     fix_axial_tolerance_m: float = 0.003
+    fix_transverse_tolerance_m: float = 0.002
+    fix_attitude_tolerance_rad: float = math.radians(0.5)
+    fix_relative_linear_speed_tolerance_mps: float = 0.01
+    fix_relative_angular_speed_tolerance_radps: float = 0.03
     selected_contact_dwell_s: float = 0.10
     max_selected_contact_force_n: float = 30.0
     max_selected_contact_penetration_m: float = 0.002
+    guidance_contact_insertion_force_n: float = 1.0
+    guidance_contact_insertion_force_ramp_s: float = 0.25
     max_joint_correction_rad: float = math.radians(5.0)
     step_timeout_s: float = 30.0
+    axial_approach_timeout_s: float = 45.0
     require_selected_pair_contact: bool = True
 
     def __post_init__(self) -> None:
@@ -72,19 +79,73 @@ class AssemblyControlBridgeConfig:
             "prealign_dwell_s": self.prealign_dwell_s,
             "approach_speed_mps": self.approach_speed_mps,
             "fix_axial_tolerance_m": self.fix_axial_tolerance_m,
+            "fix_transverse_tolerance_m": self.fix_transverse_tolerance_m,
+            "fix_attitude_tolerance_rad": self.fix_attitude_tolerance_rad,
+            "fix_relative_linear_speed_tolerance_mps": self.fix_relative_linear_speed_tolerance_mps,
+            "fix_relative_angular_speed_tolerance_radps": self.fix_relative_angular_speed_tolerance_radps,
             "selected_contact_dwell_s": self.selected_contact_dwell_s,
             "max_selected_contact_force_n": self.max_selected_contact_force_n,
             "max_selected_contact_penetration_m": self.max_selected_contact_penetration_m,
+            "guidance_contact_insertion_force_ramp_s": (
+                self.guidance_contact_insertion_force_ramp_s
+            ),
             "max_joint_correction_rad": self.max_joint_correction_rad,
             "step_timeout_s": self.step_timeout_s,
+            "axial_approach_timeout_s": self.axial_approach_timeout_s,
         }
         for name, value in positive.items():
             if not math.isfinite(value) or value <= 0.0:
                 raise SchemaValidationError(f"AssemblyControlBridgeConfig.{name} must be finite and positive")
-        if self.fix_axial_tolerance_m > self.staging_offset_m:
+        if (
+            not math.isfinite(self.guidance_contact_insertion_force_n)
+            or self.guidance_contact_insertion_force_n < 0.0
+        ):
             raise SchemaValidationError(
-                "AssemblyControlBridgeConfig.fix_axial_tolerance_m cannot exceed staging_offset_m"
+                "AssemblyControlBridgeConfig.guidance_contact_insertion_force_n "
+                "must be finite and non-negative"
             )
+        if self.guidance_contact_insertion_force_n > self.max_selected_contact_force_n:
+            raise SchemaValidationError(
+                "AssemblyControlBridgeConfig.guidance_contact_insertion_force_n "
+                "cannot exceed max_selected_contact_force_n"
+            )
+        strict_bounds = (
+            (
+                "fix_axial_tolerance_m",
+                self.fix_axial_tolerance_m,
+                "staging_axial_tolerance_m",
+                self.staging_axial_tolerance_m,
+            ),
+            (
+                "fix_transverse_tolerance_m",
+                self.fix_transverse_tolerance_m,
+                "transverse_tolerance_m",
+                self.transverse_tolerance_m,
+            ),
+            (
+                "fix_attitude_tolerance_rad",
+                self.fix_attitude_tolerance_rad,
+                "attitude_tolerance_rad",
+                self.attitude_tolerance_rad,
+            ),
+            (
+                "fix_relative_linear_speed_tolerance_mps",
+                self.fix_relative_linear_speed_tolerance_mps,
+                "relative_linear_speed_tolerance_mps",
+                self.relative_linear_speed_tolerance_mps,
+            ),
+            (
+                "fix_relative_angular_speed_tolerance_radps",
+                self.fix_relative_angular_speed_tolerance_radps,
+                "relative_angular_speed_tolerance_radps",
+                self.relative_angular_speed_tolerance_radps,
+            ),
+        )
+        for strict_name, strict_value, coarse_name, coarse_value in strict_bounds:
+            if strict_value > coarse_value:
+                raise SchemaValidationError(
+                    f"AssemblyControlBridgeConfig.{strict_name} cannot exceed {coarse_name}"
+                )
 
 
 @dataclass
@@ -387,7 +448,6 @@ class AssemblyControlBridge:
         self.config = config or AssemblyControlBridgeConfig()
         self._request: AssemblyControlRequest | None = None
         self._phase: AssemblyControlPhase | None = None
-        self._started_s = 0.0
         self._phase_started_s = 0.0
         self._last_time_s = 0.0
         self._leader_hold_pose: Pose7D | None = None
@@ -395,6 +455,7 @@ class AssemblyControlBridge:
         self._failure_reason: str | None = None
         self._completed = False
         self._selected_contact_started_s: float | None = None
+        self._guidance_contact_started_s: float | None = None
 
     def begin(
         self,
@@ -405,7 +466,6 @@ class AssemblyControlBridge:
         components = self._require_components(request, observation)
         self._request = request
         self._phase = "staging"
-        self._started_s = observation.time_s
         self._phase_started_s = observation.time_s
         self._last_time_s = observation.time_s
         self._leader_hold_pose = components[request.leader.component_id].body_pose_world
@@ -416,6 +476,7 @@ class AssemblyControlBridge:
         self._failure_reason = None
         self._completed = False
         self._selected_contact_started_s = None
+        self._guidance_contact_started_s = None
         return self._build_output(observation, components)
 
     def tick(self, observation: AssemblyControlObservation) -> AssemblyControlStepOutput:
@@ -478,7 +539,11 @@ class AssemblyControlBridge:
                     components,
                     observation.time_s,
                 )
-            elif observation.time_s - self._started_s > self.config.step_timeout_s:
+            elif observation.time_s - self._phase_started_s > (
+                self.config.axial_approach_timeout_s
+                if self._phase == "axial_approach"
+                else self.config.step_timeout_s
+            ):
                 self._enter_safe_hold("assembly_step_timeout", components, observation.time_s)
             else:
                 self._advance_phase(observation, components)
@@ -525,25 +590,28 @@ class AssemblyControlBridge:
             return
 
         if phase == "axial_approach":
+            # Contact between the selected pitch/yaw Dock bodies may begin at
+            # the receiving funnel rim, before their final connect frames are
+            # seated.  ``tick`` has already rejected invalid selected-pair
+            # evidence and unsafe force/penetration, so that bounded guidance
+            # contact is allowed to continue the axial approach.  It must not
+            # contribute to the final dwell until the unchanged strict
+            # connect-frame pose/twist gate is continuously satisfied.
             if observation.selected_pair_contact:
-                if self._fix_gate(errors, observation):
-                    if self._selected_contact_started_s is None:
-                        self._selected_contact_started_s = observation.time_s
-                    elif (
-                        observation.time_s - self._selected_contact_started_s
-                        >= self.config.selected_contact_dwell_s
-                    ):
-                        self._transition("fix_ready", observation.time_s)
-                else:
-                    self._enter_safe_hold(
-                        "selected_pair_contact_before_fix_gate",
-                        components,
-                        observation.time_s,
-                    )
-                return
-            self._selected_contact_started_s = None
-            if not self.config.require_selected_pair_contact and self._fix_gate(errors, observation):
-                self._transition("fix_ready", observation.time_s)
+                if self._guidance_contact_started_s is None:
+                    self._guidance_contact_started_s = observation.time_s
+            else:
+                self._guidance_contact_started_s = None
+            if self._fix_gate(errors, observation):
+                if self._selected_contact_started_s is None:
+                    self._selected_contact_started_s = observation.time_s
+                elif (
+                    observation.time_s - self._selected_contact_started_s
+                    >= self.config.selected_contact_dwell_s
+                ):
+                    self._transition("fix_ready", observation.time_s)
+            else:
+                self._selected_contact_started_s = None
             return
 
         if phase == "fix_ready":
@@ -573,18 +641,32 @@ class AssemblyControlBridge:
         else:
             leader_pose = self._require_leader_hold_pose()
             follower_pose = self._follower_body_target(components, desired_gap)
+        follower_twist = self._follower_desired_twist_world(
+            components,
+            errors,
+            phase,
+        )
+        follower_residual_wrench = self._follower_residual_wrench_body(
+            observation,
+            components,
+            phase,
+        )
 
         leader_command = self._policy_command(
             request.leader,
             leader_pose,
             request.leader_joint_corrections_rad,
             phase,
+            desired_body_twist=[0.0] * 6,
+            residual_wrench_body=[0.0] * 6,
         )
         follower_command = self._policy_command(
             request.follower,
             follower_pose,
             request.follower_joint_corrections_rad,
             phase,
+            desired_body_twist=follower_twist,
+            residual_wrench_body=follower_residual_wrench,
         )
         constraint_action: AssemblyConstraintAction = "none"
         if phase == "fix_ready":
@@ -671,18 +753,96 @@ class AssemblyControlBridge:
         body_pose_world: Pose7D,
         corrections: dict[str, float],
         phase: AssemblyControlPhase,
+        *,
+        desired_body_twist: list[float],
+        residual_wrench_body: list[float],
     ) -> PolicyCommand:
         joint_targets = self._canonical_joint_targets(component, corrections)
         return PolicyCommand(
-            desired_body_twist=[0.0] * 6,
+            desired_body_twist=desired_body_twist,
             desired_body_pose=body_pose_world,
-            residual_wrench_body=[0.0] * 6,
+            residual_wrench_body=residual_wrench_body,
             contact_tracking_bias={},
             priority_weights={"assembly_pose": 1.0, f"assembly_phase:{phase}": 1.0},
             control_contract_version=POLICY_COMMAND_CONTRACT_CENTROIDAL,
             joint_position_targets=joint_targets,
             joint_velocity_targets={joint_id: 0.0 for joint_id in joint_targets},
             joint_torque_bias={joint_id: 0.0 for joint_id in joint_targets},
+        )
+
+    def _follower_desired_twist_world(
+        self,
+        components: dict[str, AssemblyComponentObservation],
+        errors: AssemblyAlignmentError,
+        phase: AssemblyControlPhase,
+    ) -> list[float]:
+        if phase != "axial_approach":
+            return [0.0] * 6
+        request = self._require_session()
+        leader = components[request.leader.component_id]
+        leader_connect_world = transform_from_pose(leader.selected_connect_pose_world)
+        taper = min(
+            1.0,
+            max(
+                0.0,
+                (errors.axial_gap_m - self.config.fix_axial_tolerance_m)
+                / self.config.staging_axial_tolerance_m,
+            ),
+        )
+        speed = self.config.approach_speed_mps * taper
+        closing_axis_world = tuple(
+            -float(leader_connect_world.rotation[row][0])
+            for row in range(3)
+        )
+        return [*(speed * value for value in closing_axis_world), 0.0, 0.0, 0.0]
+
+    def _follower_residual_wrench_body(
+        self,
+        observation: AssemblyControlObservation,
+        components: dict[str, AssemblyComponentObservation],
+        phase: AssemblyControlPhase,
+    ) -> list[float]:
+        if (
+            phase != "axial_approach"
+            or not observation.selected_pair_contact
+            or not observation.selected_pair_contact_evidence_valid
+        ):
+            return [0.0] * 6
+        request = self._require_session()
+        leader = components[request.leader.component_id]
+        follower = components[request.follower.component_id]
+        leader_connect_world = transform_from_pose(leader.selected_connect_pose_world)
+        follower_body_world = transform_from_pose(follower.body_pose_world)
+        closing_axis_world = tuple(
+            -float(leader_connect_world.rotation[row][0])
+            for row in range(3)
+        )
+        force_world = tuple(
+            self.config.guidance_contact_insertion_force_n
+            * self._guidance_contact_insertion_force_scale(observation.time_s)
+            * value
+            for value in closing_axis_world
+        )
+        follower_body_from_world = transpose(follower_body_world.rotation)
+        force_body = tuple(
+            sum(
+                float(follower_body_from_world[row][column]) * force_world[column]
+                for column in range(3)
+            )
+            for row in range(3)
+        )
+        return [*force_body, 0.0, 0.0, 0.0]
+
+    def _guidance_contact_insertion_force_scale(self, time_s: float) -> float:
+        if self._guidance_contact_started_s is None:
+            return 0.0
+        return min(
+            1.0,
+            max(
+                0.0,
+                (time_s - self._guidance_contact_started_s)
+                / self.config.guidance_contact_insertion_force_ramp_s,
+            ),
         )
 
     def _canonical_joint_targets(
@@ -803,9 +963,17 @@ class AssemblyControlBridge:
             and observation.selected_pair_contact_force_n <= self.config.max_selected_contact_force_n
             and observation.selected_pair_penetration_m <= self.config.max_selected_contact_penetration_m
             and abs(errors.axial_gap_m) <= self.config.fix_axial_tolerance_m
-            and errors.transverse_error_m <= self.config.transverse_tolerance_m
-            and errors.attitude_error_rad <= self.config.attitude_tolerance_rad
-            and self._twist_gate(errors)
+            and errors.transverse_error_m <= self.config.fix_transverse_tolerance_m
+            and math.hypot(
+                errors.axial_gap_m,
+                errors.transverse_error_m,
+            )
+            <= self.config.fix_axial_tolerance_m
+            and errors.attitude_error_rad <= self.config.fix_attitude_tolerance_rad
+            and errors.relative_linear_speed_mps
+            <= self.config.fix_relative_linear_speed_tolerance_mps
+            and errors.relative_angular_speed_radps
+            <= self.config.fix_relative_angular_speed_tolerance_radps
         )
 
     def _axial_tolerance_for_phase(self, phase: AssemblyControlPhase) -> float:
@@ -816,6 +984,8 @@ class AssemblyControlBridge:
     def _transition(self, phase: AssemblyControlPhase, time_s: float) -> None:
         if phase in {"staging", "prealign_dwell", "axial_approach"}:
             self._selected_contact_started_s = None
+        if phase != "axial_approach":
+            self._guidance_contact_started_s = None
         self._phase = phase
         self._phase_started_s = time_s
 
