@@ -1,18 +1,72 @@
 dynamic_assembly:
   version: dynamic_assembly_roundtrip_v1
+  collision_type: Convex Decomposition
+  # Explicit PhysX convex-decomposition fidelity; verified on every composed
+  # pitch/yaw Dock collider before spawn.
+  dock_convex_decomposition_max_hulls: 128
+  dock_convex_decomposition_shrink_wrap: true
+  generated_usd_dir: artifacts/isaac/robots/holon_dynamic_assembly
   simulation_dt_s: 0.005
+  # Eight velocity iterations suppress the selected Dock-link velocity chatter
+  # observed with the previous value of two while preserving the strict gate.
+  solver_position_iteration_count: 8
+  solver_velocity_iteration_count: 8
   command_timeout_s: 600.0
   floor_settle_duration_s: 1.0
+  floor_settle_required_dwell_s: 0.25
+  floor_contact_force_threshold_n: 0.10
+  floor_settle_linear_speed_tolerance_mps: 0.05
+  floor_settle_angular_speed_tolerance_radps: 0.10
+  floor_settle_joint_position_tolerance_rad: 0.05
+  floor_settle_joint_speed_tolerance_radps: 0.10
+  preflight_vectoring_timeout_s: 1.0
+  preflight_feasible_dwell_s: 0.10
   takeoff_duration_s: 2.0
   assembly_height_m: 1.0
   takeoff_hold_s: 1.0
+  hover_acquisition_timeout_s: 8.0
+  hover_acquisition_dwell_s: 0.50
+  hover_position_tolerance_m: 0.10
+  hover_attitude_tolerance_rad: 0.10471975511965977
+  hover_linear_speed_tolerance_mps: 0.15
+  hover_angular_speed_tolerance_radps: 0.20
   controller_handover_blend_s: 0.25
+  assembly_translation_speed_limit_mps: 0.10
+  assembly_angular_speed_limit_radps: 0.3490658503988659
+  assembly_command_lookahead_s: 0.30
   constraint_verify_dwell_s: 0.25
   attached_hold_s: 1.0
+  attached_position_tolerance_m: 0.05
+  attached_attitude_tolerance_rad: 0.05235987755982989
+  attached_linear_speed_tolerance_mps: 0.10
+  attached_angular_speed_tolerance_radps: 0.10
+  attached_joint_position_tolerance_rad: 0.05
+  attached_joint_speed_tolerance_radps: 0.10
   post_release_hold_s: 1.0
+  post_release_position_tolerance_m: 0.05
+  post_release_attitude_tolerance_rad: 0.13962634015954636
+  post_release_linear_speed_tolerance_mps: 0.20
+  post_release_angular_speed_tolerance_radps: 0.25
+  post_release_joint_position_tolerance_rad: 0.05
+  post_release_joint_speed_tolerance_radps: 0.10
   separation_distance_m: 0.20
   separation_speed_mps: 0.05
   release_filter_clearance_m: 0.03
+  # Default mating path: filter only the selected pitch/yaw body pair during
+  # pre-alignment and use the unchanged strict final pose/twist/dwell gate.
+  # physical_funnel_contact remains available only as an explicit diagnostic
+  # override and is not part of the accepted default path.
+  mating_contact_mode: selected_pair_collision_filter_fallback
+  # First funnel-wall contact can precede final connect-frame seating.  These
+  # are coarse guidance envelopes; the unchanged strict fix gate is below.
+  guidance_contact_max_axial_gap_m: 0.060
+  guidance_contact_max_transverse_error_m: 0.010
+  guidance_contact_max_attitude_error_rad: 0.05235987755982989
+  # Legacy final-plane/surface diagnostics only; not attach acceptance gates.
+  selected_surface_axial_tolerance_m: 0.015
+  selected_surface_radius_m: 0.12
+  selected_surface_normal_tolerance_rad: 0.5235987755982988
+  detach_external_contact_force_threshold_n: 0.05
   allocation_mode: rigid_body_qp
 
   control_bridge:
@@ -25,12 +79,26 @@ dynamic_assembly:
     prealign_dwell_s: 0.30
     approach_speed_mps: 0.02
     fix_axial_tolerance_m: 0.003
+    fix_transverse_tolerance_m: 0.002
+    fix_attitude_tolerance_rad: 0.008726646259971648
+    fix_relative_linear_speed_tolerance_mps: 0.01
+    fix_relative_angular_speed_tolerance_radps: 0.03
     selected_contact_dwell_s: 0.10
     max_selected_contact_force_n: 30.0
     max_selected_contact_penetration_m: 0.002
+    # Bounded follower CoM wrench bias used only while valid selected-pair
+    # funnel guidance contact is active; this is not a contact-wrench command.
+    guidance_contact_insertion_force_n: 1.0
+    guidance_contact_insertion_force_ramp_s: 0.25
     max_joint_correction_rad: 0.08726646259971647
     step_timeout_s: 30.0
-    require_selected_pair_contact: true
+    # Contactless fallback converges the final 2 mm transverse gate more slowly
+    # than staging; keep the strict gate and give only axial approach more time.
+    axial_approach_timeout_s: 45.0
+    # The default collision-filter fallback requires zero selected-pair contact
+    # while the filter is active.  The CLI switches this to true only when the
+    # explicit physical_funnel_contact diagnostic mode is selected.
+    require_selected_pair_contact: false
 
   motion_planner:
     sample_spacing_m: 0.025

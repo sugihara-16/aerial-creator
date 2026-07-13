@@ -7,6 +7,10 @@ from amsrr.controllers.actuator_mapping import (
     build_actuator_mapping,
 )
 from amsrr.controllers.controller_base import ControllerBase, ControllerContext, PayloadCoupling
+from amsrr.controllers.controller_handover import (
+    blend_controller_commands,
+    merge_disjoint_controller_commands,
+)
 from amsrr.controllers.isaac_controller_bridge import (
     IsaacActuatorTarget,
     IsaacActuatorTargetRecord,
@@ -69,5 +73,7 @@ __all__ = [
     "RotorControlElement",
     "VirtualThrustQPAllocator",
     "actuator_target_record_to_dict",
+    "blend_controller_commands",
     "build_actuator_mapping",
+    "merge_disjoint_controller_commands",
 ]

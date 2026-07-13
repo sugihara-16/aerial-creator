@@ -183,6 +183,24 @@ def parse_args() -> argparse.Namespace:
         help="Include aligned Order-4 trajectory-runtime steps in the probe report.",
     )
     parser.add_argument(
+        "--dynamic-assembly-roundtrip",
+        action="store_true",
+        help=(
+            "Run the P4-full Orders 6-7 two-component staging, exact-frame "
+            "external FixedJoint attach, unload-gated detach, and separation smoke."
+        ),
+    )
+    parser.add_argument(
+        "--dynamic-assembly-graph-json",
+        default=None,
+        help="Serialized two-module/one-edge MorphologyGraph for dynamic assembly.",
+    )
+    parser.add_argument(
+        "--dynamic-assembly-config-json",
+        default=None,
+        help="Serialized DynamicAssemblyIsaacConfig for the round-trip smoke.",
+    )
+    parser.add_argument(
         "--order3-external-wrench-body",
         type=float,
         nargs=6,
@@ -531,6 +549,7 @@ def main() -> int:
         "random_morphology_teleop_passed",
         "p4_1_full_scene_backend_smoke_passed",
         "p4_2_deterministic_rollout_passed",
+        "dynamic_assembly_passed",
     ):
         if report.get(key) is False:
             return 1
@@ -636,6 +655,10 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         Order4DeterministicPlannerConfig,
         Order4FreeFlightMission,
     )
+    from amsrr.simulation.dynamic_assembly import DynamicAssemblyIsaacConfig
+    from amsrr.simulation.isaac_usd_collision import (
+        enforce_holon_dock_mesh_collision_approximation,
+    )
     from amsrr.schemas.policies import ContactWrenchTrajectory
     from amsrr.simulation.isaac_lab_backend import IsaacLabBackend, load_isaac_lab_backend_config
     from amsrr.simulation.random_morphology_takeoff import (
@@ -671,6 +694,23 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         or args.fixed_morphology_articulated_hover_smoke
         or args.fixed_morphology_waypoint_smoke
     )
+    dynamic_assembly_requested = bool(args.dynamic_assembly_roundtrip)
+    dynamic_assembly_graph = (
+        MorphologyGraph.from_json(args.dynamic_assembly_graph_json)
+        if dynamic_assembly_requested and args.dynamic_assembly_graph_json
+        else None
+    )
+    dynamic_assembly_config = (
+        DynamicAssemblyIsaacConfig.from_json(args.dynamic_assembly_config_json)
+        if dynamic_assembly_requested and args.dynamic_assembly_config_json
+        else None
+    )
+    if dynamic_assembly_requested and (
+        dynamic_assembly_graph is None or dynamic_assembly_config is None
+    ):
+        raise RuntimeError(
+            "--dynamic-assembly-roundtrip requires graph and config JSON"
+        )
     random_takeoff_requested = bool(args.random_morphology_takeoff)
     order3_rollout_condition = (
         Order3RolloutCondition.from_json(args.order3_rollout_condition_json)
@@ -761,6 +801,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     random_initial_root_twist = None
     articulated_connections = []
     converted = False
+    dynamic_assembly_collision_approximation_evidence = None
 
     if random_takeoff_requested:
         if random_morphology_graph is None:
@@ -812,7 +853,12 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             random_initial_root_twist = (0.0,) * 6
         args.spawn_height = float(random_initial_root_pose[2])
 
-    if args.force_convert or fixed_smoke_requested or (args.convert_if_missing and not usd_path.exists()):
+    if (
+        args.force_convert
+        or fixed_smoke_requested
+        or dynamic_assembly_requested
+        or (args.convert_if_missing and not usd_path.exists())
+    ):
         mesh_search_dirs = random_mesh_search_dirs if random_takeoff_requested else _holon_mesh_search_dirs()
         if fixed_smoke_requested:
             if args.p4_2_deterministic_rollout:
@@ -892,6 +938,11 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             usd_dir=str(usd_dir),
             fix_base=False,
             merge_fixed_joints=False,
+            collision_type=(
+                dynamic_assembly_config.collision_type
+                if dynamic_assembly_requested
+                else "Convex Hull"
+            ),
             force_usd_conversion=bool(args.force_convert),
             joint_drive=UrdfConverterCfg.JointDriveCfg(
                 gains=UrdfConverterCfg.JointDriveCfg.PDGainsCfg(
@@ -907,6 +958,42 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
 
     if not usd_path.exists():
         raise FileNotFoundError(f"Generated Holon USD is missing: {usd_path}")
+
+    if dynamic_assembly_requested:
+        dynamic_assembly_collision_approximation_evidence = (
+            enforce_holon_dock_mesh_collision_approximation(
+                usd_path,
+                collision_type=dynamic_assembly_config.collision_type,
+                max_convex_hulls=(
+                    dynamic_assembly_config.dock_convex_decomposition_max_hulls
+                ),
+                shrink_wrap=(
+                    dynamic_assembly_config.dock_convex_decomposition_shrink_wrap
+                ),
+            )
+        )
+        return _run_dynamic_assembly_roundtrip_probe(
+            args=args,
+            sim_utils=sim_utils,
+            SimulationContext=SimulationContext,
+            Articulation=Articulation,
+            ArticulationCfg=ArticulationCfg,
+            ImplicitActuatorCfg=ImplicitActuatorCfg,
+            usd_path=usd_path,
+            urdf_path=urdf_path,
+            physical_model=physical_model,
+            morphology_graph=dynamic_assembly_graph,
+            config=dynamic_assembly_config,
+            gimbal_stiffness=gimbal_stiffness,
+            gimbal_damping=gimbal_damping,
+            dock_stiffness=dock_stiffness,
+            dock_damping=dock_damping,
+            backend_config_hash=backend_config.stable_hash(),
+            collision_approximation_evidence=(
+                dynamic_assembly_collision_approximation_evidence
+            ),
+            device=args.device,
+        )
 
     sim_utils.create_new_stage()
     sim = SimulationContext(sim_utils.SimulationCfg(dt=args.dt, device=args.device))
@@ -1586,6 +1673,4250 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     sim.stop()
     sim.clear_instance()
     return report
+
+
+def _run_dynamic_assembly_roundtrip_probe(
+    *,
+    args,
+    sim_utils,
+    SimulationContext,
+    Articulation,
+    ArticulationCfg,
+    ImplicitActuatorCfg,
+    usd_path,
+    urdf_path,
+    physical_model,
+    morphology_graph,
+    config,
+    gimbal_stiffness: float,
+    gimbal_damping: float,
+    dock_stiffness: float,
+    dock_damping: float,
+    backend_config_hash: str,
+    collision_approximation_evidence: dict[str, object],
+    device: str,
+) -> dict[str, object]:
+    """Orders 6-7 real-Isaac two-single-module attach/detach round trip."""
+
+    from dataclasses import replace
+
+    import torch
+    from pxr import Sdf, UsdPhysics
+    from isaaclab.sensors import ContactSensor, ContactSensorCfg
+
+    from amsrr.assembly import (
+        AssemblyPlannerConfig,
+        AssemblyControlBridge,
+        AssemblyRunner,
+        ClosedLoopAssemblyExecutorConfig,
+        ClosedLoopAssemblyExecutor,
+        DeterministicAssemblyMotionPlanner,
+        GraphEditAssemblyPlanner,
+        initial_construction_state,
+    )
+    from amsrr.controllers.actuator_mapping import build_actuator_mapping
+    from amsrr.controllers.controller_base import ControllerContext
+    from amsrr.controllers.controller_handover import (
+        blend_controller_commands,
+        merge_disjoint_controller_commands,
+    )
+    from amsrr.controllers.detach_wrench_estimator import (
+        DetachUnloadGate,
+        FollowerSubtreeDetachWrenchEstimator,
+    )
+    from amsrr.controllers.isaac_controller_bridge import IsaacControllerBridge
+    from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
+    from amsrr.controllers.rigid_body_model import RigidBodyControlModelBuilder
+    from amsrr.feasibility.morphology_flight import (
+        collision_geometry_content_hash,
+        morphology_collision_aabbs,
+    )
+    from amsrr.geometry.pose_math import (
+        FACE_TO_FACE_DOCK_RELATION,
+        Transform3D,
+        compose_transform,
+        inverse_transform,
+        matvec,
+        pose_from_transform,
+        transform_from_pose,
+    )
+    from amsrr.schemas.morphology import ControlGroup, MorphologyGraph
+    from amsrr.schemas.policies import (
+        POLICY_COMMAND_CONTRACT_CENTROIDAL,
+        ControllerStatus,
+        InteractionKnot,
+        PolicyCommand,
+    )
+    from amsrr.schemas.runtime import (
+        ModuleRuntimeState,
+        RuntimeObservation,
+        TaskProgressState,
+    )
+    from amsrr.simulation.dynamic_assembly import (
+        DYNAMIC_ASSEMBLY_ATTACH_ONLY_GATE,
+        DYNAMIC_ASSEMBLY_FILTER_FALLBACK_ACCEPTANCE_CONTRACT,
+        DYNAMIC_ASSEMBLY_FILTER_FALLBACK_MODE,
+        DYNAMIC_ASSEMBLY_PHYSICAL_MATING_MODE,
+        DYNAMIC_ASSEMBLY_ROUNDTRIP_VERSION,
+        DynamicSeparationLifecycle,
+        dynamic_assembly_acceptance_contract,
+        format_dynamic_assembly_progress,
+    )
+    from amsrr.simulation.dynamic_contact_evidence import (
+        evaluate_final_seated_alignment,
+        evaluate_final_seated_contact,
+        evaluate_funnel_guidance_contact,
+    )
+    from amsrr.simulation.dynamic_dock_constraint import (
+        DYNAMIC_DOCK_CONSTRAINT_VERSION,
+        build_dynamic_dock_constraint_spec,
+        connect_frame_pose_in_parent_body,
+        constraint_residual,
+        disable_and_remove_fixed_joint,
+        filter_selected_body_pair,
+        fixed_joint_identity_failures,
+        preauthor_disabled_fixed_joint,
+        selected_body_pair_filter_failures,
+        set_fixed_joint_enabled,
+        unfilter_selected_body_pair,
+    )
+    from amsrr.simulation.random_morphology_takeoff import (
+        ORDER2_FLOOR_POSE_WORLD,
+        ORDER2_FLOOR_SIZE_M,
+        compute_floor_contact_placement,
+    )
+    from amsrr.utils.hashing import hash_directory_manifest, hash_file
+
+    if len(morphology_graph.modules) != 2 or len(morphology_graph.dock_edges) != 1:
+        raise RuntimeError("dynamic assembly first gate requires exactly two modules and one edge")
+    edge = morphology_graph.dock_edges[0]
+    leader_module_id = morphology_graph.base_module_id
+    if leader_module_id not in {edge.src_module_id, edge.dst_module_id}:
+        raise RuntimeError("dynamic assembly base module must be a selected edge endpoint")
+    follower_module_id = (
+        edge.dst_module_id
+        if edge.src_module_id == leader_module_id
+        else edge.src_module_id
+    )
+    target_ports = {port.port_global_id: port for port in morphology_graph.ports}
+    leader_port_id = (
+        edge.src_port_id if edge.src_module_id == leader_module_id else edge.dst_port_id
+    )
+    follower_port_id = (
+        edge.dst_port_id if edge.dst_module_id == follower_module_id else edge.src_port_id
+    )
+    leader_port = target_ports[leader_port_id]
+    follower_port = target_ports[follower_port_id]
+    physical_ports = {port.port_id: port for port in physical_model.dock_ports}
+    leader_port_spec = physical_ports[leader_port.port_local_id]
+    follower_port_spec = physical_ports[follower_port.port_local_id]
+
+    singleton_graphs = {
+        module_id: _dynamic_singleton_graph(
+            morphology_graph,
+            module_id=module_id,
+        )
+        for module_id in (leader_module_id, follower_module_id)
+    }
+    placement = compute_floor_contact_placement(
+        singleton_graphs[leader_module_id],
+        physical_model,
+        mesh_search_dirs=_holon_mesh_search_dirs(),
+        floor_z_m=0.0,
+        clearance_m=0.002,
+    )
+    initial_z = float(placement.root_pose_world[2])
+    initial_poses = {
+        leader_module_id: (-0.70, 0.0, initial_z, 0.0, 0.0, 0.0, 1.0),
+        follower_module_id: (0.70, 0.0, initial_z, 0.0, 0.0, 0.0, 1.0),
+    }
+    actuator_specs = physical_model.metadata.get("joint_actuator_specs", {})
+    dock_actuator_spec = (
+        actuator_specs.get("dock", {}) if isinstance(actuator_specs, dict) else {}
+    )
+    dock_drive_spec = (
+        dock_actuator_spec.get("simulation_drive", {})
+        if isinstance(dock_actuator_spec, dict)
+        else {}
+    )
+    try:
+        dock_effort_limit_sim_nm = float(dock_actuator_spec["peak_torque_nm"])
+        dock_velocity_limit_sim_radps = float(
+            dock_drive_spec["safe_velocity_limit_rad_s"]
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError(
+            "dynamic assembly requires explicit Dock effort and safe-velocity limits"
+        ) from error
+    if (
+        not math.isfinite(dock_effort_limit_sim_nm)
+        or dock_effort_limit_sim_nm <= 0.0
+        or not math.isfinite(dock_velocity_limit_sim_radps)
+        or dock_velocity_limit_sim_radps <= 0.0
+    ):
+        raise RuntimeError("dynamic assembly Dock solver limits must be finite and positive")
+
+    sim_utils.create_new_stage()
+    sim = SimulationContext(sim_utils.SimulationCfg(dt=config.simulation_dt_s, device=device))
+    sim.set_camera_view(eye=[2.0, 2.0, 1.7], target=[0.0, 0.0, 0.8])
+    ground_cfg = sim_utils.CuboidCfg(
+        size=ORDER2_FLOOR_SIZE_M,
+        collision_props=sim_utils.CollisionPropertiesCfg(),
+        visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.18, 0.18, 0.18)),
+    )
+    ground_cfg.func(
+        "/World/defaultGroundPlane",
+        ground_cfg,
+        translation=ORDER2_FLOOR_POSE_WORLD[:3],
+    )
+    light_cfg = sim_utils.DistantLightCfg(intensity=3000.0, color=(0.75, 0.75, 0.75))
+    light_cfg.func("/World/Light", light_cfg)
+
+    roots = {
+        leader_module_id: "/World/Assembly/Leader",
+        follower_module_id: "/World/Assembly/Follower",
+    }
+    robots = {}
+    for module_id in (leader_module_id, follower_module_id):
+        cfg = ArticulationCfg(
+            prim_path=roots[module_id],
+            spawn=sim_utils.UsdFileCfg(
+                usd_path=str(usd_path),
+                activate_contact_sensors=True,
+                rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                    disable_gravity=False,
+                    max_depenetration_velocity=2.0,
+                    enable_gyroscopic_forces=True,
+                ),
+                articulation_props=sim_utils.ArticulationRootPropertiesCfg(
+                    enabled_self_collisions=False,
+                    solver_position_iteration_count=(
+                        config.solver_position_iteration_count
+                    ),
+                    solver_velocity_iteration_count=(
+                        config.solver_velocity_iteration_count
+                    ),
+                    sleep_threshold=0.0,
+                    stabilization_threshold=0.001,
+                ),
+                copy_from_source=False,
+            ),
+            init_state=ArticulationCfg.InitialStateCfg(
+                pos=initial_poses[module_id][:3],
+                rot=initial_poses[module_id][3:7],
+                lin_vel=(0.0, 0.0, 0.0),
+                ang_vel=(0.0, 0.0, 0.0),
+                joint_pos={".*": 0.0},
+                joint_vel={".*": 0.0},
+            ),
+            actuators={
+                "gimbal_joints": ImplicitActuatorCfg(
+                    joint_names_expr=[".*gimbal.*"],
+                    stiffness=gimbal_stiffness,
+                    damping=gimbal_damping,
+                ),
+                "dock_joints": ImplicitActuatorCfg(
+                    joint_names_expr=[".*dock_mech.*"],
+                    stiffness=dock_stiffness,
+                    damping=dock_damping,
+                    effort_limit_sim=dock_effort_limit_sim_nm,
+                    velocity_limit_sim=dock_velocity_limit_sim_radps,
+                ),
+                "rotor_spinner_joints": ImplicitActuatorCfg(
+                    joint_names_expr=[".*rotor.*"],
+                    stiffness=0.0,
+                    damping=0.0,
+                ),
+            },
+        )
+        robots[module_id] = Articulation(cfg)
+
+    leader_body_path = _dynamic_resolve_rigid_body_prim_path(
+        sim.stage,
+        root_path=roots[leader_module_id],
+        body_name=leader_port_spec.parent_link,
+    )
+    follower_body_path = _dynamic_resolve_rigid_body_prim_path(
+        sim.stage,
+        root_path=roots[follower_module_id],
+        body_name=follower_port_spec.parent_link,
+    )
+    constraint_spec = build_dynamic_dock_constraint_spec(
+        morphology_graph,
+        physical_model,
+        edge_id=edge.edge_id,
+        leader_module_id=leader_module_id,
+        follower_module_id=follower_module_id,
+        leader_body_path=leader_body_path,
+        follower_body_path=follower_body_path,
+    )
+    fixed_joint = preauthor_disabled_fixed_joint(sim.stage, constraint_spec)
+    contact_report_body_counts = {
+        module_id: _activate_nested_contact_reports(
+            sim.stage,
+            root_prim_path=roots[module_id],
+        )
+        for module_id in (leader_module_id, follower_module_id)
+    }
+    component_contact_sensors = {
+        module_id: ContactSensor(
+            cfg=ContactSensorCfg(
+                prim_path=f"{roots[module_id]}/.*",
+                update_period=0.0,
+                history_length=2,
+                max_contact_data_count_per_prim=16,
+                debug_vis=False,
+            )
+        )
+        for module_id in (leader_module_id, follower_module_id)
+    }
+
+    sim.reset()
+    sim_dt = float(sim.get_physics_dt())
+    for robot in robots.values():
+        robot.update(sim_dt)
+    for sensor in component_contact_sensors.values():
+        sensor.update(sim_dt, force_recompute=True)
+    leader_body_paths = _dynamic_rigid_body_paths(sim.stage, roots[leader_module_id])
+    follower_body_paths = _dynamic_rigid_body_paths(sim.stage, roots[follower_module_id])
+    physics_view = sim.physics_manager.get_physics_sim_view()
+    cross_contact_view = physics_view.create_rigid_contact_view(
+        leader_body_paths,
+        filter_patterns=[list(follower_body_paths) for _ in leader_body_paths],
+        max_contact_data_count=max(1, len(leader_body_paths) * len(follower_body_paths) * 8),
+    )
+    ground_contact_path = "/World/defaultGroundPlane"
+    leader_external_contact_paths = [
+        ground_contact_path,
+        *follower_body_paths,
+    ]
+    follower_external_contact_paths = [
+        ground_contact_path,
+        *leader_body_paths,
+    ]
+    leader_all_contact_view = physics_view.create_rigid_contact_view(
+        leader_body_paths,
+        filter_patterns=[
+            list(leader_external_contact_paths) for _ in leader_body_paths
+        ],
+        max_contact_data_count=max(
+            8,
+            len(leader_body_paths) * len(leader_external_contact_paths) * 8,
+        ),
+    )
+    follower_all_contact_view = physics_view.create_rigid_contact_view(
+        follower_body_paths,
+        filter_patterns=[
+            list(follower_external_contact_paths) for _ in follower_body_paths
+        ],
+        max_contact_data_count=max(
+            8,
+            len(follower_body_paths) * len(follower_external_contact_paths) * 8,
+        ),
+    )
+    selected_sensor_index = leader_body_paths.index(leader_body_path)
+    selected_filter_index = follower_body_paths.index(follower_body_path)
+
+    events: list[dict[str, object]] = []
+    event_phase: str | None = None
+
+    def add_event(phase: str, time_s: float, **metrics) -> None:
+        nonlocal event_phase
+        if phase == event_phase and not metrics:
+            return
+        event_phase = phase
+        events.append({"phase": phase, "time_s": float(time_s), "metrics": metrics})
+        print(
+            format_dynamic_assembly_progress(phase, time_s),
+            file=sys.stderr,
+            flush=True,
+        )
+
+    joint_ids = sorted(
+        {
+            str(port.mechanical_limits["mechanism_joint_id"])
+            for port in physical_model.dock_ports
+            if port.mechanical_limits.get("mechanism_joint_id")
+        }
+    )
+    controllers = {
+        module_id: QPIDController(
+            config=QPIDControllerConfig(
+                allocation_mode=config.allocation_mode,
+                control_dt_s=sim_dt,
+            )
+        )
+        for module_id in (leader_module_id, follower_module_id)
+    }
+    controller_bridges = {
+        module_id: IsaacControllerBridge()
+        for module_id in (leader_module_id, follower_module_id)
+    }
+    actuator_mappings = {
+        module_id: build_actuator_mapping(singleton_graphs[module_id], physical_model)
+        for module_id in (leader_module_id, follower_module_id)
+    }
+    previous_commands = {leader_module_id: None, follower_module_id: None}
+    last_commands = {leader_module_id: None, follower_module_id: None}
+    last_statuses = {
+        leader_module_id: ControllerStatus(status="ok", qp_feasible=True),
+        follower_module_id: ControllerStatus(status="ok", qp_feasible=True),
+    }
+    command_index = 0
+    qp_infeasible_count = 0
+    missing_actuator_count = 0
+    unsupported_actuator_count = 0
+    application_unresolved_target_count = 0
+    clipped_target_count = 0
+    unintended_contact_count = 0
+    finite_state = True
+    preflight_qp_infeasible_count = 0
+    preflight_vectoring_ready = False
+    hover_acquired = False
+    first_infeasible_statuses: dict[int, dict[str, object]] = {}
+    controller_debug_samples: list[dict[str, object]] = []
+    motion_debug_samples: list[dict[str, object]] = []
+    latest_selected_dock_joint_diagnostics: dict[str, object] = {}
+    axial_selected_joint_evidence: dict[str, object] = {
+        "evidence_version": "axial_selected_dock_joint_zero_target_v1",
+        "sample_count": 0,
+        "all_targets_zero": True,
+        "by_module": {},
+    }
+    selected_pair_contact_observed = False
+    selected_surface_contact_observed = False
+    first_selected_contact_evidence: dict[str, object] | None = None
+    guidance_contact_observed = False
+    first_guidance_contact_evidence: dict[str, object] | None = None
+    final_seated_evidence: dict[str, object] | None = None
+    latest_strict_gate_snapshot: dict[str, object] | None = None
+    last_assembly_control_progress: dict[str, object] | None = None
+    strict_fix_gate_started_s: float | None = None
+    strict_fix_gate_dwell_elapsed_s = 0.0
+    selected_pair_filter_applied = False
+    selected_pair_filter_apply_verified = False
+    selected_pair_filter_remove_verified = False
+    selected_pair_filter_removal_clearance_m = 0.0
+    mating_filter_evidence: dict[str, object] | None = None
+    filter_fallback_selected_contact_violation_count = 0
+    final_selected_body_clearance_m = 0.0
+    post_unfilter_selected_contact_count = 0
+    post_unfilter_raw_invalid_count = 0
+    floor_initialization_verified = False
+    floor_initialization_evidence: dict[str, object] = {}
+    attach_handover_completed = False
+    attached_stability_verified = False
+    attached_selected_pair_contact_free = True
+    attached_stable_steps = 0
+    attached_required_stable_steps = 0
+    attached_max_metrics: dict[str, float] = {}
+    split_handover_completed = False
+    controller_handover_samples: list[dict[str, object]] = []
+    follower_external_contact_free_during_unload = False
+    follower_external_contact_max_force_n = 0.0
+    follower_external_contact_invalid_during_unload_count = 0
+    follower_external_contact_raw_patch_count_during_unload = 0
+    constraint_enabled = False
+    constraint_disabled_verified = False
+    constraint_verified = False
+    constraint_verify_started_s: float | None = None
+    constraint_identity_failures: list[str] = []
+    latest_contact = {
+        "selected_contact": False,
+        "selected_force_n": 0.0,
+        "selected_penetration_m": 0.0,
+        "unintended_contact": False,
+        "unintended_max_force_n": 0.0,
+    }
+    latest_follower_world_contact = {
+        "aggregate_force_n": 0.0,
+        "max_force_n": 0.0,
+        "active": False,
+    }
+    latest_leader_world_contact = {
+        "aggregate_force_n": 0.0,
+        "max_force_n": 0.0,
+        "active": False,
+    }
+    model_builder = RigidBodyControlModelBuilder()
+    physical_mating_mode = (
+        config.mating_contact_mode == DYNAMIC_ASSEMBLY_PHYSICAL_MATING_MODE
+    )
+
+    def mating_filter_evidence_snapshot() -> dict[str, object] | None:
+        if mating_filter_evidence is None:
+            return None
+        return {
+            **mating_filter_evidence,
+            "selected_contact_count_after_filter": int(
+                filter_fallback_selected_contact_violation_count
+            ),
+            "selected_contact_violation_count": int(
+                filter_fallback_selected_contact_violation_count
+            ),
+        }
+
+    def mating_mode_report_fields(*, attach_passed: bool) -> dict[str, object]:
+        return {
+            "dynamic_assembly_acceptance_contract": (
+                dynamic_assembly_acceptance_contract(config.mating_contact_mode)
+            ),
+            "dynamic_assembly_physical_mating_contact_claimed": bool(
+                physical_mating_mode and attach_passed
+            ),
+            "dynamic_assembly_physical_attach_passed": bool(
+                physical_mating_mode and attach_passed
+            ),
+            "dynamic_assembly_filter_fallback_attach_passed": bool(
+                not physical_mating_mode and attach_passed
+            ),
+        }
+
+    def simulation_numerics_report_fields() -> dict[str, object]:
+        return {
+            "dynamic_assembly_solver_position_iteration_count": int(
+                config.solver_position_iteration_count
+            ),
+            "dynamic_assembly_solver_velocity_iteration_count": int(
+                config.solver_velocity_iteration_count
+            ),
+            "dynamic_assembly_dock_drive_stiffness_nm_per_rad": float(
+                dock_stiffness
+            ),
+            "dynamic_assembly_dock_drive_damping_nms_per_rad": float(
+                dock_damping
+            ),
+            "dynamic_assembly_dock_effort_limit_sim_nm": float(
+                dock_effort_limit_sim_nm
+            ),
+            "dynamic_assembly_dock_velocity_limit_sim_radps": float(
+                dock_velocity_limit_sim_radps
+            ),
+        }
+
+    def abort_report(
+        reason: str,
+        *,
+        assembly_report=None,
+        attach_gate_passed: bool = False,
+    ) -> dict[str, object]:
+        """Stop without entering a later Order gate after an earlier failure."""
+
+        add_event("aborted", current_time_s, reason=reason)
+        final_root_poses = {
+            str(module_id): _tensor_row(robot.data.root_pose_w.torch)
+            for module_id, robot in robots.items()
+        }
+        if args.keep_open_after_smoke_s > 0.0:
+            _keep_viewer_open(float(args.keep_open_after_smoke_s))
+        sim.stop()
+        sim.clear_instance()
+        return {
+            "spawn_passed": True,
+            "isaac_backed": True,
+            "command_applied": command_index > 0,
+            "command_probe_passed": False,
+            "dynamic_assembly_roundtrip": (
+                config.acceptance_gate != DYNAMIC_ASSEMBLY_ATTACH_ONLY_GATE
+            ),
+            "dynamic_assembly_acceptance_gate": config.acceptance_gate,
+            "dynamic_assembly_version": DYNAMIC_ASSEMBLY_ROUNDTRIP_VERSION,
+            "dynamic_assembly_collision_type": config.collision_type,
+            "dynamic_assembly_mating_contact_mode": config.mating_contact_mode,
+            **mating_mode_report_fields(attach_passed=attach_gate_passed),
+            **simulation_numerics_report_fields(),
+            "dynamic_assembly_dock_collision_approximation_verified": bool(
+                collision_approximation_evidence.get("verified") is True
+            ),
+            "dynamic_assembly_dock_collision_approximation_token": (
+                collision_approximation_evidence.get(
+                    "requested_approximation_token"
+                )
+            ),
+            "dynamic_assembly_dock_collision_composed_prim_count": int(
+                collision_approximation_evidence.get("composed_prim_count", 0)
+            ),
+            "dynamic_assembly_dock_collision_approximation_evidence": dict(
+                collision_approximation_evidence
+            ),
+            "dynamic_assembly_force_usd_conversion": bool(args.force_convert),
+            "dynamic_assembly_graph_id": morphology_graph.graph_id,
+            "dynamic_assembly_graph_hash": morphology_graph.stable_hash(),
+            "dynamic_assembly_config_hash": config.stable_hash(),
+            "dynamic_assembly_backend_config_hash": backend_config_hash,
+            "dynamic_assembly_physical_model_hash": physical_model.stable_hash(),
+            "dynamic_assembly_collision_geometry_content_hash": (
+                collision_geometry_content_hash(
+                    physical_model,
+                    mesh_search_dirs=_holon_mesh_search_dirs(),
+                )
+            ),
+            "dynamic_assembly_module_count": 2,
+            "dynamic_assembly_edge_id": edge.edge_id,
+            "dynamic_assembly_leader_module_id": leader_module_id,
+            "dynamic_assembly_follower_module_id": follower_module_id,
+            "dynamic_assembly_attach_passed": bool(attach_gate_passed),
+            "dynamic_assembly_detach_passed": False,
+            "dynamic_assembly_passed": False,
+            "dynamic_assembly_aborted": True,
+            "dynamic_assembly_abort_reason": reason,
+            "dynamic_assembly_external_fixed_joint": True,
+            "dynamic_assembly_constraint_excluded_from_articulation": True,
+            "dynamic_assembly_constraint_version": DYNAMIC_DOCK_CONSTRAINT_VERSION,
+            "dynamic_assembly_constraint_spec": constraint_spec.to_dict(),
+            "dynamic_assembly_constraint_identity_verified": bool(
+                attach_gate_passed and not constraint_identity_failures
+            ),
+            "dynamic_assembly_constraint_identity_failures": list(
+                constraint_identity_failures
+            ),
+            "dynamic_assembly_constraint_identity_failure_count": len(
+                constraint_identity_failures
+            ),
+            "dynamic_assembly_constraint_removed": False,
+            "dynamic_assembly_constraint_disabled_verified": constraint_disabled_verified,
+            "dynamic_assembly_selected_pair_contact_observed": selected_pair_contact_observed,
+            "dynamic_assembly_selected_surface_contact_observed": selected_surface_contact_observed,
+            "dynamic_assembly_first_selected_contact_evidence": first_selected_contact_evidence,
+            "dynamic_assembly_guidance_contact_observed": guidance_contact_observed,
+            "dynamic_assembly_first_guidance_contact_evidence": (
+                first_guidance_contact_evidence
+            ),
+            "dynamic_assembly_final_seated_evidence": final_seated_evidence,
+            "dynamic_assembly_last_strict_gate_snapshot": (
+                latest_strict_gate_snapshot
+            ),
+            "dynamic_assembly_last_selected_dock_joint_diagnostics": dict(
+                latest_selected_dock_joint_diagnostics
+            ),
+            "dynamic_assembly_axial_selected_joint_evidence": dict(
+                axial_selected_joint_evidence
+            ),
+            "dynamic_assembly_last_assembly_control_progress": (
+                last_assembly_control_progress
+            ),
+            "dynamic_assembly_last_contact_measurement": dict(latest_contact),
+            "dynamic_assembly_selected_pair_filter_applied": selected_pair_filter_applied,
+            "dynamic_assembly_selected_pair_filter_apply_verified": (
+                selected_pair_filter_apply_verified
+            ),
+            "dynamic_assembly_mating_filter_evidence": (
+                mating_filter_evidence_snapshot()
+            ),
+            "dynamic_assembly_filter_fallback_selected_contact_violation_count": (
+                filter_fallback_selected_contact_violation_count
+            ),
+            "dynamic_assembly_selected_pair_filter_removed": False,
+            "dynamic_assembly_selected_pair_filter_remove_verified": False,
+            "dynamic_assembly_selected_pair_filter_removal_clearance_m": (
+                selected_pair_filter_removal_clearance_m
+            ),
+            "dynamic_assembly_final_selected_body_clearance_m": (
+                final_selected_body_clearance_m
+            ),
+            "dynamic_assembly_post_unfilter_selected_contact_count": (
+                post_unfilter_selected_contact_count
+            ),
+            "dynamic_assembly_post_unfilter_raw_invalid_count": (
+                post_unfilter_raw_invalid_count
+            ),
+            "dynamic_assembly_control_graph_split_before_release": False,
+            "dynamic_assembly_attach_handover_completed": attach_handover_completed,
+            "dynamic_assembly_attached_stability_verified": attached_stability_verified,
+            "dynamic_assembly_attached_selected_pair_contact_free": (
+                attached_selected_pair_contact_free
+            ),
+            "dynamic_assembly_attached_stable_steps": attached_stable_steps,
+            "dynamic_assembly_attached_required_stable_steps": attached_required_stable_steps,
+            "dynamic_assembly_attached_max_metrics": attached_max_metrics,
+            "dynamic_assembly_split_handover_completed": split_handover_completed,
+            "dynamic_assembly_controller_handover_samples": controller_handover_samples,
+            "dynamic_assembly_post_release_stable": False,
+            "dynamic_assembly_final_separation_gap_m": 0.0,
+            "dynamic_assembly_unload_ready": False,
+            "dynamic_assembly_follower_external_contact_free_during_unload": False,
+            "dynamic_assembly_follower_external_contact_max_force_n": (
+                follower_external_contact_max_force_n
+            ),
+            "dynamic_assembly_follower_external_contact_invalid_during_unload_count": (
+                follower_external_contact_invalid_during_unload_count
+            ),
+            "dynamic_assembly_follower_external_contact_raw_patch_count_during_unload": (
+                follower_external_contact_raw_patch_count_during_unload
+            ),
+            "dynamic_assembly_follower_external_contact_last_measurement": dict(
+                latest_follower_world_contact
+            ),
+            "dynamic_assembly_unload_estimate": None,
+            "dynamic_assembly_unload_decision": None,
+            "dynamic_assembly_assembly_run_report": (
+                assembly_report.to_dict() if assembly_report is not None else None
+            ),
+            "dynamic_assembly_preflight_vectoring_ready": preflight_vectoring_ready,
+            "dynamic_assembly_preflight_qp_infeasible_count": preflight_qp_infeasible_count,
+            "dynamic_assembly_hover_acquired": hover_acquired,
+            "dynamic_assembly_floor_initialization_verified": floor_initialization_verified,
+            "dynamic_assembly_floor_initialization_evidence": floor_initialization_evidence,
+            "dynamic_assembly_qp_infeasible_count": qp_infeasible_count,
+            "dynamic_assembly_unintended_contact_count": unintended_contact_count,
+            "dynamic_assembly_missing_actuator_count": missing_actuator_count,
+            "dynamic_assembly_unsupported_actuator_count": unsupported_actuator_count,
+            "dynamic_assembly_application_unresolved_target_count": application_unresolved_target_count,
+            "dynamic_assembly_clipped_target_count": clipped_target_count,
+            "dynamic_assembly_finite_state": finite_state,
+            "dynamic_assembly_first_infeasible_statuses": {
+                str(module_id): status
+                for module_id, status in sorted(first_infeasible_statuses.items())
+            },
+            "dynamic_assembly_controller_debug_samples": controller_debug_samples,
+            "dynamic_assembly_motion_debug_samples": motion_debug_samples,
+            "dynamic_assembly_last_controller_statuses": {
+                str(module_id): status.to_dict()
+                for module_id, status in last_statuses.items()
+            },
+            "dynamic_assembly_final_root_poses": final_root_poses,
+            "dynamic_assembly_qpid_joint_dynamics_unaware": True,
+            "dynamic_assembly_dock_joint_latch_semantics": False,
+            "dynamic_assembly_contact_report_body_counts": contact_report_body_counts,
+            "dynamic_assembly_events": events,
+            "generated_urdf_sha256": hash_file(urdf_path),
+            "generated_urdf_path": str(urdf_path),
+            "generated_usd_sha256": hash_file(usd_path),
+            "generated_usd_bundle_hash": hash_directory_manifest(usd_path.parent),
+            "usd_path": str(usd_path),
+            "realtime_playback": bool(args.realtime_playback),
+        }
+
+    def component_observation(module_id: int, time_s: float) -> RuntimeObservation:
+        robot = robots[module_id]
+        root_link_velocity = getattr(robot.data, "root_link_vel_w", None)
+        if root_link_velocity is not None:
+            root_twist = _tensor_row(_isaac_tensor(root_link_velocity), limit=6)
+        else:
+            root_twist = (
+                _tensor_row(robot.data.root_lin_vel_w.torch)
+                + _tensor_row(robot.data.root_ang_vel_w.torch)
+            )
+        return RuntimeObservation(
+            time_s=float(time_s),
+            morphology_graph=singleton_graphs[module_id],
+            module_states=[
+                ModuleRuntimeState(
+                    module_id=module_id,
+                    pose_world=tuple(_tensor_row(robot.data.root_pose_w.torch)),
+                    twist_world=root_twist,
+                    joint_positions=_joint_state_dict(robot.joint_names, robot.data.joint_pos.torch),
+                    joint_velocities=_joint_state_dict(robot.joint_names, robot.data.joint_vel.torch),
+                )
+            ],
+            object_states=[],
+            contact_states=[],
+            controller_status=last_statuses[module_id],
+            task_progress=TaskProgressState(phase_label="dynamic_assembly"),
+        )
+
+    def combined_observation(time_s: float, graph: MorphologyGraph) -> RuntimeObservation:
+        states = []
+        for module_id in (leader_module_id, follower_module_id):
+            states.extend(component_observation(module_id, time_s).module_states)
+        return RuntimeObservation(
+            time_s=float(time_s),
+            morphology_graph=graph,
+            module_states=states,
+            object_states=[],
+            contact_states=[],
+            controller_status=ControllerStatus(
+                status=("ok" if all(status.qp_feasible for status in last_statuses.values()) else "infeasible"),
+                qp_feasible=all(status.qp_feasible for status in last_statuses.values()),
+            ),
+            task_progress=TaskProgressState(phase_label="dynamic_assembly"),
+        )
+
+    def connect_state(module_id: int):
+        robot = robots[module_id]
+        graph_port = leader_port if module_id == leader_module_id else follower_port
+        port_spec = leader_port_spec if module_id == leader_module_id else follower_port_spec
+        body_name = port_spec.parent_link
+        body_id = robot.body_names.index(_dynamic_resolve_asset_body_name(robot, body_name))
+        body_pos = _tensor_body_row(robot.data.body_pos_w.torch, body_id)
+        body_quat = _tensor_body_row(robot.data.body_quat_w.torch, body_id)
+        body_pose = (*body_pos, *body_quat)
+        local_connect = connect_frame_pose_in_parent_body(graph_port, physical_model)
+        connect_pose = compose_pose(body_pose, local_connect)
+        com_pos_tensor = getattr(robot.data, "body_com_pos_w", robot.data.body_pos_w)
+        com_pos = _tensor_body_row(_isaac_tensor(com_pos_tensor), body_id)
+        linear_tensor = getattr(robot.data, "body_com_lin_vel_w", robot.data.body_lin_vel_w)
+        angular_tensor = getattr(robot.data, "body_com_ang_vel_w", robot.data.body_ang_vel_w)
+        linear = _tensor_body_row(_isaac_tensor(linear_tensor), body_id)
+        angular = _tensor_body_row(_isaac_tensor(angular_tensor), body_id)
+        radius = (
+            float(connect_pose[0]) - float(com_pos[0]),
+            float(connect_pose[1]) - float(com_pos[1]),
+            float(connect_pose[2]) - float(com_pos[2]),
+        )
+        point_linear = _add3(tuple(linear), _cross3(tuple(angular), radius))
+        return connect_pose, [*point_linear, *angular]
+
+    def dock_joint_state_max(module_ids) -> tuple[float, float]:
+        max_position = 0.0
+        max_speed = 0.0
+        for module_id in module_ids:
+            robot = robots[module_id]
+            positions = _joint_state_dict(
+                robot.joint_names,
+                robot.data.joint_pos.torch,
+            )
+            velocities = _joint_state_dict(
+                robot.joint_names,
+                robot.data.joint_vel.torch,
+            )
+            for joint_id in joint_ids:
+                resolved = _resolve_module_name(
+                    robot.joint_names,
+                    module_id,
+                    joint_id,
+                )
+                if resolved is None:
+                    raise RuntimeError(
+                        f"dynamic assembly cannot resolve Dock joint {joint_id!r}"
+                    )
+                max_position = max(max_position, abs(float(positions[resolved])))
+                max_speed = max(max_speed, abs(float(velocities[resolved])))
+        return max_position, max_speed
+
+    selected_joint_ids = {
+        leader_module_id: str(leader_port_spec.mechanical_limits["mechanism_joint_id"]),
+        follower_module_id: str(follower_port_spec.mechanical_limits["mechanism_joint_id"]),
+    }
+
+    def selected_dock_joint_diagnostics() -> dict[str, object]:
+        """Capture measured motion and the exact Isaac targets for the mating joints."""
+
+        diagnostics: dict[str, object] = {}
+        for module_id, port_spec in (
+            (leader_module_id, leader_port_spec),
+            (follower_module_id, follower_port_spec),
+        ):
+            robot = robots[module_id]
+            joint_id = selected_joint_ids[module_id]
+            resolved_joint_name = _resolve_module_name(
+                robot.joint_names,
+                module_id,
+                joint_id,
+            )
+            resolved_body_name = _dynamic_resolve_asset_body_name(
+                robot,
+                port_spec.parent_link,
+            )
+            if resolved_joint_name is None or resolved_body_name not in robot.body_names:
+                raise RuntimeError(
+                    "dynamic assembly cannot resolve the selected Dock joint/body "
+                    f"for module {module_id}"
+                )
+            joint_index = robot.joint_names.index(resolved_joint_name)
+            body_index = robot.body_names.index(resolved_body_name)
+            joint_position = _tensor_indices(
+                _isaac_tensor(robot.data.joint_pos),
+                [joint_index],
+            )[0]
+            joint_velocity = _tensor_indices(
+                _isaac_tensor(robot.data.joint_vel),
+                [joint_index],
+            )[0]
+            joint_position_target = _tensor_indices(
+                _isaac_tensor(robot.data.joint_pos_target),
+                [joint_index],
+            )[0]
+            joint_velocity_target = _tensor_indices(
+                _isaac_tensor(robot.data.joint_vel_target),
+                [joint_index],
+            )[0]
+            joint_effort_target = _tensor_indices(
+                _isaac_tensor(robot.data.joint_effort_target),
+                [joint_index],
+            )[0]
+            joint_computed_torque = _tensor_indices(
+                _isaac_tensor(robot.data.computed_torque),
+                [joint_index],
+            )[0]
+            joint_applied_torque = _tensor_indices(
+                _isaac_tensor(robot.data.applied_torque),
+                [joint_index],
+            )[0]
+            joint_stiffness = _tensor_indices(
+                _isaac_tensor(robot.data.joint_stiffness),
+                [joint_index],
+            )[0]
+            joint_damping = _tensor_indices(
+                _isaac_tensor(robot.data.joint_damping),
+                [joint_index],
+            )[0]
+            joint_effort_limit = _tensor_indices(
+                _isaac_tensor(robot.data.joint_effort_limits),
+                [joint_index],
+            )[0]
+            joint_velocity_limit = _tensor_indices(
+                _isaac_tensor(robot.data.joint_vel_limits),
+                [joint_index],
+            )[0]
+            root_pose_world = tuple(
+                _tensor_row(_isaac_tensor(robot.data.root_pose_w))[:7]
+            )
+            selected_body_pose_world = (
+                *_tensor_body_row(
+                    _isaac_tensor(robot.data.body_pos_w),
+                    body_index,
+                )[:3],
+                *_tensor_body_row(
+                    _isaac_tensor(robot.data.body_quat_w),
+                    body_index,
+                )[:4],
+            )
+            selected_body_pose_in_root = compose_pose(
+                inverse_pose(root_pose_world),
+                selected_body_pose_world,
+            )
+            root_angular_velocity = _tensor_row(
+                _isaac_tensor(robot.data.root_ang_vel_w),
+            )[:3]
+            selected_body_angular_velocity = _tensor_body_row(
+                _isaac_tensor(robot.data.body_ang_vel_w),
+                body_index,
+            )[:3]
+            body_minus_root_angular_velocity = [
+                float(selected_body_angular_velocity[index])
+                - float(root_angular_velocity[index])
+                for index in range(3)
+            ]
+            diagnostics[str(module_id)] = {
+                "role": "leader" if module_id == leader_module_id else "follower",
+                "joint_id": joint_id,
+                "resolved_joint_name": resolved_joint_name,
+                "selected_body_name": resolved_body_name,
+                "joint_position_rad": float(joint_position),
+                "joint_velocity_radps": float(joint_velocity),
+                "joint_position_target_rad": float(joint_position_target),
+                "joint_velocity_target_radps": float(joint_velocity_target),
+                "joint_effort_bias_target_nm": float(joint_effort_target),
+                "joint_computed_torque_nm": float(joint_computed_torque),
+                "joint_applied_torque_nm": float(joint_applied_torque),
+                "joint_stiffness_nm_per_rad": float(joint_stiffness),
+                "joint_damping_nms_per_rad": float(joint_damping),
+                "joint_effort_limit_sim_nm": float(joint_effort_limit),
+                "joint_velocity_limit_sim_radps": float(joint_velocity_limit),
+                "root_pose_world": list(root_pose_world),
+                "selected_body_pose_world": list(selected_body_pose_world),
+                "selected_body_pose_in_root": list(selected_body_pose_in_root),
+                "root_angular_velocity_world_radps": list(root_angular_velocity),
+                "root_angular_speed_radps": _vector_norm(root_angular_velocity),
+                "selected_body_angular_velocity_world_radps": list(
+                    selected_body_angular_velocity
+                ),
+                "selected_body_angular_speed_radps": _vector_norm(
+                    selected_body_angular_velocity
+                ),
+                "selected_body_minus_root_angular_velocity_world_radps": (
+                    body_minus_root_angular_velocity
+                ),
+                "selected_body_minus_root_angular_speed_radps": _vector_norm(
+                    body_minus_root_angular_velocity
+                ),
+            }
+        return diagnostics
+
+    def record_axial_selected_joint_evidence(
+        snapshot: dict[str, object],
+    ) -> None:
+        axial_selected_joint_evidence["sample_count"] = int(
+            axial_selected_joint_evidence["sample_count"]
+        ) + 1
+        by_module = axial_selected_joint_evidence["by_module"]
+        if not isinstance(by_module, dict):
+            raise RuntimeError("dynamic assembly axial joint evidence is malformed")
+        all_targets_zero = bool(axial_selected_joint_evidence["all_targets_zero"])
+        for module_key, raw_values in sorted(snapshot.items()):
+            if not isinstance(raw_values, dict):
+                raise RuntimeError("dynamic assembly selected-joint snapshot is malformed")
+            values = raw_values
+            entry = by_module.setdefault(
+                module_key,
+                {
+                    "role": values["role"],
+                    "joint_id": values["joint_id"],
+                    "resolved_joint_name": values["resolved_joint_name"],
+                    "max_abs_joint_position_target_rad": 0.0,
+                    "max_abs_joint_velocity_target_radps": 0.0,
+                    "max_abs_joint_effort_bias_target_nm": 0.0,
+                    "max_abs_measured_joint_position_rad": 0.0,
+                    "max_abs_measured_joint_velocity_radps": 0.0,
+                    "max_abs_joint_computed_torque_nm": 0.0,
+                    "max_abs_joint_applied_torque_nm": 0.0,
+                    "max_selected_body_minus_root_angular_speed_radps": 0.0,
+                    "first_root_pose_world": list(values["root_pose_world"]),
+                    "last_root_pose_world": list(values["root_pose_world"]),
+                    "first_selected_body_pose_in_root": list(
+                        values["selected_body_pose_in_root"]
+                    ),
+                    "last_selected_body_pose_in_root": list(
+                        values["selected_body_pose_in_root"]
+                    ),
+                },
+            )
+            target_fields = (
+                ("joint_position_target_rad", "max_abs_joint_position_target_rad"),
+                ("joint_velocity_target_radps", "max_abs_joint_velocity_target_radps"),
+                (
+                    "joint_effort_bias_target_nm",
+                    "max_abs_joint_effort_bias_target_nm",
+                ),
+            )
+            for source_key, maximum_key in target_fields:
+                magnitude = abs(float(values[source_key]))
+                entry[maximum_key] = max(float(entry[maximum_key]), magnitude)
+                all_targets_zero = all_targets_zero and magnitude <= 1.0e-12
+            measured_fields = (
+                ("joint_position_rad", "max_abs_measured_joint_position_rad"),
+                ("joint_velocity_radps", "max_abs_measured_joint_velocity_radps"),
+                ("joint_computed_torque_nm", "max_abs_joint_computed_torque_nm"),
+                ("joint_applied_torque_nm", "max_abs_joint_applied_torque_nm"),
+                (
+                    "selected_body_minus_root_angular_speed_radps",
+                    "max_selected_body_minus_root_angular_speed_radps",
+                ),
+            )
+            for source_key, maximum_key in measured_fields:
+                entry[maximum_key] = max(
+                    float(entry[maximum_key]),
+                    abs(float(values[source_key])),
+                )
+            entry["last_root_pose_world"] = list(values["root_pose_world"])
+            entry["last_selected_body_pose_in_root"] = list(
+                values["selected_body_pose_in_root"]
+            )
+        axial_selected_joint_evidence["all_targets_zero"] = all_targets_zero
+
+    def refresh_contact() -> None:
+        nonlocal latest_contact, selected_pair_contact_observed, selected_surface_contact_observed
+        nonlocal first_selected_contact_evidence, unintended_contact_count
+        nonlocal guidance_contact_observed, first_guidance_contact_evidence
+        nonlocal latest_follower_world_contact, latest_leader_world_contact
+        nonlocal filter_fallback_selected_contact_violation_count
+        latest_contact = _dynamic_contact_view_measurement(
+            cross_contact_view,
+            sim_dt=sim_dt,
+            sensor_count=len(leader_body_paths),
+            filter_count=len(follower_body_paths),
+            selected_sensor_index=selected_sensor_index,
+            selected_filter_index=selected_filter_index,
+        )
+        leader_connect_pose, _ = connect_state(leader_module_id)
+        follower_connect_pose, _ = connect_state(follower_module_id)
+        surface_evidence = _dynamic_selected_surface_contact_evidence(
+            latest_contact,
+            leader_connect_pose_world=leader_connect_pose,
+            follower_connect_pose_world=follower_connect_pose,
+            axial_tolerance_m=config.selected_surface_axial_tolerance_m,
+            radius_m=config.selected_surface_radius_m,
+            normal_tolerance_rad=config.selected_surface_normal_tolerance_rad,
+        )
+        latest_contact.update(surface_evidence)
+        relative_connect_pose = compose_pose(
+            inverse_pose(leader_connect_pose),
+            follower_connect_pose,
+        )
+        guidance_evidence = evaluate_funnel_guidance_contact(
+            latest_contact,
+            axial_gap_m=float(relative_connect_pose[0]),
+            transverse_error_m=math.hypot(
+                float(relative_connect_pose[1]),
+                float(relative_connect_pose[2]),
+            ),
+            attitude_error_rad=_quat_error_norm(
+                list(relative_connect_pose[3:7]),
+                FACE_TO_FACE_DOCK_RELATION[3:7],
+            ),
+            min_axial_gap_m=-config.control_bridge.fix_axial_tolerance_m,
+            max_axial_gap_m=config.guidance_contact_max_axial_gap_m,
+            max_transverse_error_m=(
+                config.guidance_contact_max_transverse_error_m
+            ),
+            max_attitude_error_rad=config.guidance_contact_max_attitude_error_rad,
+            max_force_n=config.control_bridge.max_selected_contact_force_n,
+            max_penetration_m=(
+                config.control_bridge.max_selected_contact_penetration_m
+            ),
+        )
+        latest_contact.update(guidance_evidence)
+        if (
+            config.mating_contact_mode == DYNAMIC_ASSEMBLY_FILTER_FALLBACK_MODE
+            and selected_pair_filter_applied
+            and latest_contact["selected_contact"]
+        ):
+            filter_fallback_selected_contact_violation_count += 1
+            latest_contact["unintended_contact"] = True
+            latest_contact["guidance_contact_valid"] = False
+            latest_contact.setdefault("guidance_failure_reasons", []).append(
+                "selected_contact_after_filter"
+            )
+        latest_follower_world_contact = _dynamic_net_contact_force_measurement(
+            follower_all_contact_view,
+            sim_dt=sim_dt,
+            sensor_count=len(follower_body_paths),
+            force_threshold_n=config.detach_external_contact_force_threshold_n,
+            scope="follower_component_all_external_contacts",
+        )
+        latest_leader_world_contact = _dynamic_net_contact_force_measurement(
+            leader_all_contact_view,
+            sim_dt=sim_dt,
+            sensor_count=len(leader_body_paths),
+            force_threshold_n=config.detach_external_contact_force_threshold_n,
+            scope="leader_component_all_external_contacts",
+        )
+        selected_pair_contact_observed = (
+            selected_pair_contact_observed or bool(latest_contact["selected_contact"])
+        )
+        selected_surface_contact_observed = (
+            selected_surface_contact_observed
+            or bool(latest_contact["selected_surface_valid"])
+        )
+        guidance_contact_observed = bool(
+            guidance_contact_observed
+            or latest_contact.get("guidance_contact_valid", False)
+        )
+        if (
+            latest_contact["selected_contact"]
+            and first_selected_contact_evidence is None
+        ):
+            first_selected_contact_evidence = {
+                **latest_contact,
+                "time_s": float(current_time_s),
+                "leader_connect_pose_world": list(leader_connect_pose),
+                "follower_connect_pose_world": list(follower_connect_pose),
+            }
+            print(
+                "[dynamic-assembly] first-selected-contact "
+                f"t={current_time_s:.3f}s "
+                f"guidance_valid={latest_contact['guidance_contact_valid']} "
+                f"count={latest_contact['selected_raw_contact_count']} "
+                f"force={latest_contact['selected_force_n']:.3f}N "
+                f"separation={latest_contact['selected_min_separation_m']:.6f}m "
+                f"relative={latest_contact['selected_surface_relative_translation']}",
+                flush=True,
+            )
+        if (
+            latest_contact.get("guidance_contact_valid") is True
+            and first_guidance_contact_evidence is None
+        ):
+            first_guidance_contact_evidence = {
+                **latest_contact,
+                "time_s": float(current_time_s),
+                "leader_connect_pose_world": list(leader_connect_pose),
+                "follower_connect_pose_world": list(follower_connect_pose),
+            }
+            print(
+                "[dynamic-assembly] first-funnel-guidance-contact "
+                f"t={current_time_s:.3f}s "
+                f"axial={latest_contact['guidance_axial_gap_m']:.6f}m "
+                f"transverse={latest_contact['guidance_transverse_error_m']:.6f}m "
+                f"attitude={latest_contact['guidance_attitude_error_rad']:.6f}rad",
+                flush=True,
+            )
+        if latest_contact["unintended_contact"]:
+            unintended_contact_count += 1
+
+    def final_seated_snapshot(
+        time_s: float,
+        *,
+        continuous_strict_dwell_s: float,
+        required_strict_dwell_s: float,
+    ) -> dict[str, object]:
+        leader_connect_pose, leader_connect_twist = connect_state(
+            leader_module_id
+        )
+        follower_connect_pose, follower_connect_twist = connect_state(
+            follower_module_id
+        )
+        alignment = _dynamic_connect_alignment_errors(
+            leader_connect_pose,
+            follower_connect_pose,
+        )
+        residual = constraint_residual(
+            leader_connect_pose,
+            follower_connect_pose,
+            leader_connect_twist_world=leader_connect_twist,
+            follower_connect_twist_world=follower_connect_twist,
+        )
+        seated_kwargs = {
+            "axial_error_m": alignment["axial_error_m"],
+            "transverse_error_m": alignment["transverse_error_m"],
+            "position_error_m": residual.position_error_m,
+            "attitude_error_rad": residual.attitude_error_rad,
+            "relative_linear_speed_mps": residual.relative_linear_speed_mps,
+            "relative_angular_speed_radps": residual.relative_angular_speed_radps,
+            "continuous_strict_dwell_s": continuous_strict_dwell_s,
+            "required_strict_dwell_s": required_strict_dwell_s,
+            "max_axial_error_m": config.control_bridge.fix_axial_tolerance_m,
+            "max_transverse_error_m": (
+                config.control_bridge.fix_transverse_tolerance_m
+            ),
+            "max_position_error_m": config.control_bridge.fix_axial_tolerance_m,
+            "max_attitude_error_rad": (
+                config.control_bridge.fix_attitude_tolerance_rad
+            ),
+            "max_relative_linear_speed_mps": (
+                config.control_bridge.fix_relative_linear_speed_tolerance_mps
+            ),
+            "max_relative_angular_speed_radps": (
+                config.control_bridge.fix_relative_angular_speed_tolerance_radps
+            ),
+            "both_component_qps_feasible": all(
+                status.qp_feasible for status in last_statuses.values()
+            ),
+        }
+        if physical_mating_mode:
+            seated = evaluate_final_seated_contact(
+                latest_contact,
+                **seated_kwargs,
+            )
+            contact_evidence = dict(latest_contact)
+        else:
+            seated = evaluate_final_seated_alignment(**seated_kwargs)
+            contact_evidence = {}
+        return {
+            **contact_evidence,
+            **seated,
+            "time_s": float(time_s),
+            "leader_qp_feasible": bool(
+                last_statuses[leader_module_id].qp_feasible
+            ),
+            "follower_qp_feasible": bool(
+                last_statuses[follower_module_id].qp_feasible
+            ),
+            "leader_connect_pose_world": list(leader_connect_pose),
+            "follower_connect_pose_world": list(follower_connect_pose),
+            "leader_connect_twist_world": list(leader_connect_twist),
+            "follower_connect_twist_world": list(follower_connect_twist),
+        }
+
+    def assembly_observation(time_s: float):
+        from amsrr.assembly import AssemblyComponentObservation, AssemblyControlObservation
+
+        nonlocal constraint_verified, constraint_verify_started_s, constraint_identity_failures
+        nonlocal strict_fix_gate_started_s, strict_fix_gate_dwell_elapsed_s
+        nonlocal latest_strict_gate_snapshot, latest_selected_dock_joint_diagnostics
+        leader_runtime = component_observation(leader_module_id, time_s)
+        follower_runtime = component_observation(follower_module_id, time_s)
+        leader_model = model_builder.build(
+            singleton_graphs[leader_module_id], physical_model, leader_runtime
+        )
+        follower_model = model_builder.build(
+            singleton_graphs[follower_module_id], physical_model, follower_runtime
+        )
+        leader_connect_pose, leader_connect_twist = connect_state(leader_module_id)
+        follower_connect_pose, follower_connect_twist = connect_state(follower_module_id)
+        latest_selected_dock_joint_diagnostics = selected_dock_joint_diagnostics()
+        strict_without_dwell = final_seated_snapshot(
+            time_s,
+            continuous_strict_dwell_s=0.0,
+            required_strict_dwell_s=0.0,
+        )
+        latest_strict_gate_snapshot = strict_without_dwell
+        if strict_without_dwell["final_seated_valid"] is True:
+            if strict_fix_gate_started_s is None:
+                strict_fix_gate_started_s = float(time_s)
+            strict_fix_gate_dwell_elapsed_s = max(
+                0.0,
+                float(time_s) - strict_fix_gate_started_s,
+            )
+        else:
+            strict_fix_gate_started_s = None
+            strict_fix_gate_dwell_elapsed_s = 0.0
+        if constraint_enabled:
+            constraint_identity_failures = fixed_joint_identity_failures(sim.stage, constraint_spec)
+            residual = constraint_residual(
+                leader_connect_pose,
+                follower_connect_pose,
+                leader_connect_twist_world=leader_connect_twist,
+                follower_connect_twist_world=follower_connect_twist,
+            )
+            alignment = _dynamic_connect_alignment_errors(
+                leader_connect_pose,
+                follower_connect_pose,
+            )
+            within = (
+                not constraint_identity_failures
+                and alignment["axial_error_m"]
+                <= config.control_bridge.fix_axial_tolerance_m
+                and alignment["transverse_error_m"]
+                <= config.control_bridge.fix_transverse_tolerance_m
+                and residual.position_error_m
+                <= config.control_bridge.fix_axial_tolerance_m
+                and residual.attitude_error_rad
+                <= config.control_bridge.fix_attitude_tolerance_rad
+                and residual.relative_linear_speed_mps
+                <= config.control_bridge.fix_relative_linear_speed_tolerance_mps
+                and residual.relative_angular_speed_radps
+                <= config.control_bridge.fix_relative_angular_speed_tolerance_radps
+            )
+            if within:
+                if constraint_verify_started_s is None:
+                    constraint_verify_started_s = float(time_s)
+                constraint_verified = (
+                    float(time_s) - constraint_verify_started_s
+                    >= config.constraint_verify_dwell_s
+                )
+            else:
+                constraint_verify_started_s = None
+                constraint_verified = False
+            if constraint_verified:
+                add_event("constraint_verified", time_s)
+        return AssemblyControlObservation(
+            time_s=float(time_s),
+            components=[
+                AssemblyComponentObservation(
+                    component_id=f"component:{leader_module_id}",
+                    module_ids=[leader_module_id],
+                    body_pose_world=leader_model.body_pose_world,
+                    selected_connect_pose_world=leader_connect_pose,
+                    selected_connect_linear_velocity_world=tuple(leader_connect_twist[:3]),
+                    selected_connect_angular_velocity_world=tuple(leader_connect_twist[3:6]),
+                    qp_feasible=last_statuses[leader_module_id].qp_feasible,
+                ),
+                AssemblyComponentObservation(
+                    component_id=f"component:{follower_module_id}",
+                    module_ids=[follower_module_id],
+                    body_pose_world=follower_model.body_pose_world,
+                    selected_connect_pose_world=follower_connect_pose,
+                    selected_connect_linear_velocity_world=tuple(follower_connect_twist[:3]),
+                    selected_connect_angular_velocity_world=tuple(follower_connect_twist[3:6]),
+                    qp_feasible=last_statuses[follower_module_id].qp_feasible,
+                ),
+            ],
+            selected_pair_contact=bool(latest_contact["selected_contact"]),
+            selected_pair_contact_evidence_valid=bool(
+                latest_contact.get("guidance_contact_valid", False)
+            ),
+            selected_pair_contact_force_n=float(latest_contact["selected_force_n"]),
+            selected_pair_penetration_m=float(latest_contact["selected_penetration_m"]),
+            unintended_contact=bool(latest_contact["unintended_contact"]),
+            constraint_present=constraint_enabled,
+            constraint_verified=constraint_verified,
+        )
+
+    def apply_component_policies(
+        policy_by_module: dict[int, PolicyCommand],
+        time_s: float,
+        *,
+        count_qp: bool = True,
+        zero_rotor_forces: bool = False,
+        control_phase: str = "operational",
+    ):
+        nonlocal command_index, qp_infeasible_count, missing_actuator_count, unsupported_actuator_count
+        nonlocal application_unresolved_target_count, clipped_target_count, finite_state
+        records = {}
+        for module_id in (leader_module_id, follower_module_id):
+            observation = component_observation(module_id, time_s)
+            command = controllers[module_id].compute(
+                ControllerContext(
+                    runtime_observation=observation,
+                    morphology_graph=singleton_graphs[module_id],
+                    physical_model=physical_model,
+                    active_knot=InteractionKnot(t_rel_s=time_s, contact_assignments=[]),
+                    policy_command=policy_by_module[module_id],
+                    previous_command=previous_commands[module_id],
+                    control_dt_s=sim_dt,
+                )
+            )
+            record = controller_bridges[module_id].convert(
+                command,
+                actuator_mappings[module_id],
+                time_s=float(time_s),
+                command_index=command_index,
+            )
+            application = _apply_actuator_record(
+                robots[module_id], record, physical_model, device,
+                allowed_module_id=module_id,
+            )
+            if zero_rotor_forces:
+                robots[module_id].permanent_wrench_composer.reset()
+            previous_commands[module_id] = command
+            last_commands[module_id] = command
+            last_statuses[module_id] = command.controller_status
+            if (
+                count_qp
+                and not command.controller_status.qp_feasible
+                and module_id not in first_infeasible_statuses
+            ):
+                first_infeasible_statuses[module_id] = {
+                    "time_s": float(time_s),
+                    "control_phase": control_phase,
+                    "command_index": int(command_index),
+                    "root_pose_world": _tensor_row(
+                        robots[module_id].data.root_pose_w.torch
+                    ),
+                    "root_twist_world": (
+                        _tensor_row(robots[module_id].data.root_lin_vel_w.torch)
+                        + _tensor_row(robots[module_id].data.root_ang_vel_w.torch)
+                    ),
+                    "model_body_pose_world": list(
+                        model_builder.build(
+                            singleton_graphs[module_id],
+                            physical_model,
+                            observation,
+                        ).body_pose_world
+                    ),
+                    "policy_command": policy_by_module[module_id].to_dict(),
+                    "controller_status": command.controller_status.to_dict(),
+                }
+            if command_index in {0, 1, 10, 50, 100, 200, 400, 600}:
+                controller_debug_samples.append(
+                    {
+                        "module_id": int(module_id),
+                        "time_s": float(time_s),
+                        "control_phase": control_phase,
+                        "command_index": int(command_index),
+                        "root_pose_world": _tensor_row(
+                            robots[module_id].data.root_pose_w.torch
+                        ),
+                        "policy_desired_body_pose": list(
+                            policy_by_module[module_id].desired_body_pose or []
+                        ),
+                        "controller_status": command.controller_status.to_dict(),
+                    }
+                )
+            if count_qp:
+                qp_infeasible_count += 0 if command.controller_status.qp_feasible else 1
+            missing_actuator_count += len(record.missing_actuators)
+            unsupported_actuator_count += len(record.unsupported_actuators)
+            clipped_target_count += len(record.clipped_targets)
+            application_unresolved_target_count += int(application["unresolved_target_count"])
+            records[module_id] = record
+        for robot in robots.values():
+            robot.write_data_to_sim()
+        sim.step()
+        for robot in robots.values():
+            robot.update(sim_dt)
+            finite_state = finite_state and all(
+                math.isfinite(float(value))
+                for value in (
+                    _tensor_row(robot.data.root_pose_w.torch)
+                    + _tensor_row(robot.data.root_lin_vel_w.torch)
+                    + _tensor_row(robot.data.root_ang_vel_w.torch)
+                )
+            )
+        command_index += 1
+        if args.realtime_playback:
+            time.sleep(max(0.0, sim_dt))
+        refresh_contact()
+        return records
+
+    def zero_joint_policy(module_id: int, pose: tuple, time_s: float) -> PolicyCommand:
+        targets = {f"module_{module_id}:{joint_id}": 0.0 for joint_id in joint_ids}
+        return PolicyCommand(
+            desired_body_pose=pose,
+            desired_body_twist=[0.0] * 6,
+            residual_wrench_body=[0.0] * 6,
+            control_contract_version=POLICY_COMMAND_CONTRACT_CENTROIDAL,
+            joint_position_targets=targets,
+            joint_velocity_targets={key: 0.0 for key in targets},
+            joint_torque_bias={key: 0.0 for key in targets},
+        )
+
+    # Floor initialization: zero thrust, implicit q=0 hold.
+    add_event("floor_settle", 0.0)
+    settle_steps = max(1, int(math.ceil(config.floor_settle_duration_s / sim_dt)))
+    floor_dwell_required_steps = max(
+        1,
+        int(math.ceil(config.floor_settle_required_dwell_s / sim_dt)),
+    )
+    floor_dwell_steps = 0
+    floor_contact_max_force_n = {module_id: 0.0 for module_id in robots}
+    all_joint_ids = {
+        module_id: torch.arange(
+            robot.num_joints,
+            dtype=torch.int32,
+            device=device,
+        )
+        for module_id, robot in robots.items()
+    }
+    for _ in range(settle_steps):
+        for module_id, robot in robots.items():
+            robot.permanent_wrench_composer.reset()
+            zero_joint_targets = torch.zeros_like(robot.data.joint_pos.torch)
+            robot.set_joint_position_target_index(
+                target=zero_joint_targets,
+                joint_ids=all_joint_ids[module_id],
+            )
+            robot.set_joint_velocity_target_index(
+                target=torch.zeros_like(robot.data.joint_vel.torch),
+                joint_ids=all_joint_ids[module_id],
+            )
+            robot.set_joint_effort_target_index(
+                target=torch.zeros_like(robot.data.joint_pos.torch),
+                joint_ids=all_joint_ids[module_id],
+            )
+            robot.write_data_to_sim()
+        sim.step()
+        for robot in robots.values():
+            robot.update(sim_dt)
+        for sensor in component_contact_sensors.values():
+            sensor.update(sim_dt, force_recompute=True)
+        measurements = {
+            module_id: _contact_sensor_measurement(
+                component_contact_sensors[module_id],
+                force_threshold_n=config.floor_contact_force_threshold_n,
+            )
+            for module_id in robots
+        }
+        for module_id, measurement in measurements.items():
+            floor_contact_max_force_n[module_id] = max(
+                floor_contact_max_force_n[module_id],
+                float(measurement["aggregate_force_n"]),
+            )
+        low_speed = all(
+            _vector_norm(_tensor_row(robot.data.root_lin_vel_w.torch))
+            <= config.floor_settle_linear_speed_tolerance_mps
+            and _vector_norm(_tensor_row(robot.data.root_ang_vel_w.torch))
+            <= config.floor_settle_angular_speed_tolerance_radps
+            and max(abs(value) for value in _tensor_row(robot.data.joint_pos.torch))
+            <= config.floor_settle_joint_position_tolerance_rad
+            and max(abs(value) for value in _tensor_row(robot.data.joint_vel.torch))
+            <= config.floor_settle_joint_speed_tolerance_radps
+            for robot in robots.values()
+        )
+        if all(bool(item["active"]) for item in measurements.values()) and low_speed:
+            floor_dwell_steps += 1
+        else:
+            floor_dwell_steps = 0
+        if args.realtime_playback:
+            time.sleep(max(0.0, sim_dt))
+    current_time_s = settle_steps * sim_dt
+    refresh_contact()
+    floor_initialization_verified = floor_dwell_steps >= floor_dwell_required_steps
+    floor_final_motion_by_module = {}
+    for module_id, robot in sorted(robots.items()):
+        joint_positions = _joint_state_dict(
+            robot.joint_names,
+            robot.data.joint_pos.torch,
+        )
+        joint_velocities = _joint_state_dict(
+            robot.joint_names,
+            robot.data.joint_vel.torch,
+        )
+        max_position_joint = max(
+            joint_positions,
+            key=lambda joint_name: abs(joint_positions[joint_name]),
+        )
+        max_velocity_joint = max(
+            joint_velocities,
+            key=lambda joint_name: abs(joint_velocities[joint_name]),
+        )
+        floor_final_motion_by_module[str(module_id)] = {
+            "root_linear_speed_mps": _vector_norm(
+                _tensor_row(robot.data.root_lin_vel_w.torch)
+            ),
+            "root_angular_speed_radps": _vector_norm(
+                _tensor_row(robot.data.root_ang_vel_w.torch)
+            ),
+            "max_abs_joint_position_rad": abs(
+                float(joint_positions[max_position_joint])
+            ),
+            "max_abs_joint_position_joint": max_position_joint,
+            "max_abs_joint_speed_radps": abs(
+                float(joint_velocities[max_velocity_joint])
+            ),
+            "max_abs_joint_speed_joint": max_velocity_joint,
+            "contact_active": bool(measurements[module_id]["active"]),
+        }
+    floor_initialization_evidence = {
+        "explicit_zero_joint_position_target": True,
+        "explicit_zero_joint_velocity_target": True,
+        "explicit_zero_joint_effort_bias": True,
+        "continuous_dwell_steps": int(floor_dwell_steps),
+        "required_dwell_steps": int(floor_dwell_required_steps),
+        "max_contact_force_n_by_module": {
+            str(module_id): value
+            for module_id, value in sorted(floor_contact_max_force_n.items())
+        },
+        "final_motion_by_module": floor_final_motion_by_module,
+        "verified": bool(floor_initialization_verified),
+    }
+    if not floor_initialization_verified:
+        return abort_report("floor_initialization_evidence_failed")
+
+    # A single module rests at a small floor pitch.  With the physical gimbal
+    # rate limit, its first gravity-compensation solve cannot instantaneously
+    # realize the corresponding body-X force.  Pre-trim vectoring joints while
+    # the floor carries weight, and do not enable rotor force until allocation
+    # has remained feasible for a dwell.
+    add_event("preflight_vectoring", current_time_s)
+    preflight_dwell_steps = 0
+    preflight_required_steps = max(
+        1,
+        int(math.ceil(config.preflight_feasible_dwell_s / sim_dt)),
+    )
+    preflight_budget = max(
+        1,
+        int(math.ceil(config.preflight_vectoring_timeout_s / sim_dt)),
+    )
+    for _ in range(preflight_budget):
+        policies = {}
+        for module_id in (leader_module_id, follower_module_id):
+            observation = component_observation(module_id, current_time_s)
+            current_pose = model_builder.build(
+                singleton_graphs[module_id], physical_model, observation
+            ).body_pose_world
+            policies[module_id] = zero_joint_policy(
+                module_id, current_pose, current_time_s
+            )
+        apply_component_policies(
+            policies,
+            current_time_s,
+            count_qp=False,
+            zero_rotor_forces=True,
+            control_phase="preflight_vectoring",
+        )
+        current_time_s += sim_dt
+        preflight_qp_infeasible_count += sum(
+            0 if status.qp_feasible else 1 for status in last_statuses.values()
+        )
+        if all(status.qp_feasible for status in last_statuses.values()):
+            preflight_dwell_steps += 1
+        else:
+            preflight_dwell_steps = 0
+        if preflight_dwell_steps >= preflight_required_steps:
+            preflight_vectoring_ready = True
+            break
+    if not preflight_vectoring_ready:
+        return abort_report("preflight_vectoring_feasibility_timeout")
+    add_event(
+        "preflight_vectoring_ready",
+        current_time_s,
+        dwell_s=preflight_dwell_steps * sim_dt,
+    )
+    for module_id, controller in controllers.items():
+        controller.reset_integrators()
+        previous_commands[module_id] = None
+
+    # Independent takeoff to a common assembly height.
+    add_event("takeoff", current_time_s)
+    takeoff_starts = {}
+    takeoff_targets = {}
+    for module_id in (leader_module_id, follower_module_id):
+        obs = component_observation(module_id, current_time_s)
+        model = model_builder.build(singleton_graphs[module_id], physical_model, obs)
+        start = model.body_pose_world
+        takeoff_starts[module_id] = start
+        takeoff_targets[module_id] = (
+            start[0], start[1], float(config.assembly_height_m), *start[3:7]
+        )
+    takeoff_steps = max(1, int(math.ceil(config.takeoff_duration_s / sim_dt)))
+    for step_index in range(takeoff_steps):
+        ratio = min(1.0, float(step_index + 1) / float(takeoff_steps))
+        smooth = ratio * ratio * (3.0 - 2.0 * ratio)
+        policies = {}
+        for module_id in (leader_module_id, follower_module_id):
+            start = takeoff_starts[module_id]
+            target = takeoff_targets[module_id]
+            pose = (
+                *(float(start[index]) + smooth * (float(target[index]) - float(start[index])) for index in range(3)),
+                *target[3:7],
+            )
+            policies[module_id] = zero_joint_policy(module_id, pose, current_time_s)
+        apply_component_policies(policies, current_time_s)
+        current_time_s += sim_dt
+
+    hold_steps = max(1, int(math.ceil(config.takeoff_hold_s / sim_dt)))
+    for _ in range(hold_steps):
+        policies = {
+            module_id: zero_joint_policy(
+                module_id, takeoff_targets[module_id], current_time_s
+            )
+            for module_id in (leader_module_id, follower_module_id)
+        }
+        apply_component_policies(policies, current_time_s)
+        current_time_s += sim_dt
+
+    # Do not start assembly merely because the open-loop schedule elapsed.
+    # Require measured hover tracking, low twist, finite state and feasible QP
+    # continuously before the planner sees either component.
+    add_event("hover_acquisition", current_time_s)
+    hover_dwell_steps = 0
+    hover_required_steps = max(
+        1,
+        int(math.ceil(config.hover_acquisition_dwell_s / sim_dt)),
+    )
+    hover_budget = max(
+        1,
+        int(math.ceil(config.hover_acquisition_timeout_s / sim_dt)),
+    )
+    hover_metrics: dict[str, float] = {}
+    for _ in range(hover_budget):
+        policies = {
+            module_id: zero_joint_policy(
+                module_id, takeoff_targets[module_id], current_time_s
+            )
+            for module_id in (leader_module_id, follower_module_id)
+        }
+        apply_component_policies(
+            policies,
+            current_time_s,
+            control_phase="hover_acquisition",
+        )
+        current_time_s += sim_dt
+        max_position_error = 0.0
+        max_attitude_error = 0.0
+        max_linear_speed = 0.0
+        max_angular_speed = 0.0
+        for module_id in (leader_module_id, follower_module_id):
+            observation = component_observation(module_id, current_time_s)
+            model = model_builder.build(
+                singleton_graphs[module_id], physical_model, observation
+            )
+            max_position_error = max(
+                max_position_error,
+                _position_error_norm(
+                    list(model.body_pose_world[:3]),
+                    takeoff_targets[module_id][:3],
+                ),
+            )
+            max_attitude_error = max(
+                max_attitude_error,
+                _quat_error_norm(
+                    list(model.body_pose_world[3:7]),
+                    takeoff_targets[module_id][3:7],
+                ),
+            )
+            max_linear_speed = max(
+                max_linear_speed, _vector_norm(model.body_twist_world[:3])
+            )
+            max_angular_speed = max(
+                max_angular_speed, _vector_norm(model.body_twist_world[3:6])
+            )
+        max_dock_joint_position, max_dock_joint_speed = dock_joint_state_max(
+            (leader_module_id, follower_module_id)
+        )
+        hover_metrics = {
+            "max_position_error_m": max_position_error,
+            "max_attitude_error_rad": max_attitude_error,
+            "max_linear_speed_mps": max_linear_speed,
+            "max_angular_speed_radps": max_angular_speed,
+            "max_dock_joint_position_rad": max_dock_joint_position,
+            "max_dock_joint_speed_radps": max_dock_joint_speed,
+        }
+        ready_now = (
+            finite_state
+            and all(status.qp_feasible for status in last_statuses.values())
+            and max_position_error <= config.hover_position_tolerance_m
+            and max_attitude_error <= config.hover_attitude_tolerance_rad
+            and max_linear_speed <= config.hover_linear_speed_tolerance_mps
+            and max_angular_speed <= config.hover_angular_speed_tolerance_radps
+            and max_dock_joint_position
+            <= config.attached_joint_position_tolerance_rad
+            and max_dock_joint_speed
+            <= config.attached_joint_speed_tolerance_radps
+        )
+        hover_dwell_steps = hover_dwell_steps + 1 if ready_now else 0
+        if hover_dwell_steps >= hover_required_steps:
+            hover_acquired = True
+            break
+    if not hover_acquired:
+        return abort_report("hover_acquisition_timeout")
+    add_event(
+        "hover_acquired",
+        current_time_s,
+        dwell_s=hover_dwell_steps * sim_dt,
+        **hover_metrics,
+    )
+
+    class _Runtime:
+        control_dt_s = sim_dt
+
+        def __init__(self):
+            self._leader_collision_proxy = None
+            self._follower_collision_proxy = None
+            self._leader_collision_pose = None
+            self._follower_collision_pose = None
+            self._leader_connect_in_component = None
+            self._follower_connect_in_component = None
+            self._last_motion_debug_s = -math.inf
+
+        def observe(self):
+            return assembly_observation(current_time_s)
+
+        def apply_and_step(self, commands):
+            nonlocal current_time_s, constraint_enabled, selected_pair_filter_applied
+            nonlocal selected_pair_filter_apply_verified
+            nonlocal final_seated_evidence, mating_filter_evidence
+            nonlocal latest_selected_dock_joint_diagnostics
+            phase = commands.phase
+            if (
+                phase == "prealign_dwell"
+                and config.mating_contact_mode
+                == DYNAMIC_ASSEMBLY_FILTER_FALLBACK_MODE
+                and not selected_pair_filter_applied
+            ):
+                filter_delta = filter_selected_body_pair(sim.stage, constraint_spec)
+                selected_pair_filter_applied = True
+                filter_failures = selected_body_pair_filter_failures(
+                    sim.stage,
+                    constraint_spec,
+                    expected_filtered=True,
+                )
+                if filter_failures:
+                    raise RuntimeError(
+                        "dynamic fallback selected-body filter verification failed: "
+                        + ",".join(filter_failures)
+                    )
+                selected_pair_filter_apply_verified = True
+                mating_filter_evidence = {
+                    "evidence_version": (
+                        DYNAMIC_ASSEMBLY_FILTER_FALLBACK_ACCEPTANCE_CONTRACT
+                    ),
+                    "mating_contact_mode": config.mating_contact_mode,
+                    "scope": "selected_dock_body_pair_only",
+                    "apply_phase": "prealign_dwell",
+                    "time_s": float(current_time_s),
+                    "command_index": int(command_index),
+                    "applied_before_first_axial_physics_step": True,
+                    "apply_verified": True,
+                    "environment_collisions_preserved": True,
+                    "other_body_pair_collisions_preserved": True,
+                    **filter_delta,
+                }
+            add_event(phase, current_time_s)
+            if phase == "fix_ready":
+                final_seated_evidence = final_seated_snapshot(
+                    current_time_s,
+                    continuous_strict_dwell_s=strict_fix_gate_dwell_elapsed_s,
+                    required_strict_dwell_s=(
+                        config.control_bridge.selected_contact_dwell_s
+                    ),
+                )
+            if (
+                commands.constraint_intent.action == "create"
+                and not constraint_enabled
+                and final_seated_evidence is not None
+                and final_seated_evidence.get("final_seated_valid") is True
+            ):
+                if not selected_pair_filter_applied:
+                    filter_selected_body_pair(sim.stage, constraint_spec)
+                    selected_pair_filter_applied = True
+                filter_failures = selected_body_pair_filter_failures(
+                    sim.stage,
+                    constraint_spec,
+                    expected_filtered=True,
+                )
+                if filter_failures:
+                    raise RuntimeError(
+                        "dynamic selected-body filter verification failed: "
+                        + ",".join(filter_failures)
+                    )
+                selected_pair_filter_apply_verified = True
+                set_fixed_joint_enabled(fixed_joint, True)
+                constraint_enabled = True
+                add_event("constraint_enabled", current_time_s)
+            policy_by_module = {
+                target.module_ids[0]: target.policy_command
+                for target in commands.component_targets
+            }
+            apply_component_policies(policy_by_module, current_time_s)
+            if phase == "axial_approach":
+                latest_selected_dock_joint_diagnostics = (
+                    selected_dock_joint_diagnostics()
+                )
+                record_axial_selected_joint_evidence(
+                    latest_selected_dock_joint_diagnostics
+                )
+            current_time_s += sim_dt
+            if (
+                phase in {"staging", "axial_approach"}
+                and current_time_s - self._last_motion_debug_s >= 0.5
+            ):
+                self._last_motion_debug_s = current_time_s
+                follower_runtime = component_observation(
+                    follower_module_id, current_time_s
+                )
+                follower_model = model_builder.build(
+                    singleton_graphs[follower_module_id],
+                    physical_model,
+                    follower_runtime,
+                )
+                follower_pose = follower_model.body_pose_world
+                follower_policy = policy_by_module[follower_module_id]
+                status_metrics = last_statuses[follower_module_id].metrics
+                leader_connect_pose, leader_connect_twist = connect_state(
+                    leader_module_id
+                )
+                follower_connect_pose, follower_connect_twist = connect_state(
+                    follower_module_id
+                )
+                connect_alignment = _dynamic_connect_alignment_errors(
+                    leader_connect_pose,
+                    follower_connect_pose,
+                )
+                current_follower_body = transform_from_pose(follower_pose)
+                current_follower_connect = transform_from_pose(
+                    follower_connect_pose
+                )
+                connect_in_follower_body = compose_transform(
+                    inverse_transform(current_follower_body),
+                    current_follower_connect,
+                )
+                target_connect_relative = None
+                if follower_policy.desired_body_pose is not None:
+                    target_connect_world = compose_transform(
+                        transform_from_pose(follower_policy.desired_body_pose),
+                        connect_in_follower_body,
+                    )
+                    target_connect_relative = compose_transform(
+                        inverse_transform(transform_from_pose(leader_connect_pose)),
+                        target_connect_world,
+                    )
+                sample = {
+                    "time_s": float(current_time_s),
+                    "phase": phase,
+                    "follower_pose_world": list(follower_pose),
+                    "target_pose_world": list(
+                        follower_policy.desired_body_pose or []
+                    ),
+                    "target_twist_world": list(
+                        follower_policy.desired_body_twist or []
+                    ),
+                    "residual_wrench_body": list(
+                        follower_policy.residual_wrench_body or []
+                    ),
+                    "observed_body_twist_world": list(
+                        follower_model.body_twist_world
+                    ),
+                    "root_link_twist_world": list(
+                        follower_runtime.module_states[0].twist_world
+                    ),
+                    "root_com_linear_velocity_world": _tensor_row(
+                        robots[follower_module_id].data.root_lin_vel_w.torch
+                    ),
+                    "target_velocity_error_norm": status_metrics.get(
+                        "target_velocity_error_norm"
+                    ),
+                    "target_position_error_m": status_metrics.get(
+                        "target_pos_error_m"
+                    ),
+                    "connect_axial_gap_m": connect_alignment["axial_error_m"],
+                    "connect_transverse_error_m": connect_alignment[
+                        "transverse_error_m"
+                    ],
+                    "connect_attitude_error_rad": connect_alignment[
+                        "attitude_error_rad"
+                    ],
+                    "connect_relative_linear_speed_mps": _vector_norm(
+                        [
+                            float(follower_connect_twist[index])
+                            - float(leader_connect_twist[index])
+                            for index in range(3)
+                        ]
+                    ),
+                    "connect_relative_angular_speed_radps": _vector_norm(
+                        [
+                            float(follower_connect_twist[index])
+                            - float(leader_connect_twist[index])
+                            for index in range(3, 6)
+                        ]
+                    ),
+                    "leader_connect_twist_world": list(leader_connect_twist),
+                    "follower_connect_twist_world": list(follower_connect_twist),
+                    "selected_dock_joint_diagnostics": (
+                        selected_dock_joint_diagnostics()
+                    ),
+                    "strict_gate_valid_without_dwell": bool(
+                        latest_strict_gate_snapshot
+                        and latest_strict_gate_snapshot.get("final_seated_valid")
+                        is True
+                    ),
+                    "strict_gate_failure_reasons_without_dwell": list(
+                        (
+                            latest_strict_gate_snapshot.get(
+                                "final_seated_failure_reasons",
+                                [],
+                            )
+                            if latest_strict_gate_snapshot
+                            else []
+                        )
+                    ),
+                    "target_connect_axial_gap_m": (
+                        None
+                        if target_connect_relative is None
+                        else float(target_connect_relative.translation[0])
+                    ),
+                    "selected_contact": bool(latest_contact["selected_contact"]),
+                    "selected_force_n": float(latest_contact["selected_force_n"]),
+                    "selected_penetration_m": float(
+                        latest_contact["selected_penetration_m"]
+                    ),
+                    "target_wrench_body": [
+                        status_metrics.get(
+                            f"target_wrench_body_after_payload_{suffix}"
+                        )
+                        for suffix in ("fx", "fy", "fz", "tx", "ty", "tz")
+                    ],
+                    "qp_feasible": last_statuses[
+                        follower_module_id
+                    ].qp_feasible,
+                }
+                motion_debug_samples.append(sample)
+                print(
+                    f"[dynamic-assembly] {phase}-motion "
+                    f"t={current_time_s:.3f}s "
+                    f"pose={sample['follower_pose_world'][:3]} "
+                    f"target={sample['target_pose_world'][:3]} "
+                    f"twist={sample['target_twist_world'][:3]} "
+                    f"observed={sample['observed_body_twist_world'][:3]} "
+                    f"connect_gap={sample['connect_axial_gap_m']:.6f}m "
+                    f"target_gap={sample['target_connect_axial_gap_m']}",
+                    flush=True,
+                )
+            if constraint_verified:
+                add_event("constraint_verified", current_time_s)
+
+        def _current_component_pose(self, module_id: int):
+            runtime_observation = component_observation(module_id, current_time_s)
+            return model_builder.build(
+                singleton_graphs[module_id],
+                physical_model,
+                runtime_observation,
+            ).body_pose_world
+
+        def _ensure_collision_proxies(self) -> None:
+            if self._leader_collision_proxy is not None:
+                return
+            self._leader_collision_pose = self._current_component_pose(
+                leader_module_id
+            )
+            self._follower_collision_pose = self._current_component_pose(
+                follower_module_id
+            )
+            leader_connect_pose, _ = connect_state(leader_module_id)
+            follower_connect_pose, _ = connect_state(follower_module_id)
+            self._leader_connect_in_component = compose_pose(
+                inverse_pose(self._leader_collision_pose),
+                leader_connect_pose,
+            )
+            self._follower_connect_in_component = compose_pose(
+                inverse_pose(self._follower_collision_pose),
+                follower_connect_pose,
+            )
+            self._leader_collision_proxy = _dynamic_component_collision_proxy(
+                robot=robots[leader_module_id],
+                physical_model=physical_model,
+                module_id=leader_module_id,
+                component_pose_world=self._leader_collision_pose,
+                mesh_search_dirs=_holon_mesh_search_dirs(),
+            )
+            self._follower_collision_proxy = _dynamic_component_collision_proxy(
+                robot=robots[follower_module_id],
+                physical_model=physical_model,
+                module_id=follower_module_id,
+                component_pose_world=self._follower_collision_pose,
+                mesh_search_dirs=_holon_mesh_search_dirs(),
+            )
+
+        def is_component_pose_collision_free(self, component_id, pose_world):
+            if component_id != f"component:{follower_module_id}":
+                return False
+            self._ensure_collision_proxies()
+            # Collider corners stay component-local while joint targets remain
+            # at canonical q=0, but the leader body pose must follow runtime
+            # drift on every planner query.
+            self._leader_collision_pose = self._current_component_pose(
+                leader_module_id
+            )
+            return _dynamic_collision_proxy_pose_free(
+                leader_proxy=self._leader_collision_proxy,
+                follower_proxy=self._follower_collision_proxy,
+                leader_pose_world=self._leader_collision_pose,
+                follower_pose_world=pose_world,
+                excluded_body_pair=(
+                    leader_port_spec.parent_link,
+                    follower_port_spec.parent_link,
+                ),
+                leader_connect_pose_in_component=self._leader_connect_in_component,
+                follower_connect_pose_in_component=self._follower_connect_in_component,
+                selected_pair_min_axial_gap_m=(
+                    config.control_bridge.staging_offset_m
+                    - config.control_bridge.staging_axial_tolerance_m
+                ),
+                selected_pair_transverse_tolerance_m=(
+                    2.0 * config.control_bridge.transverse_tolerance_m
+                ),
+                selected_pair_attitude_tolerance_rad=(
+                    2.0 * config.control_bridge.attitude_tolerance_rad
+                ),
+                floor_clearance_m=0.01,
+            )
+
+        def selected_body_clearance_m(self) -> float:
+            self._ensure_collision_proxies()
+            leader_body_pose = _module_body_pose(
+                robots[leader_module_id],
+                module_id=leader_module_id,
+                local_body_name=leader_port_spec.parent_link,
+            )
+            follower_body_pose = _module_body_pose(
+                robots[follower_module_id],
+                module_id=follower_module_id,
+                local_body_name=follower_port_spec.parent_link,
+            )
+            if leader_body_pose is None or follower_body_pose is None:
+                raise RuntimeError(
+                    "dynamic selected-body clearance cannot resolve current Dock body poses"
+                )
+            return _dynamic_selected_body_proxy_clearance_m(
+                leader_proxy=self._leader_collision_proxy,
+                follower_proxy=self._follower_collision_proxy,
+                leader_body_pose_world=leader_body_pose,
+                follower_body_pose_world=follower_body_pose,
+                leader_body_path=leader_port_spec.parent_link,
+                follower_body_path=follower_port_spec.parent_link,
+            )
+
+    runtime = _Runtime()
+    assembly_bridge = AssemblyControlBridge(
+        morphology_graph,
+        {
+            leader_module_id: physical_model,
+            follower_module_id: physical_model,
+        },
+        config=config.control_bridge,
+    )
+    executor = ClosedLoopAssemblyExecutor(
+        target_graph=morphology_graph,
+        bridge=assembly_bridge,
+        runtime=runtime,
+        motion_planner=DeterministicAssemblyMotionPlanner(config.motion_planner),
+        config=ClosedLoopAssemblyExecutorConfig(
+            max_translation_speed_mps=config.assembly_translation_speed_limit_mps,
+            max_angular_speed_radps=config.assembly_angular_speed_limit_radps,
+            command_lookahead_s=config.assembly_command_lookahead_s,
+        ),
+    )
+    assembly_report = AssemblyRunner(
+        planner=GraphEditAssemblyPlanner(
+            AssemblyPlannerConfig(
+                move_timeout_s=config.control_bridge.step_timeout_s,
+                align_timeout_s=max(5.0, config.control_bridge.prealign_dwell_s + 2.0),
+                dock_timeout_s=config.control_bridge.axial_approach_timeout_s,
+                verify_timeout_s=max(5.0, config.constraint_verify_dwell_s + 2.0),
+            )
+        )
+    ).run(
+        morphology_graph,
+        executor,
+        construction_state=initial_construction_state(morphology_graph),
+    )
+    if executor.trace:
+        last_assembly_control_progress = executor.trace[-1].progress.to_dict()
+    attach_passed = bool(
+        assembly_report.success
+        and constraint_enabled
+        and constraint_verified
+        and not constraint_identity_failures
+    )
+    if not attach_passed:
+        return abort_report(
+            "order6_attach_gate_failed",
+            assembly_report=assembly_report,
+        )
+
+    attached_graph = replace(
+        morphology_graph,
+        dock_edges=[replace(edge, latch_state="attached")],
+        graph_id=f"{morphology_graph.graph_id}:dynamic-attached",
+    )
+    # Controller handover: continuously blend the two component-controller
+    # commands into one assembled-controller command.  The two external
+    # articulation/tensor views remain intact because the FixedJoint is
+    # external to both articulation roots.
+    component_handover_source = merge_disjoint_controller_commands(
+        [
+            last_commands[module_id]
+            for module_id in (leader_module_id, follower_module_id)
+            if last_commands[module_id] is not None
+        ]
+    )
+    assembled_controller = QPIDController(
+        config=QPIDControllerConfig(
+            allocation_mode=config.allocation_mode,
+            control_dt_s=sim_dt,
+        )
+    )
+    assembled_mapping = build_actuator_mapping(attached_graph, physical_model)
+    assembled_bridge = IsaacControllerBridge()
+    assembled_previous = None
+    attached_observation = combined_observation(current_time_s, attached_graph)
+    attached_model = model_builder.build(attached_graph, physical_model, attached_observation)
+    attached_hold_pose = attached_model.body_pose_world
+    all_joint_targets = {
+        f"module_{module_id}:{joint_id}": 0.0
+        for module_id in (leader_module_id, follower_module_id)
+        for joint_id in joint_ids
+    }
+    attached_policy = PolicyCommand(
+        desired_body_pose=attached_hold_pose,
+        desired_body_twist=[0.0] * 6,
+        residual_wrench_body=[0.0] * 6,
+        control_contract_version=POLICY_COMMAND_CONTRACT_CENTROIDAL,
+        joint_position_targets=all_joint_targets,
+        joint_velocity_targets={key: 0.0 for key in all_joint_targets},
+        joint_torque_bias={key: 0.0 for key in all_joint_targets},
+    )
+    add_event("attach_handover", current_time_s)
+    attach_blend_steps = max(
+        1,
+        int(math.ceil(config.controller_handover_blend_s / sim_dt)),
+    )
+    attached_hold_steps = max(1, int(math.ceil(config.attached_hold_s / sim_dt)))
+    attached_required_stable_steps = attached_hold_steps
+    attached_max_metrics = {
+        "position_error_m": 0.0,
+        "attitude_error_rad": 0.0,
+        "linear_speed_mps": 0.0,
+        "angular_speed_radps": 0.0,
+        "connect_position_error_m": 0.0,
+        "connect_axial_error_m": 0.0,
+        "connect_transverse_error_m": 0.0,
+        "connect_attitude_error_rad": 0.0,
+        "connect_relative_linear_speed_mps": 0.0,
+        "connect_relative_angular_speed_radps": 0.0,
+        "dock_joint_position_rad": 0.0,
+        "dock_joint_speed_radps": 0.0,
+    }
+    last_assembled_command = None
+    for attached_index in range(attach_blend_steps + attached_hold_steps):
+        observation = combined_observation(current_time_s, attached_graph)
+        assembled_command = assembled_controller.compute(
+            ControllerContext(
+                runtime_observation=observation,
+                morphology_graph=attached_graph,
+                physical_model=physical_model,
+                active_knot=InteractionKnot(t_rel_s=current_time_s, contact_assignments=[]),
+                policy_command=attached_policy,
+                previous_command=assembled_previous,
+                control_dt_s=sim_dt,
+            )
+        )
+        handover_alpha = min(
+            1.0,
+            float(attached_index + 1) / float(attach_blend_steps),
+        )
+        command = blend_controller_commands(
+            component_handover_source,
+            assembled_command,
+            handover_alpha,
+        )
+        if attached_index + 1 == attach_blend_steps:
+            attach_handover_completed = True
+            add_event("attached_hold", current_time_s)
+        if attached_index in {0, attach_blend_steps - 1}:
+            controller_handover_samples.append(
+                {
+                    "direction": "components_to_assembled",
+                    "time_s": float(current_time_s),
+                    "alpha": float(handover_alpha),
+                    "source_qp_feasible": bool(
+                        component_handover_source.controller_status.qp_feasible
+                    ),
+                    "target_qp_feasible": bool(
+                        assembled_command.controller_status.qp_feasible
+                    ),
+                }
+            )
+        record = assembled_bridge.convert(
+            command,
+            assembled_mapping,
+            time_s=current_time_s,
+            command_index=command_index,
+        )
+        for module_id in (leader_module_id, follower_module_id):
+            application = _apply_actuator_record(
+                robots[module_id], record, physical_model, device,
+                allowed_module_id=module_id,
+            )
+            robots[module_id].write_data_to_sim()
+            last_statuses[module_id] = command.controller_status
+            application_unresolved_target_count += int(
+                application["unresolved_target_count"]
+            )
+        qp_infeasible_count += 0 if (
+            assembled_command.controller_status.qp_feasible
+            and command.controller_status.qp_feasible
+        ) else 1
+        missing_actuator_count += len(record.missing_actuators)
+        unsupported_actuator_count += len(record.unsupported_actuators)
+        clipped_target_count += len(record.clipped_targets)
+        sim.step()
+        for robot in robots.values():
+            robot.update(sim_dt)
+            finite_state = finite_state and all(
+                math.isfinite(float(value))
+                for value in (
+                    _tensor_row(robot.data.root_pose_w.torch)
+                    + _tensor_row(robot.data.root_lin_vel_w.torch)
+                    + _tensor_row(robot.data.root_ang_vel_w.torch)
+                )
+            )
+        refresh_contact()
+        current_identity_failures = fixed_joint_identity_failures(
+            sim.stage,
+            constraint_spec,
+        )
+        if current_identity_failures:
+            constraint_identity_failures = current_identity_failures
+            return abort_report(
+                "order6_constraint_identity_lost_during_attached_hold",
+                assembly_report=assembly_report,
+                attach_gate_passed=True,
+            )
+        if attached_index >= attach_blend_steps:
+            attached_selected_pair_contact_free = bool(
+                attached_selected_pair_contact_free
+                and not latest_contact["selected_contact"]
+            )
+            attached_observation_now = combined_observation(
+                current_time_s,
+                attached_graph,
+            )
+            attached_model_now = model_builder.build(
+                attached_graph,
+                physical_model,
+                attached_observation_now,
+            )
+            attached_position_error = _position_error_norm(
+                list(attached_model_now.body_pose_world[:3]),
+                attached_hold_pose[:3],
+            )
+            attached_attitude_error = _quat_error_norm(
+                list(attached_model_now.body_pose_world[3:7]),
+                attached_hold_pose[3:7],
+            )
+            attached_linear_speed = _vector_norm(
+                attached_model_now.body_twist_world[:3]
+            )
+            attached_angular_speed = _vector_norm(
+                attached_model_now.body_twist_world[3:6]
+            )
+            leader_connect_pose, leader_connect_twist = connect_state(
+                leader_module_id
+            )
+            follower_connect_pose, follower_connect_twist = connect_state(
+                follower_module_id
+            )
+            attached_connect_residual = constraint_residual(
+                leader_connect_pose,
+                follower_connect_pose,
+                leader_connect_twist_world=leader_connect_twist,
+                follower_connect_twist_world=follower_connect_twist,
+            )
+            attached_alignment = _dynamic_connect_alignment_errors(
+                leader_connect_pose,
+                follower_connect_pose,
+            )
+            attached_joint_position, attached_joint_speed = dock_joint_state_max(
+                (leader_module_id, follower_module_id)
+            )
+            attached_values = {
+                "position_error_m": attached_position_error,
+                "attitude_error_rad": attached_attitude_error,
+                "linear_speed_mps": attached_linear_speed,
+                "angular_speed_radps": attached_angular_speed,
+                "connect_position_error_m": attached_connect_residual.position_error_m,
+                "connect_axial_error_m": attached_alignment["axial_error_m"],
+                "connect_transverse_error_m": attached_alignment[
+                    "transverse_error_m"
+                ],
+                "connect_attitude_error_rad": attached_connect_residual.attitude_error_rad,
+                "connect_relative_linear_speed_mps": (
+                    attached_connect_residual.relative_linear_speed_mps
+                ),
+                "connect_relative_angular_speed_radps": (
+                    attached_connect_residual.relative_angular_speed_radps
+                ),
+                "dock_joint_position_rad": attached_joint_position,
+                "dock_joint_speed_radps": attached_joint_speed,
+            }
+            for key, value in attached_values.items():
+                attached_max_metrics[key] = max(attached_max_metrics[key], value)
+            attached_step_stable = bool(
+                finite_state
+                and assembled_command.controller_status.qp_feasible
+                and command.controller_status.qp_feasible
+                and not latest_contact["unintended_contact"]
+                and not latest_contact["selected_contact"]
+                and attached_position_error <= config.attached_position_tolerance_m
+                and attached_attitude_error <= config.attached_attitude_tolerance_rad
+                and attached_linear_speed <= config.attached_linear_speed_tolerance_mps
+                and attached_angular_speed <= config.attached_angular_speed_tolerance_radps
+                and attached_alignment["axial_error_m"]
+                <= config.control_bridge.fix_axial_tolerance_m
+                and attached_alignment["transverse_error_m"]
+                <= config.control_bridge.fix_transverse_tolerance_m
+                and attached_connect_residual.position_error_m
+                <= config.control_bridge.fix_axial_tolerance_m
+                and attached_connect_residual.attitude_error_rad
+                <= config.control_bridge.fix_attitude_tolerance_rad
+                and attached_connect_residual.relative_linear_speed_mps
+                <= config.control_bridge.fix_relative_linear_speed_tolerance_mps
+                and attached_connect_residual.relative_angular_speed_radps
+                <= config.control_bridge.fix_relative_angular_speed_tolerance_radps
+                and attached_joint_position
+                <= config.attached_joint_position_tolerance_rad
+                and attached_joint_speed
+                <= config.attached_joint_speed_tolerance_radps
+            )
+            attached_stable_steps = (
+                attached_stable_steps + 1 if attached_step_stable else 0
+            )
+        current_time_s += sim_dt
+        command_index += 1
+        assembled_previous = assembled_command
+        last_assembled_command = assembled_command
+
+    attached_stability_verified = (
+        attached_stable_steps >= attached_required_stable_steps
+    )
+    if (
+        not attach_handover_completed
+        or last_assembled_command is None
+        or not attached_stability_verified
+    ):
+        return abort_report(
+            "order6_attach_handover_or_stability_failed",
+            assembly_report=assembly_report,
+            attach_gate_passed=True,
+        )
+
+    mating_pre_fix_evidence_passed = bool(
+        (
+            physical_mating_mode
+            and selected_pair_contact_observed
+            and guidance_contact_observed
+            and first_selected_contact_evidence is not None
+            and first_guidance_contact_evidence is not None
+            and mating_filter_evidence is None
+        )
+        or (
+            not physical_mating_mode
+            and not selected_pair_contact_observed
+            and not guidance_contact_observed
+            and first_selected_contact_evidence is None
+            and first_guidance_contact_evidence is None
+            and mating_filter_evidence is not None
+            and selected_pair_filter_apply_verified
+            and filter_fallback_selected_contact_violation_count == 0
+        )
+    )
+
+    if config.acceptance_gate == DYNAMIC_ASSEMBLY_ATTACH_ONLY_GATE:
+        attach_only_passed = bool(
+            attach_passed
+            and attach_handover_completed
+            and attached_stability_verified
+            and not constraint_identity_failures
+            and selected_pair_filter_applied
+            and selected_pair_filter_apply_verified
+            and attached_selected_pair_contact_free
+            and mating_pre_fix_evidence_passed
+            and final_seated_evidence is not None
+            and final_seated_evidence.get("final_seated_valid") is True
+            and collision_approximation_evidence.get("verified") is True
+            and floor_initialization_verified
+            and preflight_vectoring_ready
+            and hover_acquired
+            and qp_infeasible_count == 0
+            and unintended_contact_count == 0
+            and missing_actuator_count == 0
+            and unsupported_actuator_count == 0
+            and application_unresolved_target_count == 0
+            and clipped_target_count == 0
+            and finite_state
+        )
+        add_event("complete", current_time_s, passed=attach_only_passed)
+        if args.keep_open_after_smoke_s > 0.0:
+            _keep_viewer_open(float(args.keep_open_after_smoke_s))
+        sim.stop()
+        sim.clear_instance()
+        return {
+            "spawn_passed": True,
+            "isaac_backed": True,
+            "command_applied": True,
+            "command_probe_passed": attach_only_passed,
+            "dynamic_assembly_roundtrip": False,
+            "dynamic_assembly_acceptance_gate": config.acceptance_gate,
+            "dynamic_assembly_version": DYNAMIC_ASSEMBLY_ROUNDTRIP_VERSION,
+            "dynamic_assembly_collision_type": config.collision_type,
+            "dynamic_assembly_mating_contact_mode": config.mating_contact_mode,
+            **mating_mode_report_fields(attach_passed=attach_only_passed),
+            **simulation_numerics_report_fields(),
+            "dynamic_assembly_dock_collision_approximation_verified": bool(
+                collision_approximation_evidence.get("verified") is True
+            ),
+            "dynamic_assembly_dock_collision_approximation_token": (
+                collision_approximation_evidence.get(
+                    "requested_approximation_token"
+                )
+            ),
+            "dynamic_assembly_dock_collision_composed_prim_count": int(
+                collision_approximation_evidence.get("composed_prim_count", 0)
+            ),
+            "dynamic_assembly_dock_collision_approximation_evidence": dict(
+                collision_approximation_evidence
+            ),
+            "dynamic_assembly_force_usd_conversion": bool(args.force_convert),
+            "dynamic_assembly_graph_id": morphology_graph.graph_id,
+            "dynamic_assembly_graph_hash": morphology_graph.stable_hash(),
+            "dynamic_assembly_config_hash": config.stable_hash(),
+            "dynamic_assembly_backend_config_hash": backend_config_hash,
+            "dynamic_assembly_physical_model_hash": physical_model.stable_hash(),
+            "dynamic_assembly_collision_geometry_content_hash": (
+                collision_geometry_content_hash(
+                    physical_model,
+                    mesh_search_dirs=_holon_mesh_search_dirs(),
+                )
+            ),
+            "dynamic_assembly_module_count": 2,
+            "dynamic_assembly_edge_id": edge.edge_id,
+            "dynamic_assembly_leader_module_id": leader_module_id,
+            "dynamic_assembly_follower_module_id": follower_module_id,
+            "dynamic_assembly_attach_passed": attach_only_passed,
+            "dynamic_assembly_detach_passed": False,
+            "dynamic_assembly_passed": attach_only_passed,
+            "dynamic_assembly_external_fixed_joint": True,
+            "dynamic_assembly_constraint_excluded_from_articulation": True,
+            "dynamic_assembly_constraint_version": DYNAMIC_DOCK_CONSTRAINT_VERSION,
+            "dynamic_assembly_constraint_spec": constraint_spec.to_dict(),
+            "dynamic_assembly_constraint_identity_verified": not constraint_identity_failures,
+            "dynamic_assembly_constraint_identity_failures": constraint_identity_failures,
+            "dynamic_assembly_constraint_identity_failure_count": len(
+                constraint_identity_failures
+            ),
+            "dynamic_assembly_selected_pair_contact_observed": selected_pair_contact_observed,
+            "dynamic_assembly_selected_surface_contact_observed": selected_surface_contact_observed,
+            "dynamic_assembly_first_selected_contact_evidence": first_selected_contact_evidence,
+            "dynamic_assembly_guidance_contact_observed": guidance_contact_observed,
+            "dynamic_assembly_first_guidance_contact_evidence": (
+                first_guidance_contact_evidence
+            ),
+            "dynamic_assembly_final_seated_evidence": final_seated_evidence,
+            "dynamic_assembly_last_strict_gate_snapshot": (
+                latest_strict_gate_snapshot
+            ),
+            "dynamic_assembly_last_selected_dock_joint_diagnostics": dict(
+                latest_selected_dock_joint_diagnostics
+            ),
+            "dynamic_assembly_axial_selected_joint_evidence": dict(
+                axial_selected_joint_evidence
+            ),
+            "dynamic_assembly_last_assembly_control_progress": (
+                last_assembly_control_progress
+            ),
+            "dynamic_assembly_last_contact_measurement": dict(latest_contact),
+            "dynamic_assembly_selected_pair_filter_applied": selected_pair_filter_applied,
+            "dynamic_assembly_selected_pair_filter_apply_verified": (
+                selected_pair_filter_apply_verified
+            ),
+            "dynamic_assembly_mating_filter_evidence": (
+                mating_filter_evidence_snapshot()
+            ),
+            "dynamic_assembly_filter_fallback_selected_contact_violation_count": (
+                filter_fallback_selected_contact_violation_count
+            ),
+            "dynamic_assembly_attach_handover_completed": attach_handover_completed,
+            "dynamic_assembly_attached_stability_verified": attached_stability_verified,
+            "dynamic_assembly_attached_selected_pair_contact_free": (
+                attached_selected_pair_contact_free
+            ),
+            "dynamic_assembly_attached_stable_steps": attached_stable_steps,
+            "dynamic_assembly_attached_required_stable_steps": attached_required_stable_steps,
+            "dynamic_assembly_attached_max_metrics": attached_max_metrics,
+            "dynamic_assembly_controller_handover_samples": controller_handover_samples,
+            "dynamic_assembly_assembly_run_report": assembly_report.to_dict(),
+            "dynamic_assembly_floor_initialization_verified": floor_initialization_verified,
+            "dynamic_assembly_floor_initialization_evidence": floor_initialization_evidence,
+            "dynamic_assembly_preflight_vectoring_ready": preflight_vectoring_ready,
+            "dynamic_assembly_preflight_qp_infeasible_count": preflight_qp_infeasible_count,
+            "dynamic_assembly_hover_acquired": hover_acquired,
+            "dynamic_assembly_qp_infeasible_count": qp_infeasible_count,
+            "dynamic_assembly_unintended_contact_count": unintended_contact_count,
+            "dynamic_assembly_missing_actuator_count": missing_actuator_count,
+            "dynamic_assembly_unsupported_actuator_count": unsupported_actuator_count,
+            "dynamic_assembly_application_unresolved_target_count": application_unresolved_target_count,
+            "dynamic_assembly_clipped_target_count": clipped_target_count,
+            "dynamic_assembly_finite_state": finite_state,
+            "dynamic_assembly_qpid_joint_dynamics_unaware": True,
+            "dynamic_assembly_dock_joint_latch_semantics": False,
+            "dynamic_assembly_contact_report_body_counts": contact_report_body_counts,
+            "dynamic_assembly_events": events,
+            "generated_urdf_sha256": hash_file(urdf_path),
+            "generated_urdf_path": str(urdf_path),
+            "generated_usd_sha256": hash_file(usd_path),
+            "generated_usd_bundle_hash": hash_directory_manifest(usd_path.parent),
+            "usd_path": str(usd_path),
+            "realtime_playback": bool(args.realtime_playback),
+        }
+
+    # Order 7: prepare two independent controllers before physical release.
+    add_event("control_graph_split", current_time_s)
+    for controller in controllers.values():
+        controller.reset_integrators()
+    independent_hold_poses = {}
+    for module_id in (leader_module_id, follower_module_id):
+        observation = component_observation(module_id, current_time_s)
+        independent_hold_poses[module_id] = model_builder.build(
+            singleton_graphs[module_id], physical_model, observation
+        ).body_pose_world
+    add_event("split_handover", current_time_s)
+    split_blend_steps = max(
+        1,
+        int(math.ceil(config.controller_handover_blend_s / sim_dt)),
+    )
+    for split_index in range(split_blend_steps):
+        independent_commands = []
+        for module_id in (leader_module_id, follower_module_id):
+            observation = component_observation(module_id, current_time_s)
+            policy = zero_joint_policy(
+                module_id,
+                independent_hold_poses[module_id],
+                current_time_s,
+            )
+            independent_command = controllers[module_id].compute(
+                ControllerContext(
+                    runtime_observation=observation,
+                    morphology_graph=singleton_graphs[module_id],
+                    physical_model=physical_model,
+                    active_knot=InteractionKnot(
+                        t_rel_s=current_time_s,
+                        contact_assignments=[],
+                    ),
+                    policy_command=policy,
+                    previous_command=previous_commands[module_id],
+                    control_dt_s=sim_dt,
+                )
+            )
+            previous_commands[module_id] = independent_command
+            last_commands[module_id] = independent_command
+            last_statuses[module_id] = independent_command.controller_status
+            independent_commands.append(independent_command)
+        independent_target = merge_disjoint_controller_commands(
+            independent_commands
+        )
+        assembled_observation = combined_observation(current_time_s, attached_graph)
+        assembled_source = assembled_controller.compute(
+            ControllerContext(
+                runtime_observation=assembled_observation,
+                morphology_graph=attached_graph,
+                physical_model=physical_model,
+                active_knot=InteractionKnot(
+                    t_rel_s=current_time_s,
+                    contact_assignments=[],
+                ),
+                policy_command=attached_policy,
+                previous_command=assembled_previous,
+                control_dt_s=sim_dt,
+            )
+        )
+        assembled_previous = assembled_source
+        split_alpha = float(split_index + 1) / float(split_blend_steps)
+        blended_command = blend_controller_commands(
+            assembled_source,
+            independent_target,
+            split_alpha,
+        )
+        if split_index in {0, split_blend_steps - 1}:
+            controller_handover_samples.append(
+                {
+                    "direction": "assembled_to_components",
+                    "time_s": float(current_time_s),
+                    "alpha": float(split_alpha),
+                    "source_qp_feasible": bool(
+                        assembled_source.controller_status.qp_feasible
+                    ),
+                    "target_qp_feasible": bool(
+                        independent_target.controller_status.qp_feasible
+                    ),
+                }
+            )
+        record = assembled_bridge.convert(
+            blended_command,
+            assembled_mapping,
+            time_s=current_time_s,
+            command_index=command_index,
+        )
+        for module_id in (leader_module_id, follower_module_id):
+            application = _apply_actuator_record(
+                robots[module_id],
+                record,
+                physical_model,
+                device,
+                allowed_module_id=module_id,
+            )
+            robots[module_id].write_data_to_sim()
+            application_unresolved_target_count += int(
+                application["unresolved_target_count"]
+            )
+        qp_infeasible_count += 0 if (
+            assembled_source.controller_status.qp_feasible
+            and independent_target.controller_status.qp_feasible
+            and blended_command.controller_status.qp_feasible
+        ) else 1
+        missing_actuator_count += len(record.missing_actuators)
+        unsupported_actuator_count += len(record.unsupported_actuators)
+        clipped_target_count += len(record.clipped_targets)
+        sim.step()
+        for robot in robots.values():
+            robot.update(sim_dt)
+            finite_state = finite_state and all(
+                math.isfinite(float(value))
+                for value in (
+                    _tensor_row(robot.data.root_pose_w.torch)
+                    + _tensor_row(robot.data.root_lin_vel_w.torch)
+                    + _tensor_row(robot.data.root_ang_vel_w.torch)
+                )
+            )
+        refresh_contact()
+        split_identity_failures = fixed_joint_identity_failures(
+            sim.stage,
+            constraint_spec,
+        )
+        if split_identity_failures:
+            constraint_identity_failures = split_identity_failures
+            return abort_report(
+                "order7_constraint_identity_lost_during_split_handover",
+                assembly_report=assembly_report,
+                attach_gate_passed=True,
+            )
+        current_time_s += sim_dt
+        command_index += 1
+    split_handover_completed = True
+    previous_combined = combined_observation(current_time_s, attached_graph)
+    estimator = FollowerSubtreeDetachWrenchEstimator()
+    unload_gate = DetachUnloadGate(config.detach_unload)
+    add_event("unload_dwell", current_time_s)
+    unload_ready = False
+    unload_decision = None
+    unload_estimate = None
+    follower_external_contact_free_during_unload = True
+    unload_budget = max(config.detach_unload.unload_dwell_steps * 10, 100)
+    for _ in range(unload_budget):
+        policies = {
+            module_id: zero_joint_policy(
+                module_id,
+                independent_hold_poses[module_id],
+                current_time_s,
+            )
+            for module_id in (leader_module_id, follower_module_id)
+        }
+        apply_component_policies(policies, current_time_s)
+        current_time_s += sim_dt
+        unload_identity_failures = fixed_joint_identity_failures(
+            sim.stage,
+            constraint_spec,
+        )
+        if unload_identity_failures:
+            constraint_identity_failures = unload_identity_failures
+            return abort_report(
+                "order7_constraint_identity_lost_during_unload",
+                assembly_report=assembly_report,
+                attach_gate_passed=True,
+            )
+        current_combined = combined_observation(current_time_s, attached_graph)
+        follower_external_contact_max_force_n = max(
+            follower_external_contact_max_force_n,
+            float(latest_follower_world_contact["aggregate_force_n"]),
+            float(latest_follower_world_contact["raw_max_patch_force_n"]),
+        )
+        follower_external_contact_invalid_during_unload_count += int(
+            not latest_follower_world_contact["raw_contact_valid"]
+        )
+        follower_external_contact_raw_patch_count_during_unload += int(
+            latest_follower_world_contact["raw_physical_contact_count"]
+        )
+        follower_external_contact_free = bool(
+            not latest_follower_world_contact["active"]
+            and not latest_contact["unintended_contact"]
+        )
+        follower_external_contact_free_during_unload = bool(
+            follower_external_contact_free_during_unload
+            and follower_external_contact_free
+        )
+        follower_command = last_commands[follower_module_id]
+        if follower_command is None:
+            raise RuntimeError("detach estimator lacks follower controller command")
+        unload_estimate = estimator.estimate(
+            morphology_graph=attached_graph,
+            physical_model=physical_model,
+            previous_observation=previous_combined,
+            observation=current_combined,
+            controller_command=follower_command,
+            edge_id=edge.edge_id,
+            follower_module_id=follower_module_id,
+            dt_s=sim_dt,
+            external_contact_free=follower_external_contact_free,
+        )
+        leader_connect_pose, leader_connect_twist = connect_state(leader_module_id)
+        follower_connect_pose, follower_connect_twist = connect_state(follower_module_id)
+        residual = constraint_residual(
+            leader_connect_pose,
+            follower_connect_pose,
+            leader_connect_twist_world=leader_connect_twist,
+            follower_connect_twist_world=follower_connect_twist,
+        )
+        unload_decision = unload_gate.evaluate(
+            estimate=unload_estimate,
+            external_contact_free=follower_external_contact_free,
+            parent_qp_feasible=last_statuses[leader_module_id].qp_feasible,
+            follower_qp_feasible=last_statuses[follower_module_id].qp_feasible,
+            relative_position_error_m=residual.position_error_m,
+            relative_rotation_error_rad=residual.attitude_error_rad,
+            relative_linear_speed_mps=residual.relative_linear_speed_mps,
+            relative_angular_speed_radps=residual.relative_angular_speed_radps,
+        )
+        previous_combined = current_combined
+        if unload_decision.ready_to_release:
+            unload_ready = True
+            break
+
+    if not unload_ready:
+        return abort_report(
+            "order7_unload_gate_timeout",
+            assembly_report=assembly_report,
+            attach_gate_passed=True,
+        )
+
+    constraint_removed = False
+    if unload_ready:
+        pre_release_identity_failures = fixed_joint_identity_failures(
+            sim.stage,
+            constraint_spec,
+        )
+        if pre_release_identity_failures:
+            constraint_identity_failures = pre_release_identity_failures
+            return abort_report(
+                "order7_constraint_identity_invalid_before_release",
+                assembly_report=assembly_report,
+                attach_gate_passed=True,
+            )
+        set_fixed_joint_enabled(fixed_joint, False)
+        constraint_enabled = False
+        disabled_identity_failures = fixed_joint_identity_failures(
+            sim.stage,
+            constraint_spec,
+            expected_enabled=False,
+        )
+        constraint_disabled_verified = not disabled_identity_failures
+        if disabled_identity_failures:
+            constraint_identity_failures = disabled_identity_failures
+            return abort_report(
+                "order7_constraint_disable_verification_failed",
+                assembly_report=assembly_report,
+                attach_gate_passed=True,
+            )
+        policies = {
+            module_id: zero_joint_policy(
+                module_id,
+                independent_hold_poses[module_id],
+                current_time_s,
+            )
+            for module_id in (leader_module_id, follower_module_id)
+        }
+        apply_component_policies(policies, current_time_s)
+        current_time_s += sim_dt
+        disable_and_remove_fixed_joint(sim.stage, constraint_spec)
+        constraint_removed = not sim.stage.GetPrimAtPath(Sdf.Path(constraint_spec.prim_path)).IsValid()
+        add_event("constraint_removed", current_time_s)
+    if not constraint_removed:
+        return abort_report(
+            "order7_constraint_remove_failed",
+            assembly_report=assembly_report,
+            attach_gate_passed=True,
+        )
+
+    add_event("separation", current_time_s)
+    leader_connect_pose, _ = connect_state(leader_module_id)
+    follower_connect_pose, _ = connect_state(follower_module_id)
+    follower_observation = component_observation(follower_module_id, current_time_s)
+    follower_model = model_builder.build(
+        singleton_graphs[follower_module_id], physical_model, follower_observation
+    )
+    separation_target = _dynamic_follower_body_target_for_gap(
+        leader_connect_pose,
+        follower_connect_pose,
+        follower_model.body_pose_world,
+        config.separation_distance_m,
+    )
+    separation_steps = max(
+        1,
+        int(math.ceil(config.separation_distance_m / config.separation_speed_mps / sim_dt)),
+    )
+    post_hold_steps = max(1, int(math.ceil(config.post_release_hold_s / sim_dt)))
+    separation_lifecycle = DynamicSeparationLifecycle(
+        nominal_separation_steps=separation_steps,
+        max_separation_steps=2 * separation_steps,
+        minimum_gap_m=0.8 * config.separation_distance_m,
+        minimum_clearance_m=config.release_filter_clearance_m,
+        required_post_release_stable_steps=post_hold_steps,
+        max_post_release_steps=2 * post_hold_steps,
+    )
+    filter_removed = False
+    final_gap_m = 0.0
+    while separation_lifecycle.phase == "separation":
+        step_index = separation_lifecycle.separation_steps
+        ratio = min(1.0, float(step_index + 1) / float(separation_steps))
+        start = independent_hold_poses[follower_module_id]
+        follower_target = (
+            *(float(start[index]) + ratio * (float(separation_target[index]) - float(start[index])) for index in range(3)),
+            *separation_target[3:7],
+        )
+        policies = {
+            leader_module_id: zero_joint_policy(
+                leader_module_id,
+                independent_hold_poses[leader_module_id],
+                current_time_s,
+            ),
+            follower_module_id: zero_joint_policy(
+                follower_module_id,
+                follower_target,
+                current_time_s,
+            ),
+        }
+        apply_component_policies(policies, current_time_s)
+        current_time_s += sim_dt
+        leader_connect_pose, _ = connect_state(leader_module_id)
+        follower_connect_pose, _ = connect_state(follower_module_id)
+        relative = compose_transform(
+            inverse_transform(transform_from_pose(leader_connect_pose)),
+            transform_from_pose(follower_connect_pose),
+        )
+        final_gap_m = float(relative.translation[0])
+        final_selected_body_clearance_m = runtime.selected_body_clearance_m()
+        separation_action = separation_lifecycle.observe_separation(
+            gap_m=final_gap_m,
+            clearance_m=final_selected_body_clearance_m,
+        )
+        if separation_action == "continue":
+            continue
+        if separation_action == "timeout":
+            return abort_report(
+                "order7_release_filter_clearance_timeout",
+                assembly_report=assembly_report,
+                attach_gate_passed=True,
+            )
+        if separation_action != "request_filter_removal":
+            raise RuntimeError(
+                f"unsupported separation lifecycle action: {separation_action!r}"
+            )
+        if not selected_pair_filter_applied:
+            return abort_report(
+                "order7_selected_body_filter_missing_before_remove",
+                assembly_report=assembly_report,
+                attach_gate_passed=True,
+            )
+        unfilter_selected_body_pair(sim.stage, constraint_spec)
+        filter_removed = True
+        removal_filter_failures = selected_body_pair_filter_failures(
+            sim.stage,
+            constraint_spec,
+            expected_filtered=False,
+        )
+        selected_pair_filter_remove_verified = not removal_filter_failures
+        filter_transition = separation_lifecycle.confirm_filter_removal(
+            verified=selected_pair_filter_remove_verified,
+        )
+        if removal_filter_failures or filter_transition != "post_release":
+            return abort_report(
+                "order7_selected_body_filter_remove_verification_failed",
+                assembly_report=assembly_report,
+                attach_gate_passed=True,
+            )
+        selected_pair_filter_removal_clearance_m = final_selected_body_clearance_m
+        add_event(
+            "collision_filter_removed",
+            current_time_s,
+            selected_body_clearance_m=selected_pair_filter_removal_clearance_m,
+            separation_gap_m=final_gap_m,
+            separation_steps=separation_lifecycle.separation_steps,
+        )
+
+    post_release_stable_steps = 0
+    post_release_max_metrics = {
+        "position_error_m": 0.0,
+        "attitude_error_rad": 0.0,
+        "linear_speed_mps": 0.0,
+        "angular_speed_radps": 0.0,
+        "dock_joint_position_rad": 0.0,
+        "dock_joint_speed_radps": 0.0,
+    }
+    post_release_min_separation_gap_m = math.inf
+    post_release_min_selected_body_clearance_m = math.inf
+    post_release_candidate_started_s = None
+    post_release_stable = False
+    while separation_lifecycle.phase == "post_release":
+        policies = {
+            leader_module_id: zero_joint_policy(
+                leader_module_id,
+                independent_hold_poses[leader_module_id],
+                current_time_s,
+            ),
+            follower_module_id: zero_joint_policy(
+                follower_module_id,
+                separation_target,
+                current_time_s,
+            ),
+        }
+        apply_component_policies(policies, current_time_s)
+        current_time_s += sim_dt
+        post_unfilter_selected_contact_count += int(
+            latest_contact["selected_contact"]
+        )
+        post_unfilter_raw_invalid_count += int(
+            not latest_contact["raw_contact_valid"]
+        )
+        leader_connect_pose, _ = connect_state(leader_module_id)
+        follower_connect_pose, _ = connect_state(follower_module_id)
+        relative = compose_transform(
+            inverse_transform(transform_from_pose(leader_connect_pose)),
+            transform_from_pose(follower_connect_pose),
+        )
+        final_gap_m = float(relative.translation[0])
+        final_selected_body_clearance_m = runtime.selected_body_clearance_m()
+        post_joint_position, post_joint_speed = dock_joint_state_max(
+            (leader_module_id, follower_module_id)
+        )
+        step_metrics = {
+            "position_error_m": 0.0,
+            "attitude_error_rad": 0.0,
+            "linear_speed_mps": 0.0,
+            "angular_speed_radps": 0.0,
+            "dock_joint_position_rad": post_joint_position,
+            "dock_joint_speed_radps": post_joint_speed,
+        }
+        post_release_min_separation_gap_m = min(
+            post_release_min_separation_gap_m,
+            final_gap_m,
+        )
+        post_release_min_selected_body_clearance_m = min(
+            post_release_min_selected_body_clearance_m,
+            final_selected_body_clearance_m,
+        )
+        step_stable = True
+        for module_id, target_pose in (
+            (leader_module_id, independent_hold_poses[leader_module_id]),
+            (follower_module_id, separation_target),
+        ):
+            observation = component_observation(module_id, current_time_s)
+            model = model_builder.build(
+                singleton_graphs[module_id],
+                physical_model,
+                observation,
+            )
+            position_error = _position_error_norm(
+                list(model.body_pose_world[:3]),
+                target_pose[:3],
+            )
+            attitude_error = _quat_error_norm(
+                list(model.body_pose_world[3:7]),
+                target_pose[3:7],
+            )
+            linear_speed = _vector_norm(model.body_twist_world[:3])
+            angular_speed = _vector_norm(model.body_twist_world[3:6])
+            step_metrics["position_error_m"] = max(
+                step_metrics["position_error_m"],
+                position_error,
+            )
+            step_metrics["attitude_error_rad"] = max(
+                step_metrics["attitude_error_rad"],
+                attitude_error,
+            )
+            step_metrics["linear_speed_mps"] = max(
+                step_metrics["linear_speed_mps"],
+                linear_speed,
+            )
+            step_metrics["angular_speed_radps"] = max(
+                step_metrics["angular_speed_radps"],
+                angular_speed,
+            )
+            step_stable = bool(
+                step_stable
+                and position_error <= config.post_release_position_tolerance_m
+                and attitude_error <= config.post_release_attitude_tolerance_rad
+                and linear_speed <= config.post_release_linear_speed_tolerance_mps
+                and angular_speed <= config.post_release_angular_speed_tolerance_radps
+            )
+        step_stable = bool(
+            step_stable
+            and all(status.qp_feasible for status in last_statuses.values())
+            and finite_state
+            and not latest_contact["selected_contact"]
+            and not latest_contact["unintended_contact"]
+            and not latest_leader_world_contact["active"]
+            and not latest_follower_world_contact["active"]
+            and final_gap_m >= 0.8 * config.separation_distance_m
+            and final_selected_body_clearance_m
+            >= config.release_filter_clearance_m
+            and post_joint_position
+            <= config.post_release_joint_position_tolerance_rad
+            and post_joint_speed
+            <= config.post_release_joint_speed_tolerance_radps
+        )
+        if step_stable:
+            if separation_lifecycle.post_release_stable_steps == 0:
+                post_release_candidate_started_s = current_time_s - sim_dt
+                post_release_max_metrics = {
+                    key: 0.0 for key in post_release_max_metrics
+                }
+            for key, value in step_metrics.items():
+                post_release_max_metrics[key] = max(
+                    post_release_max_metrics[key],
+                    value,
+                )
+        else:
+            post_release_candidate_started_s = None
+        post_release_action = separation_lifecycle.observe_post_release(
+            stable=step_stable,
+        )
+        post_release_stable_steps = (
+            separation_lifecycle.post_release_stable_steps
+        )
+        if post_release_action == "complete":
+            post_release_stable = True
+            if post_release_candidate_started_s is None:
+                raise RuntimeError(
+                    "post-release lifecycle completed without a dwell start"
+                )
+            add_event(
+                "post_release_hold",
+                post_release_candidate_started_s,
+                stable_dwell_s=post_release_stable_steps * sim_dt,
+                observed_steps=separation_lifecycle.post_release_steps,
+            )
+            break
+        if post_release_action == "timeout":
+            break
+        if post_release_action != "continue":
+            raise RuntimeError(
+                f"unsupported post-release lifecycle action: {post_release_action!r}"
+            )
+
+    leader_final = component_observation(leader_module_id, current_time_s)
+    follower_final = component_observation(follower_module_id, current_time_s)
+    leader_final_model = model_builder.build(
+        singleton_graphs[leader_module_id], physical_model, leader_final
+    )
+    follower_final_model = model_builder.build(
+        singleton_graphs[follower_module_id], physical_model, follower_final
+    )
+    detach_passed = bool(
+        attach_passed
+        and attach_handover_completed
+        and attached_stability_verified
+        and attached_selected_pair_contact_free
+        and selected_pair_filter_apply_verified
+        and split_handover_completed
+        and unload_ready
+        and follower_external_contact_free_during_unload
+        and constraint_removed
+        and final_gap_m >= 0.8 * config.separation_distance_m
+        and post_release_min_separation_gap_m
+        >= 0.8 * config.separation_distance_m
+        and filter_removed
+        and selected_pair_filter_remove_verified
+        and post_release_min_selected_body_clearance_m
+        >= config.release_filter_clearance_m
+        and post_unfilter_selected_contact_count == 0
+        and post_unfilter_raw_invalid_count == 0
+        and post_release_stable
+    )
+    passed = bool(
+        attach_passed
+        and detach_passed
+        and qp_infeasible_count == 0
+        and unintended_contact_count == 0
+        and missing_actuator_count == 0
+        and unsupported_actuator_count == 0
+        and application_unresolved_target_count == 0
+        and clipped_target_count == 0
+        and finite_state
+        and floor_initialization_verified
+        and mating_pre_fix_evidence_passed
+        and final_seated_evidence is not None
+        and final_seated_evidence.get("final_seated_valid") is True
+        and collision_approximation_evidence.get("verified") is True
+    )
+    add_event("complete", current_time_s, passed=passed)
+    if args.keep_open_after_smoke_s > 0.0:
+        _keep_viewer_open(float(args.keep_open_after_smoke_s))
+    sim.stop()
+    sim.clear_instance()
+    return {
+        "spawn_passed": True,
+        "isaac_backed": True,
+        "command_applied": True,
+        "command_probe_passed": passed,
+        "dynamic_assembly_roundtrip": True,
+        "dynamic_assembly_acceptance_gate": config.acceptance_gate,
+        "dynamic_assembly_version": DYNAMIC_ASSEMBLY_ROUNDTRIP_VERSION,
+        "dynamic_assembly_collision_type": config.collision_type,
+        "dynamic_assembly_mating_contact_mode": config.mating_contact_mode,
+        **mating_mode_report_fields(attach_passed=attach_passed),
+        **simulation_numerics_report_fields(),
+        "dynamic_assembly_dock_collision_approximation_verified": bool(
+            collision_approximation_evidence.get("verified") is True
+        ),
+        "dynamic_assembly_dock_collision_approximation_token": (
+            collision_approximation_evidence.get("requested_approximation_token")
+        ),
+        "dynamic_assembly_dock_collision_composed_prim_count": int(
+            collision_approximation_evidence.get("composed_prim_count", 0)
+        ),
+        "dynamic_assembly_dock_collision_approximation_evidence": dict(
+            collision_approximation_evidence
+        ),
+        "dynamic_assembly_force_usd_conversion": bool(args.force_convert),
+        "dynamic_assembly_graph_id": morphology_graph.graph_id,
+        "dynamic_assembly_graph_hash": morphology_graph.stable_hash(),
+        "dynamic_assembly_config_hash": config.stable_hash(),
+        "dynamic_assembly_backend_config_hash": backend_config_hash,
+        "dynamic_assembly_physical_model_hash": physical_model.stable_hash(),
+        "dynamic_assembly_collision_geometry_content_hash": (
+            collision_geometry_content_hash(
+                physical_model,
+                mesh_search_dirs=_holon_mesh_search_dirs(),
+            )
+        ),
+        "dynamic_assembly_module_count": 2,
+        "dynamic_assembly_edge_id": edge.edge_id,
+        "dynamic_assembly_leader_module_id": leader_module_id,
+        "dynamic_assembly_follower_module_id": follower_module_id,
+        "dynamic_assembly_attach_passed": attach_passed,
+        "dynamic_assembly_detach_passed": detach_passed,
+        "dynamic_assembly_passed": passed,
+        "dynamic_assembly_external_fixed_joint": True,
+        "dynamic_assembly_constraint_excluded_from_articulation": True,
+        "dynamic_assembly_constraint_version": DYNAMIC_DOCK_CONSTRAINT_VERSION,
+        "dynamic_assembly_constraint_spec": constraint_spec.to_dict(),
+        "dynamic_assembly_constraint_identity_verified": not constraint_identity_failures,
+        "dynamic_assembly_constraint_identity_failures": constraint_identity_failures,
+        "dynamic_assembly_constraint_identity_failure_count": len(constraint_identity_failures),
+        "dynamic_assembly_constraint_removed": constraint_removed,
+        "dynamic_assembly_constraint_disabled_verified": constraint_disabled_verified,
+        "dynamic_assembly_selected_pair_contact_observed": selected_pair_contact_observed,
+        "dynamic_assembly_selected_surface_contact_observed": selected_surface_contact_observed,
+        "dynamic_assembly_first_selected_contact_evidence": first_selected_contact_evidence,
+        "dynamic_assembly_guidance_contact_observed": guidance_contact_observed,
+        "dynamic_assembly_first_guidance_contact_evidence": (
+            first_guidance_contact_evidence
+        ),
+        "dynamic_assembly_final_seated_evidence": final_seated_evidence,
+        "dynamic_assembly_last_strict_gate_snapshot": latest_strict_gate_snapshot,
+        "dynamic_assembly_last_selected_dock_joint_diagnostics": dict(
+            latest_selected_dock_joint_diagnostics
+        ),
+        "dynamic_assembly_axial_selected_joint_evidence": dict(
+            axial_selected_joint_evidence
+        ),
+        "dynamic_assembly_last_assembly_control_progress": (
+            last_assembly_control_progress
+        ),
+        "dynamic_assembly_last_contact_measurement": dict(latest_contact),
+        "dynamic_assembly_selected_pair_filter_applied": selected_pair_filter_applied,
+        "dynamic_assembly_selected_pair_filter_apply_verified": (
+            selected_pair_filter_apply_verified
+        ),
+        "dynamic_assembly_mating_filter_evidence": (
+            mating_filter_evidence_snapshot()
+        ),
+        "dynamic_assembly_filter_fallback_selected_contact_violation_count": (
+            filter_fallback_selected_contact_violation_count
+        ),
+        "dynamic_assembly_selected_pair_filter_removed": filter_removed,
+        "dynamic_assembly_selected_pair_filter_remove_verified": (
+            selected_pair_filter_remove_verified
+        ),
+        "dynamic_assembly_selected_pair_filter_removal_clearance_m": (
+            selected_pair_filter_removal_clearance_m
+        ),
+        "dynamic_assembly_final_selected_body_clearance_m": (
+            final_selected_body_clearance_m
+        ),
+        "dynamic_assembly_post_unfilter_selected_contact_count": (
+            post_unfilter_selected_contact_count
+        ),
+        "dynamic_assembly_post_unfilter_raw_invalid_count": (
+            post_unfilter_raw_invalid_count
+        ),
+        "dynamic_assembly_control_graph_split_before_release": True,
+        "dynamic_assembly_attach_handover_completed": attach_handover_completed,
+        "dynamic_assembly_attached_stability_verified": attached_stability_verified,
+        "dynamic_assembly_attached_selected_pair_contact_free": (
+            attached_selected_pair_contact_free
+        ),
+        "dynamic_assembly_attached_stable_steps": attached_stable_steps,
+        "dynamic_assembly_attached_required_stable_steps": attached_required_stable_steps,
+        "dynamic_assembly_attached_max_metrics": attached_max_metrics,
+        "dynamic_assembly_split_handover_completed": split_handover_completed,
+        "dynamic_assembly_controller_handover_samples": controller_handover_samples,
+        "dynamic_assembly_post_release_stable": post_release_stable,
+        "dynamic_assembly_post_release_stable_dwell_steps": post_release_stable_steps,
+        "dynamic_assembly_post_release_required_dwell_steps": post_hold_steps,
+        "dynamic_assembly_post_release_max_metrics": post_release_max_metrics,
+        "dynamic_assembly_final_separation_gap_m": final_gap_m,
+        "dynamic_assembly_post_release_min_separation_gap_m": (
+            post_release_min_separation_gap_m
+        ),
+        "dynamic_assembly_post_release_min_selected_body_clearance_m": (
+            post_release_min_selected_body_clearance_m
+        ),
+        "dynamic_assembly_unload_ready": unload_ready,
+        "dynamic_assembly_follower_external_contact_free_during_unload": (
+            follower_external_contact_free_during_unload
+        ),
+        "dynamic_assembly_follower_external_contact_max_force_n": (
+            follower_external_contact_max_force_n
+        ),
+        "dynamic_assembly_follower_external_contact_invalid_during_unload_count": (
+            follower_external_contact_invalid_during_unload_count
+        ),
+        "dynamic_assembly_follower_external_contact_raw_patch_count_during_unload": (
+            follower_external_contact_raw_patch_count_during_unload
+        ),
+        "dynamic_assembly_follower_external_contact_last_measurement": dict(
+            latest_follower_world_contact
+        ),
+        "dynamic_assembly_leader_external_contact_last_measurement": dict(
+            latest_leader_world_contact
+        ),
+        "dynamic_assembly_follower_external_contact_scope": (
+            "follower_component_all_external_contacts"
+        ),
+        "dynamic_assembly_unload_estimate": (
+            unload_estimate.to_dict() if unload_estimate is not None else None
+        ),
+        "dynamic_assembly_unload_decision": (
+            unload_decision.to_dict() if unload_decision is not None else None
+        ),
+        "dynamic_assembly_assembly_run_report": assembly_report.to_dict(),
+        "dynamic_assembly_preflight_vectoring_ready": preflight_vectoring_ready,
+        "dynamic_assembly_preflight_qp_infeasible_count": preflight_qp_infeasible_count,
+        "dynamic_assembly_hover_acquired": hover_acquired,
+        "dynamic_assembly_floor_initialization_verified": floor_initialization_verified,
+        "dynamic_assembly_floor_initialization_evidence": floor_initialization_evidence,
+        "dynamic_assembly_qp_infeasible_count": qp_infeasible_count,
+        "dynamic_assembly_unintended_contact_count": unintended_contact_count,
+        "dynamic_assembly_missing_actuator_count": missing_actuator_count,
+        "dynamic_assembly_unsupported_actuator_count": unsupported_actuator_count,
+        "dynamic_assembly_application_unresolved_target_count": application_unresolved_target_count,
+        "dynamic_assembly_clipped_target_count": clipped_target_count,
+        "dynamic_assembly_finite_state": finite_state,
+        "dynamic_assembly_first_infeasible_statuses": {
+            str(module_id): status
+            for module_id, status in sorted(first_infeasible_statuses.items())
+        },
+        "dynamic_assembly_controller_debug_samples": controller_debug_samples,
+        "dynamic_assembly_motion_debug_samples": motion_debug_samples,
+        "dynamic_assembly_last_controller_statuses": {
+            str(module_id): status.to_dict()
+            for module_id, status in last_statuses.items()
+        },
+        "dynamic_assembly_final_root_poses": {
+            str(module_id): _tensor_row(robot.data.root_pose_w.torch)
+            for module_id, robot in robots.items()
+        },
+        "dynamic_assembly_qpid_joint_dynamics_unaware": True,
+        "dynamic_assembly_dock_joint_latch_semantics": False,
+        "dynamic_assembly_contact_report_body_counts": contact_report_body_counts,
+        "dynamic_assembly_events": events,
+        "generated_urdf_sha256": hash_file(urdf_path),
+        "generated_urdf_path": str(urdf_path),
+        "generated_usd_sha256": hash_file(usd_path),
+        "generated_usd_bundle_hash": hash_directory_manifest(usd_path.parent),
+        "usd_path": str(usd_path),
+        "realtime_playback": bool(args.realtime_playback),
+    }
+
+
+def _dynamic_singleton_graph(target_graph, *, module_id: int):
+    from dataclasses import replace
+
+    from amsrr.schemas.morphology import ControlGroup, MorphologyGraph
+
+    modules = [
+        replace(
+            module,
+            is_base=True,
+            pose_in_design_frame=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+        )
+        for module in target_graph.modules
+        if module.module_id == module_id
+    ]
+    if len(modules) != 1:
+        raise RuntimeError(f"dynamic singleton graph cannot resolve module {module_id}")
+    return MorphologyGraph(
+        graph_id=f"{target_graph.graph_id}:component:{module_id}",
+        modules=modules,
+        ports=[
+            replace(port, occupied=False)
+            for port in target_graph.ports
+            if port.module_id == module_id
+        ],
+        dock_edges=[],
+        robot_anchors=[
+            anchor for anchor in target_graph.robot_anchors if anchor.module_id == module_id
+        ],
+        control_groups=[
+            ControlGroup(
+                group_id=f"component:{module_id}",
+                module_ids=[module_id],
+                role="assembly_component",
+            )
+        ],
+        base_module_id=module_id,
+        is_closed_loop=False,
+    )
+
+
+def _dynamic_resolve_rigid_body_prim_path(stage, *, root_path: str, body_name: str) -> str:
+    from pxr import UsdPhysics
+
+    prefix = root_path.rstrip("/") + "/"
+    matches = []
+    for prim in stage.Traverse():
+        path = prim.GetPath().pathString
+        if not path.startswith(prefix) or not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+            continue
+        name = str(prim.GetName())
+        if name == body_name or name.endswith("__" + body_name):
+            matches.append(path)
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"dynamic assembly body {body_name!r} below {root_path} resolved to {matches}"
+        )
+    return matches[0]
+
+
+def _dynamic_rigid_body_paths(stage, root_path: str) -> list[str]:
+    from pxr import UsdPhysics
+
+    prefix = root_path.rstrip("/") + "/"
+    paths = sorted(
+        prim.GetPath().pathString
+        for prim in stage.Traverse()
+        if prim.GetPath().pathString.startswith(prefix)
+        and prim.HasAPI(UsdPhysics.RigidBodyAPI)
+    )
+    if not paths:
+        raise RuntimeError(f"dynamic assembly found no rigid bodies below {root_path}")
+    return paths
+
+
+def _dynamic_resolve_asset_body_name(robot, local_name: str) -> str:
+    resolved = _resolve_module_name(robot.body_names, 0, local_name)
+    if resolved is None:
+        raise RuntimeError(f"dynamic assembly asset lacks body {local_name!r}")
+    return resolved
+
+
+def _dynamic_contact_view_measurement(
+    contact_view,
+    *,
+    sim_dt: float,
+    sensor_count: int,
+    filter_count: int,
+    selected_sensor_index: int,
+    selected_filter_index: int,
+) -> dict[str, object]:
+    import torch
+    import warp as wp
+
+    from amsrr.simulation.dynamic_contact_evidence import (
+        classify_raw_contact_patches,
+    )
+
+    matrix = wp.to_torch(contact_view.get_contact_force_matrix(sim_dt)).reshape(
+        sensor_count,
+        filter_count,
+        3,
+    )
+    matrix_finite = bool(torch.isfinite(matrix).all().detach().cpu())
+    force_norms = torch.linalg.vector_norm(matrix, dim=-1)
+    selected_aggregate_force = float(
+        force_norms[selected_sensor_index, selected_filter_index].detach().cpu()
+    )
+    unintended = force_norms.clone()
+    unintended[selected_sensor_index, selected_filter_index] = 0.0
+    unintended_aggregate_max = (
+        float(unintended.max().detach().cpu()) if unintended.numel() else 0.0
+    )
+    (
+        force_buffer,
+        point_buffer,
+        normal_buffer,
+        separation_buffer,
+        contact_count_buffer,
+        start_indices_buffer,
+    ) = contact_view.get_contact_data(sim_dt)
+    counts = wp.to_torch(contact_count_buffer).reshape(-1).to(torch.int64)
+    starts = wp.to_torch(start_indices_buffer).reshape(-1).to(torch.int64)
+    raw_forces = wp.to_torch(force_buffer).reshape(-1)
+    raw_points = wp.to_torch(point_buffer).reshape(-1, 3)
+    raw_normals = wp.to_torch(normal_buffer).reshape(-1, 3)
+    raw_separations = wp.to_torch(separation_buffer).reshape(-1)
+    selected_flat = selected_sensor_index * filter_count + selected_filter_index
+    raw_capacity = int(contact_view.max_contact_data_count)
+    raw_evidence = classify_raw_contact_patches(
+        contact_counts=counts.detach().cpu().tolist(),
+        start_indices=starts.detach().cpu().tolist(),
+        patch_forces_n=raw_forces.detach().cpu().tolist(),
+        patch_separations_m=raw_separations.detach().cpu().tolist(),
+        raw_capacity=raw_capacity,
+        force_threshold_n=1.0e-3,
+        selected_pair_index=selected_flat,
+        patch_points_world=raw_points.detach().cpu().tolist(),
+        patch_normals_world=raw_normals.detach().cpu().tolist(),
+    )
+    selected_indices = [int(index) for index in raw_evidence["selected_patch_indices"]]
+    selected_points_world = [
+        [float(value) for value in raw_points[index].detach().cpu().tolist()]
+        for index in selected_indices
+    ]
+    selected_normals_world = [
+        [float(value) for value in raw_normals[index].detach().cpu().tolist()]
+        for index in selected_indices
+    ]
+    selected_patch_forces_n = [
+        float(raw_forces[index].detach().cpu()) for index in selected_indices
+    ]
+    selected_patch_separations_m = [
+        float(raw_separations[index].detach().cpu()) for index in selected_indices
+    ]
+    selected_physical_patch_count = sum(
+        abs(force) > 1.0e-3 or separation <= 0.0
+        for force, separation in zip(
+            selected_patch_forces_n,
+            selected_patch_separations_m,
+            strict=True,
+        )
+    )
+    min_separation = float(raw_evidence["selected_min_separation_m"])
+    selected_force = max(
+        selected_aggregate_force,
+        float(raw_evidence["selected_max_patch_force_n"]),
+    )
+    raw_valid = bool(raw_evidence["valid"] and matrix_finite)
+    selected_physical_contact = bool(
+        raw_valid
+        and (
+            selected_aggregate_force > 1.0e-3
+            or raw_evidence["selected_physical_contact"]
+        )
+    )
+    unintended_max = max(
+        unintended_aggregate_max,
+        float(raw_evidence["unintended_max_patch_force_n"]),
+    )
+    unintended_contact = bool(
+        not raw_valid
+        or unintended_aggregate_max > 1.0e-3
+        or raw_evidence["unintended_physical_contact"]
+    )
+    return {
+        "selected_contact": selected_physical_contact,
+        "selected_force_n": selected_force,
+        "selected_min_separation_m": min_separation,
+        "selected_penetration_m": max(0.0, -min_separation),
+        "unintended_contact": unintended_contact,
+        "unintended_max_force_n": unintended_max,
+        "unintended_max_penetration_m": float(
+            raw_evidence["unintended_max_penetration_m"]
+        ),
+        "unintended_raw_contact_count": int(
+            raw_evidence["unintended_physical_contact_count"]
+        ),
+        "selected_raw_contact_count": int(
+            raw_evidence["selected_raw_contact_count"]
+        ),
+        "selected_physical_patch_count": int(selected_physical_patch_count),
+        "selected_contact_points_world": selected_points_world,
+        "selected_contact_normals_world": selected_normals_world,
+        "selected_patch_forces_n": selected_patch_forces_n,
+        "selected_patch_separations_m": selected_patch_separations_m,
+        "raw_contact_count": int(raw_evidence["raw_contact_count"]),
+        "raw_contact_capacity": raw_capacity,
+        "raw_contact_saturated": bool(raw_evidence["raw_contact_saturated"]),
+        "raw_contact_valid": raw_valid,
+        "raw_contact_nonfinite": bool(raw_evidence["nonfinite"] or not matrix_finite),
+        "raw_contact_layout_invalid": bool(raw_evidence["invalid_layout"]),
+    }
+
+
+def _dynamic_net_contact_force_measurement(
+    contact_view,
+    *,
+    sim_dt: float,
+    sensor_count: int,
+    force_threshold_n: float,
+    scope: str,
+) -> dict[str, object]:
+    """Measure all component contact without allowing opposing forces to cancel."""
+
+    import torch
+    import warp as wp
+
+    from amsrr.simulation.dynamic_contact_evidence import (
+        classify_raw_contact_patches,
+    )
+
+    forces = wp.to_torch(contact_view.get_net_contact_forces(sim_dt)).reshape(
+        sensor_count,
+        3,
+    )
+    net_finite = bool(torch.isfinite(forces).all().detach().cpu())
+    norms = torch.linalg.vector_norm(forces, dim=-1)
+    aggregate_force = float(norms.sum().detach().cpu()) if norms.numel() else 0.0
+    max_force = float(norms.max().detach().cpu()) if norms.numel() else 0.0
+    (
+        force_buffer,
+        point_buffer,
+        normal_buffer,
+        separation_buffer,
+        contact_count_buffer,
+        start_indices_buffer,
+    ) = contact_view.get_contact_data(sim_dt)
+    raw_evidence = classify_raw_contact_patches(
+        contact_counts=(
+            wp.to_torch(contact_count_buffer)
+            .reshape(-1)
+            .to(torch.int64)
+            .detach()
+            .cpu()
+            .tolist()
+        ),
+        start_indices=(
+            wp.to_torch(start_indices_buffer)
+            .reshape(-1)
+            .to(torch.int64)
+            .detach()
+            .cpu()
+            .tolist()
+        ),
+        patch_forces_n=(
+            wp.to_torch(force_buffer).reshape(-1).detach().cpu().tolist()
+        ),
+        patch_separations_m=(
+            wp.to_torch(separation_buffer).reshape(-1).detach().cpu().tolist()
+        ),
+        raw_capacity=int(contact_view.max_contact_data_count),
+        force_threshold_n=float(force_threshold_n),
+        patch_points_world=(
+            wp.to_torch(point_buffer).reshape(-1, 3).detach().cpu().tolist()
+        ),
+        patch_normals_world=(
+            wp.to_torch(normal_buffer).reshape(-1, 3).detach().cpu().tolist()
+        ),
+    )
+    raw_valid = bool(raw_evidence["valid"] and net_finite)
+    active = bool(
+        not raw_valid
+        or aggregate_force >= float(force_threshold_n)
+        or raw_evidence["monitored_physical_contact"]
+    )
+    return {
+        "active": active,
+        "aggregate_force_n": aggregate_force,
+        "max_body_force_n": max_force,
+        "active_body_count": int(
+            (norms >= float(force_threshold_n)).sum().detach().cpu()
+        ),
+        "force_threshold_n": float(force_threshold_n),
+        "sensor_count": int(sensor_count),
+        "raw_contact_count": int(raw_evidence["raw_contact_count"]),
+        "raw_physical_contact_count": int(
+            raw_evidence["monitored_physical_contact_count"]
+        ),
+        "raw_max_patch_force_n": float(
+            raw_evidence["monitored_max_patch_force_n"]
+        ),
+        "raw_min_separation_m": float(
+            raw_evidence["monitored_min_separation_m"]
+        ),
+        "raw_contact_saturated": bool(raw_evidence["raw_contact_saturated"]),
+        "raw_contact_valid": raw_valid,
+        "raw_contact_nonfinite": bool(raw_evidence["nonfinite"] or not net_finite),
+        "scope": str(scope),
+    }
+
+
+def _dynamic_selected_surface_contact_evidence(
+    measurement,
+    *,
+    leader_connect_pose_world,
+    follower_connect_pose_world,
+    axial_tolerance_m: float,
+    radius_m: float,
+    normal_tolerance_rad: float,
+) -> dict[str, object]:
+    from amsrr.geometry.pose_math import (
+        Transform3D,
+        compose_transform,
+        inverse_transform,
+        transform_from_pose,
+    )
+
+    leader_connect = transform_from_pose(leader_connect_pose_world)
+    follower_connect = transform_from_pose(follower_connect_pose_world)
+    world_to_leader = inverse_transform(leader_connect)
+    world_to_follower = inverse_transform(follower_connect)
+    identity_rotation = (
+        (1.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0),
+        (0.0, 0.0, 1.0),
+    )
+    leader_x_world = (
+        leader_connect.rotation[0][0],
+        leader_connect.rotation[1][0],
+        leader_connect.rotation[2][0],
+    )
+    cosine_threshold = math.cos(float(normal_tolerance_rad))
+    patch_evidence = []
+    valid_patch_count = 0
+    points = measurement.get("selected_contact_points_world", [])
+    normals = measurement.get("selected_contact_normals_world", [])
+    forces = measurement.get("selected_patch_forces_n", [])
+    separations = measurement.get("selected_patch_separations_m", [])
+    if not (
+        len(points) == len(normals) == len(forces) == len(separations)
+    ):
+        return {
+            "selected_surface_valid": False,
+            "selected_surface_valid_patch_count": 0,
+            "selected_surface_patch_evidence": [],
+            "selected_surface_relative_translation": list(
+                compose_transform(world_to_leader, follower_connect).translation
+            ),
+            "selected_surface_failure_reason": "selected_patch_buffer_length_mismatch",
+            "selected_surface_axial_tolerance_m": float(axial_tolerance_m),
+            "selected_surface_radius_m": float(radius_m),
+            "selected_surface_normal_tolerance_rad": float(normal_tolerance_rad),
+        }
+    for point, normal, patch_force, separation in zip(
+        points,
+        normals,
+        forces,
+        separations,
+        strict=True,
+    ):
+        finite = all(
+            math.isfinite(float(value))
+            for value in (*point, *normal, patch_force, separation)
+        )
+        if not finite:
+            patch_evidence.append({"finite": False, "valid": False})
+            continue
+        point_transform = Transform3D(
+            rotation=identity_rotation,
+            translation=tuple(float(value) for value in point),
+        )
+        point_leader = compose_transform(
+            world_to_leader, point_transform
+        ).translation
+        point_follower = compose_transform(
+            world_to_follower, point_transform
+        ).translation
+        normal_norm = _vector_norm(normal)
+        normal_alignment = (
+            abs(
+                sum(
+                    float(normal[index]) * leader_x_world[index]
+                    for index in range(3)
+                )
+            )
+            / normal_norm
+            if normal_norm > 1.0e-9
+            else 0.0
+        )
+        leader_radius = math.hypot(point_leader[1], point_leader[2])
+        follower_radius = math.hypot(point_follower[1], point_follower[2])
+        physical_patch = bool(
+            abs(float(patch_force)) > 1.0e-3
+            or float(separation) <= 0.0
+        )
+        valid = (
+            physical_patch
+            and abs(point_leader[0]) <= axial_tolerance_m
+            and abs(point_follower[0]) <= axial_tolerance_m
+            and leader_radius <= radius_m
+            and follower_radius <= radius_m
+            and normal_alignment >= cosine_threshold
+        )
+        valid_patch_count += int(valid)
+        patch_evidence.append(
+            {
+                "finite": True,
+                "point_leader_connect": list(point_leader),
+                "point_follower_connect": list(point_follower),
+                "leader_radius_m": leader_radius,
+                "follower_radius_m": follower_radius,
+                "normal_alignment_abs": normal_alignment,
+                "patch_force_n": float(patch_force),
+                "separation_m": float(separation),
+                "physical_patch": physical_patch,
+                "valid": valid,
+            }
+        )
+    relative_connect = compose_transform(world_to_leader, follower_connect)
+    selected_surface_valid = bool(
+        measurement.get("selected_contact")
+        and int(measurement.get("selected_raw_contact_count", 0)) > 0
+        and measurement.get("raw_contact_valid", False)
+        and not measurement.get("raw_contact_saturated", False)
+        and valid_patch_count
+        == int(measurement.get("selected_raw_contact_count", 0))
+    )
+    return {
+        "selected_surface_valid": selected_surface_valid,
+        "selected_surface_valid_patch_count": valid_patch_count,
+        "selected_surface_patch_evidence": patch_evidence,
+        "selected_surface_relative_translation": list(
+            relative_connect.translation
+        ),
+        "selected_surface_axial_tolerance_m": float(axial_tolerance_m),
+        "selected_surface_radius_m": float(radius_m),
+        "selected_surface_normal_tolerance_rad": float(normal_tolerance_rad),
+    }
+
+
+def _dynamic_staging_pose_collision_free(
+    morphology_graph,
+    physical_model,
+    *,
+    leader_module_id: int,
+    follower_module_id: int,
+    leader_pose_world,
+    follower_pose_world,
+    mesh_search_dirs,
+    floor_clearance_m: float,
+) -> bool:
+    from dataclasses import replace
+
+    from amsrr.feasibility.morphology_flight import morphology_collision_aabbs
+
+    modules = []
+    for module in morphology_graph.modules:
+        if module.module_id == leader_module_id:
+            modules.append(replace(module, pose_in_design_frame=leader_pose_world))
+        elif module.module_id == follower_module_id:
+            modules.append(replace(module, pose_in_design_frame=follower_pose_world))
+    temporary = replace(
+        morphology_graph,
+        graph_id=f"{morphology_graph.graph_id}:staging-query",
+        modules=modules,
+        dock_edges=[],
+    )
+    bounds = morphology_collision_aabbs(
+        temporary,
+        physical_model,
+        mesh_search_dirs=mesh_search_dirs,
+    )
+    leader = bounds[leader_module_id]
+    follower = bounds[follower_module_id]
+    if min(leader[0][2], follower[0][2]) < floor_clearance_m:
+        return False
+    separated_axis = any(
+        leader[1][axis] < follower[0][axis] or follower[1][axis] < leader[0][axis]
+        for axis in range(3)
+    )
+    return separated_axis
+
+
+def _dynamic_component_collision_proxy(
+    *,
+    robot,
+    physical_model,
+    module_id: int,
+    component_pose_world,
+    mesh_search_dirs,
+):
+    """Capture collider AABB corners in a component-centroid frame.
+
+    Whole-module AABBs reject valid Holon docking because non-colliding arms
+    interleave.  This proxy keeps each authored collider separate and records
+    its owning rigid body so only the selected dock-body pair can be excluded.
+    """
+
+    from amsrr.geometry.pose_math import (
+        Transform3D,
+        compose_transform,
+        inverse_transform,
+        transform_from_pose,
+    )
+    from amsrr.feasibility.morphology_flight import (
+        _record_local_aabb,
+        _urdf_collision_records,
+    )
+
+    world_to_component = inverse_transform(
+        transform_from_pose(component_pose_world)
+    )
+    urdf_path = Path(physical_model.urdf_path)
+    records = _urdf_collision_records(urdf_path)
+    primitives = list(physical_model.collision_primitives)
+    if len(records) != len(primitives):
+        raise RuntimeError(
+            "dynamic collision proxy URDF/PhysicalModel geometry count mismatch"
+        )
+    proxies = []
+    for primitive, collision_record in zip(primitives, records, strict=True):
+        if (
+            primitive.link_id != collision_record.link_id
+            or primitive.primitive_type != collision_record.geometry_type
+            or (
+                collision_record.geometry_type == "mesh"
+                and primitive.geometry_ref != collision_record.mesh_ref
+            )
+        ):
+            raise RuntimeError(
+                "dynamic collision proxy URDF/PhysicalModel geometry identity mismatch: "
+                f"{primitive.primitive_id}"
+            )
+        link_pose = _module_body_pose(
+            robot,
+            module_id=module_id,
+            local_body_name=collision_record.link_id,
+        )
+        if link_pose is None:
+            raise RuntimeError(
+                f"dynamic collision proxy cannot resolve link {primitive.link_id}"
+            )
+        geometry_transform = compose_transform(
+            transform_from_pose(link_pose),
+            collision_record.local_transform,
+        )
+        geometry_bounds = _record_local_aabb(
+            collision_record,
+            urdf_path,
+            tuple(_expand_path(path) for path in mesh_search_dirs),
+        )
+        lower = geometry_bounds.lower
+        upper = geometry_bounds.upper
+        if any(
+            not math.isfinite(float(value))
+            for value in (*lower, *upper)
+        ):
+            raise RuntimeError(
+                f"collision primitive {primitive.primitive_id} has non-finite bounds"
+            )
+        geometry_corners = [
+            (x, y, z)
+            for x in (float(lower[0]), float(upper[0]))
+            for y in (float(lower[1]), float(upper[1]))
+            for z in (float(lower[2]), float(upper[2]))
+        ]
+        body_local_corners = [
+            compose_transform(
+                collision_record.local_transform,
+                Transform3D(
+                    rotation=(
+                        (1.0, 0.0, 0.0),
+                        (0.0, 1.0, 0.0),
+                        (0.0, 0.0, 1.0),
+                    ),
+                    translation=corner,
+                ),
+            ).translation
+            for corner in geometry_corners
+        ]
+        local_corners = [
+            compose_transform(
+                world_to_component,
+                compose_transform(
+                    geometry_transform,
+                    Transform3D(
+                        rotation=(
+                            (1.0, 0.0, 0.0),
+                            (0.0, 1.0, 0.0),
+                            (0.0, 0.0, 1.0),
+                        ),
+                        translation=corner,
+                    ),
+                ),
+            ).translation
+            for corner in geometry_corners
+        ]
+        proxies.append(
+            {
+                "owner_body_path": primitive.link_id,
+                "primitive_id": primitive.primitive_id,
+                "local_corners": local_corners,
+                "body_local_corners": body_local_corners,
+                "urdf_collision_origin_applied": True,
+            }
+        )
+    if not proxies:
+        raise RuntimeError("dynamic collision proxy found no collision primitives")
+    return proxies
+
+
+def _dynamic_collision_proxy_pose_free(
+    *,
+    leader_proxy,
+    follower_proxy,
+    leader_pose_world,
+    follower_pose_world,
+    excluded_body_pair,
+    leader_connect_pose_in_component,
+    follower_connect_pose_in_component,
+    selected_pair_min_axial_gap_m: float,
+    selected_pair_transverse_tolerance_m: float,
+    selected_pair_attitude_tolerance_rad: float,
+    floor_clearance_m: float,
+    collision_clearance_m: float = 0.002,
+) -> bool:
+    from amsrr.geometry.pose_math import (
+        FACE_TO_FACE_DOCK_RELATION,
+        compose_pose,
+        inverse_pose,
+    )
+
+    leader_bounds = _dynamic_collision_proxy_world_bounds(
+        leader_proxy,
+        leader_pose_world,
+    )
+    follower_bounds = _dynamic_collision_proxy_world_bounds(
+        follower_proxy,
+        follower_pose_world,
+    )
+    if any(item["lower"][2] < floor_clearance_m for item in (*leader_bounds, *follower_bounds)):
+        return False
+    excluded = (str(excluded_body_pair[0]), str(excluded_body_pair[1]))
+    leader_connect = compose_pose(
+        leader_pose_world,
+        leader_connect_pose_in_component,
+    )
+    follower_connect = compose_pose(
+        follower_pose_world,
+        follower_connect_pose_in_component,
+    )
+    relative_connect = compose_pose(inverse_pose(leader_connect), follower_connect)
+    selected_pair_staging_safe = (
+        float(relative_connect[0]) >= selected_pair_min_axial_gap_m
+        and math.hypot(float(relative_connect[1]), float(relative_connect[2]))
+        <= selected_pair_transverse_tolerance_m
+        and _quat_error_norm(
+            list(relative_connect[3:7]),
+            FACE_TO_FACE_DOCK_RELATION[3:7],
+        )
+        <= selected_pair_attitude_tolerance_rad
+    )
+    for leader in leader_bounds:
+        for follower in follower_bounds:
+            if (
+                leader["owner_body_path"] == excluded[0]
+                and follower["owner_body_path"] == excluded[1]
+                and selected_pair_staging_safe
+            ):
+                continue
+            separated = any(
+                leader["upper"][axis] + collision_clearance_m
+                < follower["lower"][axis]
+                or follower["upper"][axis] + collision_clearance_m
+                < leader["lower"][axis]
+                for axis in range(3)
+            )
+            if not separated:
+                return False
+    return True
+
+
+def _dynamic_collision_proxy_world_bounds(proxy, component_pose_world):
+    from amsrr.geometry.pose_math import (
+        Transform3D,
+        compose_transform,
+        transform_from_pose,
+    )
+
+    component_transform = transform_from_pose(component_pose_world)
+    values = []
+    for item in proxy:
+        world_points = [
+            compose_transform(
+                component_transform,
+                Transform3D(
+                    rotation=(
+                        (1.0, 0.0, 0.0),
+                        (0.0, 1.0, 0.0),
+                        (0.0, 0.0, 1.0),
+                    ),
+                    translation=tuple(point),
+                ),
+            ).translation
+            for point in item["local_corners"]
+        ]
+        values.append(
+            {
+                "owner_body_path": item["owner_body_path"],
+                "primitive_id": item["primitive_id"],
+                "lower": tuple(
+                    min(point[axis] for point in world_points)
+                    for axis in range(3)
+                ),
+                "upper": tuple(
+                    max(point[axis] for point in world_points)
+                    for axis in range(3)
+                ),
+            }
+        )
+    return values
+
+
+def _dynamic_selected_body_proxy_clearance_m(
+    *,
+    leader_proxy,
+    follower_proxy,
+    leader_body_pose_world,
+    follower_body_pose_world,
+    leader_body_path: str,
+    follower_body_path: str,
+) -> float:
+    """Conservative AABB clearance across all selected-body colliders."""
+
+    leader_bounds = _dynamic_body_local_proxy_world_bounds(
+        leader_proxy,
+        leader_body_pose_world,
+        owner_body_path=leader_body_path,
+    )
+    follower_bounds = _dynamic_body_local_proxy_world_bounds(
+        follower_proxy,
+        follower_body_pose_world,
+        owner_body_path=follower_body_path,
+    )
+    if not leader_bounds or not follower_bounds:
+        raise RuntimeError(
+            "dynamic selected-body clearance lacks a selected collider proxy"
+        )
+    clearances = []
+    for leader in leader_bounds:
+        for follower in follower_bounds:
+            gaps = [
+                max(
+                    float(follower["lower"][axis])
+                    - float(leader["upper"][axis]),
+                    float(leader["lower"][axis])
+                    - float(follower["upper"][axis]),
+                    0.0,
+                )
+                for axis in range(3)
+            ]
+            clearances.append(math.sqrt(sum(gap * gap for gap in gaps)))
+    return min(clearances)
+
+
+def _dynamic_body_local_proxy_world_bounds(
+    proxy,
+    body_pose_world,
+    *,
+    owner_body_path: str,
+):
+    from amsrr.geometry.pose_math import (
+        Transform3D,
+        compose_transform,
+        transform_from_pose,
+    )
+
+    body_transform = transform_from_pose(body_pose_world)
+    values = []
+    for item in proxy:
+        if item["owner_body_path"] != owner_body_path:
+            continue
+        world_points = [
+            compose_transform(
+                body_transform,
+                Transform3D(
+                    rotation=(
+                        (1.0, 0.0, 0.0),
+                        (0.0, 1.0, 0.0),
+                        (0.0, 0.0, 1.0),
+                    ),
+                    translation=tuple(point),
+                ),
+            ).translation
+            for point in item["body_local_corners"]
+        ]
+        values.append(
+            {
+                "owner_body_path": item["owner_body_path"],
+                "primitive_id": item["primitive_id"],
+                "lower": tuple(
+                    min(point[axis] for point in world_points)
+                    for axis in range(3)
+                ),
+                "upper": tuple(
+                    max(point[axis] for point in world_points)
+                    for axis in range(3)
+                ),
+            }
+        )
+    return values
+
+
+def _dynamic_follower_body_target_for_gap(
+    leader_connect_pose_world,
+    follower_connect_pose_world,
+    follower_body_pose_world,
+    gap_m: float,
+):
+    from amsrr.geometry.pose_math import (
+        FACE_TO_FACE_DOCK_RELATION,
+        Transform3D,
+        compose_transform,
+        inverse_transform,
+        pose_from_transform,
+        transform_from_pose,
+    )
+
+    leader = transform_from_pose(leader_connect_pose_world)
+    gap = Transform3D(
+        rotation=((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)),
+        translation=(float(gap_m), 0.0, 0.0),
+    )
+    desired_connect = compose_transform(
+        compose_transform(leader, gap),
+        transform_from_pose(FACE_TO_FACE_DOCK_RELATION),
+    )
+    body = transform_from_pose(follower_body_pose_world)
+    connect = transform_from_pose(follower_connect_pose_world)
+    connect_in_body = compose_transform(inverse_transform(body), connect)
+    return pose_from_transform(
+        compose_transform(desired_connect, inverse_transform(connect_in_body))
+    )
+
+
+def _dynamic_connect_alignment_errors(
+    leader_connect_pose_world,
+    follower_connect_pose_world,
+) -> dict[str, float]:
+    from amsrr.geometry.pose_math import FACE_TO_FACE_DOCK_RELATION
+
+    relative = compose_pose(
+        inverse_pose(leader_connect_pose_world),
+        follower_connect_pose_world,
+    )
+    return {
+        "axial_error_m": abs(float(relative[0])),
+        "transverse_error_m": math.hypot(
+            float(relative[1]),
+            float(relative[2]),
+        ),
+        "attitude_error_rad": _quat_error_norm(
+            list(relative[3:7]),
+            FACE_TO_FACE_DOCK_RELATION[3:7],
+        ),
+    }
 
 
 def _expand_path(path: str | Path) -> Path:
@@ -7057,6 +11388,7 @@ def _apply_actuator_record(
     device: str,
     *,
     rotor_thrust_scale: float = 1.0,
+    allowed_module_id: int | None = None,
 ) -> dict[str, object]:
     import torch
 
@@ -7079,6 +11411,8 @@ def _apply_actuator_record(
     for target in actuator_record.actuator_targets:
         local_id = str(target.metadata.get("local_id", target.command_key))
         module_id = int(target.metadata.get("module_id", 0))
+        if allowed_module_id is not None and module_id != int(allowed_module_id):
+            continue
         if target.actuator_type == "rotor_thrust":
             rotor = rotors_by_id.get(local_id)
             body_name = _resolve_module_name(robot.body_names, module_id, local_id)
