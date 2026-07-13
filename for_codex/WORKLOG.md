@@ -2,6 +2,25 @@
 
 ## Global Worklog
 
+### 2026-07-13 (P4-full Order 4 deterministic free-flight pi_H completed)
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the approved Order 4 free-flight deterministic `pi_H`/trajectory-runtime supplement
+- Work package / Agent label: Agent H/I/K boundary; P4-full Order 4 deterministic free-flight planner, trajectory executor, low-level integration, and GUI verification path
+- Status: Implementation and representative verification complete for the deterministic free-flight slice. This is not learned/contact-aware `pi_H` completion and not P4-full completion.
+- Summary: Implemented a retained production deterministic free-flight `pi_H` fallback plus the shared `ContactWrenchTrajectory` runtime. The planner consumes an unchanged `HighLevelPolicyContext`, evaluates measured centroidal/controller/floor-contact guards, emits rolling 2 s/0.25 s multi-knot plans at 2 Hz, and executes floor settle, takeoff, hover acquisition, three translation/attitude waypoints, final hover, timeout/abort, and safe hold. The common executor owns plan-relative time origin, knot validation/selection/interpolation, expiry, and explicit active-knot delivery to deterministic baseline or optional compatible learned `pi_L`, then QPID and the Isaac bridge.
+- Files changed: New `amsrr/schemas/order4.py`, `amsrr/policies/contact_wrench_trajectory_runtime.py`, `amsrr/policies/deterministic_free_flight_planner.py`, `amsrr/simulation/order4_free_flight.py`, `configs/training/order4_deterministic_pi_h.yaml`, `scripts/order4_free_flight_pi_h.py`, four focused test files; additive Order 4 integration in `scripts/p4_control_holon_spawn_probe.py`; design supplement and this worklog.
+- Schema/interface changes: No existing persisted schema or existing policy/checkpoint contract changed. Added versioned Order 4 mission, planner config, runtime-step, Isaac config/result, and report contracts. Existing `HighLevelPolicyContext`, `ContactWrenchTrajectory`, `InteractionKnot`, `PolicyCommand`, `centroidal_local_joint_v2`, and Order 3 checkpoint format remain authoritative.
+- Upstream dependencies used: v0.4 Sections 19, 20, and 24.5; completed Orders 1-3 and Order 2.5; existing random-morphology floor takeoff, morphology-conditioned `pi_L`, QPID, actuator bridge, and corrected zero-dock-hold contracts.
+- Downstream impact: Order 8 may extend the retained fallback with natural-contact planning; Order 9 may train/evaluate learned `pi_H` through the same executor. Order 4 itself cannot establish contact-aware or learned-policy quality.
+- Tests added or run: Added schema hash/timing validation; executor origin/interpolation/expiry validation; planner state guard, multi-waypoint, low-level handoff, controller-infeasible safe hold, no-contact boundary, optional checkpoint hash/propagation, and Isaac command/viewer/report/tamper tests. Final focused suite passed `12`; relevant Order 2/3/4 regression passed `112`; final complete `tests/unit tests/acceptance` regression passed `530` with `1` skipped in `297.44 s`. Python compilation, CLI help, and `git diff --check` passed.
+- Commands run: Repository/spec/interface audits; focused and full pytest; compileall; CLI dry run/help; real Isaac Lab runs through `micromamba run -n isaaclab3`; Kit viewer with real-time playback; raw report metric extraction; status/diff/whitespace checks.
+- Real-Isaac evidence: N=2 seed 2, N=3 seed 25, and N=8 seed 8 each passed the default three-waypoint mission in `18.005 s`, with `37` replans and `5.505 s` final hover. Final position errors were `0.000423/0.000484/0.000547 m`; final attitude errors `0.005200/0.005250/0.005292 rad`; maximum Dock angles `0.001056/0.001780/0.002504 rad`. Every case had zero QP infeasibility, unintended cross-module contact, missing/unsupported actuator, and nonzero Dock position/velocity/torque-bias command. N=3 endurance passed `20.505 s` final hover after `67` replans/`33.005 s`, with final position/attitude error `0.000305 m / 0.000189 rad` and zero safety failures.
+- GUI evidence: N=3 seed 25 passed through Kit with real-time playback and a 5 s post-rollout hold. The same typed validator reported no failures. User command: `/home/leus/.local/bin/micromamba run -n isaaclab3 python scripts/order4_free_flight_pi_h.py --real --viewer kit --realtime-playback --module-count 3`; omit `--seed` for a fresh morphology or add it for reproducibility.
+- Failure/recovery record: The first 20 s endurance attempt reached the inherited 300 s subprocess timeout before a raw report was produced. This was an execution-time budget failure, not accepted motion evidence. Added an explicit validated Order 4 `command_timeout_s=600`; the identical rerun passed. No failed rollout was relabelled as success.
+- Assumptions: Automated acceptance uses a 5 s continuous final hover; representative endurance uses 20 s. Existing Order 3 checkpoint-visible `task_progress` is not mutated. Empty assignments report simultaneous reachability as `not_applicable_no_active_assignments`. The optional Order 3 `pi_L` checkpoint route is hash checked and shares the executor, but the recorded Order 4 real-Isaac evidence intentionally uses deterministic baseline `pi_L` to isolate fallback/runtime behavior.
+- Artifacts: Local ignored evidence is under `artifacts/p4_full/order4_deterministic_pi_h/`, including N=2/N=3/N=8 headless, N=3 endurance, and N=3 GUI reports. These are representative evidence, not source-controlled fresh-clone dependencies.
+- Blockers / open questions: None for Order 4. Contact assignment/reachability, natural contact, learned `pi_H`, and full TaskSpec evaluation remain explicitly untested here.
+- Next steps: Order 5 (`pi_A` AssemblyControlBridge) is the next roadmap entry, only on explicit request. Do not use the Order 4 reset-time fixed morphology as evidence of dynamic docking.
+
 ### 2026-07-12 (P4-full Orders 1-10 roadmap and Order 3 commit handoff)
 - Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the approved centroidal controller, random-morphology, and Order 3 supplements
 - Work package / Agent label: Agent E/F/G/H/I/J/K/L handoff boundary; P4-full roadmap governance
@@ -2757,6 +2776,21 @@
 ---
 
 ## Work Package Logs
+
+### Agent H/I/K: Order 4 Deterministic Free-Flight pi_H and Trajectory Runtime
+
+#### 2026-07-13
+- Scope: Implement and verify the retained deterministic free-flight `pi_H` fallback and policy-agnostic rolling `ContactWrenchTrajectory` executor without claiming learned/contact-aware `pi_H` completion.
+- Files changed: Order 4 schemas, trajectory runtime, deterministic planner/context factory, Isaac environment/report gate, config, CLI, focused tests, additive Isaac probe path, design supplement, and WORKLOG.
+- Upstream dependencies: v0.4 Sections 19/20/24.5; Orders 1-3 and 2.5; current PhysicalModel/URDF; `HighLevelPolicyContext`; baseline/optional learned `pi_L`; QPID/local joint servo/Isaac bridge.
+- Implemented: Hash-bound multiple-waypoint mission; state-dependent settle/takeoff/hover/waypoint/final-hold guards; 2 Hz rolling replanning; explicit relative plan origin and centroidal interpolation; phase/timeout/safe-hold reporting; zero-contact reachability N/A; Dock absolute-zero posture; N=2/N=3/N=8 headless, N=3 20 s endurance, and N=3 Kit GUI validation.
+- Not implemented: Learned `pi_H` training/evaluation, contact candidates/assignments/wrenches, simultaneous multi-anchor reachability, object contact, dynamic module attach/detach, full TaskSpec delivery, or P4-full acceptance.
+- Schema/interface changes: Additive versioned Order 4-only contracts; no change to existing persisted policy/morphology/checkpoint/controller schemas.
+- Downstream impact: Order 8 may extend the deterministic fallback with contact planning and Order 9 may place learned `pi_H` behind the same executor. Order 5 should preserve the controller boundary and keep dynamic assembly evidence separate.
+- Tests added: Order 4 schema, executor, planner, safe-hold, low-level handoff, Isaac command/report/tamper, GUI-option coverage.
+- Tests passed: Final focused `12`; related `112`; final full regression `530 passed, 1 skipped`; compile/help/diff checks; all recorded real Isaac and Kit gates passed after the documented timeout correction.
+- Handoff notes: Use `scripts/order4_free_flight_pi_h.py`. Default execution samples a fresh feasible morphology; `--seed` reproduces it, `--module-count` accepts 2-8, `--endurance` requests 20 s, repeated `--waypoint` overrides the mission, and `--pi-l-checkpoint-path` selects a compatible Order 3 actor. Ignored reports are not required by source.
+- Open questions: None for the free-flight slice. Contact-side thresholds and reachability remain Order 8 design work.
 
 ### Agent E/F/G/H/I/J/K/L: P4-Full Orders 1-10 Handoff
 

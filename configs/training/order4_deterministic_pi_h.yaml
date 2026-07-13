@@ -1,0 +1,75 @@
+phase: P4-full-order4
+
+takeoff:
+  backend_config_path: configs/env/isaac_lab.yaml
+  robot_model_config_path: configs/robot/robot_model.yaml
+  mesh_search_dirs: [module_urdf]
+  simulation_dt_s: 0.005
+  floor_clearance_m: 0.002
+  floor_contact_force_threshold_n: 0.5
+  floor_contact_dwell_duration_s: 0.10
+  exact_cross_module_contact_force_threshold_n: 0.001
+  exact_cross_module_contact_max_patches_per_body_pair: 8
+  dock_joint_position_tolerance_rad: 0.0053
+  initial_root_position_tolerance_m: 0.002
+  initial_root_attitude_tolerance_rad: 0.001
+  settle_duration_s: 1.0
+  settle_dwell_duration_s: 0.25
+  takeoff_ramp_duration_s: 2.0
+  hover_hold_duration_s: 5.0
+  hover_acquisition_timeout_s: 5.0
+  hover_height_delta_m: 0.5
+  position_error_threshold_m: 0.20
+  attitude_error_threshold_rad: 0.25
+  settle_linear_speed_threshold_mps: 0.20
+  settle_angular_speed_threshold_rad_s: 0.50
+  hover_linear_speed_threshold_mps: 0.15
+  hover_angular_speed_threshold_rad_s: 0.25
+  max_vertical_speed_mps: 3.0
+  min_height_gain_ratio: 0.80
+  allocation_mode: rigid_body_qp
+  stop_on_hover_hold: true
+  command_timeout_s: 300.0
+  control_contract_version: centroidal_local_joint_v2
+
+order4:
+  command_timeout_s: 600.0
+  planner:
+    update_rate_hz: 2.0
+    horizon_s: 2.0
+    knot_dt_s: 0.25
+    floor_settle_duration_s: 1.0
+    floor_settle_dwell_s: 0.25
+    takeoff_duration_s: 2.0
+    hover_acquisition_timeout_s: 5.0
+    position_tolerance_m: 0.20
+    attitude_tolerance_rad: 0.25
+    linear_speed_tolerance_mps: 0.15
+    angular_speed_tolerance_rad_s: 0.25
+    max_tilt_rad: 1.2
+    trajectory_expiry_grace_s: 0.25
+  mission:
+    mission_id: order4_default_multi_waypoint
+    hover_height_delta_m: 0.5
+    hover_acquisition_dwell_s: 0.5
+    final_hover_hold_s: 5.0
+    mission_timeout_s: 45.0
+    waypoints:
+      - waypoint_id: translate_x
+        position_offset_world: [0.25, 0.0, 0.05]
+        orientation_rpy_rad: [0.0, 0.0, 0.0]
+        transition_duration_s: 2.0
+        dwell_s: 0.5
+        timeout_s: 8.0
+      - waypoint_id: translate_y_attitude
+        position_offset_world: [0.25, 0.20, 0.05]
+        orientation_rpy_rad: [0.08, -0.08, 0.20]
+        transition_duration_s: 2.5
+        dwell_s: 0.5
+        timeout_s: 9.0
+      - waypoint_id: return_hover
+        position_offset_world: [0.0, 0.0, 0.0]
+        orientation_rpy_rad: [0.0, 0.0, 0.0]
+        transition_duration_s: 2.5
+        dwell_s: 0.5
+        timeout_s: 9.0

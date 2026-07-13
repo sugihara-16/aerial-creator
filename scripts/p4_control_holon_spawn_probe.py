@@ -159,6 +159,30 @@ def parse_args() -> argparse.Namespace:
         help="Include aligned actor action/recurrent/value traces in the Order-3 report.",
     )
     parser.add_argument(
+        "--order4-free-flight-mission-json",
+        default=None,
+        help=(
+            "Canonical hash-bound Order4FreeFlightMission JSON. Enables the "
+            "production deterministic free-flight pi_H and rolling trajectory runtime."
+        ),
+    )
+    parser.add_argument(
+        "--order4-planner-config-json",
+        default=None,
+        help="Optional serialized Order4DeterministicPlannerConfig; defaults to the takeoff tolerances.",
+    )
+    parser.add_argument(
+        "--order4-pi-l-checkpoint-path",
+        default=None,
+        help="Optional compatible Order-3 morphology-conditioned pi_L checkpoint under Order-4 pi_H targets.",
+    )
+    parser.add_argument(
+        "--order4-record-runtime-steps",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Include aligned Order-4 trajectory-runtime steps in the probe report.",
+    )
+    parser.add_argument(
         "--order3-external-wrench-body",
         type=float,
         nargs=6,
@@ -608,6 +632,10 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     from amsrr.schemas.contact_candidates import ContactCandidateSet
     from amsrr.schemas.morphology import MorphologyGraph
     from amsrr.schemas.order3_rollout_condition import Order3RolloutCondition
+    from amsrr.schemas.order4 import (
+        Order4DeterministicPlannerConfig,
+        Order4FreeFlightMission,
+    )
     from amsrr.schemas.policies import ContactWrenchTrajectory
     from amsrr.simulation.isaac_lab_backend import IsaacLabBackend, load_isaac_lab_backend_config
     from amsrr.simulation.random_morphology_takeoff import (
@@ -649,9 +677,35 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         if args.order3_rollout_condition_json
         else None
     )
+    order4_free_flight_mission = (
+        Order4FreeFlightMission.from_json(args.order4_free_flight_mission_json)
+        if args.order4_free_flight_mission_json
+        else None
+    )
+    order4_planner_config = (
+        Order4DeterministicPlannerConfig.from_json(args.order4_planner_config_json)
+        if args.order4_planner_config_json
+        else None
+    )
     if order3_rollout_condition is not None and not random_takeoff_requested:
         raise RuntimeError(
             "--order3-rollout-condition-json requires --random-morphology-takeoff"
+        )
+    if order4_free_flight_mission is not None and not random_takeoff_requested:
+        raise RuntimeError(
+            "--order4-free-flight-mission-json requires --random-morphology-takeoff"
+        )
+    if order4_free_flight_mission is not None and order3_rollout_condition is not None:
+        raise RuntimeError(
+            "Order-3 rollout conditions and the Order-4 free-flight mission are mutually exclusive"
+        )
+    if args.order4_pi_l_checkpoint_path and order4_free_flight_mission is None:
+        raise RuntimeError(
+            "--order4-pi-l-checkpoint-path requires --order4-free-flight-mission-json"
+        )
+    if args.order4_pi_l_checkpoint_path and args.order3_pi_l_checkpoint_path:
+        raise RuntimeError(
+            "Order-3 and Order-4 pi_L checkpoint flags are mutually exclusive"
         )
     random_teleop_requested = bool(args.random_morphology_teleop)
     if random_teleop_requested and not random_takeoff_requested:
@@ -1265,6 +1319,14 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             order3_requested_initial_root_pose=random_initial_root_pose,
             order3_requested_initial_root_twist=random_initial_root_twist,
             order3_dynamics_realization=order3_dynamics_realization,
+            order4_free_flight_mission=order4_free_flight_mission,
+            order4_planner_config=order4_planner_config,
+            order4_checkpoint_path=(
+                str(args.order4_pi_l_checkpoint_path)
+                if args.order4_pi_l_checkpoint_path
+                else None
+            ),
+            order4_record_runtime_steps=bool(args.order4_record_runtime_steps),
         )
         if random_teleop_requested:
             if not hover_smoke_report.get(
@@ -1430,6 +1492,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
                 "fixed_morphology_waypoint_smoke_passed",
                 "random_morphology_takeoff_smoke_passed",
                 "order3_free_flight_passed",
+                "order4_free_flight_passed",
             )
         )
 
@@ -2745,6 +2808,10 @@ def _run_random_morphology_takeoff_smoke(
     order3_requested_initial_root_pose=None,
     order3_requested_initial_root_twist=None,
     order3_dynamics_realization=None,
+    order4_free_flight_mission=None,
+    order4_planner_config=None,
+    order4_checkpoint_path: str | None = None,
+    order4_record_runtime_steps: bool = True,
 ) -> dict[str, object]:
     """Real-Isaac gate for a reset-time fixed random morphology.
 
@@ -2763,7 +2830,16 @@ def _run_random_morphology_takeoff_smoke(
     from amsrr.controllers.rigid_body_model import RigidBodyControlModelBuilder
     from amsrr.feasibility.morphology_flight import collision_geometry_content_hash
     from amsrr.morphology.random_connected import morphology_structural_hash
-    from amsrr.policies.low_level_policy_base import LowLevelPolicyContext
+    from amsrr.policies.deterministic_free_flight_planner import (
+        DeterministicFreeFlightPlanner,
+        Order4FreeFlightContextFactory,
+        Order4FreeFlightTrajectoryRuntime,
+    )
+    from amsrr.policies.low_level_policy_base import (
+        BaselineLowLevelPolicy,
+        BaselineLowLevelPolicyConfig,
+        LowLevelPolicyContext,
+    )
     from amsrr.policies.morphology_conditioned_low_level_policy import (
         MorphologyConditionedLowLevelPolicy,
     )
@@ -2777,6 +2853,12 @@ def _run_random_morphology_takeoff_smoke(
         InteractionKnot,
         PolicyCommand,
     )
+    from amsrr.schemas.order4 import (
+        ORDER4_FREE_FLIGHT_REPORT_VERSION,
+        ORDER4_FREE_FLIGHT_RUNTIME_VERSION,
+        Order4DeterministicPlannerConfig,
+    )
+    from amsrr.utils.hashing import stable_hash
     from amsrr.simulation.random_morphology_takeoff import (
         DeterministicTakeoffScheduler,
         TakeoffPhase,
@@ -2793,6 +2875,22 @@ def _run_random_morphology_takeoff_smoke(
     module_count = len(morphology_graph.modules)
     centroidal_contract = (
         config.control_contract_version == POLICY_COMMAND_CONTRACT_CENTROIDAL
+    )
+    order4_enabled = order4_free_flight_mission is not None
+    if order4_enabled and not centroidal_contract:
+        raise RuntimeError(
+            "Order-4 deterministic pi_H requires centroidal_local_joint_v2"
+        )
+    if order4_enabled and order3_rollout_condition is not None:
+        raise RuntimeError("Order-3 and Order-4 rollout contracts are mutually exclusive")
+    if order4_enabled and order3_deterministic_baseline_evaluation:
+        raise RuntimeError(
+            "Order-3 deterministic baseline mode cannot be combined with Order-4"
+        )
+    if order4_checkpoint_path is not None and not order4_enabled:
+        raise RuntimeError("Order-4 pi_L checkpoint requires an Order-4 mission")
+    effective_checkpoint_path = (
+        order4_checkpoint_path if order4_enabled else order3_checkpoint_path
     )
     if order3_rollout_condition is not None:
         order3_external_wrench_body = tuple(
@@ -2817,9 +2915,9 @@ def _run_random_morphology_takeoff_smoke(
         raise RuntimeError(
             "Order-3 rollout conditions require a learned or deterministic-baseline rollout"
         )
-    if order3_checkpoint_path is not None and not centroidal_contract:
+    if effective_checkpoint_path is not None and not centroidal_contract:
         raise RuntimeError(
-            "Order-3 pi_L requires --control-contract-version centroidal_local_joint_v2"
+            "morphology-conditioned pi_L requires centroidal_local_joint_v2"
         )
     if order3_checkpoint_path is not None and order3_deterministic_baseline_evaluation:
         raise RuntimeError(
@@ -2881,13 +2979,57 @@ def _run_random_morphology_takeoff_smoke(
     rigid_body_model_builder = RigidBodyControlModelBuilder()
     learned_policy = (
         MorphologyConditionedLowLevelPolicy.from_checkpoint(
-            order3_checkpoint_path,
+            effective_checkpoint_path,
             physical_model=physical_model,
             deterministic=not order3_stochastic,
             device="cpu",
         )
-        if order3_checkpoint_path is not None
+        if effective_checkpoint_path is not None
         else None
+    )
+    if order4_enabled and order4_planner_config is None:
+        order4_planner_config = Order4DeterministicPlannerConfig(
+            floor_settle_duration_s=float(config.settle_duration_s),
+            floor_settle_dwell_s=float(config.settle_dwell_duration_s),
+            takeoff_duration_s=float(config.takeoff_ramp_duration_s),
+            hover_acquisition_timeout_s=float(config.hover_acquisition_timeout_s),
+            position_tolerance_m=float(config.position_error_threshold_m),
+            attitude_tolerance_rad=float(config.attitude_error_threshold_rad),
+            linear_speed_tolerance_mps=float(
+                config.hover_linear_speed_threshold_mps
+            ),
+            angular_speed_tolerance_rad_s=float(
+                config.hover_angular_speed_threshold_rad_s
+            ),
+        )
+    if order4_planner_config is not None:
+        order4_planner_config.validate()
+    order4_context_factory = (
+        Order4FreeFlightContextFactory(
+            mission=order4_free_flight_mission,
+            morphology_graph=morphology_graph,
+            planner_config=order4_planner_config,
+        )
+        if order4_enabled
+        else None
+    )
+    order4_planner = (
+        DeterministicFreeFlightPlanner(
+            physical_model=physical_model,
+            config=order4_planner_config,
+        )
+        if order4_enabled
+        else None
+    )
+    order4_runtime = (
+        Order4FreeFlightTrajectoryRuntime(planner=order4_planner)
+        if order4_planner is not None
+        else None
+    )
+    deterministic_low_level_policy = BaselineLowLevelPolicy(
+        BaselineLowLevelPolicyConfig(
+            control_contract_version=config.control_contract_version
+        )
     )
     policy_update_stride = (
         max(
@@ -2911,6 +3053,8 @@ def _run_random_morphology_takeoff_smoke(
     order3_fallback_count = 0
     last_order3_policy_command = None
     last_order3_policy_step = -1
+    order4_runtime_steps: list[dict[str, object]] = []
+    order4_last_step = None
     resolved_fc_body_count = sum(
         1
         for module_id in range(module_count)
@@ -3028,9 +3172,13 @@ def _run_random_morphology_takeoff_smoke(
     hold_steps = 0
     max_hold_steps = 0
     required_hold_s = (
-        float(order3_rollout_condition.hold_s)
-        if order3_in_air
-        else float(config.hover_hold_duration_s)
+        float(order4_free_flight_mission.final_hover_hold_s)
+        if order4_enabled
+        else (
+            float(order3_rollout_condition.hold_s)
+            if order3_in_air
+            else float(config.hover_hold_duration_s)
+        )
     )
     hold_steps_required = max(1, int(math.ceil(required_hold_s / max(sim_dt, 1.0e-9))))
     settle_dwell_steps_required = max(
@@ -3164,7 +3312,78 @@ def _run_random_morphology_takeoff_smoke(
             settle_low_speed_steps_at_completion = settle_low_speed_steps
             floor_contact_steps_at_completion = floor_contact_steps
         schedule_reference = settled_pose or initial_control_pose or initial_base_fc_pose
-        if order3_in_air:
+        order4_active_knot = None
+        order4_active_trajectory = None
+        if order4_enabled:
+            if order4_context_factory is None or order4_runtime is None:
+                raise RuntimeError("Order-4 trajectory runtime was not initialized")
+            order4_last_step = order4_runtime.step(
+                order4_context_factory.context(runtime_observation)
+            )
+            order4_runtime_steps.append(order4_last_step.to_dict())
+            order4_active_knot = order4_last_step.active_knot
+            order4_active_trajectory = order4_runtime.active_trajectory
+            if order4_active_trajectory is None:
+                raise RuntimeError("Order-4 runtime did not retain its active trajectory")
+            centroidal_target = order4_active_knot.centroidal_target
+            if (
+                centroidal_target is None
+                or centroidal_target.com_pos_world is None
+                or centroidal_target.body_orientation_world is None
+            ):
+                raise RuntimeError("Order-4 active knot is missing its centroidal pose target")
+            order4_pose = (
+                *centroidal_target.com_pos_world,
+                *centroidal_target.body_orientation_world,
+            )
+            order4_phase_map = {
+                "floor_settle": TakeoffPhase.SETTLE,
+                "takeoff": TakeoffPhase.TAKEOFF_RAMP,
+                "hover_acquisition": TakeoffPhase.HOVER_HOLD,
+                "waypoint": TakeoffPhase.HOVER_HOLD,
+                "final_hover": TakeoffPhase.HOVER_HOLD,
+                "complete": TakeoffPhase.COMPLETE,
+                "safe_hold": TakeoffPhase.HOVER_HOLD,
+            }
+            mapped_phase = order4_phase_map[order4_last_step.phase]
+            if order4_last_step.phase == "floor_settle":
+                order4_ramp_progress = 0.0
+            elif order4_last_step.phase == "takeoff":
+                order4_ramp_progress = min(
+                    max(
+                        (
+                            float(order4_pose[2])
+                            - float(schedule_reference[2])
+                        )
+                        / max(
+                            float(order4_free_flight_mission.hover_height_delta_m),
+                            1.0e-9,
+                        ),
+                        0.0,
+                    ),
+                    1.0,
+                )
+            else:
+                order4_ramp_progress = 1.0
+            target = type(
+                "_Order4FreeFlightSchedulerTarget",
+                (),
+                {
+                    "phase": mapped_phase,
+                    "ramp_progress": order4_ramp_progress,
+                    "desired_pose_world": order4_pose,
+                },
+            )()
+            target_twist = (
+                list(centroidal_target.com_vel_world) + [0.0, 0.0, 0.0]
+                if centroidal_target.com_vel_world is not None
+                else [0.0] * 6
+            )
+            current_target_hold_active = order4_last_step.phase in {
+                "final_hover",
+                "complete",
+            }
+        elif order3_in_air:
             if order3_condition_scheduler is None:
                 raise RuntimeError("Order-3 in-air target scheduler was not initialized")
             condition_target = order3_condition_scheduler.target_at(time_s)
@@ -3303,26 +3522,49 @@ def _run_random_morphology_takeoff_smoke(
                 joint_torque_bias=dict(neutral_dock_torque_bias),
             )
             if learned_policy is None:
-                policy_command = deterministic_policy_command
+                if order4_enabled:
+                    if order4_active_knot is None or order4_active_trajectory is None:
+                        raise RuntimeError("Order-4 low-level context is incomplete")
+                    policy_command = deterministic_low_level_policy.command(
+                        LowLevelPolicyContext(
+                            runtime_observation=runtime_observation,
+                            morphology_graph=morphology_graph,
+                            physical_model=physical_model,
+                            contact_wrench_trajectory=order4_active_trajectory,
+                            active_knot=order4_active_knot,
+                            controller_status=runtime_observation.controller_status,
+                        )
+                    )
+                    policy_command.joint_torque_bias = dict(
+                        neutral_dock_torque_bias
+                    )
+                else:
+                    policy_command = deterministic_policy_command
             elif (
                 last_order3_policy_command is None
                 or step_idx - last_order3_policy_step >= policy_update_stride
             ):
-                active_knot = InteractionKnot(
-                    t_rel_s=time_s,
-                    contact_assignments=[],
-                    centroidal_target=CentroidalTarget(
-                        com_pos_world=tuple(target.desired_pose_world[:3]),
-                        com_vel_world=tuple(target_twist[:3]),
-                        body_orientation_world=tuple(target.desired_pose_world[3:7]),
-                    ),
-                )
-                trajectory = ContactWrenchTrajectory(
-                    horizon_s=max(1.0 / learned_policy.config.update_rate_hz, sim_dt),
-                    dt_s=max(1.0 / learned_policy.config.update_rate_hz, sim_dt),
-                    knots=[active_knot],
-                    derived_mode_label=f"order3_free_flight_{order3_task_mode}",
-                )
+                if order4_enabled:
+                    if order4_active_knot is None or order4_active_trajectory is None:
+                        raise RuntimeError("Order-4 learned pi_L context is incomplete")
+                    active_knot = order4_active_knot
+                    trajectory = order4_active_trajectory
+                else:
+                    active_knot = InteractionKnot(
+                        t_rel_s=time_s,
+                        contact_assignments=[],
+                        centroidal_target=CentroidalTarget(
+                            com_pos_world=tuple(target.desired_pose_world[:3]),
+                            com_vel_world=tuple(target_twist[:3]),
+                            body_orientation_world=tuple(target.desired_pose_world[3:7]),
+                        ),
+                    )
+                    trajectory = ContactWrenchTrajectory(
+                        horizon_s=max(1.0 / learned_policy.config.update_rate_hz, sim_dt),
+                        dt_s=max(1.0 / learned_policy.config.update_rate_hz, sim_dt),
+                        knots=[active_knot],
+                        derived_mode_label=f"order3_free_flight_{order3_task_mode}",
+                    )
                 inference = learned_policy.command_with_trace(
                     LowLevelPolicyContext(
                         runtime_observation=runtime_observation,
@@ -3373,7 +3615,11 @@ def _run_random_morphology_takeoff_smoke(
                     runtime_observation=runtime_observation,
                     morphology_graph=morphology_graph,
                     physical_model=physical_model,
-                    active_knot=InteractionKnot(t_rel_s=time_s, contact_assignments=[]),
+                    active_knot=(
+                        order4_active_knot
+                        if order4_active_knot is not None
+                        else InteractionKnot(t_rel_s=time_s, contact_assignments=[])
+                    ),
                     policy_command=policy_command,
                     previous_command=previous_command,
                     control_dt_s=config.simulation_dt_s,
@@ -3680,7 +3926,17 @@ def _run_random_morphology_takeoff_smoke(
             else:
                 hold_steps = 0
             max_hold_steps = max(max_hold_steps, hold_steps)
-            if config.stop_on_hover_hold and max_hold_steps >= hold_steps_required:
+            if (
+                config.stop_on_hover_hold
+                and max_hold_steps >= hold_steps_required
+                and (
+                    not order4_enabled
+                    or (
+                        order4_last_step is not None
+                        and order4_last_step.phase == "complete"
+                    )
+                )
+            ):
                 break
 
     if settled_pose is None:
@@ -3704,9 +3960,15 @@ def _run_random_morphology_takeoff_smoke(
         else settled_pose
     )
     final_target = (
-        tuple(order3_condition_scheduler.final_pose)
-        if order3_in_air and order3_condition_scheduler is not None
-        else scheduler.final_hover_pose(settled_pose)
+        tuple(order4_planner.final_target_pose)
+        if order4_enabled
+        and order4_planner is not None
+        and order4_planner.final_target_pose is not None
+        else (
+            tuple(order3_condition_scheduler.final_pose)
+            if order3_in_air and order3_condition_scheduler is not None
+            else scheduler.final_hover_pose(settled_pose)
+        )
     )
     if order3_in_air:
         final_position_error = _position_error_norm(
@@ -3900,7 +4162,32 @@ def _run_random_morphology_takeoff_smoke(
         and order3_in_air_floor_contact_violation_count == 0
         and ramp_max_progress >= 1.0 - 1.0e-9
     )
-    passed = order3_free_flight_passed if order3_in_air else takeoff_passed
+    order4_plan_records = (
+        order4_runtime.plan_records if order4_runtime is not None else []
+    )
+    order4_max_active_assignment_count = max(
+        (
+            len(knot.get("contact_assignments", []))
+            for record in order4_plan_records
+            for knot in record.get("trajectory", {}).get("knots", [])
+        ),
+        default=0,
+    )
+    order4_free_flight_passed = bool(
+        order4_enabled
+        and takeoff_passed
+        and order4_last_step is not None
+        and order4_last_step.phase == "complete"
+        and not order4_last_step.safe_hold_active
+        and order4_last_step.failure_reason is None
+        and order4_max_active_assignment_count == 0
+        and order4_plan_records
+    )
+    passed = (
+        order4_free_flight_passed
+        if order4_enabled
+        else (order3_free_flight_passed if order3_in_air else takeoff_passed)
+    )
     requested_initial_root_pose = tuple(
         float(value) for value in order3_requested_initial_root_pose
     )
@@ -4005,9 +4292,147 @@ def _run_random_morphology_takeoff_smoke(
             float(height_gain_ratio) if not order3_in_air else None
         ),
     }
+    order4_phase_transitions = (
+        [transition.to_dict() for transition in order4_planner.transitions]
+        if order4_planner is not None
+        else []
+    )
+    order4_completed_waypoint_count = 0
+    if order4_enabled and order4_free_flight_mission is not None:
+        if any(
+            transition["to_phase"] in {"final_hover", "complete"}
+            for transition in order4_phase_transitions
+        ):
+            order4_completed_waypoint_count = len(
+                order4_free_flight_mission.waypoints
+            )
+        elif order4_last_step is not None and order4_last_step.waypoint_index is not None:
+            order4_completed_waypoint_count = int(order4_last_step.waypoint_index)
+    order4_time_origin_valid = bool(
+        order4_enabled
+        and order4_runtime_steps
+        and all(
+            abs(
+                float(step["plan_elapsed_s"])
+                - (
+                    float(step["time_s"])
+                    - float(step["plan_start_time_s"])
+                )
+            )
+            <= 1.0e-8
+            for step in order4_runtime_steps
+        )
+    )
     return {
         "random_morphology_takeoff_smoke": not order3_in_air,
         "random_morphology_takeoff_smoke_passed": bool(takeoff_passed),
+        "order4_free_flight_report_version": (
+            ORDER4_FREE_FLIGHT_REPORT_VERSION if order4_enabled else None
+        ),
+        "order4_free_flight_enabled": bool(order4_enabled),
+        "order4_free_flight_passed": bool(order4_free_flight_passed),
+        "order4_free_flight_mission": (
+            order4_free_flight_mission.to_dict()
+            if order4_free_flight_mission is not None
+            else None
+        ),
+        "order4_free_flight_mission_hash": (
+            order4_free_flight_mission.mission_hash
+            if order4_free_flight_mission is not None
+            else None
+        ),
+        "order4_free_flight_planner_config": (
+            order4_planner_config.to_dict()
+            if order4_planner_config is not None
+            else None
+        ),
+        "order4_free_flight_planner_config_hash": (
+            stable_hash(order4_planner_config)
+            if order4_planner_config is not None
+            else None
+        ),
+        "order4_free_flight_deterministic_pi_h": bool(order4_enabled),
+        "order4_free_flight_pi_h_scope": (
+            "free_flight_only_no_contact_planning" if order4_enabled else None
+        ),
+        "order4_free_flight_trajectory_runtime_version": (
+            ORDER4_FREE_FLIGHT_RUNTIME_VERSION if order4_enabled else None
+        ),
+        "order4_free_flight_final_phase": (
+            order4_last_step.phase if order4_last_step is not None else None
+        ),
+        "order4_free_flight_progress_ratio": (
+            float(order4_last_step.mission_progress_ratio)
+            if order4_last_step is not None
+            else 0.0
+        ),
+        "order4_free_flight_waypoint_count": (
+            len(order4_free_flight_mission.waypoints)
+            if order4_free_flight_mission is not None
+            else 0
+        ),
+        "order4_free_flight_completed_waypoint_count": int(
+            order4_completed_waypoint_count
+        ),
+        "order4_free_flight_phase_transitions": order4_phase_transitions,
+        "order4_free_flight_plan_records": order4_plan_records,
+        "order4_free_flight_replan_count": len(order4_plan_records),
+        "order4_free_flight_runtime_steps": (
+            order4_runtime_steps if order4_record_runtime_steps else []
+        ),
+        "order4_free_flight_runtime_step_count": len(order4_runtime_steps),
+        "order4_free_flight_time_origin_valid": order4_time_origin_valid,
+        "order4_free_flight_reachability_status": (
+            "not_applicable_no_active_assignments" if order4_enabled else None
+        ),
+        "order4_free_flight_max_active_assignment_count": int(
+            order4_max_active_assignment_count
+        ),
+        "order4_free_flight_safe_hold_active": bool(
+            order4_last_step.safe_hold_active
+            if order4_last_step is not None
+            else False
+        ),
+        "order4_free_flight_failure_reason": (
+            order4_last_step.failure_reason
+            if order4_last_step is not None
+            else None
+        ),
+        "order4_free_flight_final_target_pose_world": (
+            list(final_target) if order4_enabled else None
+        ),
+        "order4_free_flight_final_hover_hold_required_s": (
+            float(required_hold_s) if order4_enabled else None
+        ),
+        "order4_free_flight_final_hover_hold_time_s": (
+            float(hold_time_s) if order4_enabled else None
+        ),
+        "order4_free_flight_low_level_source": (
+            "order3_morphology_conditioned_pi_l"
+            if order4_enabled and learned_policy is not None
+            else (
+                "deterministic_baseline_pi_l"
+                if order4_enabled
+                else None
+            )
+        ),
+        "order4_free_flight_existing_actor_progress_unchanged": bool(
+            order4_enabled
+        ),
+        "order4_pi_l_checkpoint_sha256": (
+            learned_policy.checkpoint_sha256
+            if order4_enabled and learned_policy is not None
+            else None
+        ),
+        "order4_pi_l_policy_decision_count": (
+            int(order3_policy_decision_count) if order4_enabled else 0
+        ),
+        "order4_pi_l_policy_applied_count": (
+            int(order3_policy_applied_count) if order4_enabled else 0
+        ),
+        "order4_pi_l_fallback_count": (
+            int(order3_fallback_count) if order4_enabled else 0
+        ),
         "order3_free_flight_report_version": ORDER3_FREE_FLIGHT_REPORT_VERSION,
         "order3_free_flight_passed": bool(order3_free_flight_passed),
         "order3_free_flight_floor_initialization": not order3_in_air,
@@ -4043,7 +4468,9 @@ def _run_random_morphology_takeoff_smoke(
         "order3_tracking_window_sample_count": int(
             order3_tracking_sample_count
         ),
-        "order3_free_flight_success": bool(passed),
+        "order3_free_flight_success": bool(
+            order3_free_flight_passed if order3_in_air else False
+        ),
         "order3_qp_infeasible": bool(qp_infeasible_count > 0),
         "order3_hard_collision": bool(
             dynamic_cross_module_contact_violation_step_count
@@ -4081,9 +4508,17 @@ def _run_random_morphology_takeoff_smoke(
         "random_morphology_takeoff_assembly_representation": "reset_time_fixed_dock_tree",
         "random_morphology_takeoff_learned_policy_used": learned_policy is not None,
         "random_morphology_takeoff_controller": (
-            "order3_morphology_conditioned_pi_l_plus_deterministic_qpid"
-            if learned_policy is not None
-            else "deterministic_qpid"
+            "order4_deterministic_pi_h_plus_order3_pi_l_plus_qpid"
+            if order4_enabled and learned_policy is not None
+            else (
+                "order4_deterministic_pi_h_plus_baseline_pi_l_plus_qpid"
+                if order4_enabled
+                else (
+                    "order3_morphology_conditioned_pi_l_plus_deterministic_qpid"
+                    if learned_policy is not None
+                    else "deterministic_qpid"
+                )
+            )
         ),
         "random_morphology_takeoff_control_contract_version": config.control_contract_version,
         "random_morphology_takeoff_fixed_dock_neutral_hold_passed": bool(
@@ -4305,7 +4740,9 @@ def _run_random_morphology_takeoff_smoke(
         "random_morphology_takeoff_policy_commands": policy_commands,
         "random_morphology_takeoff_controller_commands": controller_commands,
         "random_morphology_takeoff_actuator_target_records": actuator_target_records,
-        "order3_pi_l_rollout": learned_policy is not None,
+        "order3_pi_l_rollout": bool(
+            learned_policy is not None and not order4_enabled
+        ),
         "order3_deterministic_baseline_rollout": bool(
             order3_deterministic_baseline_evaluation
         ),
@@ -4346,12 +4783,16 @@ def _run_random_morphology_takeoff_smoke(
         "random_morphology_takeoff_last_bridge_metrics": last_bridge_metrics,
         "random_morphology_takeoff_artifacts": {
             "phase": (
-                "P4-full-order3-pi-l"
-                if learned_policy is not None
+                "P4-full-order4-deterministic-pi-h"
+                if order4_enabled
                 else (
-                    "P4-full-order3-deterministic-baseline"
-                    if order3_deterministic_baseline_evaluation
-                    else "P4-full-order2"
+                    "P4-full-order3-pi-l"
+                    if learned_policy is not None
+                    else (
+                        "P4-full-order3-deterministic-baseline"
+                        if order3_deterministic_baseline_evaluation
+                        else "P4-full-order2"
+                    )
                 )
             ),
             "backend": "isaac_lab",
@@ -4359,20 +4800,27 @@ def _run_random_morphology_takeoff_smoke(
             "dry_run": False,
             "is_p4_full_completion": False,
             "physical_success_claim": (
-                f"in_air_{order3_task_mode}"
-                if order3_in_air
+                "order4_floor_takeoff_multi_waypoint_final_hover"
+                if order4_enabled
                 else "floor_takeoff_hover_only"
+                if not order3_in_air
+                else f"in_air_{order3_task_mode}"
             ),
             "object_task_claim": False,
             "learned_policy_claim": learned_policy is not None,
             "learned_policy_scope": (
-                f"order3_free_flight_{order3_task_mode}"
+                "order4_pi_l_tracking_only"
+                if order4_enabled and learned_policy is not None
+                else f"order3_free_flight_{order3_task_mode}"
                 if learned_policy is not None
                 else None
             ),
             "order3_deterministic_baseline_claim": bool(
                 order3_deterministic_baseline_evaluation
             ),
+            "order4_deterministic_pi_h_claim": bool(order4_enabled),
+            "order4_learned_pi_h_claim": False,
+            "order4_contact_planning_claim": False,
         },
     }
 
