@@ -1,9 +1,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import permutations, product
 
-from amsrr.morphology.dock_geometry import modules_with_dock_aligned_poses, relative_pose_for_dock_ports
+from amsrr.morphology.dock_geometry import (
+    modules_with_dock_aligned_poses,
+    relative_pose_for_dock_ports,
+)
+from amsrr.robot_model.gripper_surfaces import (
+    GripperSurface,
+    resolve_unoccupied_gripper_surfaces,
+    select_opposing_gripper_surface_pair,
+)
 from amsrr.robot_model.physical_model_builder import build_module_capability_token
+from amsrr.geometry.pose_math import pose_from_transform, transform_from_xyz_rpy
 from amsrr.schemas.common import ContactMode, Pose7D, SchemaValidationError, StrEnum
 from amsrr.schemas.irg import IRGNode, IRGNodeType, InteractionRequirementGraph
 from amsrr.schemas.morphology import (
@@ -18,9 +28,12 @@ from amsrr.schemas.morphology import (
     RobotAnchor,
     SlotAnchorBindingPrior,
 )
-from amsrr.schemas.physical_model import DockPortSpec, ModuleCapabilityToken, PhysicalModel
+from amsrr.schemas.physical_model import (
+    DockPortSpec,
+    ModuleCapabilityToken,
+    PhysicalModel,
+)
 from amsrr.schemas.task_spec import TaskSpec, TaskType
-
 
 IDENTITY_POSE: Pose7D = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
 PORT_TYPE_ORDER = ("pitch_dock", "yaw_dock", "generic_dock")
@@ -95,12 +108,16 @@ class GraspCarryMorphologyVariantBuilder:
         variant: GraspCarryMorphologyVariant | str,
     ) -> DesignOutput:
         if task_spec.task_type != TaskType.OBJECT_GRASP_CARRY:
-            raise SchemaValidationError("GraspCarryMorphologyVariantBuilder only supports object_grasp_carry")
+            raise SchemaValidationError(
+                "GraspCarryMorphologyVariantBuilder only supports object_grasp_carry"
+            )
         selected_variant = GraspCarryMorphologyVariant(variant)
         slot_requirements = _slot_requirements(irg)
         required_items = _required_anchor_items(slot_requirements)
         if not required_items:
-            raise SchemaValidationError("grasp/carry variant builder requires at least one required ContactSlot")
+            raise SchemaValidationError(
+                "grasp/carry variant builder requires at least one required ContactSlot"
+            )
 
         layout = _layout_for_variant(
             selected_variant,
@@ -113,9 +130,13 @@ class GraspCarryMorphologyVariantBuilder:
                 f"for {len(required_items)} required anchors"
             )
 
-        capability = build_module_capability_token(physical_model, module_type=physical_model.model_id)
+        capability = build_module_capability_token(
+            physical_model, module_type=physical_model.model_id
+        )
         modules = _build_modules(layout, capability)
-        ports, dock_edges = _build_ports_and_edges(layout, physical_model.dock_ports, modules)
+        ports, dock_edges = _build_ports_and_edges(
+            layout, physical_model.dock_ports, modules
+        )
         modules = modules_with_dock_aligned_poses(modules, dock_edges, base_module_id=0)
         anchor_plan = _anchor_plan(
             required_items,
@@ -123,8 +144,36 @@ class GraspCarryMorphologyVariantBuilder:
             layout=layout,
             variant=selected_variant,
         )
-        anchors = _build_anchors(anchor_plan, physical_model, task_spec, selected_variant)
+        anchors = _build_anchors(
+            anchor_plan, physical_model, task_spec, selected_variant
+        )
         control_groups = _build_control_groups(modules, selected_variant, layout)
+        # Order 8's representative acceptance morphology is the symmetric
+        # two-arm, three-module design.  Select its occupied Dock ports by the
+        # quality of the remaining opposing mesh pair instead of inheriting the
+        # generic builder's first-compatible greedy choice.  The latter can be
+        # topologically symmetric while leaving a yaw/pitch gripper pair whose
+        # physical surface normals are not opposed.  Other historical P2
+        # variants retain their existing heuristic anchor contract until Order
+        # 9 generalizes mesh-backed multi-contact design across the full
+        # distribution.
+        if selected_variant == GraspCarryMorphologyVariant.SYMMETRIC_TWO_ANCHOR_GRASP:
+            modules, ports, dock_edges = _select_symmetric_grasp_edge_ports(
+                layout=layout,
+                modules=modules,
+                dock_ports=physical_model.dock_ports,
+                physical_model=physical_model,
+                anchors=anchors,
+                control_groups=control_groups,
+            )
+            anchors = _bind_grasp_anchors_to_mesh_surfaces(
+                anchors,
+                modules=modules,
+                ports=ports,
+                dock_edges=dock_edges,
+                control_groups=control_groups,
+                physical_model=physical_model,
+            )
         morphology = MorphologyGraph(
             graph_id=f"morphology:{task_spec.task_id}:{irg.stable_hash()[:12]}:{selected_variant.value}",
             modules=modules,
@@ -135,7 +184,9 @@ class GraspCarryMorphologyVariantBuilder:
             base_module_id=0,
             is_closed_loop=False,
         )
-        actions = _design_actions(modules, dock_edges, anchors, control_groups, selected_variant)
+        actions = _design_actions(
+            modules, dock_edges, anchors, control_groups, selected_variant
+        )
         binding_priors = _binding_priors(anchors, anchor_plan)
         variant_index = float(GRASP_CARRY_VARIANT_ORDER.index(selected_variant))
         return DesignOutput(
@@ -176,16 +227,26 @@ def _layout_for_variant(
     required_anchor_count: int,
 ) -> _VariantLayout:
     if variant == GraspCarryMorphologyVariant.CHAIN_GRASP:
-        desired_count = max(required_anchor_count, task_spec.robot_constraints.min_modules, 2)
+        desired_count = max(
+            required_anchor_count, task_spec.robot_constraints.min_modules, 2
+        )
         _require_module_budget(desired_count, task_spec, variant)
-        roles = {idx: ("base" if idx == 0 else "chain_grasp_link") for idx in range(desired_count)}
-        poses = {idx: (0.28 * float(idx), 0.0, 0.0, 0.0, 0.0, 0.0, 1.0) for idx in range(desired_count)}
+        roles = {
+            idx: ("base" if idx == 0 else "chain_grasp_link")
+            for idx in range(desired_count)
+        }
+        poses = {
+            idx: (0.28 * float(idx), 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+            for idx in range(desired_count)
+        }
         edges = [(idx - 1, idx, "grasp_arm") for idx in range(1, desired_count)]
         anchors = _distributed_module_ids(desired_count, required_anchor_count)
         return _VariantLayout(roles, poses, edges, anchors)
 
     if variant == GraspCarryMorphologyVariant.SYMMETRIC_TWO_ANCHOR_GRASP:
-        desired_count = max(required_anchor_count + 1, task_spec.robot_constraints.min_modules, 3)
+        desired_count = max(
+            required_anchor_count + 1, task_spec.robot_constraints.min_modules, 3
+        )
         _require_module_budget(desired_count, task_spec, variant)
         roles = {0: "base"}
         poses = {0: IDENTITY_POSE}
@@ -194,13 +255,23 @@ def _layout_for_variant(
             side = -1.0 if module_id % 2 else 1.0
             arm_index = (module_id + 1) // 2
             roles[module_id] = "left_grasp_arm" if side < 0.0 else "right_grasp_arm"
-            poses[module_id] = (0.25 * float(arm_index), 0.22 * side, 0.0, 0.0, 0.0, 0.0, 1.0)
+            poses[module_id] = (
+                0.25 * float(arm_index),
+                0.22 * side,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+            )
             edges.append((0, module_id, "grasp_arm"))
         anchors = list(range(1, 1 + required_anchor_count))
         return _VariantLayout(roles, poses, edges, anchors)
 
     if variant == GraspCarryMorphologyVariant.TRI_ANCHOR_SUPPORT_GRASP:
-        desired_count = max(required_anchor_count + 1, task_spec.robot_constraints.min_modules, 3)
+        desired_count = max(
+            required_anchor_count + 1, task_spec.robot_constraints.min_modules, 3
+        )
         _require_module_budget(desired_count, task_spec, variant)
         roles = {0: "base_support"}
         poses = {0: IDENTITY_POSE}
@@ -209,13 +280,23 @@ def _layout_for_variant(
             side = -1.0 if module_id % 2 else 1.0
             arm_index = (module_id + 1) // 2
             roles[module_id] = "left_grasp_arm" if side < 0.0 else "right_grasp_arm"
-            poses[module_id] = (0.24 * float(arm_index), 0.24 * side, 0.0, 0.0, 0.0, 0.0, 1.0)
+            poses[module_id] = (
+                0.24 * float(arm_index),
+                0.24 * side,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                1.0,
+            )
             edges.append((0, module_id, "grasp_arm"))
         anchors = list(range(1, 1 + required_anchor_count))
         return _VariantLayout(roles, poses, edges, anchors, optional_support_module=0)
 
     if variant == GraspCarryMorphologyVariant.CENTRAL_BASE_PLUS_TWO_GRASP_ARMS:
-        desired_count = max(5, 3 + required_anchor_count, task_spec.robot_constraints.min_modules)
+        desired_count = max(
+            5, 3 + required_anchor_count, task_spec.robot_constraints.min_modules
+        )
         _require_module_budget(desired_count, task_spec, variant)
         roles = {
             0: "central_base",
@@ -231,7 +312,12 @@ def _layout_for_variant(
             3: (0.48, -0.32, 0.0, 0.0, 0.0, 0.0, 1.0),
             4: (0.48, 0.32, 0.0, 0.0, 0.0, 0.0, 1.0),
         }
-        edges = [(0, 1, "structural"), (0, 2, "structural"), (1, 3, "grasp_arm"), (2, 4, "grasp_arm")]
+        edges = [
+            (0, 1, "structural"),
+            (0, 2, "structural"),
+            (1, 3, "grasp_arm"),
+            (2, 4, "grasp_arm"),
+        ]
         for module_id in range(5, desired_count):
             roles[module_id] = "stabilizer"
             poses[module_id] = (0.22 * float(module_id), 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
@@ -241,7 +327,9 @@ def _layout_for_variant(
             anchors.extend(range(5, 5 + required_anchor_count - len(anchors)))
         return _VariantLayout(roles, poses, edges, anchors[:required_anchor_count])
 
-    raise SchemaValidationError(f"Unsupported grasp/carry morphology variant: {variant!r}")
+    raise SchemaValidationError(
+        f"Unsupported grasp/carry morphology variant: {variant!r}"
+    )
 
 
 def _require_module_budget(
@@ -263,10 +351,15 @@ def _distributed_module_ids(module_count: int, count: int) -> list[int]:
         return [module_count - 1]
     if count == 2:
         return [0, module_count - 1]
-    return [min(module_count - 1, round(idx * (module_count - 1) / max(1, count - 1))) for idx in range(count)]
+    return [
+        min(module_count - 1, round(idx * (module_count - 1) / max(1, count - 1)))
+        for idx in range(count)
+    ]
 
 
-def _build_modules(layout: _VariantLayout, capability: ModuleCapabilityToken) -> list[ModuleNode]:
+def _build_modules(
+    layout: _VariantLayout, capability: ModuleCapabilityToken
+) -> list[ModuleNode]:
     modules: list[ModuleNode] = []
     for module_id in sorted(layout.module_roles):
         modules.append(
@@ -288,14 +381,18 @@ def _build_ports_and_edges(
     modules: list[ModuleNode],
 ) -> tuple[list[PortNode], list[DockEdge]]:
     if layout.edge_specs and len(dock_ports) < 2:
-        raise SchemaValidationError("grasp/carry morphology variants require at least two dock ports")
+        raise SchemaValidationError(
+            "grasp/carry morphology variants require at least two dock ports"
+        )
     ports = _build_ports(len(modules), dock_ports)
     ports_by_module: dict[int, list[PortNode]] = {}
     for port in ports:
         ports_by_module.setdefault(port.module_id, []).append(port)
     used_port_ids: set[int] = set()
     dock_edges: list[DockEdge] = []
-    for edge_id, (src_module_id, dst_module_id, edge_role) in enumerate(layout.edge_specs):
+    for edge_id, (src_module_id, dst_module_id, edge_role) in enumerate(
+        layout.edge_specs
+    ):
         src_port, dst_port = _first_compatible_free_pair(
             ports_by_module[src_module_id],
             ports_by_module[dst_module_id],
@@ -309,7 +406,9 @@ def _build_ports_and_edges(
                 src_port_id=src_port.port_global_id,
                 dst_module_id=dst_module_id,
                 dst_port_id=dst_port.port_global_id,
-                relative_pose_src_to_dst=relative_pose_for_dock_ports(src_port, dst_port),
+                relative_pose_src_to_dst=relative_pose_for_dock_ports(
+                    src_port, dst_port
+                ),
                 edge_role=edge_role,  # type: ignore[arg-type]
                 estimated_stiffness=[1000.0, 1000.0, 1000.0, 50.0, 50.0, 50.0],
                 latch_state="planned",
@@ -331,6 +430,170 @@ def _build_ports_and_edges(
     ], dock_edges
 
 
+def _select_symmetric_grasp_edge_ports(
+    *,
+    layout: _VariantLayout,
+    modules: list[ModuleNode],
+    dock_ports: list[DockPortSpec],
+    physical_model: PhysicalModel,
+    anchors: list[RobotAnchor],
+    control_groups: list[ControlGroup],
+) -> tuple[list[ModuleNode], list[PortNode], list[DockEdge]]:
+    """Choose the two tree edges that leave the best opposing grasp pair.
+
+    The symmetric Order 8 representative has one base and exactly two grasp
+    arms.  Its module topology alone does not determine which physical Dock
+    mechanisms remain free.  Enumerating the small compatible port assignment
+    set keeps the choice deterministic and prevents a nominally symmetric
+    graph from exposing oblique gripper collision surfaces.  Among equally
+    opposed pairs, prefer a lateral grasp axis so the object can enter along
+    the design-frame forward x axis without a selected gripper blocking the
+    approach corridor.
+    """
+
+    if (
+        len(layout.edge_specs) != 2
+        or {src for src, _, _ in layout.edge_specs} != {0}
+        or {dst for _, dst, _ in layout.edge_specs} != {1, 2}
+        or {anchor.module_id for anchor in anchors if anchor.anchor_type == "grasp"}
+        != {1, 2}
+    ):
+        raise SchemaValidationError(
+            "symmetric two-anchor grasp port selection requires one base and "
+            "two grasp-arm edges"
+        )
+    all_ports = _build_ports(len(modules), dock_ports)
+    ports_by_module: dict[int, list[PortNode]] = {}
+    for port in all_ports:
+        ports_by_module.setdefault(port.module_id, []).append(port)
+    base_edges = sorted(layout.edge_specs, key=lambda item: item[1])
+    first_spec, second_spec = base_edges
+    ranked: list[
+        tuple[
+            tuple[float | int, ...],
+            list[ModuleNode],
+            list[PortNode],
+            list[DockEdge],
+        ]
+    ] = []
+    for first_src, second_src in permutations(ports_by_module[0], 2):
+        for first_dst, second_dst in product(
+            ports_by_module[first_spec[1]],
+            ports_by_module[second_spec[1]],
+        ):
+            if not _ports_compatible(first_src, first_dst) or not _ports_compatible(
+                second_src,
+                second_dst,
+            ):
+                continue
+            selected_ports = (first_src, first_dst, second_src, second_dst)
+            selected_ids = {port.port_global_id for port in selected_ports}
+            if len(selected_ids) != len(selected_ports):
+                continue
+            candidate_edges = [
+                _dock_edge_from_ports(0, first_spec, first_src, first_dst),
+                _dock_edge_from_ports(1, second_spec, second_src, second_dst),
+            ]
+            candidate_modules = modules_with_dock_aligned_poses(
+                modules,
+                candidate_edges,
+                base_module_id=0,
+            )
+            candidate_ports = [
+                PortNode(
+                    port_global_id=port.port_global_id,
+                    module_id=port.module_id,
+                    port_local_id=port.port_local_id,
+                    local_pose=port.local_pose,
+                    port_type=port.port_type,
+                    occupied=port.port_global_id in selected_ids,
+                    compatible_port_type_mask=port.compatible_port_type_mask,
+                )
+                for port in all_ports
+            ]
+            provisional = MorphologyGraph(
+                graph_id="provisional:symmetric-grasp-edge-port-selection",
+                modules=candidate_modules,
+                ports=candidate_ports,
+                dock_edges=candidate_edges,
+                robot_anchors=anchors,
+                control_groups=control_groups,
+                base_module_id=0,
+                is_closed_loop=False,
+            )
+            try:
+                pair = select_opposing_gripper_surface_pair(
+                    provisional,
+                    physical_model,
+                )
+            except SchemaValidationError:
+                continue
+            rank: tuple[float | int, ...] = (
+                -round(
+                    min(
+                        pair.first_inward_alignment,
+                        pair.second_inward_alignment,
+                    ),
+                    12,
+                ),
+                -round(pair.opposition_alignment, 12),
+                # URDF trigonometric round-off changes the nominally lateral
+                # x component by only a few micrometres per metre.  Quantize
+                # that non-physical difference before the stable port-ID
+                # tie-break so it cannot choose a dynamically asymmetric edge
+                # layout.
+                round(abs(float(pair.first_inward_axis_design[0])), 5),
+                first_src.port_global_id,
+                first_dst.port_global_id,
+                second_src.port_global_id,
+                second_dst.port_global_id,
+                round(pair.surface_separation_m, 12),
+            )
+            ranked.append(
+                (
+                    rank,
+                    candidate_modules,
+                    candidate_ports,
+                    candidate_edges,
+                )
+            )
+    if not ranked:
+        raise SchemaValidationError(
+            "No compatible symmetric two-anchor edge-port assignment leaves "
+            "an opposing mesh-backed grasp pair"
+        )
+    ranked.sort(key=lambda item: item[0])
+    _, selected_modules, selected_ports, selected_edges = ranked[0]
+    return selected_modules, selected_ports, selected_edges
+
+
+def _dock_edge_from_ports(
+    edge_id: int,
+    edge_spec: tuple[int, int, str],
+    src_port: PortNode,
+    dst_port: PortNode,
+) -> DockEdge:
+    src_module_id, dst_module_id, edge_role = edge_spec
+    if src_port.module_id != src_module_id or dst_port.module_id != dst_module_id:
+        raise SchemaValidationError(
+            "grasp/carry edge port does not belong to its declared module"
+        )
+    return DockEdge(
+        edge_id=edge_id,
+        src_module_id=src_module_id,
+        src_port_id=src_port.port_global_id,
+        dst_module_id=dst_module_id,
+        dst_port_id=dst_port.port_global_id,
+        relative_pose_src_to_dst=relative_pose_for_dock_ports(
+            src_port,
+            dst_port,
+        ),
+        edge_role=edge_role,  # type: ignore[arg-type]
+        estimated_stiffness=[1000.0, 1000.0, 1000.0, 50.0, 50.0, 50.0],
+        latch_state="planned",
+    )
+
+
 def _build_ports(module_count: int, dock_ports: list[DockPortSpec]) -> list[PortNode]:
     ports: list[PortNode] = []
     for module_id in range(module_count):
@@ -343,7 +606,9 @@ def _build_ports(module_count: int, dock_ports: list[DockPortSpec]) -> list[Port
                     local_pose=dock_port.local_pose,
                     port_type=dock_port.port_type,
                     occupied=False,
-                    compatible_port_type_mask=_compatible_mask(dock_port.compatible_port_types),
+                    compatible_port_type_mask=_compatible_mask(
+                        dock_port.compatible_port_types
+                    ),
                 )
             )
     return ports
@@ -363,7 +628,9 @@ def _anchor_plan(
             _AnchorPlanItem(
                 slot=slot,
                 module_id=module_id,
-                local_pose=_anchor_local_pose(slot.contact_mode, idx, len(required_items), variant),
+                local_pose=_anchor_local_pose(
+                    slot.contact_mode, idx, len(required_items), variant
+                ),
                 role_label="required_slot_coverage",
             )
         )
@@ -428,6 +695,121 @@ def _binding_priors(
     return priors
 
 
+def _bind_grasp_anchors_to_mesh_surfaces(
+    anchors: list[RobotAnchor],
+    *,
+    modules: list[ModuleNode],
+    ports: list[PortNode],
+    dock_edges: list[DockEdge],
+    control_groups: list[ControlGroup],
+    physical_model: PhysicalModel,
+) -> list[RobotAnchor]:
+    """Replace heuristic grasp anchors with actual free Dock collision surfaces.
+
+    The provisional anchor list is used only to scope deterministic opposing-pair
+    selection to the intended grasp-arm modules.  The returned RobotAnchor pose
+    is the connect frame relative to the selected mechanism link, not a module-
+    frame heuristic.  This keeps the existing schema while making downstream
+    candidate/contact identities physically executable.
+    """
+
+    grasp_anchors = [anchor for anchor in anchors if anchor.anchor_type == "grasp"]
+    if len(grasp_anchors) < 2:
+        return anchors
+    provisional = MorphologyGraph(
+        graph_id="provisional:mesh-backed-gripper-anchor-binding",
+        modules=modules,
+        ports=ports,
+        dock_edges=dock_edges,
+        robot_anchors=anchors,
+        control_groups=control_groups,
+        base_module_id=next(module.module_id for module in modules if module.is_base),
+        is_closed_loop=False,
+    )
+    pair = select_opposing_gripper_surface_pair(provisional, physical_model)
+    selected_by_module: dict[int, list[GripperSurface]] = {}
+    for surface in (pair.first, pair.second):
+        selected_by_module.setdefault(surface.module_id, []).append(surface)
+    all_surfaces_by_module: dict[int, list[GripperSurface]] = {}
+    for surface in resolve_unoccupied_gripper_surfaces(provisional, physical_model):
+        all_surfaces_by_module.setdefault(surface.module_id, []).append(surface)
+    used_port_ids: set[int] = set()
+    rebound: list[RobotAnchor] = []
+    for anchor in anchors:
+        if anchor.anchor_type != "grasp":
+            rebound.append(anchor)
+            continue
+        candidates = [
+            *selected_by_module.get(anchor.module_id, []),
+            *all_surfaces_by_module.get(anchor.module_id, []),
+        ]
+        surface = next(
+            (
+                candidate
+                for candidate in candidates
+                if candidate.port_global_id not in used_port_ids
+            ),
+            None,
+        )
+        if surface is None:
+            raise SchemaValidationError(
+                f"No free mesh-backed Dock surface remains for grasp anchor {anchor.anchor_id} "
+                f"on module {anchor.module_id}"
+            )
+        used_port_ids.add(surface.port_global_id)
+        connect_joint = next(
+            (
+                joint
+                for joint in physical_model.joints
+                if joint.joint_id == surface.port_local_id
+            ),
+            None,
+        )
+        if (
+            connect_joint is None
+            or connect_joint.parent_link != surface.mechanism_link_id
+        ):
+            raise SchemaValidationError(
+                f"Mesh-backed grasp surface {surface.port_local_id!r} has no matching "
+                "connect-frame joint"
+            )
+        link_local_pose = pose_from_transform(
+            transform_from_xyz_rpy(connect_joint.origin_xyz, connect_joint.origin_rpy)
+        )
+        rebound.append(
+            RobotAnchor(
+                anchor_id=anchor.anchor_id,
+                module_id=anchor.module_id,
+                link_id=surface.mechanism_link_id,
+                local_pose=link_local_pose,
+                anchor_type=anchor.anchor_type,
+                capability={
+                    **anchor.capability,
+                    "mesh_backed_gripper_surface": True,
+                    "dock_port_global_id": surface.port_global_id,
+                    "dock_port_local_id": surface.port_local_id,
+                    "dock_port_type": surface.port_type,
+                    "dock_mechanism_link_id": surface.mechanism_link_id,
+                    "dock_mechanism_joint_id": surface.mechanism_joint_id,
+                    "dock_collision_primitive_ids": [
+                        primitive.primitive_id
+                        for primitive in surface.collision_primitives
+                    ],
+                    "dock_collision_geometry_refs": [
+                        primitive.geometry_ref
+                        for primitive in surface.collision_primitives
+                    ],
+                    "dock_collision_requires_convex_decomposition": any(
+                        primitive.requires_convex_decomposition
+                        for primitive in surface.collision_primitives
+                    ),
+                },
+                associated_contact_slot_ids=list(anchor.associated_contact_slot_ids),
+            )
+        )
+    return rebound
+
+
 def _build_control_groups(
     modules: list[ModuleNode],
     variant: GraspCarryMorphologyVariant,
@@ -441,14 +823,40 @@ def _build_control_groups(
             metadata={"morphology_variant": variant.value},
         )
     ]
-    left_modules = [module_id for module_id, role in layout.module_roles.items() if role.startswith("left_")]
-    right_modules = [module_id for module_id, role in layout.module_roles.items() if role.startswith("right_")]
+    left_modules = [
+        module_id
+        for module_id, role in layout.module_roles.items()
+        if role.startswith("left_")
+    ]
+    right_modules = [
+        module_id
+        for module_id, role in layout.module_roles.items()
+        if role.startswith("right_")
+    ]
     if left_modules:
-        groups.append(ControlGroup(group_id="left_grasp_group", module_ids=sorted(left_modules), role="grasp_arm"))
+        groups.append(
+            ControlGroup(
+                group_id="left_grasp_group",
+                module_ids=sorted(left_modules),
+                role="grasp_arm",
+            )
+        )
     if right_modules:
-        groups.append(ControlGroup(group_id="right_grasp_group", module_ids=sorted(right_modules), role="grasp_arm"))
+        groups.append(
+            ControlGroup(
+                group_id="right_grasp_group",
+                module_ids=sorted(right_modules),
+                role="grasp_arm",
+            )
+        )
     if layout.optional_support_module is not None:
-        groups.append(ControlGroup(group_id="support_group", module_ids=[layout.optional_support_module], role="support"))
+        groups.append(
+            ControlGroup(
+                group_id="support_group",
+                module_ids=[layout.optional_support_module],
+                role="support",
+            )
+        )
     return groups
 
 
@@ -460,13 +868,19 @@ def _design_actions(
     variant: GraspCarryMorphologyVariant,
 ) -> list[DesignAction]:
     actions: list[DesignAction] = [
-        DesignAction(DesignActionType.SET_BASE_MODULE, {"module_id": 0, "variant": variant.value})
+        DesignAction(
+            DesignActionType.SET_BASE_MODULE, {"module_id": 0, "variant": variant.value}
+        )
     ]
     for module in modules:
         actions.append(
             DesignAction(
                 DesignActionType.ADD_MODULE,
-                {"module_id": module.module_id, "module_type": module.module_type, "variant": variant.value},
+                {
+                    "module_id": module.module_id,
+                    "module_type": module.module_type,
+                    "variant": variant.value,
+                },
             )
         )
         actions.append(
@@ -506,7 +920,11 @@ def _design_actions(
                 )
             )
     for group in control_groups:
-        actions.append(DesignAction(DesignActionType.SET_CONTROL_GROUP, {"group_id": group.group_id}))
+        actions.append(
+            DesignAction(
+                DesignActionType.SET_CONTROL_GROUP, {"group_id": group.group_id}
+            )
+        )
     actions.append(DesignAction(DesignActionType.STOP, {"variant": variant.value}))
     return actions
 
@@ -524,9 +942,13 @@ def _slot_requirement_from_node(node: IRGNode) -> _SlotRequirement:
     try:
         mode = ContactMode(raw_mode)
     except ValueError as exc:
-        raise SchemaValidationError(f"ContactSlot {node.node_id} has unsupported contact_mode {raw_mode!r}") from exc
+        raise SchemaValidationError(
+            f"ContactSlot {node.node_id} has unsupported contact_mode {raw_mode!r}"
+        ) from exc
     if mode not in CONTACT_MODE_TO_ANCHOR_TYPE:
-        raise SchemaValidationError(f"ContactSlot {node.node_id} contact_mode {mode.value!r} is not anchor-compatible")
+        raise SchemaValidationError(
+            f"ContactSlot {node.node_id} contact_mode {mode.value!r} is not anchor-compatible"
+        )
     return _SlotRequirement(
         slot_id=int(node.feature.get("slot_id", node.node_id)),
         contact_mode=mode,
@@ -534,11 +956,15 @@ def _slot_requirement_from_node(node: IRGNode) -> _SlotRequirement:
         min_count=int(node.feature.get("min_count_group", 1)),
         max_count=int(node.feature.get("max_count_group", 1)),
         target_entity_id=str(node.feature.get("target_entity_id", "")),
-        required_anchor_capability=dict(node.feature.get("required_anchor_capability", {}) or {}),
+        required_anchor_capability=dict(
+            node.feature.get("required_anchor_capability", {}) or {}
+        ),
     )
 
 
-def _required_anchor_items(slot_requirements: list[_SlotRequirement]) -> list[_SlotRequirement]:
+def _required_anchor_items(
+    slot_requirements: list[_SlotRequirement],
+) -> list[_SlotRequirement]:
     items: list[_SlotRequirement] = []
     for slot in slot_requirements:
         if not slot.required:
@@ -548,7 +974,9 @@ def _required_anchor_items(slot_requirements: list[_SlotRequirement]) -> list[_S
     return items
 
 
-def _optional_support_slot(slot_requirements: list[_SlotRequirement]) -> _SlotRequirement | None:
+def _optional_support_slot(
+    slot_requirements: list[_SlotRequirement],
+) -> _SlotRequirement | None:
     for slot in slot_requirements:
         if not slot.required and slot.contact_mode == ContactMode.SUPPORT:
             return slot
@@ -573,7 +1001,9 @@ def _anchor_local_pose(
 
 
 def _compatible_mask(compatible_port_types: list[str]) -> list[int]:
-    return [1 if port_type in compatible_port_types else 0 for port_type in PORT_TYPE_ORDER]
+    return [
+        1 if port_type in compatible_port_types else 0 for port_type in PORT_TYPE_ORDER
+    ]
 
 
 def _ports_compatible(src: PortNode, dst: PortNode) -> bool:
@@ -582,7 +1012,9 @@ def _ports_compatible(src: PortNode, dst: PortNode) -> bool:
         src_idx = PORT_TYPE_ORDER.index(src.port_type)
     except ValueError:
         return False
-    return bool(src.compatible_port_type_mask[dst_idx]) and bool(dst.compatible_port_type_mask[src_idx])
+    return bool(src.compatible_port_type_mask[dst_idx]) and bool(
+        dst.compatible_port_type_mask[src_idx]
+    )
 
 
 def _first_compatible_free_pair(
@@ -598,7 +1030,9 @@ def _first_compatible_free_pair(
                 continue
             if _ports_compatible(src, dst):
                 return src, dst
-    raise SchemaValidationError("No compatible free dock port pair available for grasp/carry variant")
+    raise SchemaValidationError(
+        "No compatible free dock port pair available for grasp/carry variant"
+    )
 
 
 def _default_anchor_link(physical_model: PhysicalModel) -> str | None:

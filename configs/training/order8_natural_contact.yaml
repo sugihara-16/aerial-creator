@@ -1,0 +1,191 @@
+phase: P4-full-order8-natural-contact
+
+# Order 8 is a real-contact acceptance contract.  Raw contact truth is
+# privileged simulator/diagnostic evidence and is not an actor observation or
+# a QPID contact-wrench command.
+order8:
+  config_version: order8_natural_contact_config_v7
+  contact_model: natural_contact_grasp_v1
+  object_mass_kg: 1.0
+  # The representative smoke width matches the neutral opposing-Dock span;
+  # Order 9 later randomizes object geometry for full TaskSpec delivery.
+  object_size_m: [0.30, 0.40, 0.15]
+  # Raise the natural-contact work plane while keeping the object fully
+  # dynamic.  A fixed support platform, not an object constraint or pose
+  # overwrite, carries the object at reset and at the planned place pose.
+  object_support_height_m: 0.15
+  initial_object_standoff_m: 0.50
+  object_friction: 0.6
+  floor_friction: 0.8
+  # Keep object-floor behavior at the baseline coefficients above.  Only the
+  # two selected authored Dock collision surfaces receive this coefficient,
+  # with PhysX max-combine, so the 1 kg payload can be supported without
+  # increasing the AK40-10 continuous torque bias.
+  selected_gripper_friction: 2.0
+
+  required_distinct_dock_links: 2
+  contact_normal_force_threshold_n: 0.5
+  contact_penetration_noise_floor_m: 0.0001
+  contact_dwell_s: 0.25
+  # Jacobian-transpose contact bias remains inside the AK40-10 continuous
+  # 1.3 Nm envelope.  Position-servo plus bias applied effort is independently
+  # audited against the 4.1 Nm / 7.3 A hard peak envelope.
+  normal_force_target_per_contact_n: 11.0
+  max_force_per_contact_n: 30.0
+  max_torque_per_contact_nm: 5.0
+  max_penetration_m: 0.002
+  max_tangential_slip_speed_mps: 0.02
+  max_cumulative_tangential_slip_m: 0.010
+  contact_break_grace_s: 0.05
+
+  minimum_lift_clearance_m: 0.100
+  downward_drop_velocity_threshold_mps: 0.25
+  required_transport_distance_m: 0.200
+  # Centroidal targets are rate-limited before entering QPID so phase changes
+  # cannot create an infeasible one-step pose jump.
+  base_translation_speed_limit_mps: 0.10
+  # Once mesh-clear staging is complete, approach the free object slowly enough
+  # to remain below the maintained-contact tangential-slip acceptance limit.
+  contact_base_translation_speed_limit_mps: 0.010
+  # After the verified two-contact dwell, keep the centroidal pose fixed while
+  # payload gravity feed-forward rises to full support.  Centroidal lift motion
+  # starts only after this load-transfer interval.
+  payload_load_transfer_s: 1.0
+  hover_dwell_s: 2.0
+  # The staging pose is solved from the selected URDF collision-mesh AABBs,
+  # rather than from connect points whose frames do not encode mesh protrusion.
+  pregrasp_mesh_clearance_m: 0.050
+  pregrasp_position_tolerance_m: 0.080
+  pregrasp_linear_speed_tolerance_mps: 0.020
+  # Begin side closure only after every selected mesh overlaps the object's
+  # approach-axis projection by this depth; base-root error is only a proxy.
+  contact_axial_min_mesh_overlap_m: 0.050
+  anchor_translation_speed_limit_mps: 0.010
+  anchor_reference_terminal_tolerance_m: 0.001
+  anchor_command_tracking_tolerance_m: 0.020
+  # Retain full closure speed while both authored surfaces are more than 15 mm
+  # clear, then use the 20% tier down to the 3 mm q_close arming band.  The
+  # earlier 6 mm boundary left too little distance to dissipate the coupled
+  # whole-structure joint transient before first physical contact; 15 mm stays
+  # comfortably inside the 90 s acquisition budget.
+  contact_near_surface_slowdown_m: 0.015
+  # The sampled mesh-surface proxy can conservatively overestimate the true
+  # PhysX contact gap by about 2 mm.  Arm q_close inside a separate 3 mm
+  # non-privileged geometry band and creep slowly enough that free motion
+  # remains distinguishable from contact arrest.
+  contact_surface_arm_clearance_m: 0.003
+  # During CONTACT_ACQUISITION the nominal point is the preferred centre of a
+  # surface region, not an exact 6D acceptance constraint.  A centroidal
+  # pre-correction centres the mean of the two actual Dock-mesh patches along
+  # the horizontal approach tangent; each patch (not its connect frame) may
+  # then remain anywhere within +/-5 cm.  Normal proximity and penetration
+  # limits remain unchanged.
+  contact_tangential_tolerance_m: 0.050
+  contact_surface_creep_speed_limit_mps: 0.001
+  # Continuously synchronize the opposing authored-mesh approach rates while
+  # both Dock chains close from the settled final centroidal pose.  The closer
+  # side begins to slow outside a 0.5 mm deadband and reaches 5% of its current
+  # tier speed at 1.5 mm imbalance; the farther side retains its full tier.
+  # Once the clear mesh-region precenter is complete, both sides are capped at
+  # the surface-creep speed through q_close to avoid a one-sided impact.
+  contact_clearance_sync_deadband_m: 0.0005
+  contact_clearance_sync_full_slowdown_m: 0.0015
+  contact_clearance_sync_minimum_speed_scale: 0.05
+  # q_close is latched dynamically from non-privileged kinematics: each
+  # selected Dock must be mesh-near, retain closing-command error, and have
+  # little motion relative to the observed free object for this dwell.  Raw
+  # simulator contact truth is not an input to this nominal transition.
+  # Applied Dock load + mesh proximity + low object-relative speed already
+  # disambiguate a physical arrest; 10 mm avoids grinding a unilateral
+  # contact merely to accumulate the former 30 mm servo error.
+  # Bounded normal overtravel lets the position drive establish contact while
+  # the independent mesh/load/speed dwell decides q_close.
+  contact_closure_inward_overtravel_m: 0.004
+  # The selected-Dock load/current gate rejects unloaded free-space tracking.
+  # q_close requires the full selected-mesh-point/object relative speed to be
+  # low, so tangential centring or a free tangential pass cannot be frozen.
+  # This still permits a moving object because the speed is object-relative and
+  # every target follows the measured free-object pose.  The later force-hold
+  # gate uses the low-pass signed rate of the sampled-mesh/object-OBB clearance;
+  # a changing nearest sample and solver-rate sign reversal therefore do not
+  # bias its normal-arrest estimate.  Maintained-contact slip remains guarded
+  # independently by privileged evidence after the verified grasp dwell.
+  contact_stall_anchor_speed_threshold_mps: 0.0015
+  contact_stall_dwell_s: 0.10
+  # Retained for compatibility with pre-v3 diagnostics and their bounded
+  # centroidal-recenter helpers.  The v3 nominal path does not activate that
+  # fallback: it reaches the object-relative final base pose before closure.
+  contact_centering_max_offset_m: 0.030
+  # Likewise retained as a fail-closed bound for old diagnostic helpers; v3
+  # does not issue a contact-centering tilt during joint-only closure.
+  contact_centering_max_tilt_rad: 0.020
+  # Contact-phase QPID gain bank used to hold/follow the measured-object-relative
+  # final centroidal pose while all Dock joints morph independently.  QPID
+  # remains joint-unaware and receives no contact-wrench command.
+  contact_centering_xy_p_gain: 12.0
+  contact_centering_xy_d_gain: 4.0
+  contact_centering_roll_pitch_p_gain: 60.0
+  contact_centering_roll_pitch_d_gain: 24.0
+  # Once either selected authored surface shows the non-privileged
+  # mesh-proximity + Dock-load signature of first contact, ramp centroidal
+  # pose P/I down while retaining velocity damping, gravity/payload
+  # feed-forward, QP allocation, and every local-joint command.  Aggregate
+  # external wrench estimated from centroidal momentum balance then produces
+  # only a bounded admittance twist/offset.  Stable two-contact grasp rebases
+  # the target to the measured centroidal pose before the normal gains return.
+  # The non-privileged proximity/load trigger leads first physical contact by
+  # about 0.15 s in the representative grasp; finish the handoff before impact.
+  contact_yield_ramp_down_s: 0.05
+  contact_yield_ramp_up_s: 0.50
+  contact_yield_integrator_decay_rate_per_s: 12.0
+  contact_external_wrench_filter_time_constant_s: 0.05
+  contact_external_wrench_bias_time_constant_s: 0.50
+  contact_admittance_force_deadband_n: 0.5
+  contact_admittance_torque_deadband_nm: 0.05
+  contact_admittance_linear_gain_mps_per_n: 0.0015
+  contact_admittance_angular_gain_radps_per_nm: 0.03
+  contact_admittance_max_linear_speed_mps: 0.020
+  contact_admittance_max_angular_speed_radps: 0.15
+  contact_admittance_max_translation_offset_m: 0.030
+  # Keep the pi_L q/qdot/tau-bias command unchanged, but reduce the simulator
+  # implicit position-servo energy before the first physical patch.  This
+  # starts with non-privileged joint closure, earlier than centroidal yield.
+  # The representative Kp=200/Kd=5 contact diagnostic passed q_close and the
+  # unchanged 30 N hard gate when closure used Kp=50/Kd=8.
+  contact_yield_joint_drive_stiffness_scale: 0.25
+  contact_yield_joint_drive_damping_nms_per_rad: 8.0
+  # Bound the IK trajectory and the simulator at the same acquisition speed.
+  # This remains far below the AK40-10 speed limit and prevents a position
+  # target backlog from being released as an impact at first contact.
+  contact_joint_velocity_limit_radps: 0.10
+  # Let centroidal QPID reject the slowly increasing articulated-joint
+  # reaction while retaining the 0.02 m/s maintained-contact slip limit.
+  # A representative real-Isaac run with a 10 s ramp first re-established
+  # physical contact near 84% force scale and produced a 0.0341 m/s onset
+  # slip impulse.  A 20 s ramp reduced that impulse to 0.0204 m/s at 0.588 N;
+  # 30 s passed the first onset but a later contact-chatter event reached
+  # 0.0200013 m/s.  The 40 s ramp keeps every safety threshold unchanged and
+  # still completes with about 5 s margin in the acquisition budget.
+  contact_force_ramp_s: 40.0
+  # Retain the nominal simulation damping during contact.  Kd=4 and Kd=5
+  # diagnostics triggered the same one-sided slip at lower force scales than
+  # nominal Kd=2; the AK protocol's maximum Kd is a command bound, not a
+  # recommended simulation gain.
+  contact_joint_drive_damping_multiplier: 1.0
+  # Mesh-clear staging leaves roughly 0.26 m of axial travel at 0.01 m/s.
+  # The final object-relative centroidal pose is settled before slow joint
+  # closure, so allow that bounded motion, simultaneous dwell, and force ramp.
+  contact_acquisition_timeout_s: 90.0
+  simultaneous_reachability_absolute_tolerance: 0.010
+  # PhysX may report a revolute coordinate microscopically beyond its authored
+  # hard stop; clamp only inside this narrow state-estimation tolerance.
+  joint_limit_state_tolerance_rad: 0.005
+  release_contact_free_dwell_s: 0.10
+  gripper_retreat_clearance_m: 0.050
+  settle_linear_speed_mps: 0.05
+  settle_angular_speed_rad_s: 0.10
+  post_release_settle_dwell_s: 1.0
+
+  raw_contact_truth_role: privileged_diagnostic_only
+  raw_contact_truth_actor_input: false
+  raw_contact_truth_qpid_command: false

@@ -49,6 +49,10 @@ from amsrr.acceptance.p4_2_acceptance import (
     run_p4_2_acceptance,
 )
 from amsrr.acceptance.p4_3_acceptance import P4_3AcceptanceReport, run_p4_3_acceptance
+from amsrr.acceptance.order8_acceptance import (
+    Order8AcceptanceReport,
+    run_order8_acceptance,
+)
 
 __all__ = [
     "P1AcceptanceCriteria",
@@ -70,6 +74,7 @@ __all__ = [
     "P4_3AcceptanceReport",
     "P4ControlAcceptanceReport",
     "P4ControlSmokeResult",
+    "Order8AcceptanceReport",
     "run_p1_acceptance",
     "run_p2_5_inspection",
     "run_p2_5_learning_bootstrap",
@@ -81,4 +86,5 @@ __all__ = [
     "run_p4_2_acceptance",
     "run_p4_3_acceptance",
     "run_p4_control_acceptance",
+    "run_order8_acceptance",
 ]

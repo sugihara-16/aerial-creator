@@ -6,6 +6,14 @@ from amsrr.controllers.actuator_mapping import (
     ActuatorMappingBuilder,
     build_actuator_mapping,
 )
+from amsrr.controllers.centroidal_admittance import (
+    CentroidalAdmittanceCommand,
+    CentroidalAdmittanceConfig,
+    CentroidalAdmittanceController,
+    CentroidalExternalWrenchEstimate,
+    CentroidalExternalWrenchEstimator,
+    CentroidalExternalWrenchEstimatorConfig,
+)
 from amsrr.controllers.controller_base import ControllerBase, ControllerContext, PayloadCoupling
 from amsrr.controllers.controller_handover import (
     blend_controller_commands,
@@ -34,7 +42,11 @@ from amsrr.controllers.qp_allocator_interface import (
     RotorAllocationSpec,
     VirtualThrustQPAllocator,
 )
-from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
+from amsrr.controllers.qpid_controller import (
+    QPIDController,
+    QPIDControllerConfig,
+    QPIDTrackingProfile,
+)
 from amsrr.controllers.rigid_body_model import (
     RigidBodyControlModel,
     RigidBodyControlModelBuilder,
@@ -46,6 +58,12 @@ __all__ = [
     "ActuatorMapping",
     "ActuatorMappingBuilder",
     "BoundedVerticalRotorAllocator",
+    "CentroidalAdmittanceCommand",
+    "CentroidalAdmittanceConfig",
+    "CentroidalAdmittanceController",
+    "CentroidalExternalWrenchEstimate",
+    "CentroidalExternalWrenchEstimator",
+    "CentroidalExternalWrenchEstimatorConfig",
     "ControllerBase",
     "ControllerContext",
     "DesiredBiasReferences",
@@ -60,6 +78,7 @@ __all__ = [
     "QPAllocatorInterface",
     "QPIDController",
     "QPIDControllerConfig",
+    "QPIDTrackingProfile",
     "QP_INFEASIBLE_CODE",
     "QP_RIGID_BODY_MODEL_REQUIRED_CODE",
     "QP_SOLVER_UNAVAILABLE_CODE",
