@@ -1,0 +1,38 @@
+version: order8_side_proxy_pad_preview_v4
+
+# Placement-only preview.  These colliders are deliberately disconnected from
+# the ordinary Order-8 runtime and acceptance path until visual approval.
+acceptance_eligible: false
+visual_approval_recorded: true
+# This only authorizes the explicit diagnostic CLI path. Ordinary Order 8 and
+# acceptance remain proxy-free unless that diagnostic flag is supplied.
+contact_runtime_enabled: true
+
+# Only the actual conical shell is tiled.  These link-local bounds exclude the
+# cylindrical/mounting structure on the right side of the inspection view.
+# The former 12 x 24 grid is merged into a 4 x 20 grid; local fitting keeps the
+# visible surface shape while reducing the number of collider children.
+cone_axial_min_m: 0.068
+cone_axial_max_m: 0.1158
+cone_normal_axial_min: 0.30
+cone_normal_axial_max: 0.85
+axial_band_count: 4
+circumferential_segment_count: 20
+side_min_radial_alignment: 0.22
+side_max_axial_normal_abs: 0.94
+outer_envelope_depth_m: 0.0015
+local_plane_tolerance_m: 0.00075
+normal_similarity_cosine: 0.8829475929  # cos(28 deg)
+
+# Individual tiles are 6--16 mm across and only 0.8 mm thick.  Their inner
+# faces start 0.2 mm outside the fitted authored collision surface.
+tile_coverage_scale: 1.08
+tile_size_min_m: 0.006
+tile_size_max_m: 0.019
+thickness_m: 0.0008
+mesh_clearance_m: 0.0002
+
+display_color_rgb: [0.95, 0.20, 0.05]
+display_opacity: 0.72
+mesh_search_paths: [../../module_urdf]
+link_ids: [yaw_dock_mech1, yaw_dock_mech2]

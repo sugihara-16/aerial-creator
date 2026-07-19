@@ -10,7 +10,6 @@ import time
 import traceback
 from pathlib import Path
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -21,28 +20,94 @@ from amsrr.geometry.pose_math import compose_pose, inverse_pose
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Spawn the generated Holon USD as an Isaac Lab articulation.")
-    parser.add_argument("--config", default="configs/env/isaac_lab.yaml", help="Isaac Lab backend config path.")
-    parser.add_argument("--convert-if-missing", action="store_true", help="Convert the Holon URDF if USD is absent.")
-    parser.add_argument("--force-convert", action="store_true", help="Force URDF-to-USD conversion before spawn.")
-    parser.add_argument("--generated-usd-dir", default=None, help="Override generated USD output directory.")
-    parser.add_argument("--generated-usd-path", default=None, help="Override generated USD path to spawn.")
-    parser.add_argument("--steps", type=int, default=5, help="Number of physics steps after reset.")
-    parser.add_argument("--dt", type=float, default=0.005, help="Simulation time step in seconds.")
-    parser.add_argument("--spawn-height", type=float, default=0.5, help="Initial Holon root height in meters.")
-    parser.add_argument("--force-per-rotor-n", type=float, default=0.0, help="World +z force per thrust body.")
+    parser = argparse.ArgumentParser(
+        description="Spawn the generated Holon USD as an Isaac Lab articulation."
+    )
+    parser.add_argument(
+        "--config",
+        default="configs/env/isaac_lab.yaml",
+        help="Isaac Lab backend config path.",
+    )
+    parser.add_argument(
+        "--convert-if-missing",
+        action="store_true",
+        help="Convert the Holon URDF if USD is absent.",
+    )
+    parser.add_argument(
+        "--force-convert",
+        action="store_true",
+        help="Force URDF-to-USD conversion before spawn.",
+    )
+    parser.add_argument(
+        "--generated-usd-dir",
+        default=None,
+        help="Override generated USD output directory.",
+    )
+    parser.add_argument(
+        "--generated-usd-path",
+        default=None,
+        help="Override generated USD path to spawn.",
+    )
+    parser.add_argument(
+        "--steps", type=int, default=5, help="Number of physics steps after reset."
+    )
+    parser.add_argument(
+        "--dt", type=float, default=0.005, help="Simulation time step in seconds."
+    )
+    parser.add_argument(
+        "--spawn-height",
+        type=float,
+        default=0.5,
+        help="Initial Holon root height in meters.",
+    )
+    parser.add_argument(
+        "--force-per-rotor-n",
+        type=float,
+        default=0.0,
+        help="World +z force per thrust body.",
+    )
     parser.add_argument(
         "--hover-force-scale",
         type=float,
         default=None,
         help="Override force per rotor using total mass * gravity / rotor count times this scale.",
     )
-    parser.add_argument("--gimbal-target-rad", type=float, default=0.0, help="Position target for gimbal joints.")
-    parser.add_argument("--gimbal-tolerance-rad", type=float, default=0.02, help="Probe pass tolerance for gimbal joints.")
-    parser.add_argument("--gimbal-stiffness", type=float, default=None, help="Override configured vectoring drive stiffness.")
-    parser.add_argument("--gimbal-damping", type=float, default=None, help="Override configured vectoring drive damping.")
-    parser.add_argument("--dock-stiffness", type=float, default=None, help="Override configured dock drive stiffness.")
-    parser.add_argument("--dock-damping", type=float, default=None, help="Override configured dock drive damping.")
+    parser.add_argument(
+        "--gimbal-target-rad",
+        type=float,
+        default=0.0,
+        help="Position target for gimbal joints.",
+    )
+    parser.add_argument(
+        "--gimbal-tolerance-rad",
+        type=float,
+        default=0.02,
+        help="Probe pass tolerance for gimbal joints.",
+    )
+    parser.add_argument(
+        "--gimbal-stiffness",
+        type=float,
+        default=None,
+        help="Override configured vectoring drive stiffness.",
+    )
+    parser.add_argument(
+        "--gimbal-damping",
+        type=float,
+        default=None,
+        help="Override configured vectoring drive damping.",
+    )
+    parser.add_argument(
+        "--dock-stiffness",
+        type=float,
+        default=None,
+        help="Override configured dock drive stiffness.",
+    )
+    parser.add_argument(
+        "--dock-damping",
+        type=float,
+        default=None,
+        help="Override configured dock drive damping.",
+    )
     parser.add_argument(
         "--controller-command-smoke",
         action="store_true",
@@ -201,6 +266,404 @@ def parse_args() -> argparse.Namespace:
         help="Serialized DynamicAssemblyIsaacConfig for the round-trip smoke.",
     )
     parser.add_argument(
+        "--order8-natural-contact",
+        action="store_true",
+        help=(
+            "Run the P4-full Order 8 free-object natural-contact grasp, lift, "
+            "transport, place, release, and settle smoke."
+        ),
+    )
+    parser.add_argument(
+        "--order8-morphology-graph-json",
+        default=None,
+        help="Serialized representative three-module MorphologyGraph for Order 8.",
+    )
+    parser.add_argument(
+        "--order8-config-json",
+        default=None,
+        help="Serialized Order8NaturalContactConfig for the natural-contact smoke.",
+    )
+    parser.add_argument(
+        "--order8-seed",
+        type=int,
+        default=0,
+        help=(
+            "Order 8 reproducibility seed. The v1 representative scene is "
+            "deterministic, but the seed remains bound into its evidence."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-only",
+        action="store_true",
+        help=(
+            "Run the temporary accelerated Order-8 fault-isolation path. "
+            "Its report is explicitly ineligible for acceptance."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-stop-force-scale",
+        type=float,
+        default=0.40,
+        help=(
+            "Stop the diagnostic-only path after reaching this contact-force "
+            "scale; ignored by the complete acceptance path."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-continue-after-force-ramp",
+        action="store_true",
+        help=(
+            "Continue the acceptance-ineligible precontact diagnostic through "
+            "the remaining manipulation phases instead of stopping at the "
+            "force-ramp threshold."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-separated-lift-transition",
+        action="store_true",
+        help=(
+            "Acceptance-ineligible fault isolation that waits for complete "
+            "QPID/joint-drive restoration before grasp dwell and then delays "
+            "the extra LIFT acceleration bias."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-lift-bias-delay-s",
+        type=float,
+        default=0.0,
+        help=(
+            "Non-negative delay from diagnostic LIFT entry to the extra "
+            "acceleration-bias ramp; ordinary LIFT and payload feed-forward "
+            "remain unchanged."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-disable-payload-feedforward",
+        action="store_true",
+        help=(
+            "Acceptance-ineligible A/B isolation that preserves the LIFT "
+            "pose trajectory while suppressing only payload coupling."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-payload-coupling-component-mode",
+        choices=(
+            "full",
+            "translational_force_only",
+            "translational_force_and_com_offset_moment",
+        ),
+        default="full",
+        help=(
+            "Acceptance-ineligible A/B isolation of payload translational "
+            "force, COM-offset moment, and rotational inertia."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-force-anchor-id",
+        type=int,
+        action="append",
+        default=None,
+        help=(
+            "Acceptance-ineligible force-isolation mask. Repeat to apply the "
+            "diagnostic wrench only to selected Order-8 anchor ids."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-force-fixture",
+        action="store_true",
+        help=(
+            "Start the acceptance-ineligible Order-8 diagnostic directly at "
+            "the neutral grasp pose and exercise only the position-plus-torque "
+            "contact-force path."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-world-fixed-object",
+        action="store_true",
+        help=(
+            "Acceptance-ineligible fault-isolation mode that fixes only the "
+            "Order-8 object while retaining the free robot base."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-kinematic-base-isolation",
+        action="store_true",
+        help=(
+            "Acceptance-ineligible Order-8 fault-isolation mode that fixes the "
+            "base module to world and suppresses QPID rotor wrench while "
+            "retaining the articulated Dock joints and graph constraints."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-object-width-padding-m",
+        type=float,
+        default=0.0,
+        help=(
+            "Acceptance-ineligible physical object-width padding used only by "
+            "the Order-8 force fixture."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-proxy-pad",
+        action="store_true",
+        help=(
+            "Acceptance-ineligible Order-8 live-physics diagnostic that adds "
+            "one finite-area collider to each selected Dock rigid body while "
+            "retaining the authored mesh collisions."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-cone-proxy-pad",
+        action="store_true",
+        help=(
+            "Acceptance-ineligible Order-8 diagnostic that uses the visually "
+            "approved cone-only micro-pad set on each selected Dock rigid body. "
+            "Authored selected-body collisions are disabled to prevent double "
+            "contact. State replay is permitted only in the contact-minimized "
+            "PhysX synchronization mode."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-contact-closure-joint-speed-radps",
+        type=float,
+        default=None,
+        help=(
+            "Acceptance-ineligible override for the fixed joint-space closing "
+            "speed used to acquire q_close. It must be positive and no faster "
+            "than the ordinary Order-8 closure speed."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-precontact-base-pose",
+        type=float,
+        nargs=7,
+        default=None,
+        metavar=("X", "Y", "Z", "QX", "QY", "QZ", "QW"),
+        help=(
+            "Acceptance-ineligible post-axial-insertion base pose used to "
+            "start directly before dynamic q_close acquisition."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-near-contact-base-pose",
+        type=float,
+        nargs=7,
+        default=None,
+        metavar=("X", "Y", "Z", "QX", "QY", "QZ", "QW"),
+        help=(
+            "Acceptance-ineligible collision-free base pose used with the "
+            "complete Dock state and object pose to start only the last "
+            "millimetres before dynamic q_close."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-near-contact-joint-positions-json",
+        default=None,
+        help=(
+            "Acceptance-ineligible measured global Dock-joint position map "
+            "paired with --order8-diagnostic-near-contact-base-pose."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-near-contact-object-pose",
+        type=float,
+        nargs=7,
+        default=None,
+        metavar=("X", "Y", "Z", "QX", "QY", "QZ", "QW"),
+        help=(
+            "Acceptance-ineligible measured free-object pose paired with the "
+            "near-contact base pose and Dock state."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-qclose-base-pose",
+        type=float,
+        nargs=7,
+        default=None,
+        metavar=("X", "Y", "Z", "QX", "QY", "QZ", "QW"),
+        help=(
+            "Acceptance-ineligible measured q_close base pose used by the "
+            "short force-path checkpoint fixture."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-qclose-joint-positions-json",
+        default=None,
+        help=(
+            "Acceptance-ineligible measured global Dock-joint position map "
+            "paired with --order8-diagnostic-qclose-base-pose."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-qclose-state-json",
+        default=None,
+        help=(
+            "Optional acceptance-ineligible exact q_close simulator-state "
+            "checkpoint paired with the measured base/joint checkpoint."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-qclose-zero-velocities",
+        action="store_true",
+        help=(
+            "Acceptance-ineligible force-path isolation mode that restores the "
+            "exact q_close poses and joint positions but initializes every "
+            "module, Dock joint, and object velocity to zero."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-profile-output",
+        default=None,
+        help=(
+            "Optional cProfile output for the acceptance-ineligible Order-8 "
+            "runtime loop."
+        ),
+    )
+    parser.add_argument(
+        "--order8-state-trace-output",
+        default=None,
+        help=(
+            "Record an acceptance-ineligible Order-8 kinematic state trace for "
+            "later wall-clock GUI replay. Requires --order8-diagnostic-only."
+        ),
+    )
+    parser.add_argument(
+        "--order8-state-trace-frame-stride",
+        type=int,
+        default=2,
+        help=(
+            "Record every Nth physics state in the diagnostic Order-8 trace; "
+            "the default yields 50 fps for dt=0.01 s."
+        ),
+    )
+    parser.add_argument(
+        "--order8-state-trace-replay",
+        default=None,
+        help=(
+            "Replay a recorded diagnostic Order-8 state trace without physics. "
+            "This is visual evidence only and requires --order8-diagnostic-only."
+        ),
+    )
+    parser.add_argument(
+        "--order8-state-trace-replay-sync-physics",
+        action="store_true",
+        help=(
+            "Acceptance-ineligible GUI compatibility mode that advances one "
+            "gravity-free, contact-minimized PhysX synchronization step for "
+            "every rendered trace frame. Use only when no-step state writes are "
+            "not reflected by the Kit viewport or runtime joint inspector."
+        ),
+    )
+    parser.add_argument(
+        "--order8-state-trace-replay-speed",
+        type=float,
+        default=1.0,
+        help="Wall-clock speed multiplier for diagnostic state-trace replay.",
+    )
+    parser.add_argument(
+        "--order8-state-trace-replay-loops",
+        type=int,
+        default=1,
+        help="Positive number of wall-clock replay loops.",
+    )
+    parser.add_argument(
+        "--order8-state-trace-replay-endpoint-hold-s",
+        type=float,
+        default=0.0,
+        help=(
+            "Diagnostic wall-clock hold at the first and last trace frames; "
+            "physics remains disabled during the hold."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-dock-velocity-limit-rad-s",
+        type=float,
+        default=None,
+        help=(
+            "Acceptance-ineligible Order-8 Dock physics velocity-limit "
+            "override; must not exceed the configured actuator limit."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-dock-armature-kg-m2",
+        type=float,
+        default=None,
+        help=(
+            "Acceptance-ineligible reflected Dock-joint armature override. "
+            "This changes simulator inertia only and does not relax any "
+            "AK40-10 command limit."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-peak-torque-window-s",
+        type=float,
+        default=None,
+        help=(
+            "Acceptance-ineligible AK40-10 peak-torque window after Order-8 "
+            "simultaneous q_close. The runtime returns to the continuous "
+            "torque rating before the window ends."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-post-grasp-joint-torque-bias-nm",
+        type=float,
+        default=None,
+        help=(
+            "Acceptance-ineligible equal-magnitude offset torque applied after "
+            "load-limited preload to each grasp-contributing Dock joint, signed "
+            "by its fixed closure direction."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-disable-slip-speed-safe-hold",
+        action="store_true",
+        help=(
+            "Acceptance-ineligible Order-8 diagnostic that records but does "
+            "not safe-hold on instantaneous selected-contact slip speed. "
+            "Cumulative slip and every other safety gate remain active."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-disable-all-safe-hold",
+        action="store_true",
+        help=(
+            "Acceptance-ineligible fault-isolation mode that continues the "
+            "requested physics-step budget without entering SAFE_HOLD. All "
+            "safety evidence is still measured and reported; only the "
+            "control-stop transition is suppressed."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-lock-object-rotation",
+        action="store_true",
+        help=(
+            "Acceptance-ineligible Order-8 fault isolation that leaves the "
+            "payload translation free but projects its LIFT orientation to "
+            "the measured LIFT-entry orientation with zero angular velocity."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-anchor-hold-joint-correction",
+        action="store_true",
+        help=(
+            "Acceptance-ineligible Order-8 diagnostic that preserves the two "
+            "measured q_close anchor poses along the commanded centroidal "
+            "LIFT/TRANSPORT/PLACE path by integrating the existing full-Dock "
+            "multi-anchor DLS output into absolute joint position targets."
+        ),
+    )
+    parser.add_argument(
+        "--order8-diagnostic-loaded-state-rebase",
+        action="store_true",
+        help=(
+            "Acceptance-ineligible Order-8 diagnostic that pauses at the "
+            "first geometric lift-off event, rebases the centroidal and all-"
+            "Dock absolute position targets once to the measured loaded "
+            "state, waits for kinematic relative-motion settle, then resumes "
+            "the normal LIFT path."
+        ),
+    )
+    parser.add_argument(
         "--order3-external-wrench-body",
         type=float,
         nargs=6,
@@ -244,7 +707,9 @@ def parse_args() -> argparse.Namespace:
         metavar=("X", "Y", "Z"),
         help="P4.1 box object dimensions in meters.",
     )
-    parser.add_argument("--p4-1-object-mass-kg", type=float, default=1.0, help="P4.1 object mass in kg.")
+    parser.add_argument(
+        "--p4-1-object-mass-kg", type=float, default=1.0, help="P4.1 object mass in kg."
+    )
     parser.add_argument(
         "--p4-1-object-pose-world",
         type=float,
@@ -307,7 +772,9 @@ def parse_args() -> argparse.Namespace:
         metavar=("X", "Y", "Z"),
         help="P4.2 box object dimensions in meters.",
     )
-    parser.add_argument("--p4-2-object-mass-kg", type=float, default=1.0, help="P4.2 object mass in kg.")
+    parser.add_argument(
+        "--p4-2-object-mass-kg", type=float, default=1.0, help="P4.2 object mass in kg."
+    )
     parser.add_argument(
         "--p4-2-object-pose-world",
         type=float,
@@ -345,8 +812,18 @@ def parse_args() -> argparse.Namespace:
         default=0.12,
         help="P4.2 distance threshold for approach to pregrasp_align transition.",
     )
-    parser.add_argument("--fixed-module-count", type=int, default=2, help="Module count for fixed-morphology smokes.")
-    parser.add_argument("--fixed-module-spacing-m", type=float, default=0.45, help="Rigid spacing between fixed modules.")
+    parser.add_argument(
+        "--fixed-module-count",
+        type=int,
+        default=2,
+        help="Module count for fixed-morphology smokes.",
+    )
+    parser.add_argument(
+        "--fixed-module-spacing-m",
+        type=float,
+        default=0.45,
+        help="Rigid spacing between fixed modules.",
+    )
     parser.add_argument(
         "--allocation-mode",
         choices=("rigid_body_qp", "rigid_body_pseudoinverse"),
@@ -359,7 +836,12 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Override gimbal/vectoring joint velocity limits in the generated conversion URDF.",
     )
-    parser.add_argument("--hover-target-height", type=float, default=None, help="Closed-loop hover target z in meters.")
+    parser.add_argument(
+        "--hover-target-height",
+        type=float,
+        default=None,
+        help="Closed-loop hover target z in meters.",
+    )
     parser.add_argument(
         "--waypoint-target-position-m",
         type=float,
@@ -368,18 +850,48 @@ def parse_args() -> argparse.Namespace:
         metavar=("X", "Y", "Z"),
         help="Fixed-morphology waypoint target position in meters.",
     )
-    parser.add_argument("--waypoint-target-yaw-rad", type=float, default=0.0, help="Fixed-morphology waypoint target yaw.")
-    parser.add_argument("--waypoint-ramp-duration-s", type=float, default=0.1, help="Ramp duration for waypoint targets.")
-    parser.add_argument("--hover-position-tolerance-m", type=float, default=0.20, help="Closed-loop hover position tolerance.")
-    parser.add_argument("--hover-attitude-tolerance-rad", type=float, default=0.25, help="Closed-loop hover attitude tolerance.")
-    parser.add_argument("--hover-hold-duration-s", type=float, default=1.0, help="Required final hold duration for hover pass.")
+    parser.add_argument(
+        "--waypoint-target-yaw-rad",
+        type=float,
+        default=0.0,
+        help="Fixed-morphology waypoint target yaw.",
+    )
+    parser.add_argument(
+        "--waypoint-ramp-duration-s",
+        type=float,
+        default=0.1,
+        help="Ramp duration for waypoint targets.",
+    )
+    parser.add_argument(
+        "--hover-position-tolerance-m",
+        type=float,
+        default=0.20,
+        help="Closed-loop hover position tolerance.",
+    )
+    parser.add_argument(
+        "--hover-attitude-tolerance-rad",
+        type=float,
+        default=0.25,
+        help="Closed-loop hover attitude tolerance.",
+    )
+    parser.add_argument(
+        "--hover-hold-duration-s",
+        type=float,
+        default=1.0,
+        help="Required final hold duration for hover pass.",
+    )
     parser.add_argument(
         "--takeoff-hover-acquisition-timeout-s",
         type=float,
         default=2.0,
         help="Extra deterministic horizon in which to acquire the continuous hover hold.",
     )
-    parser.add_argument("--floor-clearance-m", type=float, default=0.002, help="Initial collision-AABB clearance over floor.")
+    parser.add_argument(
+        "--floor-clearance-m",
+        type=float,
+        default=0.002,
+        help="Initial collision-AABB clearance over floor.",
+    )
     parser.add_argument(
         "--takeoff-floor-contact-force-threshold-n",
         type=float,
@@ -422,15 +934,30 @@ def parse_args() -> argparse.Namespace:
         default=0.001,
         help="Allowed Isaac-vs-requested initial root attitude error for floor placement evidence.",
     )
-    parser.add_argument("--takeoff-settle-duration-s", type=float, default=1.0, help="Zero-thrust floor settle duration.")
+    parser.add_argument(
+        "--takeoff-settle-duration-s",
+        type=float,
+        default=1.0,
+        help="Zero-thrust floor settle duration.",
+    )
     parser.add_argument(
         "--takeoff-settle-dwell-duration-s",
         type=float,
         default=0.25,
         help="Required continuous low-speed dwell within the zero-thrust settle phase.",
     )
-    parser.add_argument("--takeoff-ramp-duration-s", type=float, default=2.0, help="Settled-pose to hover target ramp duration.")
-    parser.add_argument("--takeoff-hover-height-delta-m", type=float, default=0.5, help="Hover root-height gain from settled pose.")
+    parser.add_argument(
+        "--takeoff-ramp-duration-s",
+        type=float,
+        default=2.0,
+        help="Settled-pose to hover target ramp duration.",
+    )
+    parser.add_argument(
+        "--takeoff-hover-height-delta-m",
+        type=float,
+        default=0.5,
+        help="Hover root-height gain from settled pose.",
+    )
     parser.add_argument(
         "--takeoff-settle-linear-speed-threshold-mps",
         type=float,
@@ -455,7 +982,12 @@ def parse_args() -> argparse.Namespace:
         default=0.25,
         help="Maximum continuous angular speed during the accepted hover hold.",
     )
-    parser.add_argument("--takeoff-max-vertical-speed-mps", type=float, default=3.0, help="Takeoff safety speed threshold.")
+    parser.add_argument(
+        "--takeoff-max-vertical-speed-mps",
+        type=float,
+        default=3.0,
+        help="Takeoff safety speed threshold.",
+    )
     parser.add_argument(
         "--takeoff-min-height-gain-ratio",
         type=float,
@@ -522,14 +1054,18 @@ def main() -> int:
     warp_cpu_pinned_allocator_fallback = _patch_warp_cpu_pinned_allocator_for_cpu_only()
     try:
         report = run_probe(args_cli)
-    except Exception as exc:  # pragma: no cover - exercised through real Isaac smoke commands.
+    except (
+        Exception
+    ) as exc:  # pragma: no cover - exercised through real Isaac smoke commands.
         report = {
             "spawn_passed": False,
             "error_type": type(exc).__name__,
             "error": str(exc),
             "traceback_tail": traceback.format_exc(limit=8),
         }
-    report.setdefault("warp_cpu_pinned_allocator_fallback", warp_cpu_pinned_allocator_fallback)
+    report.setdefault(
+        "warp_cpu_pinned_allocator_fallback", warp_cpu_pinned_allocator_fallback
+    )
     printable_report = (
         _compact_random_morphology_teleop_report(report)
         if args_cli.random_morphology_teleop
@@ -550,6 +1086,8 @@ def main() -> int:
         "p4_1_full_scene_backend_smoke_passed",
         "p4_2_deterministic_rollout_passed",
         "dynamic_assembly_passed",
+        "order8_natural_contact_passed",
+        "order8_state_trace_replay_passed",
     ):
         if report.get(key) is False:
             return 1
@@ -646,7 +1184,9 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         write_joint_velocity_override_urdf,
         write_resolved_mesh_urdf,
     )
-    from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
+    from amsrr.robot_model.physical_model_builder import (
+        build_physical_model_from_config,
+    )
     from amsrr.schemas.common import SchemaValidationError
     from amsrr.schemas.contact_candidates import ContactCandidateSet
     from amsrr.schemas.morphology import MorphologyGraph
@@ -655,12 +1195,16 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         Order4DeterministicPlannerConfig,
         Order4FreeFlightMission,
     )
+    from amsrr.schemas.order8 import Order8NaturalContactConfig
     from amsrr.simulation.dynamic_assembly import DynamicAssemblyIsaacConfig
     from amsrr.simulation.isaac_usd_collision import (
         enforce_holon_dock_mesh_collision_approximation,
     )
     from amsrr.schemas.policies import ContactWrenchTrajectory
-    from amsrr.simulation.isaac_lab_backend import IsaacLabBackend, load_isaac_lab_backend_config
+    from amsrr.simulation.isaac_lab_backend import (
+        IsaacLabBackend,
+        load_isaac_lab_backend_config,
+    )
     from amsrr.simulation.random_morphology_takeoff import (
         ORDER2_FLOOR_POSE_WORLD,
         ORDER2_FLOOR_SIZE_M,
@@ -681,14 +1225,26 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
 
     backend_config = load_isaac_lab_backend_config(args.config)
     backend = IsaacLabBackend(backend_config)
-    physical_model = build_physical_model_from_config(backend_config.robot_model_config_path)
-    gimbal_stiffness = _joint_drive_parameter(physical_model, "vectoring", "stiffness", args.gimbal_stiffness, 20.0)
-    gimbal_damping = _joint_drive_parameter(physical_model, "vectoring", "damping", args.gimbal_damping, 1.0)
-    dock_stiffness = _joint_drive_parameter(physical_model, "dock", "stiffness", args.dock_stiffness, 20.0)
-    dock_damping = _joint_drive_parameter(physical_model, "dock", "damping", args.dock_damping, 1.0)
+    physical_model = build_physical_model_from_config(
+        backend_config.robot_model_config_path
+    )
+    gimbal_stiffness = _joint_drive_parameter(
+        physical_model, "vectoring", "stiffness", args.gimbal_stiffness, 20.0
+    )
+    gimbal_damping = _joint_drive_parameter(
+        physical_model, "vectoring", "damping", args.gimbal_damping, 1.0
+    )
+    dock_stiffness = _joint_drive_parameter(
+        physical_model, "dock", "stiffness", args.dock_stiffness, 20.0
+    )
+    dock_damping = _joint_drive_parameter(
+        physical_model, "dock", "damping", args.dock_damping, 1.0
+    )
     urdf_path = _expand_path(backend_config.holon_urdf_path)
     usd_dir = _expand_path(args.generated_usd_dir or backend_config.generated_usd_dir)
-    usd_path = _expand_path(args.generated_usd_path or backend_config.generated_usd_path)
+    usd_path = _expand_path(
+        args.generated_usd_path or backend_config.generated_usd_path
+    )
     fixed_control_smoke_requested = bool(
         args.fixed_morphology_hover_smoke
         or args.fixed_morphology_articulated_hover_smoke
@@ -710,6 +1266,494 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     ):
         raise RuntimeError(
             "--dynamic-assembly-roundtrip requires graph and config JSON"
+        )
+    order8_natural_contact_requested = bool(args.order8_natural_contact)
+    order8_morphology_graph = (
+        MorphologyGraph.from_json(args.order8_morphology_graph_json)
+        if order8_natural_contact_requested and args.order8_morphology_graph_json
+        else None
+    )
+    order8_config = (
+        Order8NaturalContactConfig.from_json(args.order8_config_json)
+        if order8_natural_contact_requested and args.order8_config_json
+        else None
+    )
+    if order8_natural_contact_requested and (
+        order8_morphology_graph is None or order8_config is None
+    ):
+        raise RuntimeError(
+            "--order8-natural-contact requires morphology graph and config JSON"
+        )
+    if args.order8_diagnostic_only and not order8_natural_contact_requested:
+        raise RuntimeError("--order8-diagnostic-only requires --order8-natural-contact")
+    order8_state_trace_output = args.order8_state_trace_output is not None
+    order8_state_trace_replay = args.order8_state_trace_replay is not None
+    if order8_state_trace_output and order8_state_trace_replay:
+        raise RuntimeError(
+            "Order8 state-trace capture and replay are mutually exclusive"
+        )
+    if (order8_state_trace_output or order8_state_trace_replay) and not (
+        args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "Order8 state-trace capture/replay requires --order8-diagnostic-only"
+        )
+    if (
+        bool(getattr(args, "order8_state_trace_replay_sync_physics", False))
+        and not order8_state_trace_replay
+    ):
+        raise RuntimeError(
+            "--order8-state-trace-replay-sync-physics requires "
+            "--order8-state-trace-replay"
+        )
+    if (
+        not isinstance(args.order8_state_trace_frame_stride, int)
+        or isinstance(args.order8_state_trace_frame_stride, bool)
+        or args.order8_state_trace_frame_stride <= 0
+    ):
+        raise RuntimeError(
+            "--order8-state-trace-frame-stride must be a positive integer"
+        )
+    if (
+        not math.isfinite(float(args.order8_state_trace_replay_speed))
+        or float(args.order8_state_trace_replay_speed) <= 0.0
+    ):
+        raise RuntimeError(
+            "--order8-state-trace-replay-speed must be finite and positive"
+        )
+    if (
+        not isinstance(args.order8_state_trace_replay_loops, int)
+        or isinstance(args.order8_state_trace_replay_loops, bool)
+        or args.order8_state_trace_replay_loops <= 0
+    ):
+        raise RuntimeError(
+            "--order8-state-trace-replay-loops must be a positive integer"
+        )
+    if (
+        not math.isfinite(
+            float(args.order8_state_trace_replay_endpoint_hold_s)
+        )
+        or float(args.order8_state_trace_replay_endpoint_hold_s) < 0.0
+    ):
+        raise RuntimeError(
+            "--order8-state-trace-replay-endpoint-hold-s must be finite and "
+            "non-negative"
+        )
+    if order8_state_trace_replay and args.realtime_playback:
+        raise RuntimeError(
+            "Order8 state replay already uses wall-clock pacing; "
+            "--realtime-playback is incompatible"
+        )
+    if (
+        args.order8_diagnostic_dock_velocity_limit_rad_s is not None
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-dock-velocity-limit-rad-s requires "
+            "--order8-diagnostic-only"
+        )
+    if (
+        args.order8_diagnostic_contact_closure_joint_speed_radps is not None
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-contact-closure-joint-speed-radps requires "
+            "--order8-diagnostic-only"
+        )
+    if (
+        args.order8_diagnostic_contact_closure_joint_speed_radps is not None
+        and (
+            not math.isfinite(
+                float(
+                    args.order8_diagnostic_contact_closure_joint_speed_radps
+                )
+            )
+            or float(args.order8_diagnostic_contact_closure_joint_speed_radps)
+            <= 0.0
+        )
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-contact-closure-joint-speed-radps must be "
+            "finite and positive"
+        )
+    if (
+        args.order8_diagnostic_dock_armature_kg_m2 is not None
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-dock-armature-kg-m2 requires "
+            "--order8-diagnostic-only"
+        )
+    if args.order8_diagnostic_dock_armature_kg_m2 is not None and (
+        not math.isfinite(float(args.order8_diagnostic_dock_armature_kg_m2))
+        or float(args.order8_diagnostic_dock_armature_kg_m2) <= 0.0
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-dock-armature-kg-m2 must be finite and positive"
+        )
+    if (
+        args.order8_diagnostic_peak_torque_window_s is not None
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-peak-torque-window-s requires "
+            "--order8-diagnostic-only"
+        )
+    if args.order8_diagnostic_peak_torque_window_s is not None and (
+        not math.isfinite(
+            float(args.order8_diagnostic_peak_torque_window_s)
+        )
+        or float(args.order8_diagnostic_peak_torque_window_s) <= 0.0
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-peak-torque-window-s must be finite and positive"
+        )
+    if (
+        args.order8_diagnostic_post_grasp_joint_torque_bias_nm is not None
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-post-grasp-joint-torque-bias-nm requires "
+            "--order8-diagnostic-only"
+        )
+    if args.order8_diagnostic_post_grasp_joint_torque_bias_nm is not None and (
+        not math.isfinite(
+            float(args.order8_diagnostic_post_grasp_joint_torque_bias_nm)
+        )
+        or float(args.order8_diagnostic_post_grasp_joint_torque_bias_nm) <= 0.0
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-post-grasp-joint-torque-bias-nm must be "
+            "finite and positive"
+        )
+    if (
+        args.order8_diagnostic_disable_slip_speed_safe_hold
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-disable-slip-speed-safe-hold requires "
+            "--order8-diagnostic-only"
+        )
+    if (
+        args.order8_diagnostic_disable_all_safe_hold
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-disable-all-safe-hold requires "
+            "--order8-diagnostic-only"
+        )
+    if (
+        args.order8_diagnostic_lock_object_rotation
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-lock-object-rotation requires "
+            "--order8-diagnostic-only"
+        )
+    if (
+        args.order8_diagnostic_anchor_hold_joint_correction
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-anchor-hold-joint-correction requires "
+            "--order8-diagnostic-only"
+        )
+    if (
+        args.order8_diagnostic_loaded_state_rebase
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-loaded-state-rebase requires "
+            "--order8-diagnostic-only"
+        )
+    if (
+        args.order8_diagnostic_loaded_state_rebase
+        and not args.order8_diagnostic_separated_lift_transition
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-loaded-state-rebase requires "
+            "--order8-diagnostic-separated-lift-transition"
+        )
+    if (
+        args.order8_diagnostic_loaded_state_rebase
+        and not args.order8_diagnostic_continue_after_force_ramp
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-loaded-state-rebase requires "
+            "--order8-diagnostic-continue-after-force-ramp"
+        )
+    if (
+        args.order8_diagnostic_continue_after_force_ramp
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-continue-after-force-ramp requires "
+            "--order8-diagnostic-only"
+        )
+    if (
+        args.order8_diagnostic_separated_lift_transition
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-separated-lift-transition requires "
+            "--order8-diagnostic-only"
+        )
+    if (
+        not math.isfinite(float(args.order8_diagnostic_lift_bias_delay_s))
+        or float(args.order8_diagnostic_lift_bias_delay_s) < 0.0
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-lift-bias-delay-s must be finite and non-negative"
+        )
+    if (
+        float(args.order8_diagnostic_lift_bias_delay_s) > 0.0
+        and not args.order8_diagnostic_separated_lift_transition
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-lift-bias-delay-s requires "
+            "--order8-diagnostic-separated-lift-transition"
+        )
+    if (
+        args.order8_diagnostic_disable_payload_feedforward
+        and not args.order8_diagnostic_separated_lift_transition
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-disable-payload-feedforward requires "
+            "--order8-diagnostic-separated-lift-transition"
+        )
+    if (
+        args.order8_diagnostic_payload_coupling_component_mode != "full"
+        and not args.order8_diagnostic_separated_lift_transition
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-payload-coupling-component-mode requires "
+            "--order8-diagnostic-separated-lift-transition"
+        )
+    if (
+        args.order8_diagnostic_disable_payload_feedforward
+        and args.order8_diagnostic_payload_coupling_component_mode != "full"
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-disable-payload-feedforward cannot be combined "
+            "with payload component isolation"
+        )
+    if args.order8_diagnostic_force_fixture and not args.order8_diagnostic_only:
+        raise RuntimeError(
+            "--order8-diagnostic-force-fixture requires " "--order8-diagnostic-only"
+        )
+    if (
+        args.order8_diagnostic_world_fixed_object
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-world-fixed-object requires "
+            "--order8-diagnostic-only"
+        )
+    if (
+        args.order8_diagnostic_lock_object_rotation
+        and args.order8_diagnostic_world_fixed_object
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-lock-object-rotation cannot be combined with "
+            "--order8-diagnostic-world-fixed-object"
+        )
+    if (
+        args.order8_diagnostic_anchor_hold_joint_correction
+        and args.order8_diagnostic_lock_object_rotation
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-anchor-hold-joint-correction cannot be combined "
+            "with --order8-diagnostic-lock-object-rotation"
+        )
+    if (
+        args.order8_diagnostic_loaded_state_rebase
+        and args.order8_diagnostic_anchor_hold_joint_correction
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-loaded-state-rebase cannot be combined with "
+            "--order8-diagnostic-anchor-hold-joint-correction"
+        )
+    if (
+        args.order8_diagnostic_loaded_state_rebase
+        and args.order8_diagnostic_lock_object_rotation
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-loaded-state-rebase cannot be combined with "
+            "--order8-diagnostic-lock-object-rotation"
+        )
+    if (
+        args.order8_diagnostic_kinematic_base_isolation
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-kinematic-base-isolation requires "
+            "--order8-diagnostic-only"
+        )
+    if args.order8_diagnostic_proxy_pad and not args.order8_diagnostic_only:
+        raise RuntimeError(
+            "--order8-diagnostic-proxy-pad requires --order8-diagnostic-only"
+        )
+    if (
+        args.order8_diagnostic_cone_proxy_pad
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-cone-proxy-pad requires --order8-diagnostic-only"
+        )
+    if (
+        args.order8_diagnostic_proxy_pad
+        and args.order8_diagnostic_cone_proxy_pad
+    ):
+        raise RuntimeError(
+            "legacy and cone-only Order8 proxy pads are mutually exclusive"
+        )
+    if args.order8_diagnostic_proxy_pad and order8_state_trace_replay:
+        raise RuntimeError(
+            "--order8-diagnostic-proxy-pad requires live physics and cannot "
+            "be combined with state replay"
+        )
+    if (
+        args.order8_diagnostic_cone_proxy_pad
+        and order8_state_trace_replay
+        and not bool(args.order8_state_trace_replay_sync_physics)
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-cone-proxy-pad state replay requires "
+            "--order8-state-trace-replay-sync-physics"
+        )
+    if float(args.order8_diagnostic_object_width_padding_m) < 0.0:
+        raise RuntimeError(
+            "--order8-diagnostic-object-width-padding-m must be non-negative"
+        )
+    if (
+        float(args.order8_diagnostic_object_width_padding_m) > 0.0
+        and not args.order8_diagnostic_force_fixture
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-object-width-padding-m requires "
+            "--order8-diagnostic-force-fixture"
+        )
+    if (
+        args.order8_diagnostic_precontact_base_pose is not None
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-precontact-base-pose requires "
+            "--order8-diagnostic-only"
+        )
+    if (
+        args.order8_diagnostic_precontact_base_pose is not None
+        and args.order8_diagnostic_force_fixture
+    ):
+        raise RuntimeError(
+            "Order8 diagnostic precontact and force fixtures are mutually exclusive"
+        )
+    near_contact_pose_present = (
+        args.order8_diagnostic_near_contact_base_pose is not None
+    )
+    near_contact_joints_present = (
+        args.order8_diagnostic_near_contact_joint_positions_json is not None
+    )
+    near_contact_object_present = (
+        args.order8_diagnostic_near_contact_object_pose is not None
+    )
+    if len(
+        {
+            near_contact_pose_present,
+            near_contact_joints_present,
+            near_contact_object_present,
+        }
+    ) != 1:
+        raise RuntimeError(
+            "Order8 diagnostic near-contact fixture requires base pose, "
+            "joint-position JSON, and object pose together"
+        )
+    if near_contact_pose_present and not args.order8_diagnostic_only:
+        raise RuntimeError(
+            "Order8 diagnostic near-contact fixture requires "
+            "--order8-diagnostic-only"
+        )
+    if near_contact_pose_present and (
+        args.order8_diagnostic_force_fixture
+        or args.order8_diagnostic_precontact_base_pose is not None
+    ):
+        raise RuntimeError(
+            "Order8 diagnostic near-contact, precontact, and force fixtures "
+            "are mutually exclusive"
+        )
+    qclose_pose_present = args.order8_diagnostic_qclose_base_pose is not None
+    qclose_joints_present = (
+        args.order8_diagnostic_qclose_joint_positions_json is not None
+    )
+    qclose_state_present = args.order8_diagnostic_qclose_state_json is not None
+    if qclose_pose_present != qclose_joints_present:
+        raise RuntimeError(
+            "Order8 diagnostic q_close fixture requires both base pose and "
+            "joint-position JSON"
+        )
+    if qclose_pose_present and not args.order8_diagnostic_only:
+        raise RuntimeError(
+            "Order8 diagnostic q_close fixture requires --order8-diagnostic-only"
+        )
+    if qclose_state_present and not qclose_pose_present:
+        raise RuntimeError(
+            "Order8 exact q_close state requires the paired base pose and "
+            "joint-position checkpoint"
+        )
+    if args.order8_diagnostic_qclose_zero_velocities and not qclose_state_present:
+        raise RuntimeError(
+            "Order8 zero-velocity q_close replay requires an exact q_close "
+            "state checkpoint"
+        )
+    if qclose_pose_present and (
+        args.order8_diagnostic_force_fixture
+        or args.order8_diagnostic_precontact_base_pose is not None
+        or near_contact_pose_present
+    ):
+        raise RuntimeError(
+            "Order8 diagnostic q_close, near-contact, precontact, and force "
+            "fixtures are mutually exclusive"
+        )
+    if args.order8_diagnostic_continue_after_force_ramp and (
+        not (
+            args.order8_diagnostic_precontact_base_pose is not None
+            or near_contact_pose_present
+            or (qclose_pose_present and qclose_state_present)
+        )
+        or args.order8_diagnostic_force_fixture
+        or args.order8_diagnostic_world_fixed_object
+        or args.order8_diagnostic_force_anchor_id is not None
+    ):
+        raise RuntimeError(
+            "Order8 diagnostic continuation requires a free-object precontact "
+            "or near-contact fixture, or exact q_close checkpoint, without "
+            "force-anchor isolation"
+        )
+    if not 0.0 < float(args.order8_diagnostic_stop_force_scale) <= 1.0:
+        raise RuntimeError("--order8-diagnostic-stop-force-scale must be in (0, 1]")
+    if (
+        args.order8_diagnostic_force_anchor_id is not None
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-force-anchor-id requires " "--order8-diagnostic-only"
+        )
+    if args.order8_diagnostic_force_anchor_id is not None and (
+        not args.order8_diagnostic_force_anchor_id
+        or len(set(args.order8_diagnostic_force_anchor_id))
+        != len(args.order8_diagnostic_force_anchor_id)
+        or any(value < 0 for value in args.order8_diagnostic_force_anchor_id)
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-force-anchor-id values must be unique and "
+            "non-negative"
+        )
+    if (
+        args.order8_diagnostic_profile_output is not None
+        and not args.order8_diagnostic_only
+    ):
+        raise RuntimeError(
+            "--order8-diagnostic-profile-output requires " "--order8-diagnostic-only"
         )
     random_takeoff_requested = bool(args.random_morphology_takeoff)
     order3_rollout_condition = (
@@ -857,15 +1901,26 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         args.force_convert
         or fixed_smoke_requested
         or dynamic_assembly_requested
+        or order8_natural_contact_requested
         or (args.convert_if_missing and not usd_path.exists())
     ):
-        mesh_search_dirs = random_mesh_search_dirs if random_takeoff_requested else _holon_mesh_search_dirs()
+        mesh_search_dirs = (
+            random_mesh_search_dirs
+            if random_takeoff_requested
+            else _holon_mesh_search_dirs()
+        )
         if fixed_smoke_requested:
             if args.p4_2_deterministic_rollout:
                 if p4_2_morphology_graph is None:
-                    raise RuntimeError("P4.2 deterministic rollout requires --p4-2-morphology-graph-json")
-                fixed_module_poses = morphology_graph_module_poses(p4_2_morphology_graph)
-                graph_urdf_path = usd_dir / "graph_morphology_urdf" / "holon_p4_2_graph.urdf"
+                    raise RuntimeError(
+                        "P4.2 deterministic rollout requires --p4-2-morphology-graph-json"
+                    )
+                fixed_module_poses = morphology_graph_module_poses(
+                    p4_2_morphology_graph
+                )
+                graph_urdf_path = (
+                    usd_dir / "graph_morphology_urdf" / "holon_p4_2_graph.urdf"
+                )
                 urdf_path = write_fixed_morphology_graph_urdf(
                     urdf_path,
                     graph_urdf_path,
@@ -877,7 +1932,9 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
                     raise RuntimeError("random morphology takeoff graph is missing")
                 graph_name = random_morphology_graph.stable_hash()[:12]
                 graph_urdf_path = (
-                    usd_dir / "graph_morphology_urdf" / f"holon_random_takeoff_{graph_name}.urdf"
+                    usd_dir
+                    / "graph_morphology_urdf"
+                    / f"holon_random_takeoff_{graph_name}.urdf"
                 )
                 urdf_path = write_fixed_morphology_graph_urdf(
                     urdf_path,
@@ -910,7 +1967,11 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
                     mesh_search_dirs=mesh_search_dirs,
                 )
             else:
-                fixed_urdf_path = usd_dir / "fixed_morphology_urdf" / f"holon_fixed_{int(args.fixed_module_count)}.urdf"
+                fixed_urdf_path = (
+                    usd_dir
+                    / "fixed_morphology_urdf"
+                    / f"holon_fixed_{int(args.fixed_module_count)}.urdf"
+                )
                 urdf_path = write_fixed_morphology_urdf(
                     urdf_path,
                     fixed_urdf_path,
@@ -941,7 +2002,11 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             collision_type=(
                 dynamic_assembly_config.collision_type
                 if dynamic_assembly_requested
-                else "Convex Hull"
+                else (
+                    "Convex Decomposition"
+                    if order8_natural_contact_requested
+                    else "Convex Hull"
+                )
             ),
             force_usd_conversion=bool(args.force_convert),
             joint_drive=UrdfConverterCfg.JointDriveCfg(
@@ -994,6 +2059,40 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             ),
             device=args.device,
         )
+
+    if order8_natural_contact_requested:
+        collision_approximation_evidence = (
+            enforce_holon_dock_mesh_collision_approximation(
+                usd_path,
+                collision_type="Convex Decomposition",
+            )
+        )
+        report = _run_order8_natural_contact_probe(
+            args=args,
+            sim_utils=sim_utils,
+            SimulationContext=SimulationContext,
+            Articulation=Articulation,
+            ArticulationCfg=ArticulationCfg,
+            ImplicitActuatorCfg=ImplicitActuatorCfg,
+            RigidObject=RigidObject,
+            RigidObjectCfg=RigidObjectCfg,
+            usd_path=usd_path,
+            urdf_path=urdf_path,
+            physical_model=physical_model,
+            morphology_graph=order8_morphology_graph,
+            config=order8_config,
+            gimbal_stiffness=gimbal_stiffness,
+            gimbal_damping=gimbal_damping,
+            dock_stiffness=dock_stiffness,
+            dock_damping=dock_damping,
+            backend_config_hash=backend_config.stable_hash(),
+            collision_approximation_evidence=collision_approximation_evidence,
+            device=args.device,
+        )
+        report["keep_open_after_smoke_s"] = float(args.keep_open_after_smoke_s)
+        if args.keep_open_after_smoke_s > 0.0:
+            _keep_viewer_open(float(args.keep_open_after_smoke_s))
+        return report
 
     sim_utils.create_new_stage()
     sim = SimulationContext(sim_utils.SimulationCfg(dt=args.dt, device=args.device))
@@ -1083,12 +2182,16 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         # verify that no non-adjacent module contact occurred, so an accepted
         # run's aggregate ContactSensor force is attributable to the floor.
         if random_morphology_graph is None:
-            raise RuntimeError("random morphology graph is missing for collision filtering")
-        random_self_collision_filter_info = _configure_random_morphology_collision_filters(
-            sim.stage,
-            morphology_graph=random_morphology_graph,
-            physical_model=physical_model,
-            root_prim_path="/World/Holon",
+            raise RuntimeError(
+                "random morphology graph is missing for collision filtering"
+            )
+        random_self_collision_filter_info = (
+            _configure_random_morphology_collision_filters(
+                sim.stage,
+                morphology_graph=random_morphology_graph,
+                physical_model=physical_model,
+                root_prim_path="/World/Holon",
+            )
         )
         _activate_nested_contact_reports(sim.stage, root_prim_path="/World/Holon")
         random_initial_exact_collision_info = (
@@ -1111,13 +2214,25 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     if args.p4_1_full_scene_backend_smoke or args.p4_2_deterministic_rollout:
         object_pose = tuple(
             float(value)
-            for value in (args.p4_2_object_pose_world if args.p4_2_deterministic_rollout else args.p4_1_object_pose_world)
+            for value in (
+                args.p4_2_object_pose_world
+                if args.p4_2_deterministic_rollout
+                else args.p4_1_object_pose_world
+            )
         )
         object_size = tuple(
             float(value)
-            for value in (args.p4_2_object_size_m if args.p4_2_deterministic_rollout else args.p4_1_object_size_m)
+            for value in (
+                args.p4_2_object_size_m
+                if args.p4_2_deterministic_rollout
+                else args.p4_1_object_size_m
+            )
         )
-        object_mass = float(args.p4_2_object_mass_kg if args.p4_2_deterministic_rollout else args.p4_1_object_mass_kg)
+        object_mass = float(
+            args.p4_2_object_mass_kg
+            if args.p4_2_deterministic_rollout
+            else args.p4_1_object_mass_kg
+        )
         object_cfg = RigidObjectCfg(
             prim_path="/World/Object/box_01",
             spawn=sim_utils.CuboidCfg(
@@ -1128,7 +2243,9 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
                 ),
                 mass_props=sim_utils.MassPropertiesCfg(mass=object_mass),
                 collision_props=sim_utils.CollisionPropertiesCfg(),
-                visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.2, 0.55, 0.85)),
+                visual_material=sim_utils.PreviewSurfaceCfg(
+                    diffuse_color=(0.2, 0.55, 0.85)
+                ),
             ),
             init_state=RigidObjectCfg.InitialStateCfg(
                 pos=object_pose[:3],
@@ -1164,7 +2281,9 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         robot.write_root_velocity_to_sim_index(root_velocity=root_velocity_tensor)
     if random_takeoff_requested:
         if random_morphology_graph is None or random_self_collision_filter_info is None:
-            raise RuntimeError("random morphology collision views lack graph/filter data")
+            raise RuntimeError(
+                "random morphology collision views lack graph/filter data"
+            )
         random_cross_module_contact_views = _create_cross_module_contact_views(
             sim.physics_manager.get_physics_sim_view(),
             morphology_graph=random_morphology_graph,
@@ -1182,19 +2301,25 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     thrust_body_ids, thrust_body_names = robot.find_bodies(".*thrust_.*")
     gimbal_joint_ids, gimbal_joint_names = robot.find_joints(".*gimbal.*")
     robot_mass = float(robot.data.body_mass.torch[0].sum().detach().cpu())
-    gravity = float(torch.tensor(sim.cfg.gravity, device=sim.device).norm().detach().cpu())
+    gravity = float(
+        torch.tensor(sim.cfg.gravity, device=sim.device).norm().detach().cpu()
+    )
     force_per_rotor_n = float(args.force_per_rotor_n)
     if args.hover_force_scale is not None:
         if not thrust_body_ids:
             raise RuntimeError("Cannot compute hover force without thrust bodies.")
-        force_per_rotor_n = robot_mass * gravity * float(args.hover_force_scale) / len(thrust_body_ids)
+        force_per_rotor_n = (
+            robot_mass * gravity * float(args.hover_force_scale) / len(thrust_body_ids)
+        )
     command_applied = force_per_rotor_n != 0.0 or args.gimbal_target_rad != 0.0
     effective_fixed_module_count = (
         len(random_morphology_graph.modules)
         if random_morphology_graph is not None
         else int(args.fixed_module_count)
     )
-    expected_thrust_bodies = 4 * effective_fixed_module_count if fixed_smoke_requested else 4
+    expected_thrust_bodies = (
+        4 * effective_fixed_module_count if fixed_smoke_requested else 4
+    )
     if force_per_rotor_n != 0.0 and len(thrust_body_ids) != expected_thrust_bodies:
         raise RuntimeError(
             f"Expected {expected_thrust_bodies} thrust bodies, found {len(thrust_body_ids)}: {thrust_body_names}"
@@ -1202,8 +2327,12 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     if args.gimbal_target_rad != 0.0 and not gimbal_joint_ids:
         raise RuntimeError("Cannot command gimbal target without gimbal joints.")
 
-    thrust_body_ids_tensor = torch.tensor(thrust_body_ids, dtype=torch.int32, device=sim.device)
-    gimbal_joint_ids_tensor = torch.tensor(gimbal_joint_ids, dtype=torch.int32, device=sim.device)
+    thrust_body_ids_tensor = torch.tensor(
+        thrust_body_ids, dtype=torch.int32, device=sim.device
+    )
+    gimbal_joint_ids_tensor = torch.tensor(
+        gimbal_joint_ids, dtype=torch.int32, device=sim.device
+    )
     initial_root_pos_w = _tensor_row(robot.data.root_pos_w.torch)
     controller_bundle = None
     hover_smoke_report = None
@@ -1216,11 +2345,18 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             command_index=0,
             control_dt_s=args.dt,
             pose_world=tuple(_tensor_row(robot.data.root_pose_w.torch)),  # type: ignore[arg-type]
-            twist_world=_tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch),
-            joint_positions=_joint_state_dict(robot.joint_names, robot.data.joint_pos.torch),
-            joint_velocities=_joint_state_dict(robot.joint_names, robot.data.joint_vel.torch),
+            twist_world=_tensor_row(robot.data.root_lin_vel_w.torch)
+            + _tensor_row(robot.data.root_ang_vel_w.torch),
+            joint_positions=_joint_state_dict(
+                robot.joint_names, robot.data.joint_pos.torch
+            ),
+            joint_velocities=_joint_state_dict(
+                robot.joint_names, robot.data.joint_vel.torch
+            ),
         )
-        _apply_actuator_record(robot, controller_bundle.actuator_target_record, physical_model, sim.device)
+        _apply_actuator_record(
+            robot, controller_bundle.actuator_target_record, physical_model, sim.device
+        )
     if args.single_module_hover_smoke or args.single_module_articulated_hover_smoke:
         single_articulated = bool(args.single_module_articulated_hover_smoke)
         hover_smoke_report = _run_single_module_hover_smoke(
@@ -1230,7 +2366,11 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             physical_model=physical_model,
             device=sim.device,
             steps=max(0, args.steps),
-            target_height=float(args.hover_target_height if args.hover_target_height is not None else args.spawn_height),
+            target_height=float(
+                args.hover_target_height
+                if args.hover_target_height is not None
+                else args.spawn_height
+            ),
             position_tolerance_m=float(args.hover_position_tolerance_m),
             attitude_tolerance_rad=float(args.hover_attitude_tolerance_rad),
             hold_duration_s=float(args.hover_hold_duration_s),
@@ -1251,11 +2391,17 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             articulated_joint_amplitude_rad=float(args.articulated_joint_amplitude_rad),
             articulated_joint_period_s=float(args.articulated_joint_period_s),
             articulated_joint_warmup_s=float(args.articulated_joint_warmup_s),
-            articulated_joint_tracking_tolerance_rad=float(args.articulated_joint_tracking_tolerance_rad),
+            articulated_joint_tracking_tolerance_rad=float(
+                args.articulated_joint_tracking_tolerance_rad
+            ),
         )
     if fixed_control_smoke_requested:
         waypoint_position = args.waypoint_target_position_m
-        target_height = float(args.hover_target_height if args.hover_target_height is not None else args.spawn_height)
+        target_height = float(
+            args.hover_target_height
+            if args.hover_target_height is not None
+            else args.spawn_height
+        )
         if waypoint_position is None:
             waypoint_position = [0.25, 0.0, target_height]
         if args.fixed_morphology_waypoint_smoke:
@@ -1312,12 +2458,16 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             articulated_joint_amplitude_rad=float(args.articulated_joint_amplitude_rad),
             articulated_joint_period_s=float(args.articulated_joint_period_s),
             articulated_joint_warmup_s=float(args.articulated_joint_warmup_s),
-            articulated_joint_tracking_tolerance_rad=float(args.articulated_joint_tracking_tolerance_rad),
+            articulated_joint_tracking_tolerance_rad=float(
+                args.articulated_joint_tracking_tolerance_rad
+            ),
             articulated_assembly=bool(args.fixed_morphology_articulated_hover_smoke),
         )
     if random_takeoff_requested:
         if random_morphology_graph is None or random_floor_placement is None:
-            raise RuntimeError("random morphology takeoff graph/floor placement was not initialized")
+            raise RuntimeError(
+                "random morphology takeoff graph/floor placement was not initialized"
+            )
         takeoff_config = RandomMorphologyTakeoffConfig(
             backend_config_path=str(args.config),
             robot_model_config_path=backend_config.robot_model_config_path,
@@ -1349,14 +2499,16 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             settle_dwell_duration_s=float(args.takeoff_settle_dwell_duration_s),
             takeoff_ramp_duration_s=float(args.takeoff_ramp_duration_s),
             hover_hold_duration_s=float(args.hover_hold_duration_s),
-            hover_acquisition_timeout_s=float(
-                args.takeoff_hover_acquisition_timeout_s
-            ),
+            hover_acquisition_timeout_s=float(args.takeoff_hover_acquisition_timeout_s),
             hover_height_delta_m=float(args.takeoff_hover_height_delta_m),
             position_error_threshold_m=float(args.hover_position_tolerance_m),
             attitude_error_threshold_rad=float(args.hover_attitude_tolerance_rad),
-            settle_linear_speed_threshold_mps=float(args.takeoff_settle_linear_speed_threshold_mps),
-            settle_angular_speed_threshold_rad_s=float(args.takeoff_settle_angular_speed_threshold_rad_s),
+            settle_linear_speed_threshold_mps=float(
+                args.takeoff_settle_linear_speed_threshold_mps
+            ),
+            settle_angular_speed_threshold_rad_s=float(
+                args.takeoff_settle_angular_speed_threshold_rad_s
+            ),
             hover_linear_speed_threshold_mps=float(
                 args.takeoff_hover_linear_speed_threshold_mps
             ),
@@ -1416,9 +2568,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             order4_record_runtime_steps=bool(args.order4_record_runtime_steps),
         )
         if random_teleop_requested:
-            if not hover_smoke_report.get(
-                "random_morphology_takeoff_smoke_passed"
-            ):
+            if not hover_smoke_report.get("random_morphology_takeoff_smoke_passed"):
                 raise RuntimeError(
                     "terminal teleop requires a passing takeoff/hover gate"
                 )
@@ -1438,9 +2588,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
                     ]
                 ),
                 settled_pose_world=tuple(
-                    hover_smoke_report[
-                        "random_morphology_takeoff_settled_pose_world"
-                    ]
+                    hover_smoke_report["random_morphology_takeoff_settled_pose_world"]
                 ),
                 takeoff_config=takeoff_config,
                 teleop_config=RandomMorphologyTeleopConfig(
@@ -1458,7 +2606,9 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             hover_smoke_report.update(teleop_report)
     if args.p4_1_full_scene_backend_smoke:
         if p4_1_object is None:
-            raise RuntimeError("P4.1 full-scene backend smoke requested without a spawned object.")
+            raise RuntimeError(
+                "P4.1 full-scene backend smoke requested without a spawned object."
+            )
         p4_1_smoke_report = _run_p4_1_full_scene_backend_smoke(
             robot=robot,
             p4_1_object=p4_1_object,
@@ -1471,7 +2621,11 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             module_spacing_m=float(args.fixed_module_spacing_m),
             module_poses=fixed_module_poses,
             object_id="box_01",
-            target_height=float(args.hover_target_height if args.hover_target_height is not None else args.spawn_height),
+            target_height=float(
+                args.hover_target_height
+                if args.hover_target_height is not None
+                else args.spawn_height
+            ),
             control_dt_s=float(args.dt),
             build_fixed_morphology=build_fixed_morphology,
             bridge_supported_controller_command=bridge_supported_controller_command,
@@ -1482,9 +2636,13 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         )
     if args.p4_2_deterministic_rollout:
         if p4_1_object is None:
-            raise RuntimeError("P4.2 deterministic rollout requested without a spawned object.")
+            raise RuntimeError(
+                "P4.2 deterministic rollout requested without a spawned object."
+            )
         if p4_2_morphology_graph is None:
-            raise RuntimeError("P4.2 deterministic rollout requested without a morphology graph.")
+            raise RuntimeError(
+                "P4.2 deterministic rollout requested without a morphology graph."
+            )
         p4_2_rollout_report = _run_p4_2_deterministic_rollout_probe(
             robot=robot,
             p4_2_object=p4_1_object,
@@ -1500,7 +2658,11 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             object_id="box_01",
             object_size_m=tuple(float(value) for value in args.p4_2_object_size_m),
             object_mass_kg=float(args.p4_2_object_mass_kg),
-            target_height=float(args.hover_target_height if args.hover_target_height is not None else args.spawn_height),
+            target_height=float(
+                args.hover_target_height
+                if args.hover_target_height is not None
+                else args.spawn_height
+            ),
             control_dt_s=float(args.dt),
             bridge_supported_controller_command=bridge_supported_controller_command,
             split_fixed_module_name=split_fixed_module_name,
@@ -1509,9 +2671,15 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             uses_p2_p3=bool(args.p4_2_uses_p2_p3),
             contact_model=str(args.p4_2_contact_model),
             attach_distance_threshold_m=float(args.p4_2_attach_distance_threshold_m),
-            attach_relative_velocity_threshold_mps=float(args.p4_2_attach_relative_velocity_threshold_mps),
-            attach_snap_distance_threshold_m=float(args.p4_2_attach_snap_distance_threshold_m),
-            pregrasp_alignment_distance_m=float(args.p4_2_pregrasp_alignment_distance_m),
+            attach_relative_velocity_threshold_mps=float(
+                args.p4_2_attach_relative_velocity_threshold_mps
+            ),
+            attach_snap_distance_threshold_m=float(
+                args.p4_2_attach_snap_distance_threshold_m
+            ),
+            pregrasp_alignment_distance_m=float(
+                args.p4_2_pregrasp_alignment_distance_m
+            ),
             learned_pi_l_checkpoint_path=args.p4_3_pi_l_checkpoint_path,
             learned_pi_l_runtime_blend_factor=float(
                 args.p4_3_pi_l_runtime_blend_factor
@@ -1519,13 +2687,22 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         )
     for _ in range(
         0
-        if hover_smoke_report is not None or p4_1_smoke_report is not None or p4_2_rollout_report is not None
+        if hover_smoke_report is not None
+        or p4_1_smoke_report is not None
+        or p4_2_rollout_report is not None
         else max(0, args.steps)
     ):
         if controller_bundle is not None:
-            _apply_actuator_record(robot, controller_bundle.actuator_target_record, physical_model, sim.device)
+            _apply_actuator_record(
+                robot,
+                controller_bundle.actuator_target_record,
+                physical_model,
+                sim.device,
+            )
         elif force_per_rotor_n != 0.0:
-            forces = torch.zeros(robot.num_instances, len(thrust_body_ids), 3, device=sim.device)
+            forces = torch.zeros(
+                robot.num_instances, len(thrust_body_ids), 3, device=sim.device
+            )
             torques = torch.zeros_like(forces)
             forces[..., 2] = force_per_rotor_n
             robot.permanent_wrench_composer.set_forces_and_torques_index(
@@ -1541,7 +2718,9 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
                 dtype=torch.float32,
                 device=sim.device,
             )
-            robot.set_joint_position_target_index(target=gimbal_targets, joint_ids=gimbal_joint_ids_tensor)
+            robot.set_joint_position_target_index(
+                target=gimbal_targets, joint_ids=gimbal_joint_ids_tensor
+            )
         robot.write_data_to_sim()
         sim.step()
         robot.update(sim_dt)
@@ -1551,7 +2730,9 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             time.sleep(max(0.0, sim_dt))
     final_root_pos_w = _tensor_row(robot.data.root_pos_w.torch)
     gimbal_joint_pos = _tensor_indices(robot.data.joint_pos.torch, gimbal_joint_ids)
-    gimbal_joint_pos_target = _tensor_indices(robot.data.joint_pos_target.torch, gimbal_joint_ids)
+    gimbal_joint_pos_target = _tensor_indices(
+        robot.data.joint_pos_target.torch, gimbal_joint_ids
+    )
     gimbal_target_error_rad = 0.0
     if args.gimbal_target_rad != 0.0:
         gimbal_target_error_rad = max(
@@ -1559,13 +2740,23 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             for position in gimbal_joint_pos
         )
     force_command_ok = force_per_rotor_n == 0.0 or len(thrust_body_ids) == 4
-    gimbal_command_ok = args.gimbal_target_rad == 0.0 or gimbal_target_error_rad <= args.gimbal_tolerance_rad
+    gimbal_command_ok = (
+        args.gimbal_target_rad == 0.0
+        or gimbal_target_error_rad <= args.gimbal_tolerance_rad
+    )
     controller_command_ok = True
     if controller_bundle is not None:
         controller_command_ok = (
-            controller_bundle.actuator_target_record.metrics["missing_actuator_count"] == 0.0
-            and controller_bundle.actuator_target_record.metrics["unsupported_actuator_count"] == 0.0
-            and controller_bundle.controller_command.controller_status.metrics.get("qp_primary_path", 0.0) == 1.0
+            controller_bundle.actuator_target_record.metrics["missing_actuator_count"]
+            == 0.0
+            and controller_bundle.actuator_target_record.metrics[
+                "unsupported_actuator_count"
+            ]
+            == 0.0
+            and controller_bundle.controller_command.controller_status.metrics.get(
+                "qp_primary_path", 0.0
+            )
+            == 1.0
         )
     hover_command_ok = True
     if hover_smoke_report is not None:
@@ -1594,7 +2785,10 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             or p4_2_rollout_report is not None
         ),
         "command_probe_passed": (
-            force_command_ok and gimbal_command_ok and controller_command_ok and hover_command_ok
+            force_command_ok
+            and gimbal_command_ok
+            and controller_command_ok
+            and hover_command_ok
             if command_applied
             or controller_bundle is not None
             or hover_smoke_report is not None
@@ -1604,7 +2798,9 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         ),
         "controller_command_smoke": controller_bundle is not None,
         "converted": converted,
-        "asset_cache_reuse_enabled": bool(fixed_smoke_requested and not args.force_convert),
+        "asset_cache_reuse_enabled": bool(
+            fixed_smoke_requested and not args.force_convert
+        ),
         "asset_cache_key": stable_hash(
             {
                 "urdf_sha256": hash_file(urdf_path),
@@ -1652,7 +2848,10 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         ),
         "initial_root_pos_w": initial_root_pos_w,
         "root_pos_w": final_root_pos_w,
-        "root_delta_w": [final - initial for final, initial in zip(final_root_pos_w, initial_root_pos_w, strict=True)],
+        "root_delta_w": [
+            final - initial
+            for final, initial in zip(final_root_pos_w, initial_root_pos_w, strict=True)
+        ],
         "root_quat_w": _tensor_row(robot.data.root_quat_w.torch),
         "root_lin_vel_w": _tensor_row(robot.data.root_lin_vel_w.torch),
         "root_ang_vel_w": _tensor_row(robot.data.root_ang_vel_w.torch),
@@ -1673,6 +2872,14 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     sim.stop()
     sim.clear_instance()
     return report
+
+
+def _run_order8_natural_contact_probe(**kwargs):
+    """Lazy bridge into the separately testable Order-8 Isaac producer."""
+
+    from amsrr.simulation.order8_isaac_runtime import run_order8_isaac_runtime
+
+    return run_order8_isaac_runtime(**kwargs)
 
 
 def _run_dynamic_assembly_roundtrip_probe(
@@ -1789,11 +2996,15 @@ def _run_dynamic_assembly_roundtrip_probe(
     from amsrr.utils.hashing import hash_directory_manifest, hash_file
 
     if len(morphology_graph.modules) != 2 or len(morphology_graph.dock_edges) != 1:
-        raise RuntimeError("dynamic assembly first gate requires exactly two modules and one edge")
+        raise RuntimeError(
+            "dynamic assembly first gate requires exactly two modules and one edge"
+        )
     edge = morphology_graph.dock_edges[0]
     leader_module_id = morphology_graph.base_module_id
     if leader_module_id not in {edge.src_module_id, edge.dst_module_id}:
-        raise RuntimeError("dynamic assembly base module must be a selected edge endpoint")
+        raise RuntimeError(
+            "dynamic assembly base module must be a selected edge endpoint"
+        )
     follower_module_id = (
         edge.dst_module_id
         if edge.src_module_id == leader_module_id
@@ -1804,7 +3015,9 @@ def _run_dynamic_assembly_roundtrip_probe(
         edge.src_port_id if edge.src_module_id == leader_module_id else edge.dst_port_id
     )
     follower_port_id = (
-        edge.dst_port_id if edge.dst_module_id == follower_module_id else edge.src_port_id
+        edge.dst_port_id
+        if edge.dst_module_id == follower_module_id
+        else edge.src_port_id
     )
     leader_port = target_ports[leader_port_id]
     follower_port = target_ports[follower_port_id]
@@ -1855,10 +3068,14 @@ def _run_dynamic_assembly_roundtrip_probe(
         or not math.isfinite(dock_velocity_limit_sim_radps)
         or dock_velocity_limit_sim_radps <= 0.0
     ):
-        raise RuntimeError("dynamic assembly Dock solver limits must be finite and positive")
+        raise RuntimeError(
+            "dynamic assembly Dock solver limits must be finite and positive"
+        )
 
     sim_utils.create_new_stage()
-    sim = SimulationContext(sim_utils.SimulationCfg(dt=config.simulation_dt_s, device=device))
+    sim = SimulationContext(
+        sim_utils.SimulationCfg(dt=config.simulation_dt_s, device=device)
+    )
     sim.set_camera_view(eye=[2.0, 2.0, 1.7], target=[0.0, 0.0, 0.8])
     ground_cfg = sim_utils.CuboidCfg(
         size=ORDER2_FLOOR_SIZE_M,
@@ -1979,12 +3196,16 @@ def _run_dynamic_assembly_roundtrip_probe(
     for sensor in component_contact_sensors.values():
         sensor.update(sim_dt, force_recompute=True)
     leader_body_paths = _dynamic_rigid_body_paths(sim.stage, roots[leader_module_id])
-    follower_body_paths = _dynamic_rigid_body_paths(sim.stage, roots[follower_module_id])
+    follower_body_paths = _dynamic_rigid_body_paths(
+        sim.stage, roots[follower_module_id]
+    )
     physics_view = sim.physics_manager.get_physics_sim_view()
     cross_contact_view = physics_view.create_rigid_contact_view(
         leader_body_paths,
         filter_patterns=[list(follower_body_paths) for _ in leader_body_paths],
-        max_contact_data_count=max(1, len(leader_body_paths) * len(follower_body_paths) * 8),
+        max_contact_data_count=max(
+            1, len(leader_body_paths) * len(follower_body_paths) * 8
+        ),
     )
     ground_contact_path = "/World/defaultGroundPlane"
     leader_external_contact_paths = [
@@ -2201,12 +3422,8 @@ def _run_dynamic_assembly_roundtrip_probe(
             "dynamic_assembly_solver_velocity_iteration_count": int(
                 config.solver_velocity_iteration_count
             ),
-            "dynamic_assembly_dock_drive_stiffness_nm_per_rad": float(
-                dock_stiffness
-            ),
-            "dynamic_assembly_dock_drive_damping_nms_per_rad": float(
-                dock_damping
-            ),
+            "dynamic_assembly_dock_drive_stiffness_nm_per_rad": float(dock_stiffness),
+            "dynamic_assembly_dock_drive_damping_nms_per_rad": float(dock_damping),
             "dynamic_assembly_dock_effort_limit_sim_nm": float(
                 dock_effort_limit_sim_nm
             ),
@@ -2250,9 +3467,7 @@ def _run_dynamic_assembly_roundtrip_probe(
                 collision_approximation_evidence.get("verified") is True
             ),
             "dynamic_assembly_dock_collision_approximation_token": (
-                collision_approximation_evidence.get(
-                    "requested_approximation_token"
-                )
+                collision_approximation_evidence.get("requested_approximation_token")
             ),
             "dynamic_assembly_dock_collision_composed_prim_count": int(
                 collision_approximation_evidence.get("composed_prim_count", 0)
@@ -2304,9 +3519,7 @@ def _run_dynamic_assembly_roundtrip_probe(
                 first_guidance_contact_evidence
             ),
             "dynamic_assembly_final_seated_evidence": final_seated_evidence,
-            "dynamic_assembly_last_strict_gate_snapshot": (
-                latest_strict_gate_snapshot
-            ),
+            "dynamic_assembly_last_strict_gate_snapshot": (latest_strict_gate_snapshot),
             "dynamic_assembly_last_selected_dock_joint_diagnostics": dict(
                 latest_selected_dock_joint_diagnostics
             ),
@@ -2414,9 +3627,8 @@ def _run_dynamic_assembly_roundtrip_probe(
         if root_link_velocity is not None:
             root_twist = _tensor_row(_isaac_tensor(root_link_velocity), limit=6)
         else:
-            root_twist = (
-                _tensor_row(robot.data.root_lin_vel_w.torch)
-                + _tensor_row(robot.data.root_ang_vel_w.torch)
+            root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(
+                robot.data.root_ang_vel_w.torch
             )
         return RuntimeObservation(
             time_s=float(time_s),
@@ -2426,8 +3638,12 @@ def _run_dynamic_assembly_roundtrip_probe(
                     module_id=module_id,
                     pose_world=tuple(_tensor_row(robot.data.root_pose_w.torch)),
                     twist_world=root_twist,
-                    joint_positions=_joint_state_dict(robot.joint_names, robot.data.joint_pos.torch),
-                    joint_velocities=_joint_state_dict(robot.joint_names, robot.data.joint_vel.torch),
+                    joint_positions=_joint_state_dict(
+                        robot.joint_names, robot.data.joint_pos.torch
+                    ),
+                    joint_velocities=_joint_state_dict(
+                        robot.joint_names, robot.data.joint_vel.torch
+                    ),
                 )
             ],
             object_states=[],
@@ -2436,7 +3652,9 @@ def _run_dynamic_assembly_roundtrip_probe(
             task_progress=TaskProgressState(phase_label="dynamic_assembly"),
         )
 
-    def combined_observation(time_s: float, graph: MorphologyGraph) -> RuntimeObservation:
+    def combined_observation(
+        time_s: float, graph: MorphologyGraph
+    ) -> RuntimeObservation:
         states = []
         for module_id in (leader_module_id, follower_module_id):
             states.extend(component_observation(module_id, time_s).module_states)
@@ -2447,8 +3665,14 @@ def _run_dynamic_assembly_roundtrip_probe(
             object_states=[],
             contact_states=[],
             controller_status=ControllerStatus(
-                status=("ok" if all(status.qp_feasible for status in last_statuses.values()) else "infeasible"),
-                qp_feasible=all(status.qp_feasible for status in last_statuses.values()),
+                status=(
+                    "ok"
+                    if all(status.qp_feasible for status in last_statuses.values())
+                    else "infeasible"
+                ),
+                qp_feasible=all(
+                    status.qp_feasible for status in last_statuses.values()
+                ),
             ),
             task_progress=TaskProgressState(phase_label="dynamic_assembly"),
         )
@@ -2456,9 +3680,13 @@ def _run_dynamic_assembly_roundtrip_probe(
     def connect_state(module_id: int):
         robot = robots[module_id]
         graph_port = leader_port if module_id == leader_module_id else follower_port
-        port_spec = leader_port_spec if module_id == leader_module_id else follower_port_spec
+        port_spec = (
+            leader_port_spec if module_id == leader_module_id else follower_port_spec
+        )
         body_name = port_spec.parent_link
-        body_id = robot.body_names.index(_dynamic_resolve_asset_body_name(robot, body_name))
+        body_id = robot.body_names.index(
+            _dynamic_resolve_asset_body_name(robot, body_name)
+        )
         body_pos = _tensor_body_row(robot.data.body_pos_w.torch, body_id)
         body_quat = _tensor_body_row(robot.data.body_quat_w.torch, body_id)
         body_pose = (*body_pos, *body_quat)
@@ -2466,8 +3694,12 @@ def _run_dynamic_assembly_roundtrip_probe(
         connect_pose = compose_pose(body_pose, local_connect)
         com_pos_tensor = getattr(robot.data, "body_com_pos_w", robot.data.body_pos_w)
         com_pos = _tensor_body_row(_isaac_tensor(com_pos_tensor), body_id)
-        linear_tensor = getattr(robot.data, "body_com_lin_vel_w", robot.data.body_lin_vel_w)
-        angular_tensor = getattr(robot.data, "body_com_ang_vel_w", robot.data.body_ang_vel_w)
+        linear_tensor = getattr(
+            robot.data, "body_com_lin_vel_w", robot.data.body_lin_vel_w
+        )
+        angular_tensor = getattr(
+            robot.data, "body_com_ang_vel_w", robot.data.body_ang_vel_w
+        )
         linear = _tensor_body_row(_isaac_tensor(linear_tensor), body_id)
         angular = _tensor_body_row(_isaac_tensor(angular_tensor), body_id)
         radius = (
@@ -2507,7 +3739,9 @@ def _run_dynamic_assembly_roundtrip_probe(
 
     selected_joint_ids = {
         leader_module_id: str(leader_port_spec.mechanical_limits["mechanism_joint_id"]),
-        follower_module_id: str(follower_port_spec.mechanical_limits["mechanism_joint_id"]),
+        follower_module_id: str(
+            follower_port_spec.mechanical_limits["mechanism_joint_id"]
+        ),
     }
 
     def selected_dock_joint_diagnostics() -> dict[str, object]:
@@ -2529,7 +3763,10 @@ def _run_dynamic_assembly_roundtrip_probe(
                 robot,
                 port_spec.parent_link,
             )
-            if resolved_joint_name is None or resolved_body_name not in robot.body_names:
+            if (
+                resolved_joint_name is None
+                or resolved_body_name not in robot.body_names
+            ):
                 raise RuntimeError(
                     "dynamic assembly cannot resolve the selected Dock joint/body "
                     f"for module {module_id}"
@@ -2648,16 +3885,18 @@ def _run_dynamic_assembly_roundtrip_probe(
     def record_axial_selected_joint_evidence(
         snapshot: dict[str, object],
     ) -> None:
-        axial_selected_joint_evidence["sample_count"] = int(
-            axial_selected_joint_evidence["sample_count"]
-        ) + 1
+        axial_selected_joint_evidence["sample_count"] = (
+            int(axial_selected_joint_evidence["sample_count"]) + 1
+        )
         by_module = axial_selected_joint_evidence["by_module"]
         if not isinstance(by_module, dict):
             raise RuntimeError("dynamic assembly axial joint evidence is malformed")
         all_targets_zero = bool(axial_selected_joint_evidence["all_targets_zero"])
         for module_key, raw_values in sorted(snapshot.items()):
             if not isinstance(raw_values, dict):
-                raise RuntimeError("dynamic assembly selected-joint snapshot is malformed")
+                raise RuntimeError(
+                    "dynamic assembly selected-joint snapshot is malformed"
+                )
             values = raw_values
             entry = by_module.setdefault(
                 module_key,
@@ -2758,9 +3997,7 @@ def _run_dynamic_assembly_roundtrip_probe(
             ),
             min_axial_gap_m=-config.control_bridge.fix_axial_tolerance_m,
             max_axial_gap_m=config.guidance_contact_max_axial_gap_m,
-            max_transverse_error_m=(
-                config.guidance_contact_max_transverse_error_m
-            ),
+            max_transverse_error_m=(config.guidance_contact_max_transverse_error_m),
             max_attitude_error_rad=config.guidance_contact_max_attitude_error_rad,
             max_force_n=config.control_bridge.max_selected_contact_force_n,
             max_penetration_m=(
@@ -2793,12 +4030,11 @@ def _run_dynamic_assembly_roundtrip_probe(
             force_threshold_n=config.detach_external_contact_force_threshold_n,
             scope="leader_component_all_external_contacts",
         )
-        selected_pair_contact_observed = (
-            selected_pair_contact_observed or bool(latest_contact["selected_contact"])
+        selected_pair_contact_observed = selected_pair_contact_observed or bool(
+            latest_contact["selected_contact"]
         )
-        selected_surface_contact_observed = (
-            selected_surface_contact_observed
-            or bool(latest_contact["selected_surface_valid"])
+        selected_surface_contact_observed = selected_surface_contact_observed or bool(
+            latest_contact["selected_surface_valid"]
         )
         guidance_contact_observed = bool(
             guidance_contact_observed
@@ -2851,9 +4087,7 @@ def _run_dynamic_assembly_roundtrip_probe(
         continuous_strict_dwell_s: float,
         required_strict_dwell_s: float,
     ) -> dict[str, object]:
-        leader_connect_pose, leader_connect_twist = connect_state(
-            leader_module_id
-        )
+        leader_connect_pose, leader_connect_twist = connect_state(leader_module_id)
         follower_connect_pose, follower_connect_twist = connect_state(
             follower_module_id
         )
@@ -2907,12 +4141,8 @@ def _run_dynamic_assembly_roundtrip_probe(
             **contact_evidence,
             **seated,
             "time_s": float(time_s),
-            "leader_qp_feasible": bool(
-                last_statuses[leader_module_id].qp_feasible
-            ),
-            "follower_qp_feasible": bool(
-                last_statuses[follower_module_id].qp_feasible
-            ),
+            "leader_qp_feasible": bool(last_statuses[leader_module_id].qp_feasible),
+            "follower_qp_feasible": bool(last_statuses[follower_module_id].qp_feasible),
             "leader_connect_pose_world": list(leader_connect_pose),
             "follower_connect_pose_world": list(follower_connect_pose),
             "leader_connect_twist_world": list(leader_connect_twist),
@@ -2920,7 +4150,10 @@ def _run_dynamic_assembly_roundtrip_probe(
         }
 
     def assembly_observation(time_s: float):
-        from amsrr.assembly import AssemblyComponentObservation, AssemblyControlObservation
+        from amsrr.assembly import (
+            AssemblyComponentObservation,
+            AssemblyControlObservation,
+        )
 
         nonlocal constraint_verified, constraint_verify_started_s, constraint_identity_failures
         nonlocal strict_fix_gate_started_s, strict_fix_gate_dwell_elapsed_s
@@ -2934,7 +4167,9 @@ def _run_dynamic_assembly_roundtrip_probe(
             singleton_graphs[follower_module_id], physical_model, follower_runtime
         )
         leader_connect_pose, leader_connect_twist = connect_state(leader_module_id)
-        follower_connect_pose, follower_connect_twist = connect_state(follower_module_id)
+        follower_connect_pose, follower_connect_twist = connect_state(
+            follower_module_id
+        )
         latest_selected_dock_joint_diagnostics = selected_dock_joint_diagnostics()
         strict_without_dwell = final_seated_snapshot(
             time_s,
@@ -2953,7 +4188,9 @@ def _run_dynamic_assembly_roundtrip_probe(
             strict_fix_gate_started_s = None
             strict_fix_gate_dwell_elapsed_s = 0.0
         if constraint_enabled:
-            constraint_identity_failures = fixed_joint_identity_failures(sim.stage, constraint_spec)
+            constraint_identity_failures = fixed_joint_identity_failures(
+                sim.stage, constraint_spec
+            )
             residual = constraint_residual(
                 leader_connect_pose,
                 follower_connect_pose,
@@ -2999,8 +4236,12 @@ def _run_dynamic_assembly_roundtrip_probe(
                     module_ids=[leader_module_id],
                     body_pose_world=leader_model.body_pose_world,
                     selected_connect_pose_world=leader_connect_pose,
-                    selected_connect_linear_velocity_world=tuple(leader_connect_twist[:3]),
-                    selected_connect_angular_velocity_world=tuple(leader_connect_twist[3:6]),
+                    selected_connect_linear_velocity_world=tuple(
+                        leader_connect_twist[:3]
+                    ),
+                    selected_connect_angular_velocity_world=tuple(
+                        leader_connect_twist[3:6]
+                    ),
                     qp_feasible=last_statuses[leader_module_id].qp_feasible,
                 ),
                 AssemblyComponentObservation(
@@ -3008,8 +4249,12 @@ def _run_dynamic_assembly_roundtrip_probe(
                     module_ids=[follower_module_id],
                     body_pose_world=follower_model.body_pose_world,
                     selected_connect_pose_world=follower_connect_pose,
-                    selected_connect_linear_velocity_world=tuple(follower_connect_twist[:3]),
-                    selected_connect_angular_velocity_world=tuple(follower_connect_twist[3:6]),
+                    selected_connect_linear_velocity_world=tuple(
+                        follower_connect_twist[:3]
+                    ),
+                    selected_connect_angular_velocity_world=tuple(
+                        follower_connect_twist[3:6]
+                    ),
                     qp_feasible=last_statuses[follower_module_id].qp_feasible,
                 ),
             ],
@@ -3055,7 +4300,10 @@ def _run_dynamic_assembly_roundtrip_probe(
                 command_index=command_index,
             )
             application = _apply_actuator_record(
-                robots[module_id], record, physical_model, device,
+                robots[module_id],
+                record,
+                physical_model,
+                device,
                 allowed_module_id=module_id,
             )
             if zero_rotor_forces:
@@ -3110,7 +4358,9 @@ def _run_dynamic_assembly_roundtrip_probe(
             missing_actuator_count += len(record.missing_actuators)
             unsupported_actuator_count += len(record.unsupported_actuators)
             clipped_target_count += len(record.clipped_targets)
-            application_unresolved_target_count += int(application["unresolved_target_count"])
+            application_unresolved_target_count += int(
+                application["unresolved_target_count"]
+            )
             records[module_id] = record
         for robot in robots.values():
             robot.write_data_to_sim()
@@ -3331,7 +4581,10 @@ def _run_dynamic_assembly_roundtrip_probe(
         start = model.body_pose_world
         takeoff_starts[module_id] = start
         takeoff_targets[module_id] = (
-            start[0], start[1], float(config.assembly_height_m), *start[3:7]
+            start[0],
+            start[1],
+            float(config.assembly_height_m),
+            *start[3:7],
         )
     takeoff_steps = max(1, int(math.ceil(config.takeoff_duration_s / sim_dt)))
     for step_index in range(takeoff_steps):
@@ -3342,7 +4595,11 @@ def _run_dynamic_assembly_roundtrip_probe(
             start = takeoff_starts[module_id]
             target = takeoff_targets[module_id]
             pose = (
-                *(float(start[index]) + smooth * (float(target[index]) - float(start[index])) for index in range(3)),
+                *(
+                    float(start[index])
+                    + smooth * (float(target[index]) - float(start[index]))
+                    for index in range(3)
+                ),
                 *target[3:7],
             )
             policies[module_id] = zero_joint_policy(module_id, pose, current_time_s)
@@ -3434,10 +4691,8 @@ def _run_dynamic_assembly_roundtrip_probe(
             and max_attitude_error <= config.hover_attitude_tolerance_rad
             and max_linear_speed <= config.hover_linear_speed_tolerance_mps
             and max_angular_speed <= config.hover_angular_speed_tolerance_radps
-            and max_dock_joint_position
-            <= config.attached_joint_position_tolerance_rad
-            and max_dock_joint_speed
-            <= config.attached_joint_speed_tolerance_radps
+            and max_dock_joint_position <= config.attached_joint_position_tolerance_rad
+            and max_dock_joint_speed <= config.attached_joint_speed_tolerance_radps
         )
         hover_dwell_steps = hover_dwell_steps + 1 if ready_now else 0
         if hover_dwell_steps >= hover_required_steps:
@@ -3475,8 +4730,7 @@ def _run_dynamic_assembly_roundtrip_probe(
             phase = commands.phase
             if (
                 phase == "prealign_dwell"
-                and config.mating_contact_mode
-                == DYNAMIC_ASSEMBLY_FILTER_FALLBACK_MODE
+                and config.mating_contact_mode == DYNAMIC_ASSEMBLY_FILTER_FALLBACK_MODE
                 and not selected_pair_filter_applied
             ):
                 filter_delta = filter_selected_body_pair(sim.stage, constraint_spec)
@@ -3579,9 +4833,7 @@ def _run_dynamic_assembly_roundtrip_probe(
                     follower_connect_pose,
                 )
                 current_follower_body = transform_from_pose(follower_pose)
-                current_follower_connect = transform_from_pose(
-                    follower_connect_pose
-                )
+                current_follower_connect = transform_from_pose(follower_connect_pose)
                 connect_in_follower_body = compose_transform(
                     inverse_transform(current_follower_body),
                     current_follower_connect,
@@ -3600,18 +4852,14 @@ def _run_dynamic_assembly_roundtrip_probe(
                     "time_s": float(current_time_s),
                     "phase": phase,
                     "follower_pose_world": list(follower_pose),
-                    "target_pose_world": list(
-                        follower_policy.desired_body_pose or []
-                    ),
+                    "target_pose_world": list(follower_policy.desired_body_pose or []),
                     "target_twist_world": list(
                         follower_policy.desired_body_twist or []
                     ),
                     "residual_wrench_body": list(
                         follower_policy.residual_wrench_body or []
                     ),
-                    "observed_body_twist_world": list(
-                        follower_model.body_twist_world
-                    ),
+                    "observed_body_twist_world": list(follower_model.body_twist_world),
                     "root_link_twist_world": list(
                         follower_runtime.module_states[0].twist_world
                     ),
@@ -3621,9 +4869,7 @@ def _run_dynamic_assembly_roundtrip_probe(
                     "target_velocity_error_norm": status_metrics.get(
                         "target_velocity_error_norm"
                     ),
-                    "target_position_error_m": status_metrics.get(
-                        "target_pos_error_m"
-                    ),
+                    "target_position_error_m": status_metrics.get("target_pos_error_m"),
                     "connect_axial_gap_m": connect_alignment["axial_error_m"],
                     "connect_transverse_error_m": connect_alignment[
                         "transverse_error_m"
@@ -3676,14 +4922,10 @@ def _run_dynamic_assembly_roundtrip_probe(
                         latest_contact["selected_penetration_m"]
                     ),
                     "target_wrench_body": [
-                        status_metrics.get(
-                            f"target_wrench_body_after_payload_{suffix}"
-                        )
+                        status_metrics.get(f"target_wrench_body_after_payload_{suffix}")
                         for suffix in ("fx", "fy", "fz", "tx", "ty", "tz")
                     ],
-                    "qp_feasible": last_statuses[
-                        follower_module_id
-                    ].qp_feasible,
+                    "qp_feasible": last_statuses[follower_module_id].qp_feasible,
                 }
                 motion_debug_samples.append(sample)
                 print(
@@ -3711,9 +4953,7 @@ def _run_dynamic_assembly_roundtrip_probe(
         def _ensure_collision_proxies(self) -> None:
             if self._leader_collision_proxy is not None:
                 return
-            self._leader_collision_pose = self._current_component_pose(
-                leader_module_id
-            )
+            self._leader_collision_pose = self._current_component_pose(leader_module_id)
             self._follower_collision_pose = self._current_component_pose(
                 follower_module_id
             )
@@ -3749,9 +4989,7 @@ def _run_dynamic_assembly_roundtrip_probe(
             # Collider corners stay component-local while joint targets remain
             # at canonical q=0, but the leader body pose must follow runtime
             # drift on every planner query.
-            self._leader_collision_pose = self._current_component_pose(
-                leader_module_id
-            )
+            self._leader_collision_pose = self._current_component_pose(leader_module_id)
             return _dynamic_collision_proxy_pose_free(
                 leader_proxy=self._leader_collision_proxy,
                 follower_proxy=self._follower_collision_proxy,
@@ -3875,7 +5113,9 @@ def _run_dynamic_assembly_roundtrip_probe(
     assembled_bridge = IsaacControllerBridge()
     assembled_previous = None
     attached_observation = combined_observation(current_time_s, attached_graph)
-    attached_model = model_builder.build(attached_graph, physical_model, attached_observation)
+    attached_model = model_builder.build(
+        attached_graph, physical_model, attached_observation
+    )
     attached_hold_pose = attached_model.body_pose_world
     all_joint_targets = {
         f"module_{module_id}:{joint_id}": 0.0
@@ -3920,7 +5160,9 @@ def _run_dynamic_assembly_roundtrip_probe(
                 runtime_observation=observation,
                 morphology_graph=attached_graph,
                 physical_model=physical_model,
-                active_knot=InteractionKnot(t_rel_s=current_time_s, contact_assignments=[]),
+                active_knot=InteractionKnot(
+                    t_rel_s=current_time_s, contact_assignments=[]
+                ),
                 policy_command=attached_policy,
                 previous_command=assembled_previous,
                 control_dt_s=sim_dt,
@@ -3960,7 +5202,10 @@ def _run_dynamic_assembly_roundtrip_probe(
         )
         for module_id in (leader_module_id, follower_module_id):
             application = _apply_actuator_record(
-                robots[module_id], record, physical_model, device,
+                robots[module_id],
+                record,
+                physical_model,
+                device,
                 allowed_module_id=module_id,
             )
             robots[module_id].write_data_to_sim()
@@ -3968,10 +5213,14 @@ def _run_dynamic_assembly_roundtrip_probe(
             application_unresolved_target_count += int(
                 application["unresolved_target_count"]
             )
-        qp_infeasible_count += 0 if (
-            assembled_command.controller_status.qp_feasible
-            and command.controller_status.qp_feasible
-        ) else 1
+        qp_infeasible_count += (
+            0
+            if (
+                assembled_command.controller_status.qp_feasible
+                and command.controller_status.qp_feasible
+            )
+            else 1
+        )
         missing_actuator_count += len(record.missing_actuators)
         unsupported_actuator_count += len(record.unsupported_actuators)
         clipped_target_count += len(record.clipped_targets)
@@ -4026,9 +5275,7 @@ def _run_dynamic_assembly_roundtrip_probe(
             attached_angular_speed = _vector_norm(
                 attached_model_now.body_twist_world[3:6]
             )
-            leader_connect_pose, leader_connect_twist = connect_state(
-                leader_module_id
-            )
+            leader_connect_pose, leader_connect_twist = connect_state(leader_module_id)
             follower_connect_pose, follower_connect_twist = connect_state(
                 follower_module_id
             )
@@ -4052,9 +5299,7 @@ def _run_dynamic_assembly_roundtrip_probe(
                 "angular_speed_radps": attached_angular_speed,
                 "connect_position_error_m": attached_connect_residual.position_error_m,
                 "connect_axial_error_m": attached_alignment["axial_error_m"],
-                "connect_transverse_error_m": attached_alignment[
-                    "transverse_error_m"
-                ],
+                "connect_transverse_error_m": attached_alignment["transverse_error_m"],
                 "connect_attitude_error_rad": attached_connect_residual.attitude_error_rad,
                 "connect_relative_linear_speed_mps": (
                     attached_connect_residual.relative_linear_speed_mps
@@ -4076,7 +5321,8 @@ def _run_dynamic_assembly_roundtrip_probe(
                 and attached_position_error <= config.attached_position_tolerance_m
                 and attached_attitude_error <= config.attached_attitude_tolerance_rad
                 and attached_linear_speed <= config.attached_linear_speed_tolerance_mps
-                and attached_angular_speed <= config.attached_angular_speed_tolerance_radps
+                and attached_angular_speed
+                <= config.attached_angular_speed_tolerance_radps
                 and attached_alignment["axial_error_m"]
                 <= config.control_bridge.fix_axial_tolerance_m
                 and attached_alignment["transverse_error_m"]
@@ -4091,8 +5337,7 @@ def _run_dynamic_assembly_roundtrip_probe(
                 <= config.control_bridge.fix_relative_angular_speed_tolerance_radps
                 and attached_joint_position
                 <= config.attached_joint_position_tolerance_rad
-                and attached_joint_speed
-                <= config.attached_joint_speed_tolerance_radps
+                and attached_joint_speed <= config.attached_joint_speed_tolerance_radps
             )
             attached_stable_steps = (
                 attached_stable_steps + 1 if attached_step_stable else 0
@@ -4183,9 +5428,7 @@ def _run_dynamic_assembly_roundtrip_probe(
                 collision_approximation_evidence.get("verified") is True
             ),
             "dynamic_assembly_dock_collision_approximation_token": (
-                collision_approximation_evidence.get(
-                    "requested_approximation_token"
-                )
+                collision_approximation_evidence.get("requested_approximation_token")
             ),
             "dynamic_assembly_dock_collision_composed_prim_count": int(
                 collision_approximation_evidence.get("composed_prim_count", 0)
@@ -4229,9 +5472,7 @@ def _run_dynamic_assembly_roundtrip_probe(
                 first_guidance_contact_evidence
             ),
             "dynamic_assembly_final_seated_evidence": final_seated_evidence,
-            "dynamic_assembly_last_strict_gate_snapshot": (
-                latest_strict_gate_snapshot
-            ),
+            "dynamic_assembly_last_strict_gate_snapshot": (latest_strict_gate_snapshot),
             "dynamic_assembly_last_selected_dock_joint_diagnostics": dict(
                 latest_selected_dock_joint_diagnostics
             ),
@@ -4328,9 +5569,7 @@ def _run_dynamic_assembly_roundtrip_probe(
             last_commands[module_id] = independent_command
             last_statuses[module_id] = independent_command.controller_status
             independent_commands.append(independent_command)
-        independent_target = merge_disjoint_controller_commands(
-            independent_commands
-        )
+        independent_target = merge_disjoint_controller_commands(independent_commands)
         assembled_observation = combined_observation(current_time_s, attached_graph)
         assembled_source = assembled_controller.compute(
             ControllerContext(
@@ -4385,11 +5624,15 @@ def _run_dynamic_assembly_roundtrip_probe(
             application_unresolved_target_count += int(
                 application["unresolved_target_count"]
             )
-        qp_infeasible_count += 0 if (
-            assembled_source.controller_status.qp_feasible
-            and independent_target.controller_status.qp_feasible
-            and blended_command.controller_status.qp_feasible
-        ) else 1
+        qp_infeasible_count += (
+            0
+            if (
+                assembled_source.controller_status.qp_feasible
+                and independent_target.controller_status.qp_feasible
+                and blended_command.controller_status.qp_feasible
+            )
+            else 1
+        )
         missing_actuator_count += len(record.missing_actuators)
         unsupported_actuator_count += len(record.unsupported_actuators)
         clipped_target_count += len(record.clipped_targets)
@@ -4486,7 +5729,9 @@ def _run_dynamic_assembly_roundtrip_probe(
             external_contact_free=follower_external_contact_free,
         )
         leader_connect_pose, leader_connect_twist = connect_state(leader_module_id)
-        follower_connect_pose, follower_connect_twist = connect_state(follower_module_id)
+        follower_connect_pose, follower_connect_twist = connect_state(
+            follower_module_id
+        )
         residual = constraint_residual(
             leader_connect_pose,
             follower_connect_pose,
@@ -4554,7 +5799,9 @@ def _run_dynamic_assembly_roundtrip_probe(
         apply_component_policies(policies, current_time_s)
         current_time_s += sim_dt
         disable_and_remove_fixed_joint(sim.stage, constraint_spec)
-        constraint_removed = not sim.stage.GetPrimAtPath(Sdf.Path(constraint_spec.prim_path)).IsValid()
+        constraint_removed = not sim.stage.GetPrimAtPath(
+            Sdf.Path(constraint_spec.prim_path)
+        ).IsValid()
         add_event("constraint_removed", current_time_s)
     if not constraint_removed:
         return abort_report(
@@ -4578,7 +5825,11 @@ def _run_dynamic_assembly_roundtrip_probe(
     )
     separation_steps = max(
         1,
-        int(math.ceil(config.separation_distance_m / config.separation_speed_mps / sim_dt)),
+        int(
+            math.ceil(
+                config.separation_distance_m / config.separation_speed_mps / sim_dt
+            )
+        ),
     )
     post_hold_steps = max(1, int(math.ceil(config.post_release_hold_s / sim_dt)))
     separation_lifecycle = DynamicSeparationLifecycle(
@@ -4596,7 +5847,11 @@ def _run_dynamic_assembly_roundtrip_probe(
         ratio = min(1.0, float(step_index + 1) / float(separation_steps))
         start = independent_hold_poses[follower_module_id]
         follower_target = (
-            *(float(start[index]) + ratio * (float(separation_target[index]) - float(start[index])) for index in range(3)),
+            *(
+                float(start[index])
+                + ratio * (float(separation_target[index]) - float(start[index]))
+                for index in range(3)
+            ),
             *separation_target[3:7],
         )
         policies = {
@@ -4697,12 +5952,8 @@ def _run_dynamic_assembly_roundtrip_probe(
         }
         apply_component_policies(policies, current_time_s)
         current_time_s += sim_dt
-        post_unfilter_selected_contact_count += int(
-            latest_contact["selected_contact"]
-        )
-        post_unfilter_raw_invalid_count += int(
-            not latest_contact["raw_contact_valid"]
-        )
+        post_unfilter_selected_contact_count += int(latest_contact["selected_contact"])
+        post_unfilter_raw_invalid_count += int(not latest_contact["raw_contact_valid"])
         leader_connect_pose, _ = connect_state(leader_module_id)
         follower_connect_pose, _ = connect_state(follower_module_id)
         relative = compose_transform(
@@ -4783,12 +6034,9 @@ def _run_dynamic_assembly_roundtrip_probe(
             and not latest_leader_world_contact["active"]
             and not latest_follower_world_contact["active"]
             and final_gap_m >= 0.8 * config.separation_distance_m
-            and final_selected_body_clearance_m
-            >= config.release_filter_clearance_m
-            and post_joint_position
-            <= config.post_release_joint_position_tolerance_rad
-            and post_joint_speed
-            <= config.post_release_joint_speed_tolerance_radps
+            and final_selected_body_clearance_m >= config.release_filter_clearance_m
+            and post_joint_position <= config.post_release_joint_position_tolerance_rad
+            and post_joint_speed <= config.post_release_joint_speed_tolerance_radps
         )
         if step_stable:
             if separation_lifecycle.post_release_stable_steps == 0:
@@ -4806,9 +6054,7 @@ def _run_dynamic_assembly_roundtrip_probe(
         post_release_action = separation_lifecycle.observe_post_release(
             stable=step_stable,
         )
-        post_release_stable_steps = (
-            separation_lifecycle.post_release_stable_steps
-        )
+        post_release_stable_steps = separation_lifecycle.post_release_stable_steps
         if post_release_action == "complete":
             post_release_stable = True
             if post_release_candidate_started_s is None:
@@ -4848,8 +6094,7 @@ def _run_dynamic_assembly_roundtrip_probe(
         and follower_external_contact_free_during_unload
         and constraint_removed
         and final_gap_m >= 0.8 * config.separation_distance_m
-        and post_release_min_separation_gap_m
-        >= 0.8 * config.separation_distance_m
+        and post_release_min_separation_gap_m >= 0.8 * config.separation_distance_m
         and filter_removed
         and selected_pair_filter_remove_verified
         and post_release_min_selected_body_clearance_m
@@ -4928,7 +6173,9 @@ def _run_dynamic_assembly_roundtrip_probe(
         "dynamic_assembly_constraint_spec": constraint_spec.to_dict(),
         "dynamic_assembly_constraint_identity_verified": not constraint_identity_failures,
         "dynamic_assembly_constraint_identity_failures": constraint_identity_failures,
-        "dynamic_assembly_constraint_identity_failure_count": len(constraint_identity_failures),
+        "dynamic_assembly_constraint_identity_failure_count": len(
+            constraint_identity_failures
+        ),
         "dynamic_assembly_constraint_removed": constraint_removed,
         "dynamic_assembly_constraint_disabled_verified": constraint_disabled_verified,
         "dynamic_assembly_selected_pair_contact_observed": selected_pair_contact_observed,
@@ -4954,9 +6201,7 @@ def _run_dynamic_assembly_roundtrip_probe(
         "dynamic_assembly_selected_pair_filter_apply_verified": (
             selected_pair_filter_apply_verified
         ),
-        "dynamic_assembly_mating_filter_evidence": (
-            mating_filter_evidence_snapshot()
-        ),
+        "dynamic_assembly_mating_filter_evidence": (mating_filter_evidence_snapshot()),
         "dynamic_assembly_filter_fallback_selected_contact_violation_count": (
             filter_fallback_selected_contact_violation_count
         ),
@@ -5092,7 +6337,9 @@ def _dynamic_singleton_graph(target_graph, *, module_id: int):
         ],
         dock_edges=[],
         robot_anchors=[
-            anchor for anchor in target_graph.robot_anchors if anchor.module_id == module_id
+            anchor
+            for anchor in target_graph.robot_anchors
+            if anchor.module_id == module_id
         ],
         control_groups=[
             ControlGroup(
@@ -5106,7 +6353,9 @@ def _dynamic_singleton_graph(target_graph, *, module_id: int):
     )
 
 
-def _dynamic_resolve_rigid_body_prim_path(stage, *, root_path: str, body_name: str) -> str:
+def _dynamic_resolve_rigid_body_prim_path(
+    stage, *, root_path: str, body_name: str
+) -> str:
     from pxr import UsdPhysics
 
     prefix = root_path.rstrip("/") + "/"
@@ -5263,9 +6512,7 @@ def _dynamic_contact_view_measurement(
         "unintended_raw_contact_count": int(
             raw_evidence["unintended_physical_contact_count"]
         ),
-        "selected_raw_contact_count": int(
-            raw_evidence["selected_raw_contact_count"]
-        ),
+        "selected_raw_contact_count": int(raw_evidence["selected_raw_contact_count"]),
         "selected_physical_patch_count": int(selected_physical_patch_count),
         "selected_contact_points_world": selected_points_world,
         "selected_contact_normals_world": selected_normals_world,
@@ -5330,9 +6577,7 @@ def _dynamic_net_contact_force_measurement(
             .cpu()
             .tolist()
         ),
-        patch_forces_n=(
-            wp.to_torch(force_buffer).reshape(-1).detach().cpu().tolist()
-        ),
+        patch_forces_n=(wp.to_torch(force_buffer).reshape(-1).detach().cpu().tolist()),
         patch_separations_m=(
             wp.to_torch(separation_buffer).reshape(-1).detach().cpu().tolist()
         ),
@@ -5364,12 +6609,8 @@ def _dynamic_net_contact_force_measurement(
         "raw_physical_contact_count": int(
             raw_evidence["monitored_physical_contact_count"]
         ),
-        "raw_max_patch_force_n": float(
-            raw_evidence["monitored_max_patch_force_n"]
-        ),
-        "raw_min_separation_m": float(
-            raw_evidence["monitored_min_separation_m"]
-        ),
+        "raw_max_patch_force_n": float(raw_evidence["monitored_max_patch_force_n"]),
+        "raw_min_separation_m": float(raw_evidence["monitored_min_separation_m"]),
         "raw_contact_saturated": bool(raw_evidence["raw_contact_saturated"]),
         "raw_contact_valid": raw_valid,
         "raw_contact_nonfinite": bool(raw_evidence["nonfinite"] or not net_finite),
@@ -5414,9 +6655,7 @@ def _dynamic_selected_surface_contact_evidence(
     normals = measurement.get("selected_contact_normals_world", [])
     forces = measurement.get("selected_patch_forces_n", [])
     separations = measurement.get("selected_patch_separations_m", [])
-    if not (
-        len(points) == len(normals) == len(forces) == len(separations)
-    ):
+    if not (len(points) == len(normals) == len(forces) == len(separations)):
         return {
             "selected_surface_valid": False,
             "selected_surface_valid_patch_count": 0,
@@ -5447,20 +6686,13 @@ def _dynamic_selected_surface_contact_evidence(
             rotation=identity_rotation,
             translation=tuple(float(value) for value in point),
         )
-        point_leader = compose_transform(
-            world_to_leader, point_transform
-        ).translation
+        point_leader = compose_transform(world_to_leader, point_transform).translation
         point_follower = compose_transform(
             world_to_follower, point_transform
         ).translation
         normal_norm = _vector_norm(normal)
         normal_alignment = (
-            abs(
-                sum(
-                    float(normal[index]) * leader_x_world[index]
-                    for index in range(3)
-                )
-            )
+            abs(sum(float(normal[index]) * leader_x_world[index] for index in range(3)))
             / normal_norm
             if normal_norm > 1.0e-9
             else 0.0
@@ -5468,8 +6700,7 @@ def _dynamic_selected_surface_contact_evidence(
         leader_radius = math.hypot(point_leader[1], point_leader[2])
         follower_radius = math.hypot(point_follower[1], point_follower[2])
         physical_patch = bool(
-            abs(float(patch_force)) > 1.0e-3
-            or float(separation) <= 0.0
+            abs(float(patch_force)) > 1.0e-3 or float(separation) <= 0.0
         )
         valid = (
             physical_patch
@@ -5500,16 +6731,13 @@ def _dynamic_selected_surface_contact_evidence(
         and int(measurement.get("selected_raw_contact_count", 0)) > 0
         and measurement.get("raw_contact_valid", False)
         and not measurement.get("raw_contact_saturated", False)
-        and valid_patch_count
-        == int(measurement.get("selected_raw_contact_count", 0))
+        and valid_patch_count == int(measurement.get("selected_raw_contact_count", 0))
     )
     return {
         "selected_surface_valid": selected_surface_valid,
         "selected_surface_valid_patch_count": valid_patch_count,
         "selected_surface_patch_evidence": patch_evidence,
-        "selected_surface_relative_translation": list(
-            relative_connect.translation
-        ),
+        "selected_surface_relative_translation": list(relative_connect.translation),
         "selected_surface_axial_tolerance_m": float(axial_tolerance_m),
         "selected_surface_radius_m": float(radius_m),
         "selected_surface_normal_tolerance_rad": float(normal_tolerance_rad),
@@ -5585,9 +6813,7 @@ def _dynamic_component_collision_proxy(
         _urdf_collision_records,
     )
 
-    world_to_component = inverse_transform(
-        transform_from_pose(component_pose_world)
-    )
+    world_to_component = inverse_transform(transform_from_pose(component_pose_world))
     urdf_path = Path(physical_model.urdf_path)
     records = _urdf_collision_records(urdf_path)
     primitives = list(physical_model.collision_primitives)
@@ -5629,10 +6855,7 @@ def _dynamic_component_collision_proxy(
         )
         lower = geometry_bounds.lower
         upper = geometry_bounds.upper
-        if any(
-            not math.isfinite(float(value))
-            for value in (*lower, *upper)
-        ):
+        if any(not math.isfinite(float(value)) for value in (*lower, *upper)):
             raise RuntimeError(
                 f"collision primitive {primitive.primitive_id} has non-finite bounds"
             )
@@ -5716,7 +6939,10 @@ def _dynamic_collision_proxy_pose_free(
         follower_proxy,
         follower_pose_world,
     )
-    if any(item["lower"][2] < floor_clearance_m for item in (*leader_bounds, *follower_bounds)):
+    if any(
+        item["lower"][2] < floor_clearance_m
+        for item in (*leader_bounds, *follower_bounds)
+    ):
         return False
     excluded = (str(excluded_body_pair[0]), str(excluded_body_pair[1]))
     leader_connect = compose_pose(
@@ -5747,8 +6973,7 @@ def _dynamic_collision_proxy_pose_free(
             ):
                 continue
             separated = any(
-                leader["upper"][axis] + collision_clearance_m
-                < follower["lower"][axis]
+                leader["upper"][axis] + collision_clearance_m < follower["lower"][axis]
                 or follower["upper"][axis] + collision_clearance_m
                 < leader["lower"][axis]
                 for axis in range(3)
@@ -5787,12 +7012,10 @@ def _dynamic_collision_proxy_world_bounds(proxy, component_pose_world):
                 "owner_body_path": item["owner_body_path"],
                 "primitive_id": item["primitive_id"],
                 "lower": tuple(
-                    min(point[axis] for point in world_points)
-                    for axis in range(3)
+                    min(point[axis] for point in world_points) for axis in range(3)
                 ),
                 "upper": tuple(
-                    max(point[axis] for point in world_points)
-                    for axis in range(3)
+                    max(point[axis] for point in world_points) for axis in range(3)
                 ),
             }
         )
@@ -5829,10 +7052,8 @@ def _dynamic_selected_body_proxy_clearance_m(
         for follower in follower_bounds:
             gaps = [
                 max(
-                    float(follower["lower"][axis])
-                    - float(leader["upper"][axis]),
-                    float(leader["lower"][axis])
-                    - float(follower["upper"][axis]),
+                    float(follower["lower"][axis]) - float(leader["upper"][axis]),
+                    float(leader["lower"][axis]) - float(follower["upper"][axis]),
                     0.0,
                 )
                 for axis in range(3)
@@ -5877,12 +7098,10 @@ def _dynamic_body_local_proxy_world_bounds(
                 "owner_body_path": item["owner_body_path"],
                 "primitive_id": item["primitive_id"],
                 "lower": tuple(
-                    min(point[axis] for point in world_points)
-                    for axis in range(3)
+                    min(point[axis] for point in world_points) for axis in range(3)
                 ),
                 "upper": tuple(
-                    max(point[axis] for point in world_points)
-                    for axis in range(3)
+                    max(point[axis] for point in world_points) for axis in range(3)
                 ),
             }
         )
@@ -6071,8 +7290,7 @@ def _configure_random_morphology_collision_filters(
         "intended_dock_body_path_pairs": sorted(intended_dock_path_pairs),
         "adjacent_module_pair_count": len(adjacent_module_pairs),
         "cross_module_pair_count": module_pair_count,
-        "nonadjacent_module_pair_count": module_pair_count
-        - len(adjacent_module_pairs),
+        "nonadjacent_module_pair_count": module_pair_count - len(adjacent_module_pairs),
         "body_paths_by_module": {
             module_id: sorted(prim.GetPath().pathString for prim in prims)
             for module_id, prims in bodies_by_module.items()
@@ -6149,7 +7367,9 @@ def _create_cross_module_contact_views(
     """Create one PhysX tensor contact matrix per cross-module pair."""
 
     if max_patches_per_body_pair <= 0:
-        raise RuntimeError("cross-module raw contact capacity multiplier must be positive")
+        raise RuntimeError(
+            "cross-module raw contact capacity multiplier must be positive"
+        )
     module_ids = sorted(int(module_id) for module_id in body_paths_by_module)
     views: list[dict[str, object]] = []
     for src_index, src_module_id in enumerate(module_ids):
@@ -6158,9 +7378,7 @@ def _create_cross_module_contact_views(
             sensor_paths = sorted(body_paths_by_module[src_module_id])
             filter_paths = sorted(body_paths_by_module[dst_module_id])
             raw_contact_capacity = (
-                len(sensor_paths)
-                * len(filter_paths)
-                * max_patches_per_body_pair
+                len(sensor_paths) * len(filter_paths) * max_patches_per_body_pair
             )
             contact_view = physics_sim_view.create_rigid_contact_view(
                 sensor_paths,
@@ -6189,9 +7407,7 @@ def _create_cross_module_contact_views(
                     "view": contact_view,
                     "sensor_count": int(contact_view.sensor_count),
                     "filter_count": int(contact_view.filter_count),
-                    "raw_contact_capacity": int(
-                        contact_view.max_contact_data_count
-                    ),
+                    "raw_contact_capacity": int(contact_view.max_contact_data_count),
                 }
             )
     return views
@@ -6221,9 +7437,7 @@ def _measure_cross_module_contact_views(
         matrix_tensor = wp.to_torch(matrix)
         force_norms = torch.linalg.vector_norm(matrix_tensor.reshape(-1, 3), dim=-1)
         pair_max_force_n = (
-            float(force_norms.max().detach().cpu())
-            if force_norms.numel() > 0
-            else 0.0
+            float(force_norms.max().detach().cpu()) if force_norms.numel() > 0 else 0.0
         )
         module_pair = entry["module_pair"]
         pair_key = f"{module_pair[0]}-{module_pair[1]}"
@@ -6267,19 +7481,19 @@ def _measure_cross_module_contact_views(
                     dtype=torch.long,
                     device=wp.to_torch(force_buffer).device,
                 )
-                active_forces = wp.to_torch(force_buffer).reshape(-1).index_select(
-                    0, index_tensor
+                active_forces = (
+                    wp.to_torch(force_buffer).reshape(-1).index_select(0, index_tensor)
                 )
-                active_separations = wp.to_torch(separation_buffer).reshape(
-                    -1
-                ).index_select(0, index_tensor)
+                active_separations = (
+                    wp.to_torch(separation_buffer)
+                    .reshape(-1)
+                    .index_select(0, index_tensor)
+                )
                 raw_contact_max_force_n = max(
                     raw_contact_max_force_n,
                     float(active_forces.abs().max().detach().cpu()),
                 )
-                pair_min_separation = float(
-                    active_separations.min().detach().cpu()
-                )
+                pair_min_separation = float(active_separations.min().detach().cpu())
                 raw_contact_min_separation_m = (
                     pair_min_separation
                     if raw_contact_min_separation_m is None
@@ -6329,7 +7543,9 @@ def _activate_nested_contact_reports(stage, *, root_prim_path: str) -> int:
     return applied_count
 
 
-def _vectoring_velocity_overrides(physical_model, velocity_limit_rad_s: float) -> dict[str, float]:
+def _vectoring_velocity_overrides(
+    physical_model, velocity_limit_rad_s: float
+) -> dict[str, float]:
     if velocity_limit_rad_s < 0.0:
         raise ValueError("vectoring velocity limit must be non-negative")
     return {
@@ -6339,7 +7555,9 @@ def _vectoring_velocity_overrides(physical_model, velocity_limit_rad_s: float) -
     }
 
 
-def _articulated_joint_ids(physical_model, requested_joint_names: list[str] | None) -> list[str]:
+def _articulated_joint_ids(
+    physical_model, requested_joint_names: list[str] | None
+) -> list[str]:
     available = sorted(
         {
             str(port.mechanical_limits["mechanism_joint_id"])
@@ -6352,7 +7570,9 @@ def _articulated_joint_ids(physical_model, requested_joint_names: list[str] | No
     requested = [str(joint_id) for joint_id in requested_joint_names]
     unknown = sorted(set(requested) - set(available))
     if unknown:
-        raise ValueError(f"Unknown dock mechanism joints for articulated smoke: {unknown}")
+        raise ValueError(
+            f"Unknown dock mechanism joints for articulated smoke: {unknown}"
+        )
     return requested
 
 
@@ -6420,8 +7640,13 @@ def _joint_positions_for_command_key(
     return values
 
 
-def _module_scoped_joint_targets(joint_targets: dict[str, float], *, module_id: int) -> dict[str, float]:
-    return {f"module_{module_id}:{joint_id}": float(value) for joint_id, value in joint_targets.items()}
+def _module_scoped_joint_targets(
+    joint_targets: dict[str, float], *, module_id: int
+) -> dict[str, float]:
+    return {
+        f"module_{module_id}:{joint_id}": float(value)
+        for joint_id, value in joint_targets.items()
+    }
 
 
 def _split_global_command_key(command_key: str) -> tuple[int, str] | None:
@@ -6451,7 +7676,9 @@ def _module_body_twist(robot, *, module_id: int, local_body_name: str):
     if body_name is None:
         return None
     body_id = robot.body_names.index(body_name)
-    if not hasattr(robot.data, "body_lin_vel_w") or not hasattr(robot.data, "body_ang_vel_w"):
+    if not hasattr(robot.data, "body_lin_vel_w") or not hasattr(
+        robot.data, "body_ang_vel_w"
+    ):
         return None
     linear = _tensor_body_row(robot.data.body_lin_vel_w.torch, body_id)
     angular = _tensor_body_row(robot.data.body_ang_vel_w.torch, body_id)
@@ -6474,7 +7701,11 @@ def _max_vector_dict_delta(
             continue
         max_delta = max(
             max_delta,
-            sum((float(current_vector[idx]) - float(initial_vector[idx])) ** 2 for idx in range(3)) ** 0.5,
+            sum(
+                (float(current_vector[idx]) - float(initial_vector[idx])) ** 2
+                for idx in range(3)
+            )
+            ** 0.5,
         )
     return max_delta
 
@@ -6487,7 +7718,9 @@ def _max_matrix_delta(current: list[list[float]], initial: list[list[float]]) ->
         for col_idx, value in enumerate(row):
             if col_idx >= len(initial[row_idx]):
                 continue
-            max_delta = max(max_delta, abs(float(value) - float(initial[row_idx][col_idx])))
+            max_delta = max(
+                max_delta, abs(float(value) - float(initial[row_idx][col_idx]))
+            )
     return max_delta
 
 
@@ -6557,7 +7790,11 @@ def _run_single_module_hover_smoke(
     last_controller_status = None
     last_bridge_metrics: dict[str, float] = {}
     executed_steps = 0
-    articulated_joint_ids = _articulated_joint_ids(physical_model, articulated_joint_names) if articulated else []
+    articulated_joint_ids = (
+        _articulated_joint_ids(physical_model, articulated_joint_names)
+        if articulated
+        else []
+    )
     max_joint_target_abs = 0.0
     max_joint_position_abs = 0.0
     max_joint_tracking_error = 0.0
@@ -6580,7 +7817,10 @@ def _run_single_module_hover_smoke(
         )
         last_joint_targets = dict(joint_targets)
         posture_target = (
-            PostureTarget(joint_pos_target=joint_targets, joint_vel_target={joint_id: 0.0 for joint_id in joint_targets})
+            PostureTarget(
+                joint_pos_target=joint_targets,
+                joint_vel_target={joint_id: 0.0 for joint_id in joint_targets},
+            )
             if joint_targets
             else None
         )
@@ -6588,9 +7828,14 @@ def _run_single_module_hover_smoke(
             morphology_graph,
             time_s=time_s,
             pose_world=tuple(_tensor_row(robot.data.root_pose_w.torch)),
-            twist_world=_tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch),
-            joint_positions=_joint_state_dict(robot.joint_names, robot.data.joint_pos.torch),
-            joint_velocities=_joint_state_dict(robot.joint_names, robot.data.joint_vel.torch),
+            twist_world=_tensor_row(robot.data.root_lin_vel_w.torch)
+            + _tensor_row(robot.data.root_ang_vel_w.torch),
+            joint_positions=_joint_state_dict(
+                robot.joint_names, robot.data.joint_pos.torch
+            ),
+            joint_velocities=_joint_state_dict(
+                robot.joint_names, robot.data.joint_vel.torch
+            ),
         )
         controller_command = controller.compute(
             ControllerContext(
@@ -6648,8 +7893,13 @@ def _run_single_module_hover_smoke(
                 observed_joint_count += 1
                 max_joint_target_abs = max(max_joint_target_abs, abs(float(target)))
                 max_joint_position_abs = max(max_joint_position_abs, abs(float(actual)))
-                max_joint_tracking_error = max(max_joint_tracking_error, abs(float(actual) - float(target)))
-        if position_error <= position_tolerance_m and attitude_error <= attitude_tolerance_rad:
+                max_joint_tracking_error = max(
+                    max_joint_tracking_error, abs(float(actual) - float(target))
+                )
+        if (
+            position_error <= position_tolerance_m
+            and attitude_error <= attitude_tolerance_rad
+        ):
             hold_steps += 1
         else:
             hold_steps = 0
@@ -6668,22 +7918,24 @@ def _run_single_module_hover_smoke(
         previous_command = bridged_command
         motion_observed_for_stop = (
             not articulated
-            or max_joint_position_abs + 1.0e-9 >= 0.5 * abs(float(articulated_joint_amplitude_rad))
+            or max_joint_position_abs + 1.0e-9
+            >= 0.5 * abs(float(articulated_joint_amplitude_rad))
         )
-        if stop_on_hold and hold_steps >= hold_steps_required and motion_observed_for_stop:
+        if (
+            stop_on_hold
+            and hold_steps >= hold_steps_required
+            and motion_observed_for_stop
+        ):
             break
 
     hold_time_s = max_hold_steps * sim_dt
     expected_joint_motion = 0.5 * abs(float(articulated_joint_amplitude_rad))
-    joint_motion_passed = (
-        not articulated
-        or (
-            bool(articulated_joint_ids)
-            and observed_joint_count > 0
-            and max_joint_target_abs + 1.0e-9 >= expected_joint_motion
-            and max_joint_position_abs + 1.0e-9 >= expected_joint_motion
-            and max_joint_tracking_error <= articulated_joint_tracking_tolerance_rad
-        )
+    joint_motion_passed = not articulated or (
+        bool(articulated_joint_ids)
+        and observed_joint_count > 0
+        and max_joint_target_abs + 1.0e-9 >= expected_joint_motion
+        and max_joint_position_abs + 1.0e-9 >= expected_joint_motion
+        and max_joint_tracking_error <= articulated_joint_tracking_tolerance_rad
     )
     passed = (
         executed_steps > 0
@@ -6706,7 +7958,9 @@ def _run_single_module_hover_smoke(
         f"{report_prefix}_duration_s": float(executed_steps * sim_dt),
         f"{report_prefix}_hold_time_s": hold_time_s,
         f"{report_prefix}_hold_required_s": hold_duration_s,
-        f"{report_prefix}_stopped_on_hold": bool(stop_on_hold and executed_steps < max(0, steps)),
+        f"{report_prefix}_stopped_on_hold": bool(
+            stop_on_hold and executed_steps < max(0, steps)
+        ),
         f"{report_prefix}_position_tolerance_m": position_tolerance_m,
         f"{report_prefix}_attitude_tolerance_rad": attitude_tolerance_rad,
         f"{report_prefix}_final_position_error_m": final_position_error,
@@ -6723,17 +7977,29 @@ def _run_single_module_hover_smoke(
         f"{report_prefix}_clipped_target_count": clipped_target_count,
         f"{report_prefix}_articulated": bool(articulated),
         f"{report_prefix}_articulated_joint_ids": list(articulated_joint_ids),
-        f"{report_prefix}_articulated_joint_amplitude_rad": float(articulated_joint_amplitude_rad),
-        f"{report_prefix}_articulated_joint_period_s": float(articulated_joint_period_s),
-        f"{report_prefix}_articulated_joint_warmup_s": float(articulated_joint_warmup_s),
+        f"{report_prefix}_articulated_joint_amplitude_rad": float(
+            articulated_joint_amplitude_rad
+        ),
+        f"{report_prefix}_articulated_joint_period_s": float(
+            articulated_joint_period_s
+        ),
+        f"{report_prefix}_articulated_joint_warmup_s": float(
+            articulated_joint_warmup_s
+        ),
         f"{report_prefix}_articulated_joint_tracking_tolerance_rad": float(
             articulated_joint_tracking_tolerance_rad
         ),
         f"{report_prefix}_articulated_joint_motion_passed": bool(joint_motion_passed),
         f"{report_prefix}_articulated_joint_observed_count": int(observed_joint_count),
-        f"{report_prefix}_articulated_max_joint_target_abs_rad": float(max_joint_target_abs),
-        f"{report_prefix}_articulated_max_joint_position_abs_rad": float(max_joint_position_abs),
-        f"{report_prefix}_articulated_max_joint_tracking_error_rad": float(max_joint_tracking_error),
+        f"{report_prefix}_articulated_max_joint_target_abs_rad": float(
+            max_joint_target_abs
+        ),
+        f"{report_prefix}_articulated_max_joint_position_abs_rad": float(
+            max_joint_position_abs
+        ),
+        f"{report_prefix}_articulated_max_joint_tracking_error_rad": float(
+            max_joint_tracking_error
+        ),
         f"{report_prefix}_articulated_last_joint_targets": dict(last_joint_targets),
         f"{report_prefix}_last_controller_status": last_controller_status,
         f"{report_prefix}_last_bridge_metrics": last_bridge_metrics,
@@ -6750,7 +8016,9 @@ def _run_fixed_morphology_smoke(
     steps: int,
     module_count: int,
     module_spacing_m: float,
-    module_poses: dict[int, tuple[float, float, float, float, float, float, float]] | None,
+    module_poses: (
+        dict[int, tuple[float, float, float, float, float, float, float]] | None
+    ),
     target_position: tuple[float, float, float],
     target_yaw_rad: float,
     position_tolerance_m: float,
@@ -6840,7 +8108,11 @@ def _run_fixed_morphology_smoke(
     last_controller_status = None
     last_bridge_metrics: dict[str, float] = {}
     executed_steps = 0
-    articulated_joint_ids = _articulated_joint_ids(physical_model, articulated_joint_names) if articulated else []
+    articulated_joint_ids = (
+        _articulated_joint_ids(physical_model, articulated_joint_names)
+        if articulated
+        else []
+    )
     max_joint_target_abs = 0.0
     max_joint_position_abs = 0.0
     max_joint_tracking_error = 0.0
@@ -6858,7 +8130,9 @@ def _run_fixed_morphology_smoke(
         executed_steps = step_idx + 1
         time_s = step_idx * sim_dt
         root_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
-        root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch)
+        root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(
+            robot.data.root_ang_vel_w.torch
+        )
         command_target_pose = _ramped_target_pose(
             tracked_initial_pose,  # type: ignore[arg-type]
             target_pose,
@@ -6883,7 +8157,10 @@ def _run_fixed_morphology_smoke(
         )
         last_joint_targets = dict(joint_targets)
         posture_target = (
-            PostureTarget(joint_pos_target=joint_targets, joint_vel_target={joint_id: 0.0 for joint_id in joint_targets})
+            PostureTarget(
+                joint_pos_target=joint_targets,
+                joint_vel_target={joint_id: 0.0 for joint_id in joint_targets},
+            )
             if joint_targets
             else None
         )
@@ -6922,11 +8199,15 @@ def _run_fixed_morphology_smoke(
                 initial_relative_module_pose = relative_pose
             max_relative_module_position_change = max(
                 max_relative_module_position_change,
-                _position_error_norm(list(relative_pose[:3]), initial_relative_module_pose[:3]),
+                _position_error_norm(
+                    list(relative_pose[:3]), initial_relative_module_pose[:3]
+                ),
             )
             max_relative_module_attitude_change = max(
                 max_relative_module_attitude_change,
-                _quat_error_norm(list(relative_pose[3:7]), initial_relative_module_pose[3:7]),
+                _quat_error_norm(
+                    list(relative_pose[3:7]), initial_relative_module_pose[3:7]
+                ),
             )
             diagnostic_model = controller.rigid_body_model_builder.build(
                 morphology_graph,
@@ -6935,17 +8216,22 @@ def _run_fixed_morphology_smoke(
             )
             if initial_model_rotor_origins is None:
                 initial_model_rotor_origins = dict(diagnostic_model.rotor_origins_body)
-                initial_model_allocation_matrix = [list(row) for row in diagnostic_model.allocation_matrix_body]
+                initial_model_allocation_matrix = [
+                    list(row) for row in diagnostic_model.allocation_matrix_body
+                ]
             else:
                 max_model_rotor_origin_change = max(
                     max_model_rotor_origin_change,
-                    _max_vector_dict_delta(diagnostic_model.rotor_origins_body, initial_model_rotor_origins),
+                    _max_vector_dict_delta(
+                        diagnostic_model.rotor_origins_body, initial_model_rotor_origins
+                    ),
                 )
                 max_model_allocation_change = max(
                     max_model_allocation_change,
                     _max_matrix_delta(
                         diagnostic_model.allocation_matrix_body,
-                        initial_model_allocation_matrix or diagnostic_model.allocation_matrix_body,
+                        initial_model_allocation_matrix
+                        or diagnostic_model.allocation_matrix_body,
                     ),
                 )
         controller_command = controller.compute(
@@ -6982,7 +8268,10 @@ def _run_fixed_morphology_smoke(
 
         root_pose_after = _tensor_row(robot.data.root_pose_w.torch)
         tracked_pose_after = (
-            list(_module_body_pose(robot, module_id=0, local_body_name="fc") or tuple(root_pose_after))
+            list(
+                _module_body_pose(robot, module_id=0, local_body_name="fc")
+                or tuple(root_pose_after)
+            )
             if articulated_assembly
             else root_pose_after
         )
@@ -6995,7 +8284,9 @@ def _run_fixed_morphology_smoke(
         max_attitude_error = max(max_attitude_error, attitude_error)
         min_height = min(min_height, root_pos[2])
         max_height = max(max_height, root_pos[2])
-        finite_state = finite_state and all(_is_finite(value) for value in root_pose_after)
+        finite_state = finite_state and all(
+            _is_finite(value) for value in root_pose_after
+        )
         if articulated:
             for command_key, target in joint_targets.items():
                 actuals = _joint_positions_for_command_key(
@@ -7007,10 +8298,18 @@ def _run_fixed_morphology_smoke(
                 for actual in actuals:
                     observed_joint_count += 1
                     max_joint_target_abs = max(max_joint_target_abs, abs(float(target)))
-                    max_joint_position_abs = max(max_joint_position_abs, abs(float(actual)))
-                    max_joint_tracking_error = max(max_joint_tracking_error, abs(float(actual) - float(target)))
+                    max_joint_position_abs = max(
+                        max_joint_position_abs, abs(float(actual))
+                    )
+                    max_joint_tracking_error = max(
+                        max_joint_tracking_error, abs(float(actual) - float(target))
+                    )
         ramp_complete = time_s + 1.0e-9 >= waypoint_ramp_duration_s
-        if ramp_complete and position_error <= position_tolerance_m and attitude_error <= attitude_tolerance_rad:
+        if (
+            ramp_complete
+            and position_error <= position_tolerance_m
+            and attitude_error <= attitude_tolerance_rad
+        ):
             hold_steps += 1
         else:
             hold_steps = 0
@@ -7029,22 +8328,24 @@ def _run_fixed_morphology_smoke(
         previous_command = bridged_command
         motion_observed_for_stop = (
             not articulated
-            or max_joint_position_abs + 1.0e-9 >= 0.5 * abs(float(articulated_joint_amplitude_rad))
+            or max_joint_position_abs + 1.0e-9
+            >= 0.5 * abs(float(articulated_joint_amplitude_rad))
         )
-        if stop_on_hold and hold_steps >= hold_steps_required and motion_observed_for_stop:
+        if (
+            stop_on_hold
+            and hold_steps >= hold_steps_required
+            and motion_observed_for_stop
+        ):
             break
 
     hold_time_s = max_hold_steps * sim_dt
     expected_joint_motion = 0.5 * abs(float(articulated_joint_amplitude_rad))
-    joint_motion_passed = (
-        not articulated
-        or (
-            bool(articulated_joint_ids)
-            and observed_joint_count > 0
-            and max_joint_target_abs + 1.0e-9 >= expected_joint_motion
-            and max_joint_position_abs + 1.0e-9 >= expected_joint_motion
-            and max_joint_tracking_error <= articulated_joint_tracking_tolerance_rad
-        )
+    joint_motion_passed = not articulated or (
+        bool(articulated_joint_ids)
+        and observed_joint_count > 0
+        and max_joint_target_abs + 1.0e-9 >= expected_joint_motion
+        and max_joint_position_abs + 1.0e-9 >= expected_joint_motion
+        and max_joint_tracking_error <= articulated_joint_tracking_tolerance_rad
     )
     module_motion_passed = (
         not articulated_assembly
@@ -7082,7 +8383,9 @@ def _run_fixed_morphology_smoke(
         f"{report_prefix}_duration_s": float(executed_steps * sim_dt),
         f"{report_prefix}_hold_time_s": hold_time_s,
         f"{report_prefix}_hold_required_s": hold_duration_s,
-        f"{report_prefix}_stopped_on_hold": bool(stop_on_hold and executed_steps < max(0, steps)),
+        f"{report_prefix}_stopped_on_hold": bool(
+            stop_on_hold and executed_steps < max(0, steps)
+        ),
         f"{report_prefix}_position_tolerance_m": position_tolerance_m,
         f"{report_prefix}_attitude_tolerance_rad": attitude_tolerance_rad,
         f"{report_prefix}_final_position_error_m": final_position_error,
@@ -7099,9 +8402,15 @@ def _run_fixed_morphology_smoke(
         f"{report_prefix}_clipped_target_count": clipped_target_count,
         f"{report_prefix}_articulated": bool(articulated),
         f"{report_prefix}_articulated_joint_ids": list(articulated_joint_ids),
-        f"{report_prefix}_articulated_joint_amplitude_rad": float(articulated_joint_amplitude_rad),
-        f"{report_prefix}_articulated_joint_period_s": float(articulated_joint_period_s),
-        f"{report_prefix}_articulated_joint_warmup_s": float(articulated_joint_warmup_s),
+        f"{report_prefix}_articulated_joint_amplitude_rad": float(
+            articulated_joint_amplitude_rad
+        ),
+        f"{report_prefix}_articulated_joint_period_s": float(
+            articulated_joint_period_s
+        ),
+        f"{report_prefix}_articulated_joint_warmup_s": float(
+            articulated_joint_warmup_s
+        ),
         f"{report_prefix}_articulated_joint_tracking_tolerance_rad": float(
             articulated_joint_tracking_tolerance_rad
         ),
@@ -7110,17 +8419,27 @@ def _run_fixed_morphology_smoke(
         f"{report_prefix}_articulated_module_motion_passed": bool(module_motion_passed),
         f"{report_prefix}_articulated_model_update_passed": bool(model_update_passed),
         f"{report_prefix}_articulated_joint_observed_count": int(observed_joint_count),
-        f"{report_prefix}_articulated_max_joint_target_abs_rad": float(max_joint_target_abs),
-        f"{report_prefix}_articulated_max_joint_position_abs_rad": float(max_joint_position_abs),
-        f"{report_prefix}_articulated_max_joint_tracking_error_rad": float(max_joint_tracking_error),
+        f"{report_prefix}_articulated_max_joint_target_abs_rad": float(
+            max_joint_target_abs
+        ),
+        f"{report_prefix}_articulated_max_joint_position_abs_rad": float(
+            max_joint_position_abs
+        ),
+        f"{report_prefix}_articulated_max_joint_tracking_error_rad": float(
+            max_joint_tracking_error
+        ),
         f"{report_prefix}_articulated_max_relative_module_position_change_m": float(
             max_relative_module_position_change
         ),
         f"{report_prefix}_articulated_max_relative_module_attitude_change_rad": float(
             max_relative_module_attitude_change
         ),
-        f"{report_prefix}_articulated_max_model_rotor_origin_change_m": float(max_model_rotor_origin_change),
-        f"{report_prefix}_articulated_max_model_allocation_change": float(max_model_allocation_change),
+        f"{report_prefix}_articulated_max_model_rotor_origin_change_m": float(
+            max_model_rotor_origin_change
+        ),
+        f"{report_prefix}_articulated_max_model_allocation_change": float(
+            max_model_allocation_change
+        ),
         f"{report_prefix}_articulated_last_joint_targets": dict(last_joint_targets),
         f"{report_prefix}_last_controller_status": last_controller_status,
         f"{report_prefix}_last_bridge_metrics": last_bridge_metrics,
@@ -7238,7 +8557,9 @@ def _run_random_morphology_takeoff_smoke(
             "Order-4 deterministic pi_H requires centroidal_local_joint_v2"
         )
     if order4_enabled and order3_rollout_condition is not None:
-        raise RuntimeError("Order-3 and Order-4 rollout contracts are mutually exclusive")
+        raise RuntimeError(
+            "Order-3 and Order-4 rollout contracts are mutually exclusive"
+        )
     if order4_enabled and order3_deterministic_baseline_evaluation:
         raise RuntimeError(
             "Order-3 deterministic baseline mode cannot be combined with Order-4"
@@ -7252,9 +8573,7 @@ def _run_random_morphology_takeoff_smoke(
         order3_external_wrench_body = tuple(
             float(value) for value in order3_rollout_condition.external_wrench_body
         )
-        order3_disturbance_start_s = float(
-            order3_rollout_condition.disturbance_start_s
-        )
+        order3_disturbance_start_s = float(order3_rollout_condition.disturbance_start_s)
         order3_disturbance_duration_s = float(
             order3_rollout_condition.disturbance_duration_s
         )
@@ -7265,8 +8584,7 @@ def _run_random_morphology_takeoff_smoke(
     )
     order3_in_air = order3_task_mode in {"hover", "waypoint"}
     if order3_rollout_condition is not None and (
-        order3_checkpoint_path is None
-        and not order3_deterministic_baseline_evaluation
+        order3_checkpoint_path is None and not order3_deterministic_baseline_evaluation
     ):
         raise RuntimeError(
             "Order-3 rollout conditions require a learned or deterministic-baseline rollout"
@@ -7284,15 +8602,21 @@ def _run_random_morphology_takeoff_smoke(
         and not order3_deterministic_baseline_evaluation
         and any(abs(float(value)) > 0.0 for value in order3_external_wrench_body)
     ):
-        raise RuntimeError("Order-3 external disturbance requires an Order-3 pi_L checkpoint")
+        raise RuntimeError(
+            "Order-3 external disturbance requires an Order-3 pi_L checkpoint"
+        )
     if order3_disturbance_start_s < 0.0 or order3_disturbance_duration_s < 0.0:
         raise RuntimeError("Order-3 disturbance timing must be non-negative")
     if floor_contact_sensor is None:
         raise RuntimeError("random morphology takeoff requires an Isaac contact sensor")
     if not isinstance(self_collision_filter_info, dict):
-        raise RuntimeError("random morphology takeoff requires collision-filter evidence")
+        raise RuntimeError(
+            "random morphology takeoff requires collision-filter evidence"
+        )
     if not isinstance(initial_exact_collision_info, dict):
-        raise RuntimeError("random morphology takeoff requires exact initial-collider evidence")
+        raise RuntimeError(
+            "random morphology takeoff requires exact initial-collider evidence"
+        )
     if not isinstance(cross_module_contact_views, list):
         raise RuntimeError("random morphology takeoff requires tensor contact views")
     if order3_in_air and not centroidal_contract:
@@ -7351,9 +8675,7 @@ def _run_random_morphology_takeoff_smoke(
             hover_acquisition_timeout_s=float(config.hover_acquisition_timeout_s),
             position_tolerance_m=float(config.position_error_threshold_m),
             attitude_tolerance_rad=float(config.attitude_error_threshold_rad),
-            linear_speed_tolerance_mps=float(
-                config.hover_linear_speed_threshold_mps
-            ),
+            linear_speed_tolerance_mps=float(config.hover_linear_speed_threshold_mps),
             angular_speed_tolerance_rad_s=float(
                 config.hover_angular_speed_threshold_rad_s
             ),
@@ -7414,7 +8736,8 @@ def _run_random_morphology_takeoff_smoke(
     resolved_fc_body_count = sum(
         1
         for module_id in range(module_count)
-        if _module_body_pose(robot, module_id=module_id, local_body_name="fc") is not None
+        if _module_body_pose(robot, module_id=module_id, local_body_name="fc")
+        is not None
     )
     initial_root_pose_actual = tuple(_tensor_row(robot.data.root_pose_w.torch))
     initial_root_twist_actual = tuple(
@@ -7444,11 +8767,7 @@ def _run_random_morphology_takeoff_smoke(
     floor_contact_steps_at_completion = 0
     floor_contact_dwell_steps_required = max(
         1,
-        int(
-            math.ceil(
-                config.floor_contact_dwell_duration_s / max(sim_dt, 1.0e-9)
-            )
-        ),
+        int(math.ceil(config.floor_contact_dwell_duration_s / max(sim_dt, 1.0e-9))),
     )
     current_floor_contact = _contact_sensor_measurement(
         floor_contact_sensor,
@@ -7457,7 +8776,9 @@ def _run_random_morphology_takeoff_smoke(
     max_floor_contact_aggregate_force_n = float(
         current_floor_contact["aggregate_force_n"]
     )
-    max_floor_contact_active_body_count = int(current_floor_contact["active_body_count"])
+    max_floor_contact_active_body_count = int(
+        current_floor_contact["active_body_count"]
+    )
     previous_command = None
     phase_counts = {phase.value: 0 for phase in TakeoffPhase}
     phase_transitions: list[dict[str, object]] = []
@@ -7490,12 +8811,8 @@ def _run_random_morphology_takeoff_smoke(
         for module_id in range(module_count)
         for joint_id in fixed_dock_joint_ids
     }
-    neutral_dock_velocity_targets = {
-        key: 0.0 for key in neutral_dock_position_targets
-    }
-    neutral_dock_torque_bias = {
-        key: 0.0 for key in neutral_dock_position_targets
-    }
+    neutral_dock_velocity_targets = {key: 0.0 for key in neutral_dock_position_targets}
+    neutral_dock_torque_bias = {key: 0.0 for key in neutral_dock_position_targets}
     max_abs_dock_joint_position_rad = 0.0
     final_max_abs_dock_joint_position_rad = 0.0
     max_abs_dock_position_target_rad = 0.0
@@ -7514,8 +8831,7 @@ def _run_random_morphology_takeoff_smoke(
     dynamic_pair_raw_contact_counts: dict[str, int] = {}
     order3_in_air_floor_contact_violation_count = 0
     dynamic_raw_contact_capacity = sum(
-        int(entry["raw_contact_capacity"])
-        for entry in cross_module_contact_views
+        int(entry["raw_contact_capacity"]) for entry in cross_module_contact_views
     )
     finite_state = True
     max_vertical_speed = 0.0
@@ -7563,7 +8879,9 @@ def _run_random_morphology_takeoff_smoke(
         executed_steps = step_idx + 1
         time_s = step_idx * sim_dt
         root_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
-        root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch)
+        root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(
+            robot.data.root_ang_vel_w.torch
+        )
         runtime_observation = _build_articulated_runtime_observation(
             morphology_graph,
             time_s=time_s,
@@ -7599,9 +8917,7 @@ def _run_random_morphology_takeoff_smoke(
         # observation used for PPO; the current command's outcome belongs to
         # the next observation and must not leak backwards into old_log_prob.
         if previous_command is not None:
-            runtime_observation.controller_status = (
-                previous_command.controller_status
-            )
+            runtime_observation.controller_status = previous_command.controller_status
         current_base_state = runtime_observation.module_states[0]
         if centroidal_contract:
             current_control_model = rigid_body_model_builder.build(
@@ -7667,7 +8983,9 @@ def _run_random_morphology_takeoff_smoke(
             settled_angular_speed = _vector_norm(current_control_twist[3:6])
             settle_low_speed_steps_at_completion = settle_low_speed_steps
             floor_contact_steps_at_completion = floor_contact_steps
-        schedule_reference = settled_pose or initial_control_pose or initial_base_fc_pose
+        schedule_reference = (
+            settled_pose or initial_control_pose or initial_base_fc_pose
+        )
         order4_active_knot = None
         order4_active_trajectory = None
         if order4_enabled:
@@ -7680,14 +8998,18 @@ def _run_random_morphology_takeoff_smoke(
             order4_active_knot = order4_last_step.active_knot
             order4_active_trajectory = order4_runtime.active_trajectory
             if order4_active_trajectory is None:
-                raise RuntimeError("Order-4 runtime did not retain its active trajectory")
+                raise RuntimeError(
+                    "Order-4 runtime did not retain its active trajectory"
+                )
             centroidal_target = order4_active_knot.centroidal_target
             if (
                 centroidal_target is None
                 or centroidal_target.com_pos_world is None
                 or centroidal_target.body_orientation_world is None
             ):
-                raise RuntimeError("Order-4 active knot is missing its centroidal pose target")
+                raise RuntimeError(
+                    "Order-4 active knot is missing its centroidal pose target"
+                )
             order4_pose = (
                 *centroidal_target.com_pos_world,
                 *centroidal_target.body_orientation_world,
@@ -7707,10 +9029,7 @@ def _run_random_morphology_takeoff_smoke(
             elif order4_last_step.phase == "takeoff":
                 order4_ramp_progress = min(
                     max(
-                        (
-                            float(order4_pose[2])
-                            - float(schedule_reference[2])
-                        )
+                        (float(order4_pose[2]) - float(schedule_reference[2]))
                         / max(
                             float(order4_free_flight_mission.hover_height_delta_m),
                             1.0e-9,
@@ -7741,7 +9060,9 @@ def _run_random_morphology_takeoff_smoke(
             }
         elif order3_in_air:
             if order3_condition_scheduler is None:
-                raise RuntimeError("Order-3 in-air target scheduler was not initialized")
+                raise RuntimeError(
+                    "Order-3 in-air target scheduler was not initialized"
+                )
             condition_target = order3_condition_scheduler.target_at(time_s)
             target = type(
                 "_Order3InAirSchedulerTarget",
@@ -7767,7 +9088,9 @@ def _run_random_morphology_takeoff_smoke(
         if target.phase != previous_phase:
             phase_transitions.append(
                 {
-                    "from_phase": previous_phase.value if previous_phase is not None else None,
+                    "from_phase": (
+                        previous_phase.value if previous_phase is not None else None
+                    ),
                     "to_phase": target.phase.value,
                     "time_s": time_s,
                     "reason": "deterministic_schedule",
@@ -7868,7 +9191,9 @@ def _run_random_morphology_takeoff_smoke(
             previous_command = settle_command
         else:
             if target.desired_pose_world is None:
-                raise RuntimeError("takeoff scheduler enabled thrust without a desired pose")
+                raise RuntimeError(
+                    "takeoff scheduler enabled thrust without a desired pose"
+                )
             deterministic_policy_command = PolicyCommand(
                 desired_body_pose=target.desired_pose_world,
                 desired_body_twist=target_twist,
@@ -7891,9 +9216,7 @@ def _run_random_morphology_takeoff_smoke(
                             controller_status=runtime_observation.controller_status,
                         )
                     )
-                    policy_command.joint_torque_bias = dict(
-                        neutral_dock_torque_bias
-                    )
+                    policy_command.joint_torque_bias = dict(neutral_dock_torque_bias)
                 else:
                     policy_command = deterministic_policy_command
             elif (
@@ -7912,11 +9235,15 @@ def _run_random_morphology_takeoff_smoke(
                         centroidal_target=CentroidalTarget(
                             com_pos_world=tuple(target.desired_pose_world[:3]),
                             com_vel_world=tuple(target_twist[:3]),
-                            body_orientation_world=tuple(target.desired_pose_world[3:7]),
+                            body_orientation_world=tuple(
+                                target.desired_pose_world[3:7]
+                            ),
                         ),
                     )
                     trajectory = ContactWrenchTrajectory(
-                        horizon_s=max(1.0 / learned_policy.config.update_rate_hz, sim_dt),
+                        horizon_s=max(
+                            1.0 / learned_policy.config.update_rate_hz, sim_dt
+                        ),
                         dt_s=max(1.0 / learned_policy.config.update_rate_hz, sim_dt),
                         knots=[active_knot],
                         derived_mode_label=f"order3_free_flight_{order3_task_mode}",
@@ -8008,9 +9335,7 @@ def _run_random_morphology_takeoff_smoke(
             application_requested_target_count += int(
                 application["requested_target_count"]
             )
-            application_applied_target_count += int(
-                application["applied_target_count"]
-            )
+            application_applied_target_count += int(application["applied_target_count"])
             application_unresolved_target_count += int(
                 application["unresolved_target_count"]
             )
@@ -8105,15 +9430,9 @@ def _run_random_morphology_takeoff_smoke(
         dynamic_cross_module_contact_view_update_count += len(
             cross_module_contact_views
         )
-        dynamic_raw_contact_view_update_count += len(
-            cross_module_contact_views
-        )
-        step_dynamic_max_force_n = float(
-            dynamic_contact_measurement["max_force_n"]
-        )
-        step_raw_contact_count = int(
-            dynamic_contact_measurement["raw_contact_count"]
-        )
+        dynamic_raw_contact_view_update_count += len(cross_module_contact_views)
+        step_dynamic_max_force_n = float(dynamic_contact_measurement["max_force_n"])
+        step_raw_contact_count = int(dynamic_contact_measurement["raw_contact_count"])
         step_raw_contact_saturated = bool(
             dynamic_contact_measurement["raw_contact_saturated"]
         )
@@ -8185,12 +9504,14 @@ def _run_random_morphology_takeoff_smoke(
         if base_fc_pose is None:
             base_fc_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
         if base_fc_twist is None:
-            base_fc_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch)
-        if centroidal_contract:
-            post_root_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
-            post_root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(
+            base_fc_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(
                 robot.data.root_ang_vel_w.torch
             )
+        if centroidal_contract:
+            post_root_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
+            post_root_twist = _tensor_row(
+                robot.data.root_lin_vel_w.torch
+            ) + _tensor_row(robot.data.root_ang_vel_w.torch)
             post_observation = _build_articulated_runtime_observation(
                 morphology_graph,
                 time_s=time_s + sim_dt,
@@ -8216,7 +9537,9 @@ def _run_random_morphology_takeoff_smoke(
         root_pose_history.append(list(base_fc_pose))
         control_pose_history.append(list(control_pose))
         finite_state = finite_state and all(_is_finite(value) for value in control_pose)
-        finite_state = finite_state and all(_is_finite(value) for value in control_twist)
+        finite_state = finite_state and all(
+            _is_finite(value) for value in control_twist
+        )
         max_vertical_speed = max(max_vertical_speed, abs(float(control_twist[2])))
         final_linear_speed = _vector_norm(control_twist[:3])
         final_angular_speed = _vector_norm(control_twist[3:6])
@@ -8228,8 +9551,7 @@ def _run_random_morphology_takeoff_smoke(
             max_floor_contact_steps = max(max_floor_contact_steps, floor_contact_steps)
             if (
                 bool(current_floor_contact["active"])
-                and
-                final_linear_speed <= config.settle_linear_speed_threshold_mps
+                and final_linear_speed <= config.settle_linear_speed_threshold_mps
                 and final_angular_speed <= config.settle_angular_speed_threshold_rad_s
             ):
                 settle_low_speed_steps += 1
@@ -8252,23 +9574,18 @@ def _run_random_morphology_takeoff_smoke(
             max_attitude_error = max(max_attitude_error, attitude_error)
             instantaneous_tracking_cost = 0.25 * (
                 position_error / max(config.position_error_threshold_m, 1.0e-9)
-                + attitude_error
-                / max(config.attitude_error_threshold_rad, 1.0e-9)
+                + attitude_error / max(config.attitude_error_threshold_rad, 1.0e-9)
                 + final_linear_speed
                 / max(config.hover_linear_speed_threshold_mps, 1.0e-9)
                 + final_angular_speed
                 / max(config.hover_angular_speed_threshold_rad_s, 1.0e-9)
             )
-            if (
-                time_s + sim_dt + 1.0e-12
-                >= order3_tracking_window_start_s
-            ):
+            if time_s + sim_dt + 1.0e-12 >= order3_tracking_window_start_s:
                 order3_tracking_cost_sum += instantaneous_tracking_cost
                 order3_tracking_sample_count += 1
             terminal_evidence_active = (
                 order3_rollout_condition is None
-                or time_s + sim_dt + 1.0e-12
-                >= order3_terminal_evidence_start_s
+                or time_s + sim_dt + 1.0e-12 >= order3_terminal_evidence_start_s
             )
             if (
                 current_target_hold_active
@@ -8306,14 +9623,10 @@ def _run_random_morphology_takeoff_smoke(
         settle_low_speed_steps_at_completion = settle_low_speed_steps
         floor_contact_steps_at_completion = floor_contact_steps
     final_base_fc_pose = (
-        tuple(root_pose_history[-1])
-        if root_pose_history
-        else settled_pose
+        tuple(root_pose_history[-1]) if root_pose_history else settled_pose
     )
     final_control_pose = (
-        tuple(control_pose_history[-1])
-        if control_pose_history
-        else settled_pose
+        tuple(control_pose_history[-1]) if control_pose_history else settled_pose
     )
     final_target = (
         tuple(order4_planner.final_target_pose)
@@ -8394,7 +9707,8 @@ def _run_random_morphology_takeoff_smoke(
     height_gain_ratio = height_gain / max(config.hover_height_delta_m, 1.0e-9)
     hold_time_s = max_hold_steps * sim_dt
     floor_pose_evidenced = (
-        abs(float(floor_placement.floor_gap_m) - float(config.floor_clearance_m)) <= 1.0e-6
+        abs(float(floor_placement.floor_gap_m) - float(config.floor_clearance_m))
+        <= 1.0e-6
         and floor_placement.collision_bounds_root.collision_geometry_count > 0
         and initial_root_position_error <= config.initial_root_position_tolerance_m
         and initial_root_attitude_error <= config.initial_root_attitude_tolerance_rad
@@ -8441,10 +9755,7 @@ def _run_random_morphology_takeoff_smoke(
         and dynamic_raw_contact_max_force_n
         <= config.exact_cross_module_contact_force_threshold_n
         and dynamic_raw_contact_saturation_step_count == 0
-        and all(
-            count == 0
-            for count in dynamic_pair_raw_contact_counts.values()
-        )
+        and all(count == 0 for count in dynamic_pair_raw_contact_counts.values())
         and dynamic_cross_module_contact_max_force_n
         <= config.exact_cross_module_contact_force_threshold_n
         and dynamic_cross_module_contact_violation_step_count == 0
@@ -8461,7 +9772,8 @@ def _run_random_morphology_takeoff_smoke(
     )
     ramp_passed = (
         phase_counts[TakeoffPhase.TAKEOFF_RAMP.value] > 0
-        and ramp_max_progress >= 1.0 - 2.0 * sim_dt / max(config.takeoff_ramp_duration_s, sim_dt)
+        and ramp_max_progress
+        >= 1.0 - 2.0 * sim_dt / max(config.takeoff_ramp_duration_s, sim_dt)
         and height_gain_ratio + 1.0e-9 >= config.min_height_gain_ratio
     )
     hover_passed = (
@@ -8479,8 +9791,7 @@ def _run_random_morphology_takeoff_smoke(
     )
     fixed_dock_neutral_hold_passed = bool(
         fixed_dock_joint_ids
-        and max_abs_dock_joint_position_rad
-        <= config.dock_joint_position_tolerance_rad
+        and max_abs_dock_joint_position_rad <= config.dock_joint_position_tolerance_rad
         and max_abs_dock_position_target_rad <= 1.0e-12
         and max_abs_dock_velocity_target_rad_s <= 1.0e-12
         and max_abs_dock_torque_bias_nm <= 1.0e-12
@@ -8583,9 +9894,7 @@ def _run_random_morphology_takeoff_smoke(
             requested_mass_scale=float(
                 order3_dynamics_realization["requested_mass_scale"]
             ),
-            applied_mass_scale=float(
-                order3_dynamics_realization["applied_mass_scale"]
-            ),
+            applied_mass_scale=float(order3_dynamics_realization["applied_mass_scale"]),
             requested_inertia_scale=float(
                 order3_dynamics_realization["requested_inertia_scale"]
             ),
@@ -8623,8 +9932,7 @@ def _run_random_morphology_takeoff_smoke(
         final_position_error / max(config.position_error_threshold_m, 1.0e-9)
         + final_attitude_error / max(config.attitude_error_threshold_rad, 1.0e-9)
         + final_linear_speed / max(config.hover_linear_speed_threshold_mps, 1.0e-9)
-        + final_angular_speed
-        / max(config.hover_angular_speed_threshold_rad_s, 1.0e-9)
+        + final_angular_speed / max(config.hover_angular_speed_threshold_rad_s, 1.0e-9)
     )
     order3_tracking_cost = (
         order3_tracking_cost_sum / order3_tracking_sample_count
@@ -8659,10 +9967,10 @@ def _run_random_morphology_takeoff_smoke(
             transition["to_phase"] in {"final_hover", "complete"}
             for transition in order4_phase_transitions
         ):
-            order4_completed_waypoint_count = len(
-                order4_free_flight_mission.waypoints
-            )
-        elif order4_last_step is not None and order4_last_step.waypoint_index is not None:
+            order4_completed_waypoint_count = len(order4_free_flight_mission.waypoints)
+        elif (
+            order4_last_step is not None and order4_last_step.waypoint_index is not None
+        ):
             order4_completed_waypoint_count = int(order4_last_step.waypoint_index)
     order4_time_origin_valid = bool(
         order4_enabled
@@ -8670,10 +9978,7 @@ def _run_random_morphology_takeoff_smoke(
         and all(
             abs(
                 float(step["plan_elapsed_s"])
-                - (
-                    float(step["time_s"])
-                    - float(step["plan_start_time_s"])
-                )
+                - (float(step["time_s"]) - float(step["plan_start_time_s"]))
             )
             <= 1.0e-8
             for step in order4_runtime_steps
@@ -8745,14 +10050,10 @@ def _run_random_morphology_takeoff_smoke(
             order4_max_active_assignment_count
         ),
         "order4_free_flight_safe_hold_active": bool(
-            order4_last_step.safe_hold_active
-            if order4_last_step is not None
-            else False
+            order4_last_step.safe_hold_active if order4_last_step is not None else False
         ),
         "order4_free_flight_failure_reason": (
-            order4_last_step.failure_reason
-            if order4_last_step is not None
-            else None
+            order4_last_step.failure_reason if order4_last_step is not None else None
         ),
         "order4_free_flight_final_target_pose_world": (
             list(final_target) if order4_enabled else None
@@ -8766,15 +10067,9 @@ def _run_random_morphology_takeoff_smoke(
         "order4_free_flight_low_level_source": (
             "order3_morphology_conditioned_pi_l"
             if order4_enabled and learned_policy is not None
-            else (
-                "deterministic_baseline_pi_l"
-                if order4_enabled
-                else None
-            )
+            else ("deterministic_baseline_pi_l" if order4_enabled else None)
         ),
-        "order4_free_flight_existing_actor_progress_unchanged": bool(
-            order4_enabled
-        ),
+        "order4_free_flight_existing_actor_progress_unchanged": bool(order4_enabled),
         "order4_pi_l_checkpoint_sha256": (
             learned_policy.checkpoint_sha256
             if order4_enabled and learned_policy is not None
@@ -8806,7 +10101,9 @@ def _run_random_morphology_takeoff_smoke(
             else None
         ),
         "order3_condition_realization": (
-            condition_realization.to_dict() if condition_realization is not None else None
+            condition_realization.to_dict()
+            if condition_realization is not None
+            else None
         ),
         "order3_terminal_metrics": terminal_metrics,
         "order3_report_validation_failures": [],
@@ -8817,13 +10114,9 @@ def _run_random_morphology_takeoff_smoke(
         "order3_free_flight_terminal_tracking_cost": float(
             order3_terminal_tracking_cost
         ),
-        "order3_tracking_window_start_s": float(
-            order3_tracking_window_start_s
-        ),
+        "order3_tracking_window_start_s": float(order3_tracking_window_start_s),
         "order3_tracking_window_end_s": float(executed_steps * sim_dt),
-        "order3_tracking_window_sample_count": int(
-            order3_tracking_sample_count
-        ),
+        "order3_tracking_window_sample_count": int(order3_tracking_sample_count),
         "order3_free_flight_success": bool(
             order3_free_flight_passed if order3_in_air else False
         ),
@@ -9029,12 +10322,16 @@ def _run_random_morphology_takeoff_smoke(
         "random_morphology_takeoff_initial_root_pose_world": list(
             requested_initial_root_pose
         ),
-        "random_morphology_takeoff_initial_root_pose_actual": list(initial_root_pose_actual),
+        "random_morphology_takeoff_initial_root_pose_actual": list(
+            initial_root_pose_actual
+        ),
         "random_morphology_takeoff_initial_root_position_error_m": initial_root_position_error,
         "random_morphology_takeoff_initial_root_attitude_error_rad": initial_root_attitude_error,
         "random_morphology_takeoff_initial_root_position_tolerance_m": config.initial_root_position_tolerance_m,
         "random_morphology_takeoff_initial_root_attitude_tolerance_rad": config.initial_root_attitude_tolerance_rad,
-        "random_morphology_takeoff_initial_base_fc_pose_world": list(initial_base_fc_pose),
+        "random_morphology_takeoff_initial_base_fc_pose_world": list(
+            initial_base_fc_pose
+        ),
         "random_morphology_takeoff_resolved_fc_body_count": resolved_fc_body_count,
         "random_morphology_takeoff_settle_zero_thrust": not order3_in_air,
         "random_morphology_takeoff_settle_duration_s": config.settle_duration_s,
@@ -9096,9 +10393,7 @@ def _run_random_morphology_takeoff_smoke(
         "random_morphology_takeoff_policy_commands": policy_commands,
         "random_morphology_takeoff_controller_commands": controller_commands,
         "random_morphology_takeoff_actuator_target_records": actuator_target_records,
-        "order3_pi_l_rollout": bool(
-            learned_policy is not None and not order4_enabled
-        ),
+        "order3_pi_l_rollout": bool(learned_policy is not None and not order4_enabled),
         "order3_deterministic_baseline_rollout": bool(
             order3_deterministic_baseline_evaluation
         ),
@@ -9126,9 +10421,7 @@ def _run_random_morphology_takeoff_smoke(
         "order3_privileged_external_wrench_body": list(order3_external_wrench_body),
         "order3_disturbance_start_s": float(order3_disturbance_start_s),
         "order3_disturbance_duration_s": float(order3_disturbance_duration_s),
-        "order3_terminal_evidence_start_s": float(
-            order3_terminal_evidence_start_s
-        ),
+        "order3_terminal_evidence_start_s": float(order3_terminal_evidence_start_s),
         "order3_terminal_evidence_completed": bool(
             hold_time_s + 1.0e-9 >= required_hold_s
         ),
@@ -9158,18 +10451,22 @@ def _run_random_morphology_takeoff_smoke(
             "physical_success_claim": (
                 "order4_floor_takeoff_multi_waypoint_final_hover"
                 if order4_enabled
-                else "floor_takeoff_hover_only"
-                if not order3_in_air
-                else f"in_air_{order3_task_mode}"
+                else (
+                    "floor_takeoff_hover_only"
+                    if not order3_in_air
+                    else f"in_air_{order3_task_mode}"
+                )
             ),
             "object_task_claim": False,
             "learned_policy_claim": learned_policy is not None,
             "learned_policy_scope": (
                 "order4_pi_l_tracking_only"
                 if order4_enabled and learned_policy is not None
-                else f"order3_free_flight_{order3_task_mode}"
-                if learned_policy is not None
-                else None
+                else (
+                    f"order3_free_flight_{order3_task_mode}"
+                    if learned_policy is not None
+                    else None
+                )
             ),
             "order3_deterministic_baseline_claim": bool(
                 order3_deterministic_baseline_evaluation
@@ -9257,9 +10554,13 @@ def _run_random_morphology_teleop(
 
     teleop_config.validate()
     if floor_contact_sensor is None:
-        raise RuntimeError("random morphology teleop requires the takeoff contact sensor")
+        raise RuntimeError(
+            "random morphology teleop requires the takeoff contact sensor"
+        )
     if not isinstance(cross_module_contact_views, list):
-        raise RuntimeError("random morphology teleop requires cross-module contact views")
+        raise RuntimeError(
+            "random morphology teleop requires cross-module contact views"
+        )
 
     target = RandomMorphologyTeleopTarget.from_hover_pose(
         hover_pose_world,
@@ -9301,9 +10602,9 @@ def _run_random_morphology_teleop(
             if base_pose is None:
                 base_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
             if base_twist is None:
-                base_twist = _tensor_row(
-                    robot.data.root_lin_vel_w.torch
-                ) + _tensor_row(robot.data.root_ang_vel_w.torch)
+                base_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(
+                    robot.data.root_ang_vel_w.torch
+                )
 
             quit_requested = False
             for key in key_reader.read_available():
@@ -9459,7 +10760,9 @@ def _run_p4_1_full_scene_backend_smoke(
     steps: int,
     module_count: int,
     module_spacing_m: float,
-    module_poses: dict[int, tuple[float, float, float, float, float, float, float]] | None,
+    module_poses: (
+        dict[int, tuple[float, float, float, float, float, float, float]] | None
+    ),
     object_id: str,
     target_height: float,
     control_dt_s: float,
@@ -9475,7 +10778,9 @@ def _run_p4_1_full_scene_backend_smoke(
     from amsrr.controllers.isaac_controller_bridge import IsaacControllerBridge
     from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
     from amsrr.schemas.policies import InteractionKnot, PolicyCommand
-    from amsrr.simulation.p4_1_backend_smoke import evaluate_runtime_observation_joint_state
+    from amsrr.simulation.p4_1_backend_smoke import (
+        evaluate_runtime_observation_joint_state,
+    )
 
     morphology_graph = build_fixed_morphology(
         physical_model,
@@ -9514,7 +10819,9 @@ def _run_p4_1_full_scene_backend_smoke(
         executed_steps = step_idx + 1
         time_s = step_idx * sim_dt
         root_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
-        root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch)
+        root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(
+            robot.data.root_ang_vel_w.torch
+        )
         runtime_observation = _build_fixed_runtime_observation(
             morphology_graph,
             time_s=time_s,
@@ -9528,7 +10835,9 @@ def _run_p4_1_full_scene_backend_smoke(
             module_poses=module_poses,
             split_fixed_module_name=split_fixed_module_name,
         )
-        object_state = _build_p4_1_object_runtime_state(p4_1_object, object_id=object_id)
+        object_state = _build_p4_1_object_runtime_state(
+            p4_1_object, object_id=object_id
+        )
         runtime_observation.object_states = [object_state]
         runtime_observation_objects.append(runtime_observation)
         runtime_observations.append(runtime_observation.to_dict())
@@ -9640,11 +10949,19 @@ def _run_p4_1_full_scene_backend_smoke(
         "p4_1_module_state_count": int(joint_state_metrics.module_state_count),
         "p4_1_modules_with_pose": int(joint_state_metrics.modules_with_pose),
         "p4_1_modules_with_twist": int(joint_state_metrics.modules_with_twist),
-        "p4_1_modules_with_joint_positions": int(joint_state_metrics.modules_with_joint_positions),
-        "p4_1_modules_with_joint_velocities": int(joint_state_metrics.modules_with_joint_velocities),
-        "p4_1_vectoring_joint_key_count": int(joint_state_metrics.vectoring_joint_key_count),
+        "p4_1_modules_with_joint_positions": int(
+            joint_state_metrics.modules_with_joint_positions
+        ),
+        "p4_1_modules_with_joint_velocities": int(
+            joint_state_metrics.modules_with_joint_velocities
+        ),
+        "p4_1_vectoring_joint_key_count": int(
+            joint_state_metrics.vectoring_joint_key_count
+        ),
         "p4_1_dock_joint_key_count": int(joint_state_metrics.dock_joint_key_count),
-        "p4_1_vectoring_joint_value_count": int(joint_state_metrics.vectoring_joint_value_count),
+        "p4_1_vectoring_joint_value_count": int(
+            joint_state_metrics.vectoring_joint_value_count
+        ),
         "p4_1_dock_joint_value_count": int(joint_state_metrics.dock_joint_value_count),
         "p4_1_max_model_rotor_origin_change_m": 0.0,
         "p4_1_max_model_allocation_change": 0.0,
@@ -9665,7 +10982,9 @@ def _run_p4_2_deterministic_rollout_probe(
     morphology_graph,
     contact_candidate_set,
     contact_wrench_trajectory,
-    module_poses: dict[int, tuple[float, float, float, float, float, float, float]] | None,
+    module_poses: (
+        dict[int, tuple[float, float, float, float, float, float, float]] | None
+    ),
     object_id: str,
     object_size_m: tuple[float, float, float],
     object_mass_kg: float,
@@ -9774,13 +11093,24 @@ def _run_p4_2_deterministic_rollout_probe(
     selected_assignments = _p4_2_selected_assignments(contact_wrench_trajectory)
     candidate_by_id = {
         candidate.candidate_id: candidate
-        for candidate in (contact_candidate_set.candidates if contact_candidate_set is not None else [])
+        for candidate in (
+            contact_candidate_set.candidates
+            if contact_candidate_set is not None
+            else []
+        )
     }
-    anchor_by_id = {anchor.anchor_id: anchor for anchor in morphology_graph.robot_anchors}
+    anchor_by_id = {
+        anchor.anchor_id: anchor for anchor in morphology_graph.robot_anchors
+    }
     selected_pairs = [
-        (assignment, candidate_by_id[assignment.candidate_id], anchor_by_id[assignment.anchor_id])
+        (
+            assignment,
+            candidate_by_id[assignment.candidate_id],
+            anchor_by_id[assignment.anchor_id],
+        )
         for assignment in selected_assignments
-        if assignment.candidate_id in candidate_by_id and assignment.anchor_id in anchor_by_id
+        if assignment.candidate_id in candidate_by_id
+        and assignment.anchor_id in anchor_by_id
     ]
     selected_contact_candidates_available = bool(selected_pairs)
     selected_assignment, selected_candidate, selected_anchor = (
@@ -9791,12 +11121,16 @@ def _run_p4_2_deterministic_rollout_probe(
         [assignment.candidate_id for assignment in selected_assignments],
     )
     fallback_anchor_relative_pose = (
-        _p4_2_anchor_relative_pose(morphology_graph, graph_module_poses, selected_anchor)
+        _p4_2_anchor_relative_pose(
+            morphology_graph, graph_module_poses, selected_anchor
+        )
         if selected_anchor is not None
         else None
     )
     candidate_relative_to_object = (
-        compose_pose(inverse_pose(object_pose_initial), selected_candidate.contact_pose_world)
+        compose_pose(
+            inverse_pose(object_pose_initial), selected_candidate.contact_pose_world
+        )
         if selected_candidate is not None
         else None
     )
@@ -9844,7 +11178,9 @@ def _run_p4_2_deterministic_rollout_probe(
         executed_steps = step_idx + 1
         time_s = step_idx * sim_dt
         root_pose = tuple(_tensor_row(robot.data.root_pose_w.torch))
-        root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(robot.data.root_ang_vel_w.torch)
+        root_twist = _tensor_row(robot.data.root_lin_vel_w.torch) + _tensor_row(
+            robot.data.root_ang_vel_w.torch
+        )
         runtime_observation = _build_fixed_runtime_observation(
             morphology_graph,
             time_s=time_s,
@@ -9879,19 +11215,33 @@ def _run_p4_2_deterministic_rollout_probe(
             P4_2RolloutPhase.PREGRASP_ALIGN,
             P4_2RolloutPhase.ATTACH_ATTEMPT,
         }:
-            _set_p4_2_object_pose_and_twist(p4_2_object, pre_attach_object_pose, [0.0] * 6, device=device)
+            _set_p4_2_object_pose_and_twist(
+                p4_2_object, pre_attach_object_pose, [0.0] * 6, device=device
+            )
             p4_2_object.update(sim_dt)
-        if attached and anchor_pose is not None and object_relative_to_anchor is not None:
+        if (
+            attached
+            and anchor_pose is not None
+            and object_relative_to_anchor is not None
+        ):
             slaved_pose = compose_pose(anchor_pose, object_relative_to_anchor)
-            _set_p4_2_object_pose_and_twist(p4_2_object, slaved_pose, [0.0] * 6, device=device)
+            _set_p4_2_object_pose_and_twist(
+                p4_2_object, slaved_pose, [0.0] * 6, device=device
+            )
             p4_2_object.update(sim_dt)
-        object_state = _build_p4_1_object_runtime_state(p4_2_object, object_id=object_id)
+        object_state = _build_p4_1_object_runtime_state(
+            p4_2_object, object_id=object_id
+        )
         runtime_observation.object_states = [object_state]
 
         attach_anchor_target = (
             compose_pose(object_state.pose_world, candidate_relative_to_object)
             if candidate_relative_to_object is not None
-            else (selected_candidate.contact_pose_world if selected_candidate is not None else object_state.pose_world)
+            else (
+                selected_candidate.contact_pose_world
+                if selected_candidate is not None
+                else object_state.pose_world
+            )
         )
         approach_anchor_target = _p4_2_offset_pose(attach_anchor_target, dz=0.10)
         anchor_distance_m = (
@@ -9906,7 +11256,11 @@ def _run_p4_2_deterministic_rollout_probe(
         phase_elapsed_s = max(0.0, time_s - phase_started_s)
         if final_phase is None:
             if current_phase == P4_2RolloutPhase.APPROACH:
-                if selected_contact_candidates_available and anchor_distance_m <= rollout_config.pregrasp_alignment_distance_m:
+                if (
+                    selected_contact_candidates_available
+                    and anchor_distance_m
+                    <= rollout_config.pregrasp_alignment_distance_m
+                ):
                     phase_transitions.append(
                         _p4_2_transition_record(
                             current_phase,
@@ -9914,13 +11268,18 @@ def _run_p4_2_deterministic_rollout_probe(
                             time_s=time_s,
                             phase_elapsed_s=phase_elapsed_s,
                             reason="selected_anchor_within_pregrasp_alignment_distance",
-                            timeout_s=rollout_config.phase_timeouts_s[current_phase.value],
+                            timeout_s=rollout_config.phase_timeouts_s[
+                                current_phase.value
+                            ],
                         )
                     )
                     current_phase = P4_2RolloutPhase.PREGRASP_ALIGN
                     phase_started_s = time_s
                     phase_elapsed_s = 0.0
-                elif phase_elapsed_s > rollout_config.phase_timeouts_s[current_phase.value]:
+                elif (
+                    phase_elapsed_s
+                    > rollout_config.phase_timeouts_s[current_phase.value]
+                ):
                     final_phase = P4_2RolloutPhase.TIMEOUT_FAILURE
             if current_phase == P4_2RolloutPhase.PREGRASP_ALIGN:
                 if anchor_distance_m <= rollout_config.attach_distance_threshold_m:
@@ -9931,34 +11290,52 @@ def _run_p4_2_deterministic_rollout_probe(
                             time_s=time_s,
                             phase_elapsed_s=phase_elapsed_s,
                             reason="anchor_distance_inside_attach_gate",
-                            timeout_s=rollout_config.phase_timeouts_s[current_phase.value],
+                            timeout_s=rollout_config.phase_timeouts_s[
+                                current_phase.value
+                            ],
                         )
                     )
                     current_phase = P4_2RolloutPhase.ATTACH_ATTEMPT
                     phase_started_s = time_s
                     phase_elapsed_s = 0.0
-                elif phase_elapsed_s > rollout_config.phase_timeouts_s[current_phase.value]:
+                elif (
+                    phase_elapsed_s
+                    > rollout_config.phase_timeouts_s[current_phase.value]
+                ):
                     final_phase = P4_2RolloutPhase.TIMEOUT_FAILURE
-            if current_phase in {
-                P4_2RolloutPhase.ATTACH_ATTEMPT,
-                P4_2RolloutPhase.ATTACHED_MAINTAIN,
-                P4_2RolloutPhase.TRANSPORT,
-                P4_2RolloutPhase.RELEASE,
-            } and phase_elapsed_s > rollout_config.phase_timeouts_s[current_phase.value]:
+            if (
+                current_phase
+                in {
+                    P4_2RolloutPhase.ATTACH_ATTEMPT,
+                    P4_2RolloutPhase.ATTACHED_MAINTAIN,
+                    P4_2RolloutPhase.TRANSPORT,
+                    P4_2RolloutPhase.RELEASE,
+                }
+                and phase_elapsed_s
+                > rollout_config.phase_timeouts_s[current_phase.value]
+            ):
                 final_phase = (
                     P4_2RolloutPhase.DROP_FAILURE
-                    if current_phase in {P4_2RolloutPhase.ATTACH_ATTEMPT, P4_2RolloutPhase.ATTACHED_MAINTAIN}
+                    if current_phase
+                    in {
+                        P4_2RolloutPhase.ATTACH_ATTEMPT,
+                        P4_2RolloutPhase.ATTACHED_MAINTAIN,
+                    }
                     else P4_2RolloutPhase.TIMEOUT_FAILURE
                 )
 
-        release_error_m = _p4_2_pose_distance(object_state.pose_world, release_object_target)
+        release_error_m = _p4_2_pose_distance(
+            object_state.pose_world, release_object_target
+        )
         transport_displacement_m = (
             _p4_2_pose_distance(object_state.pose_world, transport_start_object_pose)
             if transport_start_object_pose is not None
             else 0.0
         )
         if final_phase is None and current_phase == P4_2RolloutPhase.ATTACHED_MAINTAIN:
-            maintain_dwell_s = min(0.25, rollout_config.phase_timeouts_s[current_phase.value])
+            maintain_dwell_s = min(
+                0.25, rollout_config.phase_timeouts_s[current_phase.value]
+            )
             if phase_elapsed_s >= maintain_dwell_s:
                 transport_start_object_pose = object_state.pose_world
                 phase_transitions.append(
@@ -9978,8 +11355,12 @@ def _run_p4_2_deterministic_rollout_probe(
             if transport_start_object_pose is None:
                 transport_start_object_pose = object_state.pose_world
                 transport_displacement_m = 0.0
-            release_region_reached = release_error_m <= max(rollout_config.attach_distance_threshold_m, 0.08)
-            bounded_transport_reached = transport_displacement_m >= rollout_config.transport_min_displacement_m
+            release_region_reached = release_error_m <= max(
+                rollout_config.attach_distance_threshold_m, 0.08
+            )
+            bounded_transport_reached = (
+                transport_displacement_m >= rollout_config.transport_min_displacement_m
+            )
             if release_region_reached or bounded_transport_reached:
                 release_reason = (
                     "attached_object_reached_release_region"
@@ -10003,15 +11384,25 @@ def _run_p4_2_deterministic_rollout_probe(
         runtime_observation.task_progress.phase_label = current_phase.value
         runtime_observation.task_progress.metrics.update(
             {
-                "selected_contact_candidates_available": 1.0 if selected_contact_candidates_available else 0.0,
-                "selected_assignment_feasible": 1.0 if selected_assignment_feasible else 0.0,
-                "anchor_object_distance_m": 0.0 if math.isinf(anchor_distance_m) else float(anchor_distance_m),
+                "selected_contact_candidates_available": (
+                    1.0 if selected_contact_candidates_available else 0.0
+                ),
+                "selected_assignment_feasible": (
+                    1.0 if selected_assignment_feasible else 0.0
+                ),
+                "anchor_object_distance_m": (
+                    0.0 if math.isinf(anchor_distance_m) else float(anchor_distance_m)
+                ),
                 "relative_velocity_mps": float(relative_velocity_mps),
                 "transport_displacement_m": float(transport_displacement_m),
-                "transport_min_displacement_m": float(rollout_config.transport_min_displacement_m),
+                "transport_min_displacement_m": float(
+                    rollout_config.transport_min_displacement_m
+                ),
                 "unconditional_attach_allowed": 0.0,
                 "anchor_pose_source_is_isaac_link": (
-                    1.0 if anchor_resolution.get("anchor_pose_source") == "isaac_link" else 0.0
+                    1.0
+                    if anchor_resolution.get("anchor_pose_source") == "isaac_link"
+                    else 0.0
                 ),
             }
         )
@@ -10020,11 +11411,17 @@ def _run_p4_2_deterministic_rollout_probe(
                 {
                     "time_s": float(time_s),
                     "phase": current_phase.value,
-                    "anchor_id": None if selected_anchor is None else int(selected_anchor.anchor_id),
+                    "anchor_id": (
+                        None
+                        if selected_anchor is None
+                        else int(selected_anchor.anchor_id)
+                    ),
                     "anchor_pose_world": list(anchor_pose),
                     "anchor_pose_source": anchor_resolution.get("anchor_pose_source"),
                     "anchor_link_id": anchor_resolution.get("anchor_link_id"),
-                    "anchor_resolved_body_name": anchor_resolution.get("anchor_resolved_body_name"),
+                    "anchor_resolved_body_name": anchor_resolution.get(
+                        "anchor_resolved_body_name"
+                    ),
                     "contact_pose_world": list(attach_anchor_target),
                     "anchor_object_distance_m": float(anchor_distance_m),
                 }
@@ -10046,14 +11443,20 @@ def _run_p4_2_deterministic_rollout_probe(
             desired_body_twist=target_twist,
             priority_weights={
                 phase_weight: 1.0,
-                "attach_condition_gate": 1.0 if current_phase == P4_2RolloutPhase.ATTACH_ATTEMPT else 0.0,
+                "attach_condition_gate": (
+                    1.0 if current_phase == P4_2RolloutPhase.ATTACH_ATTEMPT else 0.0
+                ),
                 "attached_object_tracking": 1.0 if attached else 0.0,
-                "release_gate": 1.0 if current_phase == P4_2RolloutPhase.RELEASE else 0.0,
+                "release_gate": (
+                    1.0 if current_phase == P4_2RolloutPhase.RELEASE else 0.0
+                ),
             },
         )
         active_knot = InteractionKnot(
             t_rel_s=time_s,
-            contact_assignments=selected_assignments if selected_contact_candidates_available else [],
+            contact_assignments=(
+                selected_assignments if selected_contact_candidates_available else []
+            ),
             priority_weights={phase_weight: 1.0},
             guard_conditions=[
                 {
@@ -10067,8 +11470,12 @@ def _run_p4_2_deterministic_rollout_probe(
                     "robot_anchors_available": len(morphology_graph.robot_anchors) > 0,
                     "unconditional_attach_allowed": False,
                     "attach_distance_threshold_m": float(attach_distance_threshold_m),
-                    "attach_relative_velocity_threshold_mps": float(attach_relative_velocity_threshold_mps),
-                    "attach_snap_distance_threshold_m": float(attach_snap_distance_threshold_m),
+                    "attach_relative_velocity_threshold_mps": float(
+                        attach_relative_velocity_threshold_mps
+                    ),
+                    "attach_snap_distance_threshold_m": float(
+                        attach_snap_distance_threshold_m
+                    ),
                 },
             ],
         )
@@ -10116,12 +11523,16 @@ def _run_p4_2_deterministic_rollout_probe(
                     policy_command.desired_body_twist,
                 ),
                 (
-                    deterministic_policy_command.desired_body_pose[:3]
-                    if deterministic_policy_command.desired_body_pose is not None
-                    else None,
-                    policy_command.desired_body_pose[:3]
-                    if policy_command.desired_body_pose is not None
-                    else None,
+                    (
+                        deterministic_policy_command.desired_body_pose[:3]
+                        if deterministic_policy_command.desired_body_pose is not None
+                        else None
+                    ),
+                    (
+                        policy_command.desired_body_pose[:3]
+                        if policy_command.desired_body_pose is not None
+                        else None
+                    ),
                 ),
                 (
                     deterministic_policy_command.residual_wrench_body,
@@ -10155,7 +11566,9 @@ def _run_p4_2_deterministic_rollout_probe(
                 contact_model=contact_model,
                 mass_kg=float(object_mass_kg),
                 inertia_body=list(payload_inertia),
-                com_offset_body=tuple(float(value) for value in object_relative_to_root_at_attach[:3]),
+                com_offset_body=tuple(
+                    float(value) for value in object_relative_to_root_at_attach[:3]
+                ),
                 coupling_mode=contact_model,
             )
         controller_command = controller.compute(
@@ -10192,11 +11605,15 @@ def _run_p4_2_deterministic_rollout_probe(
                 attach_snap_distance_m=anchor_distance_m,
                 relative_pose_error_m=anchor_distance_m,
                 attach_phase_elapsed_s=phase_elapsed_s,
-                attach_phase_timeout_s=rollout_config.phase_timeouts_s[P4_2RolloutPhase.ATTACH_ATTEMPT.value],
+                attach_phase_timeout_s=rollout_config.phase_timeouts_s[
+                    P4_2RolloutPhase.ATTACH_ATTEMPT.value
+                ],
                 config=rollout_config,
             )
             if condition_report.passed:
-                object_relative_to_anchor = compose_pose(inverse_pose(anchor_pose), object_state.pose_world)
+                object_relative_to_anchor = compose_pose(
+                    inverse_pose(anchor_pose), object_state.pose_world
+                )
                 object_relative_to_root_at_attach = compose_pose(inverse_pose(root_pose), object_state.pose_world)  # type: ignore[arg-type]
                 attach_event = P4_2AttachEvent(
                     time_s=time_s,
@@ -10215,11 +11632,18 @@ def _run_p4_2_deterministic_rollout_probe(
                     attach_snap_distance_m=anchor_distance_m,
                     relative_pose_error_m=anchor_distance_m,
                     assignment_feasible=selected_assignment_feasible,
-                    controller_ok=status.qp_feasible and status.status not in {"infeasible", "fault"},
+                    controller_ok=status.qp_feasible
+                    and status.status not in {"infeasible", "fault"},
                     condition_report=condition_report,
-                    candidate_ids=[assignment.candidate_id for assignment in selected_assignments],
-                    anchor_ids=[assignment.anchor_id for assignment in selected_assignments],
-                    slot_ids=[assignment.slot_id for assignment in selected_assignments],
+                    candidate_ids=[
+                        assignment.candidate_id for assignment in selected_assignments
+                    ],
+                    anchor_ids=[
+                        assignment.anchor_id for assignment in selected_assignments
+                    ],
+                    slot_ids=[
+                        assignment.slot_id for assignment in selected_assignments
+                    ],
                     contact_region_ids=[
                         candidate_by_id[assignment.candidate_id].region_id
                         for assignment in selected_assignments
@@ -10227,10 +11651,12 @@ def _run_p4_2_deterministic_rollout_probe(
                     ],
                     distance_margins={
                         "anchor_object_distance_margin_m": float(
-                            rollout_config.attach_distance_threshold_m - anchor_distance_m
+                            rollout_config.attach_distance_threshold_m
+                            - anchor_distance_m
                         ),
                         "attach_snap_distance_margin_m": float(
-                            rollout_config.attach_snap_distance_threshold_m - anchor_distance_m
+                            rollout_config.attach_snap_distance_threshold_m
+                            - anchor_distance_m
                         ),
                     },
                     assignment_feasibility={
@@ -10244,25 +11670,44 @@ def _run_p4_2_deterministic_rollout_probe(
                     ),
                     anchor_resolved_body_name=(
                         str(anchor_resolution.get("anchor_resolved_body_name"))
-                        if anchor_resolution.get("anchor_resolved_body_name") is not None
+                        if anchor_resolution.get("anchor_resolved_body_name")
+                        is not None
                         else None
                     ),
-                    anchor_pose_source=str(anchor_resolution.get("anchor_pose_source", "module_state_fallback")),
+                    anchor_pose_source=str(
+                        anchor_resolution.get(
+                            "anchor_pose_source", "module_state_fallback"
+                        )
+                    ),
                     anchor_link_pose_world=(
-                        tuple(float(value) for value in anchor_resolution["anchor_link_pose_world"])
-                        if isinstance(anchor_resolution.get("anchor_link_pose_world"), (list, tuple))
+                        tuple(
+                            float(value)
+                            for value in anchor_resolution["anchor_link_pose_world"]
+                        )
+                        if isinstance(
+                            anchor_resolution.get("anchor_link_pose_world"),
+                            (list, tuple),
+                        )
                         else None
                     ),
                     anchor_local_pose_in_link=(
-                        tuple(float(value) for value in anchor_resolution["anchor_local_pose_in_link"])
-                        if isinstance(anchor_resolution.get("anchor_local_pose_in_link"), (list, tuple))
+                        tuple(
+                            float(value)
+                            for value in anchor_resolution["anchor_local_pose_in_link"]
+                        )
+                        if isinstance(
+                            anchor_resolution.get("anchor_local_pose_in_link"),
+                            (list, tuple),
+                        )
                         else None
                     ),
                     anchor_link_twist_world=[
                         float(value)
                         for value in (
                             anchor_resolution.get("anchor_link_twist_world")
-                            if isinstance(anchor_resolution.get("anchor_link_twist_world"), list)
+                            if isinstance(
+                                anchor_resolution.get("anchor_link_twist_world"), list
+                            )
                             else []
                         )
                     ],
@@ -10300,8 +11745,10 @@ def _run_p4_2_deterministic_rollout_probe(
             release_error_for_event = (
                 0.0
                 if transport_start_object_pose is not None
-                and transport_displacement_m >= rollout_config.transport_min_displacement_m
-                and release_error_m > max(rollout_config.attach_distance_threshold_m, 0.08)
+                and transport_displacement_m
+                >= rollout_config.transport_min_displacement_m
+                and release_error_m
+                > max(rollout_config.attach_distance_threshold_m, 0.08)
                 else release_error_m
             )
             release_event = P4_2ReleaseEvent(
@@ -10365,7 +11812,8 @@ def _run_p4_2_deterministic_rollout_probe(
             qp_infeasible_consecutive = 0
         if (
             final_phase is None
-            and qp_infeasible_consecutive >= rollout_config.controller_failure_consecutive_steps
+            and qp_infeasible_consecutive
+            >= rollout_config.controller_failure_consecutive_steps
         ):
             final_phase = P4_2RolloutPhase.CONTROLLER_FAILURE
         if status.metrics.get("clipped", 0.0) > 0.0:
@@ -10383,7 +11831,9 @@ def _run_p4_2_deterministic_rollout_probe(
                         time_s=time_s,
                         phase_elapsed_s=phase_elapsed_s,
                         reason=f"{final_phase.value}_terminal_condition",
-                        timeout_s=rollout_config.phase_timeouts_s.get(current_phase.value),
+                        timeout_s=rollout_config.phase_timeouts_s.get(
+                            current_phase.value
+                        ),
                     )
                 )
             break
@@ -10396,7 +11846,9 @@ def _run_p4_2_deterministic_rollout_probe(
                 from_phase=current_phase,
                 to_phase=final_phase,
                 time_s=float(executed_steps * sim_dt),
-                phase_elapsed_s=float(max(0.0, executed_steps * sim_dt - phase_started_s)),
+                phase_elapsed_s=float(
+                    max(0.0, executed_steps * sim_dt - phase_started_s)
+                ),
                 reason=(
                     "selected_contact_candidate_gate_not_available_before_probe_end"
                     if not selected_contact_candidates_available
@@ -10410,7 +11862,9 @@ def _run_p4_2_deterministic_rollout_probe(
                     "object_attach_event_recorded": bool(attach_events),
                     "object_release_event_recorded": bool(release_events),
                 },
-                timeout_s=float(executed_steps * sim_dt) if executed_steps > 0 else None,
+                timeout_s=(
+                    float(executed_steps * sim_dt) if executed_steps > 0 else None
+                ),
             )
         )
     logged_step_count_ok = (
@@ -10422,7 +11876,10 @@ def _run_p4_2_deterministic_rollout_probe(
     )
     object_pose_history_ok = all(len(pose) == 7 for pose in object_pose_history)
     module_placement_reflected = len(graph_module_poses) == module_count
-    actuator_mapping_reflected = len(actuator_mapping.channels) > 0 and actuator_mapping.graph_id == morphology_graph.graph_id
+    actuator_mapping_reflected = (
+        len(actuator_mapping.channels) > 0
+        and actuator_mapping.graph_id == morphology_graph.graph_id
+    )
     rollout_passed = (
         final_phase == P4_2RolloutPhase.SUCCESS
         and bool(attach_events)
@@ -10443,16 +11900,28 @@ def _run_p4_2_deterministic_rollout_probe(
             "p4_2_policy_command_count": float(len(policy_commands)),
             "p4_2_controller_command_count": float(len(controller_commands)),
             "p4_2_actuator_target_record_count": float(len(actuator_target_records)),
-            "p4_2_selected_contact_candidates_available": 1.0 if selected_contact_candidates_available else 0.0,
+            "p4_2_selected_contact_candidates_available": (
+                1.0 if selected_contact_candidates_available else 0.0
+            ),
             "p4_2_unconditional_attach_allowed": 0.0,
-            "p4_2_attach_snap_distance_threshold_m": float(attach_snap_distance_threshold_m),
-            "p4_2_transport_min_displacement_m": float(rollout_config.transport_min_displacement_m),
+            "p4_2_attach_snap_distance_threshold_m": float(
+                attach_snap_distance_threshold_m
+            ),
+            "p4_2_transport_min_displacement_m": float(
+                rollout_config.transport_min_displacement_m
+            ),
             "p4_2_transport_displacement_m": float(transport_displacement_m),
             "p4_2_attach_event_count": float(len(attach_events)),
             "p4_2_attach_event_link_backed_count": float(
-                sum(1 for event in attach_events if event.anchor_pose_source == "isaac_link")
+                sum(
+                    1
+                    for event in attach_events
+                    if event.anchor_pose_source == "isaac_link"
+                )
             ),
-            "p4_2_link_backed_anchor_pose_used": 1.0 if link_backed_anchor_pose_used else 0.0,
+            "p4_2_link_backed_anchor_pose_used": (
+                1.0 if link_backed_anchor_pose_used else 0.0
+            ),
             "p4_2_release_event_count": float(len(release_events)),
             "p4_2_actuator_channel_count": float(len(actuator_mapping.channels)),
             "p4_3_pi_l_checkpoint_loaded": 1.0 if learned_pi_l is not None else 0.0,
@@ -10465,9 +11934,15 @@ def _run_p4_2_deterministic_rollout_probe(
             "p4_3_pi_l_learned_decision_count": float(learned_pi_l_decision_count),
             "p4_3_pi_l_fallback_count": float(learned_pi_l_fallback_count),
             "p4_3_pi_l_runtime_blend_factor": float(learned_pi_l_runtime_blend_factor),
-            "p4_3_pi_l_overlay_nonzero_count": float(learned_pi_l_overlay_nonzero_count),
-            "p4_3_pi_l_overlay_delta_norm_sum": float(learned_pi_l_overlay_delta_norm_sum),
-            "p4_3_pi_l_overlay_delta_norm_max": float(learned_pi_l_overlay_delta_norm_max),
+            "p4_3_pi_l_overlay_nonzero_count": float(
+                learned_pi_l_overlay_nonzero_count
+            ),
+            "p4_3_pi_l_overlay_delta_norm_sum": float(
+                learned_pi_l_overlay_delta_norm_sum
+            ),
+            "p4_3_pi_l_overlay_delta_norm_max": float(
+                learned_pi_l_overlay_delta_norm_max
+            ),
             **payload_metric_summary,
         }
     )
@@ -10494,13 +11969,17 @@ def _run_p4_2_deterministic_rollout_probe(
         "p4_2_morphology_asset_reflected": True,
         "p4_2_module_placement_reflected": bool(module_placement_reflected),
         "p4_2_module_poses_source": "p3_assembled_morphology_graph",
-        "p4_2_module_poses": {str(module_id): list(pose) for module_id, pose in sorted(graph_module_poses.items())},
+        "p4_2_module_poses": {
+            str(module_id): list(pose)
+            for module_id, pose in sorted(graph_module_poses.items())
+        },
         "p4_2_actuator_mapping_reflected": bool(actuator_mapping_reflected),
         "p4_2_actuator_mapping_graph_id": actuator_mapping.graph_id,
         "p4_2_actuator_channel_count": len(actuator_mapping.channels),
         "p4_3_pi_l_checkpoint_loaded": learned_pi_l is not None,
         "p4_3_pi_l_checkpoint_requested": learned_pi_l_checkpoint_path is not None,
-        "p4_3_pi_l_checkpoint_load_failed": learned_pi_l_checkpoint_load_error is not None,
+        "p4_3_pi_l_checkpoint_load_failed": learned_pi_l_checkpoint_load_error
+        is not None,
         "p4_3_pi_l_checkpoint_load_error": learned_pi_l_checkpoint_load_error,
         "p4_3_pi_l_learned_decision_count": learned_pi_l_decision_count,
         "p4_3_pi_l_fallback_count": learned_pi_l_fallback_count,
@@ -10520,9 +11999,13 @@ def _run_p4_2_deterministic_rollout_probe(
         "p4_2_attach_gate_input_available": bool(selected_contact_candidates_available),
         "p4_2_unconditional_attach_allowed": False,
         "p4_2_link_backed_anchor_pose_used": bool(link_backed_anchor_pose_used),
-        "p4_2_anchor_pose_source": str(last_anchor_resolution.get("anchor_pose_source", "")),
+        "p4_2_anchor_pose_source": str(
+            last_anchor_resolution.get("anchor_pose_source", "")
+        ),
         "p4_2_anchor_link_id": str(last_anchor_resolution.get("anchor_link_id", "")),
-        "p4_2_anchor_resolved_body_name": str(last_anchor_resolution.get("anchor_resolved_body_name", "")),
+        "p4_2_anchor_resolved_body_name": str(
+            last_anchor_resolution.get("anchor_resolved_body_name", "")
+        ),
         "p4_2_anchor_debug_samples": anchor_debug_samples,
         "p4_2_selected_contact_candidate_count": len(
             {assignment.candidate_id for assignment in selected_assignments}
@@ -10531,7 +12014,9 @@ def _run_p4_2_deterministic_rollout_probe(
         "p4_2_policy_commands": policy_commands,
         "p4_2_controller_commands": controller_commands,
         "p4_2_actuator_target_records": actuator_target_records,
-        "p4_2_phase_transitions": [transition.to_dict() for transition in phase_transitions],
+        "p4_2_phase_transitions": [
+            transition.to_dict() for transition in phase_transitions
+        ],
         "p4_2_attach_events": [event.to_dict() for event in attach_events],
         "p4_2_release_events": [event.to_dict() for event in release_events],
         "p4_2_object_pose_history": object_pose_history,
@@ -10550,8 +12035,12 @@ def _run_p4_2_deterministic_rollout_probe(
         "p4_2_clipped_target_count": int(clipped_target_count),
         "p4_2_last_controller_status": last_controller_status,
         "p4_2_last_bridge_metrics": last_bridge_metrics,
-        "p4_2_object_pose_at_release": list(object_pose_at_release) if object_pose_at_release is not None else [],
-        "p4_2_robot_pose_at_release": list(root_pose_at_release) if root_pose_at_release is not None else [],
+        "p4_2_object_pose_at_release": (
+            list(object_pose_at_release) if object_pose_at_release is not None else []
+        ),
+        "p4_2_robot_pose_at_release": (
+            list(root_pose_at_release) if root_pose_at_release is not None else []
+        ),
         "p4_2_rollout_artifacts": artifacts,
         **metrics,
     }
@@ -10610,12 +12099,17 @@ def _p4_2_selected_assignments(contact_wrench_trajectory) -> list:
     return [assignments[key] for key in sorted(assignments)]
 
 
-def _p4_2_selected_assignment_feasible(contact_candidate_set, candidate_ids: list[int]) -> bool:
+def _p4_2_selected_assignment_feasible(
+    contact_candidate_set, candidate_ids: list[int]
+) -> bool:
     if contact_candidate_set is None or not candidate_ids:
         return False
     selected_ids = sorted(set(int(candidate_id) for candidate_id in candidate_ids))
     for result in contact_candidate_set.assignment_feasibility_cache.values():
-        if sorted(set(int(candidate_id) for candidate_id in result.candidate_ids)) == selected_ids:
+        if (
+            sorted(set(int(candidate_id) for candidate_id in result.candidate_ids))
+            == selected_ids
+        ):
             return bool(result.feasible)
     candidates = {
         candidate.candidate_id: candidate
@@ -10633,7 +12127,9 @@ def _p4_2_selected_assignment_feasible(contact_candidate_set, candidate_ids: lis
         for right_id in selected_ids[left_idx + 1 :]:
             matrix_left = index_by_id[left_id]
             matrix_right = index_by_id[right_id]
-            if contact_candidate_set.pairwise_conflict_matrix[matrix_left][matrix_right]:
+            if contact_candidate_set.pairwise_conflict_matrix[matrix_left][
+                matrix_right
+            ]:
                 return False
     return True
 
@@ -10666,7 +12162,9 @@ def _p4_2_anchor_resolution(*, robot, runtime_observation, anchor) -> dict[str, 
             "fallback_reason": "selected_anchor_missing",
         }
     if anchor.link_id:
-        body_name = _resolve_module_name(robot.body_names, anchor.module_id, str(anchor.link_id))
+        body_name = _resolve_module_name(
+            robot.body_names, anchor.module_id, str(anchor.link_id)
+        )
         if body_name is not None:
             body_id = robot.body_names.index(body_name)
             link_pos = _tensor_body_row(robot.data.body_pos_w.torch, body_id)
@@ -10712,7 +12210,11 @@ def _p4_2_anchor_resolution(*, robot, runtime_observation, anchor) -> dict[str, 
         "anchor_link_pose_world": None,
         "anchor_local_pose_in_link": None,
         "anchor_link_twist_world": [0.0] * 6,
-        "fallback_reason": "anchor_link_body_not_resolved" if anchor.link_id else "anchor_link_id_missing",
+        "fallback_reason": (
+            "anchor_link_body_not_resolved"
+            if anchor.link_id
+            else "anchor_link_id_missing"
+        ),
         "module_id": int(anchor.module_id),
         "anchor_id": int(anchor.anchor_id),
     }
@@ -10763,17 +12265,31 @@ def _p4_2_target_pose_for_phase(
     object_relative_to_anchor,
 ):
     if phase == "approach" or str(phase) == "approach":
-        return _p4_2_root_pose_for_anchor_position_target(approach_anchor_target, anchor_relative_pose, root_pose)
+        return _p4_2_root_pose_for_anchor_position_target(
+            approach_anchor_target, anchor_relative_pose, root_pose
+        )
     phase_value = phase.value if hasattr(phase, "value") else str(phase)
     if phase_value in {"pregrasp_align", "attach_attempt"}:
-        return _p4_2_root_pose_for_anchor_position_target(attach_anchor_target, anchor_relative_pose, root_pose)
-    if phase_value in {"transport", "release"} and anchor_relative_pose is not None and object_relative_to_anchor is not None:
-        target_anchor_pose = compose_pose(release_object_target, inverse_pose(object_relative_to_anchor))
-        return _p4_2_root_pose_for_anchor_position_target(target_anchor_pose, anchor_relative_pose, root_pose)
+        return _p4_2_root_pose_for_anchor_position_target(
+            attach_anchor_target, anchor_relative_pose, root_pose
+        )
+    if (
+        phase_value in {"transport", "release"}
+        and anchor_relative_pose is not None
+        and object_relative_to_anchor is not None
+    ):
+        target_anchor_pose = compose_pose(
+            release_object_target, inverse_pose(object_relative_to_anchor)
+        )
+        return _p4_2_root_pose_for_anchor_position_target(
+            target_anchor_pose, anchor_relative_pose, root_pose
+        )
     return root_pose
 
 
-def _p4_2_root_pose_for_anchor_position_target(target_anchor_pose, anchor_relative_pose, root_pose):
+def _p4_2_root_pose_for_anchor_position_target(
+    target_anchor_pose, anchor_relative_pose, root_pose
+):
     if anchor_relative_pose is None:
         return _p4_2_with_root_orientation(target_anchor_pose, root_pose)
     root_rotation = _quat_to_matrix(tuple(float(value) for value in root_pose[3:7]))
@@ -10804,7 +12320,9 @@ def _p4_2_with_root_orientation(target_pose, root_pose):
     )
 
 
-def _p4_2_release_object_target(contact_wrench_trajectory, *, object_id: str, fallback_pose):
+def _p4_2_release_object_target(
+    contact_wrench_trajectory, *, object_id: str, fallback_pose
+):
     if contact_wrench_trajectory is None:
         return fallback_pose
     for knot in reversed(contact_wrench_trajectory.knots):
@@ -10814,7 +12332,9 @@ def _p4_2_release_object_target(contact_wrench_trajectory, *, object_id: str, fa
     return fallback_pose
 
 
-def _p4_2_cuboid_inertia_body(mass_kg: float, size_m: tuple[float, float, float]) -> tuple[float, float, float, float, float, float]:
+def _p4_2_cuboid_inertia_body(
+    mass_kg: float, size_m: tuple[float, float, float]
+) -> tuple[float, float, float, float, float, float]:
     sx, sy, sz = (float(value) for value in size_m)
     mass = float(mass_kg)
     ixx = mass * (sy * sy + sz * sz) / 12.0
@@ -10826,28 +12346,45 @@ def _p4_2_cuboid_inertia_body(mass_kg: float, size_m: tuple[float, float, float]
 def _p4_2_pose_distance(left, right) -> float:
     if left is None or right is None:
         return float("inf")
-    return math.sqrt(sum((float(left[idx]) - float(right[idx])) ** 2 for idx in range(3)))
+    return math.sqrt(
+        sum((float(left[idx]) - float(right[idx])) ** 2 for idx in range(3))
+    )
 
 
 def _p4_2_relative_speed(left_twist: list[float], right_twist: list[float]) -> float:
     left = (list(left_twist) + [0.0] * 6)[:6]
     right = (list(right_twist) + [0.0] * 6)[:6]
-    return math.sqrt(sum((float(left[idx]) - float(right[idx])) ** 2 for idx in range(3)))
+    return math.sqrt(
+        sum((float(left[idx]) - float(right[idx])) ** 2 for idx in range(3))
+    )
 
 
-def _p4_2_payload_metric_summary(controller_commands: list[dict[str, object]]) -> dict[str, float]:
+def _p4_2_payload_metric_summary(
+    controller_commands: list[dict[str, object]],
+) -> dict[str, float]:
     suffixes = ("fx", "fy", "fz", "tx", "ty", "tz")
     record_count = 0
     max_delta_norm = 0.0
     for command in controller_commands:
         status = command.get("controller_status") if isinstance(command, dict) else None
         metrics = status.get("metrics") if isinstance(status, dict) else None
-        if not isinstance(metrics, dict) or float(metrics.get("payload_coupled", 0.0)) != 1.0:
+        if (
+            not isinstance(metrics, dict)
+            or float(metrics.get("payload_coupled", 0.0)) != 1.0
+        ):
             continue
         record_count += 1
-        before = [float(metrics.get(f"target_wrench_body_before_payload_{suffix}", 0.0)) for suffix in suffixes]
-        after = [float(metrics.get(f"target_wrench_body_after_payload_{suffix}", 0.0)) for suffix in suffixes]
-        delta_norm = math.sqrt(sum((after[idx] - before[idx]) ** 2 for idx in range(len(suffixes))))
+        before = [
+            float(metrics.get(f"target_wrench_body_before_payload_{suffix}", 0.0))
+            for suffix in suffixes
+        ]
+        after = [
+            float(metrics.get(f"target_wrench_body_after_payload_{suffix}", 0.0))
+            for suffix in suffixes
+        ]
+        delta_norm = math.sqrt(
+            sum((after[idx] - before[idx]) ** 2 for idx in range(len(suffixes)))
+        )
         max_delta_norm = max(max_delta_norm, delta_norm)
     return {
         "p4_2_payload_controller_metric_record_count": float(record_count),
@@ -10880,11 +12417,15 @@ def _set_p4_2_object_pose_and_twist(p4_2_object, pose, twist, *, device: str) ->
     import torch
 
     pose_tensor = torch.tensor([list(pose)], dtype=torch.float32, device=device)
-    twist_tensor = torch.tensor([(list(twist) + [0.0] * 6)[:6]], dtype=torch.float32, device=device)
+    twist_tensor = torch.tensor(
+        [(list(twist) + [0.0] * 6)[:6]], dtype=torch.float32, device=device
+    )
     if hasattr(p4_2_object, "write_root_pose_to_sim"):
         p4_2_object.write_root_pose_to_sim(pose_tensor)
     elif hasattr(p4_2_object, "write_root_state_to_sim"):
-        p4_2_object.write_root_state_to_sim(torch.cat([pose_tensor, twist_tensor], dim=1))
+        p4_2_object.write_root_state_to_sim(
+            torch.cat([pose_tensor, twist_tensor], dim=1)
+        )
         return
     if hasattr(p4_2_object, "write_root_velocity_to_sim"):
         p4_2_object.write_root_velocity_to_sim(twist_tensor)
@@ -10902,11 +12443,17 @@ def _build_fixed_runtime_observation(
     joint_velocities_tensor,
     module_count: int,
     module_spacing_m: float,
-    module_poses: dict[int, tuple[float, float, float, float, float, float, float]] | None,
+    module_poses: (
+        dict[int, tuple[float, float, float, float, float, float, float]] | None
+    ),
     split_fixed_module_name,
 ):
     from amsrr.schemas.policies import ControllerStatus
-    from amsrr.schemas.runtime import ModuleRuntimeState, RuntimeObservation, TaskProgressState
+    from amsrr.schemas.runtime import (
+        ModuleRuntimeState,
+        RuntimeObservation,
+        TaskProgressState,
+    )
 
     joint_positions = _fixed_module_joint_state_dicts(
         module_count,
@@ -10965,7 +12512,11 @@ def _build_articulated_runtime_observation(
     split_fixed_module_name,
 ):
     from amsrr.schemas.policies import ControllerStatus
-    from amsrr.schemas.runtime import ModuleRuntimeState, RuntimeObservation, TaskProgressState
+    from amsrr.schemas.runtime import (
+        ModuleRuntimeState,
+        RuntimeObservation,
+        TaskProgressState,
+    )
 
     joint_positions = _fixed_module_joint_state_dicts(
         module_count,
@@ -10983,7 +12534,9 @@ def _build_articulated_runtime_observation(
     module_states = []
     for module_id in range(module_count):
         pose_world = _module_body_pose(robot, module_id=module_id, local_body_name="fc")
-        twist_world = _module_body_twist(robot, module_id=module_id, local_body_name="fc")
+        twist_world = _module_body_twist(
+            robot, module_id=module_id, local_body_name="fc"
+        )
         if pose_world is None:
             pose_world = root_pose_world
         if twist_world is None:
@@ -11020,7 +12573,8 @@ def _ramped_target_pose(
     ratio = min(max(float(elapsed_s) / float(ramp_duration_s), 0.0), 1.0)
     smooth = ratio * ratio * (3.0 - 2.0 * ratio)
     position = tuple(
-        float(start_pose[idx]) + (float(final_pose[idx]) - float(start_pose[idx])) * smooth
+        float(start_pose[idx])
+        + (float(final_pose[idx]) - float(start_pose[idx])) * smooth
         for idx in range(3)
     )
     return (
@@ -11116,15 +12670,21 @@ def _keep_viewer_open(duration_s: float) -> None:
         time.sleep(1.0 / 60.0)
 
 
-def _position_error_norm(position: list[float], target: tuple[float, float, float]) -> float:
-    return sum((float(position[idx]) - float(target[idx])) ** 2 for idx in range(3)) ** 0.5
+def _position_error_norm(
+    position: list[float], target: tuple[float, float, float]
+) -> float:
+    return (
+        sum((float(position[idx]) - float(target[idx])) ** 2 for idx in range(3)) ** 0.5
+    )
 
 
 def _vector_norm(values) -> float:
     return sum(float(value) ** 2 for value in values) ** 0.5
 
 
-def _contact_sensor_measurement(contact_sensor, *, force_threshold_n: float) -> dict[str, object]:
+def _contact_sensor_measurement(
+    contact_sensor, *, force_threshold_n: float
+) -> dict[str, object]:
     """Return aggregate external-contact evidence from an Isaac Lab sensor."""
 
     force_tensor = contact_sensor.data.net_forces_w.torch
@@ -11144,8 +12704,7 @@ def _contact_sensor_measurement(contact_sensor, *, force_threshold_n: float) -> 
         (body_force_norms >= float(force_threshold_n)).sum().detach().cpu()
     )
     net_force_world = [
-        float(value)
-        for value in body_forces.sum(dim=0).detach().cpu().tolist()
+        float(value) for value in body_forces.sum(dim=0).detach().cpu().tolist()
     ]
     return {
         "active": aggregate_force_n >= float(force_threshold_n),
@@ -11187,7 +12746,9 @@ def _floor_contact_runtime_states(
     ]
 
 
-def _quat_error_norm(current_xyzw: list[float], target_xyzw: tuple[float, float, float, float]) -> float:
+def _quat_error_norm(
+    current_xyzw: list[float], target_xyzw: tuple[float, float, float, float]
+) -> float:
     cx, cy, cz, cw = _normalize_quat(tuple(float(value) for value in current_xyzw))
     tx, ty, tz, tw = _normalize_quat(target_xyzw)
     ex, ey, ez, ew = _quat_multiply((-cx, -cy, -cz, cw), (tx, ty, tz, tw))
@@ -11199,7 +12760,9 @@ def _quat_error_norm(current_xyzw: list[float], target_xyzw: tuple[float, float,
     return 2.0 * math.atan2(vector_norm, max(min(ew, 1.0), -1.0))
 
 
-def _normalize_quat(quat_xyzw: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+def _normalize_quat(
+    quat_xyzw: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
     norm = sum(value * value for value in quat_xyzw) ** 0.5
     if norm <= 0.0:
         raise RuntimeError("Cannot normalize zero quaternion")
@@ -11237,11 +12800,15 @@ def _matvec(matrix, vector: tuple[float, float, float]) -> tuple[float, float, f
     )
 
 
-def _add3(left: tuple[float, float, float], right: tuple[float, float, float]) -> tuple[float, float, float]:
+def _add3(
+    left: tuple[float, float, float], right: tuple[float, float, float]
+) -> tuple[float, float, float]:
     return (left[0] + right[0], left[1] + right[1], left[2] + right[2])
 
 
-def _cross3(left: tuple[float, float, float], right: tuple[float, float, float]) -> tuple[float, float, float]:
+def _cross3(
+    left: tuple[float, float, float], right: tuple[float, float, float]
+) -> tuple[float, float, float]:
     return (
         left[1] * right[2] - left[2] * right[1],
         left[2] * right[0] - left[0] * right[2],
@@ -11300,9 +12867,7 @@ def _apply_order3_dynamics_randomization(robot, *, condition) -> dict[str, objec
         robot.set_masses_index(masses=original_masses * requested_mass_scale)
         observed = robot.data.body_mass.torch
         expected = original_masses * requested_mass_scale
-        mass_applied = bool(
-            (observed - expected).abs().max().detach().cpu() <= 1.0e-6
-        )
+        mass_applied = bool((observed - expected).abs().max().detach().cpu() <= 1.0e-6)
     if not inertia_applied:
         robot.set_inertias_index(inertias=original_inertias * requested_inertia_scale)
         observed = robot.data.body_inertia.torch
@@ -11311,7 +12876,9 @@ def _apply_order3_dynamics_randomization(robot, *, condition) -> dict[str, objec
             (observed - expected).abs().max().detach().cpu() <= 1.0e-6
         )
     if not mass_applied or not inertia_applied:
-        raise RuntimeError("Order-3 Isaac dynamics randomization was not applied exactly")
+        raise RuntimeError(
+            "Order-3 Isaac dynamics randomization was not applied exactly"
+        )
     return {
         "requested_mass_scale": requested_mass_scale,
         "applied_mass_scale": requested_mass_scale,
@@ -11446,7 +13013,9 @@ def _apply_actuator_record(
                 continue
             force_body_ids.append(robot.body_names.index(body_name))
             applied_thrust = float(target.target_value) * float(rotor_thrust_scale)
-            force_rows.append([float(axis) * applied_thrust for axis in rotor.thrust_axis_local])
+            force_rows.append(
+                [float(axis) * applied_thrust for axis in rotor.thrust_axis_local]
+            )
             reaction_torque = [
                 float(axis)
                 * float(rotor.reaction_torque_coeff_nm_per_n)
@@ -11494,17 +13063,35 @@ def _apply_actuator_record(
             is_global=False,
         )
     if joint_position_ids:
-        target_tensor = torch.tensor([joint_position_targets], dtype=torch.float32, device=device)
-        joint_ids_tensor = torch.tensor(joint_position_ids, dtype=torch.int32, device=device)
-        robot.set_joint_position_target_index(target=target_tensor, joint_ids=joint_ids_tensor)
+        target_tensor = torch.tensor(
+            [joint_position_targets], dtype=torch.float32, device=device
+        )
+        joint_ids_tensor = torch.tensor(
+            joint_position_ids, dtype=torch.int32, device=device
+        )
+        robot.set_joint_position_target_index(
+            target=target_tensor, joint_ids=joint_ids_tensor
+        )
     if joint_velocity_ids:
-        target_tensor = torch.tensor([joint_velocity_targets], dtype=torch.float32, device=device)
-        joint_ids_tensor = torch.tensor(joint_velocity_ids, dtype=torch.int32, device=device)
-        robot.set_joint_velocity_target_index(target=target_tensor, joint_ids=joint_ids_tensor)
+        target_tensor = torch.tensor(
+            [joint_velocity_targets], dtype=torch.float32, device=device
+        )
+        joint_ids_tensor = torch.tensor(
+            joint_velocity_ids, dtype=torch.int32, device=device
+        )
+        robot.set_joint_velocity_target_index(
+            target=target_tensor, joint_ids=joint_ids_tensor
+        )
     if joint_effort_ids:
-        target_tensor = torch.tensor([joint_effort_targets], dtype=torch.float32, device=device)
-        joint_ids_tensor = torch.tensor(joint_effort_ids, dtype=torch.int32, device=device)
-        robot.set_joint_effort_target_index(target=target_tensor, joint_ids=joint_ids_tensor)
+        target_tensor = torch.tensor(
+            [joint_effort_targets], dtype=torch.float32, device=device
+        )
+        joint_ids_tensor = torch.tensor(
+            joint_effort_ids, dtype=torch.int32, device=device
+        )
+        robot.set_joint_effort_target_index(
+            target=target_tensor, joint_ids=joint_ids_tensor
+        )
     applied_joint_target_count = (
         len(joint_position_ids) + len(joint_velocity_ids) + len(joint_effort_ids)
     )
