@@ -185,6 +185,14 @@ GPU 挙動が重要な場合は、`ilab-gpu` で active PyTorch/CUDA environment
 
 基盤となる schema、geometry、URDF/PhysicalModel、IRGBuilder、envelope、feasibility tests が通る前に、policy training や simulator-scale experiments へ進んではならない。
 
+## Simulator debugging and completion time
+
+- 完全環境での最終検証条件と、原因追求用の temporary diagnostic を分離すること。temporary diagnostic の結果を acceptance や完了証跡へ読み替えてはならない。
+- simulator 不具合の反復では、まず問題に関係する最小の actuator / body / contact / phase だけを残した diagnostic を作る。不要な takeoff、approach、viewer、asset regeneration、contact sensor、collision pair、rollout tail を毎回実行しない。
+- 高忠実度 rollout を繰り返す前に、requested / limited / applied command、controller state、relevant pose/contact geometry を短時間で観測できる telemetry を用意する。
+- URDF、collision、drive configuration が変わっていない diagnostic では生成済み asset を再利用する。最終 acceptance では従来どおり current source から再生成し provenance を再検証する。
+- 作業計画には、実装品質だけでなく wall-clock completion time と simulator throughput を明示的な制約として含める。高速な unit/model diagnostic、最小 real-simulator diagnostic、完全環境 acceptance の順に進め、各段階に時間上限と継続判断点を置く。
+
 ## Handoff Expectations
 
 各タスクの終了時には、次を提示すること。
