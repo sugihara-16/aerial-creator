@@ -15,6 +15,7 @@ class SimulationJointDrive:
     damping: float
     safe_velocity_limit_rad_s: float
     provenance: str
+    armature_kg_m2: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,10 @@ def _parse_spec(role: str, raw: object) -> JointActuatorSpec:
             f"{role}.simulation_drive.safe_velocity_limit_rad_s",
         ),
         provenance=_non_empty_string(drive_raw.get("provenance"), f"{role}.simulation_drive.provenance"),
+        armature_kg_m2=_non_negative_float(
+            drive_raw.get("armature_kg_m2", 0.0),
+            f"{role}.simulation_drive.armature_kg_m2",
+        ),
     )
     nominal_voltage = _positive_float(raw.get("nominal_voltage_v"), f"{role}.nominal_voltage_v")
     voltage_range = _optional_pair(raw.get("voltage_range_v"), f"{role}.voltage_range_v")

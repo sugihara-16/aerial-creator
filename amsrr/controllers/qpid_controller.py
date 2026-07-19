@@ -4,7 +4,10 @@ import math
 from dataclasses import dataclass
 
 from amsrr.controllers.controller_base import ControllerContext, PayloadCoupling
-from amsrr.controllers.policy_command_builder import DesiredBiasReferences, PolicyCommandBiasBuilder
+from amsrr.controllers.policy_command_builder import (
+    DesiredBiasReferences,
+    PolicyCommandBiasBuilder,
+)
 from amsrr.controllers.qp_allocator_interface import (
     BoundedVerticalRotorAllocator,
     QPAllocationProblem,
@@ -14,7 +17,10 @@ from amsrr.controllers.qp_allocator_interface import (
     RotorAllocationSpec,
     VirtualThrustQPAllocator,
 )
-from amsrr.controllers.rigid_body_model import RigidBodyControlModelBuilder
+from amsrr.controllers.rigid_body_model import (
+    RigidBodyControlModel,
+    RigidBodyControlModelBuilder,
+)
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.physical_model import JointModel, PhysicalModel
 from amsrr.schemas.policies import (
@@ -52,6 +58,48 @@ class QPIDControllerConfig:
     unsupported_wrench_tolerance: float = 1.0e-2
 
 
+@dataclass(frozen=True)
+class QPIDTrackingProfile:
+    """Per-cycle centroidal tracking schedule.
+
+    The profile scales only the pose-tracking PID terms.  Gravity/payload
+    feed-forward, residual wrench, allocation constraints, and local-joint
+    commands remain unchanged.  This lets a contact-acquisition state machine
+    temporarily yield at the centroidal level without introducing contact
+    wrench targets into :class:`PolicyCommand`.
+    """
+
+    proportional_gain_scale: float = 1.0
+    integral_gain_scale: float = 1.0
+    derivative_gain_scale: float = 1.0
+    integrator_accumulation_scale: float = 1.0
+    integrator_decay_rate_per_s: float = 0.0
+
+    def validate(self) -> None:
+        for name in (
+            "proportional_gain_scale",
+            "integral_gain_scale",
+            "derivative_gain_scale",
+            "integrator_accumulation_scale",
+            "integrator_decay_rate_per_s",
+        ):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value < 0.0:
+                raise SchemaValidationError(
+                    f"QPIDTrackingProfile.{name} must be finite and non-negative"
+                )
+        for name in (
+            "proportional_gain_scale",
+            "integral_gain_scale",
+            "derivative_gain_scale",
+            "integrator_accumulation_scale",
+        ):
+            if float(getattr(self, name)) > 1.0:
+                raise SchemaValidationError(
+                    f"QPIDTrackingProfile.{name} must not exceed one"
+                )
+
+
 class QPIDController:
     """P1 controller scaffold: QP-style rotor allocation plus PD joint bias."""
 
@@ -66,28 +114,69 @@ class QPIDController:
         self.config = config or QPIDControllerConfig()
         self.allocator = allocator or self._default_allocator(self.config)
         self.bias_builder = bias_builder or PolicyCommandBiasBuilder()
-        self.rigid_body_model_builder = rigid_body_model_builder or RigidBodyControlModelBuilder()
+        self.rigid_body_model_builder = (
+            rigid_body_model_builder or RigidBodyControlModelBuilder()
+        )
         self._position_error_integral_world = [0.0, 0.0, 0.0]
         self._attitude_error_integral_body = [0.0, 0.0, 0.0]
         self._pending_position_error_integral_world: list[float] | None = None
         self._pending_attitude_error_integral_body: list[float] | None = None
         self._reference_metrics: dict[str, float] = {}
 
-    def compute(self, context: ControllerContext) -> ControllerCommand:
-        refs = context.desired_references or self._build_references(context)
-        allocation = self.allocator.allocate(self._allocation_problem(context, refs))
+    def compute(
+        self,
+        context: ControllerContext,
+        *,
+        tracking_profile: QPIDTrackingProfile | None = None,
+    ) -> ControllerCommand:
+        active_tracking_profile = tracking_profile or QPIDTrackingProfile()
+        active_tracking_profile.validate()
+        needs_rigid_body_model = bool(
+            self._uses_rigid_body_qp()
+            or (
+                context.runtime_observation.module_states
+                and (
+                    context.policy_command.desired_body_pose is not None
+                    or context.policy_command.desired_body_twist is not None
+                )
+            )
+        )
+        rigid_body_model = (
+            self.rigid_body_model_builder.build(
+                context.morphology_graph,
+                context.physical_model,
+                context.runtime_observation,
+            )
+            if needs_rigid_body_model
+            else None
+        )
+        refs = context.desired_references or self._build_references(
+            context,
+            rigid_body_model=rigid_body_model,
+            tracking_profile=active_tracking_profile,
+        )
+        allocation = self.allocator.allocate(
+            self._allocation_problem(
+                context,
+                refs,
+                rigid_body_model=rigid_body_model,
+            )
+        )
         self._commit_or_freeze_integrators(allocation)
         centroidal_contract = (
-            context.policy_command.control_contract_version == POLICY_COMMAND_CONTRACT_CENTROIDAL
+            context.policy_command.control_contract_version
+            == POLICY_COMMAND_CONTRACT_CENTROIDAL
         )
         if centroidal_contract:
             vectoring_targets = dict(allocation.vectoring_joint_targets)
             joint_torques: dict[str, float] = {}
             dock_commands: dict[str, float] = {}
-            joint_position_targets, joint_velocity_targets, joint_torque_bias = _local_joint_targets(
-                refs,
-                context.policy_command,
-                context.physical_model,
+            joint_position_targets, joint_velocity_targets, joint_torque_bias = (
+                _local_joint_targets(
+                    refs,
+                    context.policy_command,
+                    context.physical_model,
+                )
             )
         else:
             vectoring_targets = _vectoring_joint_targets(refs, context.physical_model)
@@ -101,8 +190,12 @@ class QPIDController:
             dock_commands = _dock_mechanism_hold_commands(
                 refs,
                 context.physical_model,
-                active_module_ids=sorted(module.module_id for module in context.morphology_graph.modules),
-                commanded_joint_ids=_commanded_joint_position_ids(context.active_knot, context.policy_command),
+                active_module_ids=sorted(
+                    module.module_id for module in context.morphology_graph.modules
+                ),
+                commanded_joint_ids=_commanded_joint_position_ids(
+                    context.active_knot, context.policy_command
+                ),
             )
             joint_position_targets = {}
             joint_velocity_targets = {}
@@ -145,12 +238,19 @@ class QPIDController:
             return RigidBodyPseudoinverseAllocator()
         return BoundedVerticalRotorAllocator()
 
-    def _build_references(self, context: ControllerContext) -> DesiredBiasReferences:
+    def _build_references(
+        self,
+        context: ControllerContext,
+        *,
+        rigid_body_model: RigidBodyControlModel | None = None,
+        tracking_profile: QPIDTrackingProfile,
+    ) -> DesiredBiasReferences:
         self._reference_metrics = {}
         self._pending_position_error_integral_world = None
         self._pending_attitude_error_integral_body = None
         centroidal_contract = (
-            context.policy_command.control_contract_version == POLICY_COMMAND_CONTRACT_CENTROIDAL
+            context.policy_command.control_contract_version
+            == POLICY_COMMAND_CONTRACT_CENTROIDAL
         )
         current_q = _current_joint_positions(
             context.runtime_observation,
@@ -175,7 +275,9 @@ class QPIDController:
             joint_limits=_joint_position_limits(
                 context.physical_model,
                 active_module_ids=(
-                    sorted(module.module_id for module in context.morphology_graph.modules)
+                    sorted(
+                        module.module_id for module in context.morphology_graph.modules
+                    )
                     if centroidal_contract
                     else None
                 ),
@@ -183,33 +285,47 @@ class QPIDController:
             velocity_limits=_joint_velocity_limits(
                 context.physical_model,
                 active_module_ids=(
-                    sorted(module.module_id for module in context.morphology_graph.modules)
+                    sorted(
+                        module.module_id for module in context.morphology_graph.modules
+                    )
                     if centroidal_contract
                     else None
                 ),
             ),
         )
-        target_wrench = self._target_wrench_from_body_reference(context, refs)
+        target_wrench = self._target_wrench_from_body_reference(
+            context,
+            refs,
+            rigid_body_model=rigid_body_model,
+            tracking_profile=tracking_profile,
+        )
         if target_wrench is not None:
-            refs.desired_wrench_body = _sum_wrenches(target_wrench, refs.desired_wrench_body)
+            refs.desired_wrench_body = _sum_wrenches(
+                target_wrench, refs.desired_wrench_body
+            )
         return refs
 
     def _target_wrench_from_body_reference(
         self,
         context: ControllerContext,
         refs: DesiredBiasReferences,
+        *,
+        rigid_body_model: RigidBodyControlModel | None = None,
+        tracking_profile: QPIDTrackingProfile,
     ) -> list[float] | None:
         if refs.desired_body_pose is None and refs.desired_body_twist is None:
             return None
         if not context.runtime_observation.module_states:
             return None
-        rigid_body_model = self.rigid_body_model_builder.build(
-            context.morphology_graph,
-            context.physical_model,
-            context.runtime_observation,
-        )
+        if rigid_body_model is None:
+            rigid_body_model = self.rigid_body_model_builder.build(
+                context.morphology_graph,
+                context.physical_model,
+                context.runtime_observation,
+            )
         centroidal_contract = (
-            context.policy_command.control_contract_version == POLICY_COMMAND_CONTRACT_CENTROIDAL
+            context.policy_command.control_contract_version
+            == POLICY_COMMAND_CONTRACT_CENTROIDAL
         )
         if centroidal_contract:
             current_pose = rigid_body_model.body_pose_world
@@ -223,17 +339,21 @@ class QPIDController:
         dt = max(float(context.control_dt_s or self.config.control_dt_s), 1.0e-9)
 
         position_error_world = [
-            float(target_pose[idx]) - float(current_pose[idx])
-            for idx in range(3)
+            float(target_pose[idx]) - float(current_pose[idx]) for idx in range(3)
         ]
         current_twist = (current_twist + [0.0] * 6)[:6]
         target_twist = (list(target_twist) + [0.0] * 6)[:6]
         velocity_error_world = [
-            float(target_twist[idx]) - float(current_twist[idx])
-            for idx in range(3)
+            float(target_twist[idx]) - float(current_twist[idx]) for idx in range(3)
         ]
+        integrator_retention = math.exp(
+            -float(tracking_profile.integrator_decay_rate_per_s) * dt
+        )
         position_integral = [
-            self._position_error_integral_world[idx] + position_error_world[idx] * dt
+            self._position_error_integral_world[idx] * integrator_retention
+            + position_error_world[idx]
+            * dt
+            * float(tracking_profile.integrator_accumulation_scale)
             for idx in range(3)
         ]
         self._pending_position_error_integral_world = position_integral
@@ -242,28 +362,38 @@ class QPIDController:
         target_quat = _normalize_quat(_pose_quat(target_pose))
         attitude_error_body = _quat_error_vector_body(current_quat, target_quat)
         body_from_world = _transpose(_quat_to_matrix(current_quat))
-        current_angular_velocity_body = _matvec(body_from_world, tuple(float(value) for value in current_twist[3:6]))
-        target_angular_velocity_body = tuple(float(value) for value in target_twist[3:6])
+        current_angular_velocity_body = _matvec(
+            body_from_world, tuple(float(value) for value in current_twist[3:6])
+        )
+        target_angular_velocity_body = tuple(
+            float(value) for value in target_twist[3:6]
+        )
         angular_velocity_error_body = [
             target_angular_velocity_body[idx] - current_angular_velocity_body[idx]
             for idx in range(3)
         ]
         attitude_integral = [
-            self._attitude_error_integral_body[idx] + attitude_error_body[idx] * dt
+            self._attitude_error_integral_body[idx] * integrator_retention
+            + attitude_error_body[idx]
+            * dt
+            * float(tracking_profile.integrator_accumulation_scale)
             for idx in range(3)
         ]
         self._pending_attitude_error_integral_body = attitude_integral
 
+        p_scale = float(tracking_profile.proportional_gain_scale)
+        i_scale = float(tracking_profile.integral_gain_scale)
+        d_scale = float(tracking_profile.derivative_gain_scale)
         desired_acc_world = [
-            self.config.xy_p_gain * position_error_world[0]
-            + self.config.xy_i_gain * position_integral[0]
-            + self.config.xy_d_gain * velocity_error_world[0],
-            self.config.xy_p_gain * position_error_world[1]
-            + self.config.xy_i_gain * position_integral[1]
-            + self.config.xy_d_gain * velocity_error_world[1],
-            self.config.z_p_gain * position_error_world[2]
-            + self.config.z_i_gain * position_integral[2]
-            + self.config.z_d_gain * velocity_error_world[2],
+            p_scale * self.config.xy_p_gain * position_error_world[0]
+            + i_scale * self.config.xy_i_gain * position_integral[0]
+            + d_scale * self.config.xy_d_gain * velocity_error_world[0],
+            p_scale * self.config.xy_p_gain * position_error_world[1]
+            + i_scale * self.config.xy_i_gain * position_integral[1]
+            + d_scale * self.config.xy_d_gain * velocity_error_world[1],
+            p_scale * self.config.z_p_gain * position_error_world[2]
+            + i_scale * self.config.z_i_gain * position_integral[2]
+            + d_scale * self.config.z_d_gain * velocity_error_world[2],
         ]
         control_mass_kg = rigid_body_model.total_mass_kg
         desired_force_world = (
@@ -273,17 +403,24 @@ class QPIDController:
         )
         desired_force_body = _matvec(body_from_world, desired_force_world)
         desired_ang_acc_body = (
-            self.config.roll_pitch_p_gain * attitude_error_body[0]
-            + self.config.roll_pitch_i_gain * attitude_integral[0]
-            + self.config.roll_pitch_d_gain * angular_velocity_error_body[0],
-            self.config.roll_pitch_p_gain * attitude_error_body[1]
-            + self.config.roll_pitch_i_gain * attitude_integral[1]
-            + self.config.roll_pitch_d_gain * angular_velocity_error_body[1],
-            self.config.yaw_p_gain * attitude_error_body[2]
-            + self.config.yaw_i_gain * attitude_integral[2]
-            + self.config.yaw_d_gain * angular_velocity_error_body[2],
+            p_scale * self.config.roll_pitch_p_gain * attitude_error_body[0]
+            + i_scale * self.config.roll_pitch_i_gain * attitude_integral[0]
+            + d_scale
+            * self.config.roll_pitch_d_gain
+            * angular_velocity_error_body[0],
+            p_scale * self.config.roll_pitch_p_gain * attitude_error_body[1]
+            + i_scale * self.config.roll_pitch_i_gain * attitude_integral[1]
+            + d_scale
+            * self.config.roll_pitch_d_gain
+            * angular_velocity_error_body[1],
+            p_scale * self.config.yaw_p_gain * attitude_error_body[2]
+            + i_scale * self.config.yaw_i_gain * attitude_integral[2]
+            + d_scale * self.config.yaw_d_gain * angular_velocity_error_body[2],
         )
-        desired_torque_body = _matvec(_inertia_matrix_from_inertia6(rigid_body_model.inertia_body), desired_ang_acc_body)
+        desired_torque_body = _matvec(
+            _inertia_matrix_from_inertia6(rigid_body_model.inertia_body),
+            desired_ang_acc_body,
+        )
         target_wrench_before_payload = [*desired_force_body, *desired_torque_body]
         target_wrench_after_payload = list(target_wrench_before_payload)
         payload_wrench_body: list[float] | None = None
@@ -304,21 +441,43 @@ class QPIDController:
                 or target_wrench_before_payload
             )
         self._reference_metrics = {
-            "target_pos_error_m": math.sqrt(sum(value * value for value in position_error_world)),
-            "target_rot_error_rad": math.sqrt(sum(value * value for value in attitude_error_body)),
-            "target_velocity_error_norm": math.sqrt(sum(value * value for value in velocity_error_world)),
-            "target_angular_velocity_error_norm": math.sqrt(sum(value * value for value in angular_velocity_error_body)),
+            "target_pos_error_m": math.sqrt(
+                sum(value * value for value in position_error_world)
+            ),
+            "target_rot_error_rad": math.sqrt(
+                sum(value * value for value in attitude_error_body)
+            ),
+            "target_velocity_error_norm": math.sqrt(
+                sum(value * value for value in velocity_error_world)
+            ),
+            "target_angular_velocity_error_norm": math.sqrt(
+                sum(value * value for value in angular_velocity_error_body)
+            ),
             "pid_target_builder_active": 1.0,
             "tracking_state_is_true_centroidal": 1.0 if centroidal_contract else 0.0,
-            **_wrench_metrics("target_wrench_body_before_payload", target_wrench_before_payload),
-            **_wrench_metrics("target_wrench_body_after_payload", target_wrench_after_payload),
+            "tracking_proportional_gain_scale": p_scale,
+            "tracking_integral_gain_scale": i_scale,
+            "tracking_derivative_gain_scale": d_scale,
+            "tracking_integrator_accumulation_scale": float(
+                tracking_profile.integrator_accumulation_scale
+            ),
+            "tracking_integrator_decay_rate_per_s": float(
+                tracking_profile.integrator_decay_rate_per_s
+            ),
+            **_wrench_metrics(
+                "target_wrench_body_before_payload", target_wrench_before_payload
+            ),
+            **_wrench_metrics(
+                "target_wrench_body_after_payload", target_wrench_after_payload
+            ),
         }
         if context.payload_coupling is not None:
             self._reference_metrics.update(
                 _payload_metrics(
                     context.payload_coupling,
                     payload_wrench_body=payload_wrench_body or [0.0] * 6,
-                    payload_gravity_wrench_body=payload_gravity_wrench_body or [0.0] * 6,
+                    payload_gravity_wrench_body=payload_gravity_wrench_body
+                    or [0.0] * 6,
                 )
             )
         return target_wrench_after_payload
@@ -326,9 +485,13 @@ class QPIDController:
     def _commit_or_freeze_integrators(self, allocation: QPAllocationResult) -> None:
         if allocation.feasible and not allocation.clipped:
             if self._pending_position_error_integral_world is not None:
-                self._position_error_integral_world = list(self._pending_position_error_integral_world)
+                self._position_error_integral_world = list(
+                    self._pending_position_error_integral_world
+                )
             if self._pending_attitude_error_integral_body is not None:
-                self._attitude_error_integral_body = list(self._pending_attitude_error_integral_body)
+                self._attitude_error_integral_body = list(
+                    self._pending_attitude_error_integral_body
+                )
         self._pending_position_error_integral_world = None
         self._pending_attitude_error_integral_body = None
 
@@ -336,9 +499,10 @@ class QPIDController:
         self,
         context: ControllerContext,
         refs: DesiredBiasReferences,
+        *,
+        rigid_body_model: RigidBodyControlModel | None = None,
     ) -> QPAllocationProblem:
-        rigid_body_model = None
-        if self._uses_rigid_body_qp():
+        if self._uses_rigid_body_qp() and rigid_body_model is None:
             rigid_body_model = self.rigid_body_model_builder.build(
                 context.morphology_graph,
                 context.physical_model,
@@ -346,8 +510,19 @@ class QPIDController:
             )
         desired_wrench = refs.desired_wrench_body
         if desired_wrench is None and self.config.default_hover_when_no_wrench:
-            hover_mass_kg = rigid_body_model.total_mass_kg if rigid_body_model is not None else context.physical_model.aggregate_mass_kg
-            desired_wrench = [0.0, 0.0, hover_mass_kg * self.config.gravity_mps2, 0.0, 0.0, 0.0]
+            hover_mass_kg = (
+                rigid_body_model.total_mass_kg
+                if rigid_body_model is not None
+                else context.physical_model.aggregate_mass_kg
+            )
+            desired_wrench = [
+                0.0,
+                0.0,
+                hover_mass_kg * self.config.gravity_mps2,
+                0.0,
+                0.0,
+                0.0,
+            ]
         return QPAllocationProblem(
             desired_wrench_body=desired_wrench,
             rotors=[
@@ -360,9 +535,15 @@ class QPIDController:
                 for rotor in context.physical_model.rotors
             ],
             rigid_body_model=rigid_body_model,
-            previous_rotor_thrusts_n=(context.previous_command.rotor_thrusts_n if context.previous_command is not None else {}),
+            previous_rotor_thrusts_n=(
+                context.previous_command.rotor_thrusts_n
+                if context.previous_command is not None
+                else {}
+            ),
             previous_vectoring_joint_targets=(
-                context.previous_command.vectoring_joint_targets if context.previous_command is not None else {}
+                context.previous_command.vectoring_joint_targets
+                if context.previous_command is not None
+                else {}
             ),
             control_dt_s=self.config.control_dt_s,
             vertical_tolerance_n=self.config.vertical_tolerance_n,
@@ -370,13 +551,18 @@ class QPIDController:
         )
 
     def _uses_rigid_body_qp(self) -> bool:
-        return self.config.allocation_mode in {"rigid_body_qp", "rigid_body_pseudoinverse"} or isinstance(
+        return self.config.allocation_mode in {
+            "rigid_body_qp",
+            "rigid_body_pseudoinverse",
+        } or isinstance(
             self.allocator,
             (VirtualThrustQPAllocator, RigidBodyPseudoinverseAllocator),
         )
 
 
-def _controller_status(allocation: QPAllocationResult, config: QPIDControllerConfig) -> ControllerStatus:
+def _controller_status(
+    allocation: QPAllocationResult, config: QPIDControllerConfig
+) -> ControllerStatus:
     status = "ok"
     message = "allocation feasible"
     if not allocation.feasible:
@@ -424,7 +610,9 @@ def _vectoring_joint_targets(
     for joint_id in sorted(vectoring_joint_ids):
         if joint_id not in refs.joint_position_ref:
             continue
-        targets[joint_id] = _clip_to_limit(refs.joint_position_ref[joint_id], limits.get(joint_id))
+        targets[joint_id] = _clip_to_limit(
+            refs.joint_position_ref[joint_id], limits.get(joint_id)
+        )
     return targets
 
 
@@ -470,9 +658,11 @@ def _local_joint_targets(
         if is_modeled_local_joint(joint_id)
     }
     velocity_targets = {
-        joint_id: float(refs.joint_velocity_ref.get(joint_id, 0.0))
-        if joint_id in policy_command.joint_velocity_targets
-        else 0.0
+        joint_id: (
+            float(refs.joint_velocity_ref.get(joint_id, 0.0))
+            if joint_id in policy_command.joint_velocity_targets
+            else 0.0
+        )
         for joint_id in position_targets
     }
     for joint_id in sorted(policy_command.joint_velocity_targets):
@@ -528,7 +718,9 @@ def _dock_mechanism_hold_commands(
             if port.mechanical_limits.get("mechanism_joint_id")
         }
     )
-    has_global_command = any(_split_global_joint_id(joint_id) is not None for joint_id in commanded_joint_ids)
+    has_global_command = any(
+        _split_global_joint_id(joint_id) is not None for joint_id in commanded_joint_ids
+    )
     if has_global_command:
         for module_id in active_module_ids:
             for joint_id in mechanism_joint_ids:
@@ -546,17 +738,28 @@ def _dock_mechanism_hold_commands(
 
     for joint_id in mechanism_joint_ids:
         joint = joint_by_id.get(joint_id)
-        value = float(refs.joint_position_ref.get(joint_id, 0.0)) if joint_id in commanded_joint_ids else 0.0
+        value = (
+            float(refs.joint_position_ref.get(joint_id, 0.0))
+            if joint_id in commanded_joint_ids
+            else 0.0
+        )
         if joint is not None:
             value = _clip_to_limit(value, _limit_tuple(joint))
         commands[joint_id] = value
     return commands
 
 
-def _commanded_joint_position_ids(active_knot: InteractionKnot, policy_command: PolicyCommand) -> set[str]:
+def _commanded_joint_position_ids(
+    active_knot: InteractionKnot, policy_command: PolicyCommand
+) -> set[str]:
     joint_ids: set[str] = set(policy_command.joint_position_bias)
-    if active_knot.posture_target is not None and active_knot.posture_target.joint_pos_target is not None:
-        joint_ids.update(str(joint_id) for joint_id in active_knot.posture_target.joint_pos_target)
+    if (
+        active_knot.posture_target is not None
+        and active_knot.posture_target.joint_pos_target is not None
+    ):
+        joint_ids.update(
+            str(joint_id) for joint_id in active_knot.posture_target.joint_pos_target
+        )
     return joint_ids
 
 
@@ -661,7 +864,9 @@ def _limit_tuple(joint: JointModel) -> tuple[float, float] | None:
     lower = float(joint.limit_lower)
     upper = float(joint.limit_upper)
     if lower > upper:
-        raise SchemaValidationError(f"Joint {joint.joint_id!r} has lower limit above upper limit")
+        raise SchemaValidationError(
+            f"Joint {joint.joint_id!r} has lower limit above upper limit"
+        )
     return lower, upper
 
 
@@ -678,7 +883,9 @@ def _clip_symmetric(value: float, limit: float | None) -> float:
     return min(max(float(value), -limit), limit)
 
 
-def _sum_wrenches(left: list[float] | None, right: list[float] | None) -> list[float] | None:
+def _sum_wrenches(
+    left: list[float] | None, right: list[float] | None
+) -> list[float] | None:
     if left is None and right is None:
         return None
     left_values = left or [0.0] * 6
@@ -700,7 +907,9 @@ def _payload_effective_wrench_body(
     )
     force_body = _matvec(body_from_world, force_world)
     torque_from_offset = _cross(payload.com_offset_body, force_body)
-    inertia_torque = _matvec(_inertia_matrix_from_inertia6(payload.inertia_body), desired_ang_acc_body)
+    inertia_torque = _matvec(
+        _inertia_matrix_from_inertia6(payload.inertia_body), desired_ang_acc_body
+    )
     torque_body = (
         torque_from_offset[0] + inertia_torque[0],
         torque_from_offset[1] + inertia_torque[1],
@@ -749,11 +958,15 @@ def _wrench_metrics(prefix: str, wrench: list[float]) -> dict[str, float]:
     return {f"{prefix}_{label}": float(values[idx]) for idx, label in enumerate(labels)}
 
 
-def _pose_quat(pose: tuple[float, float, float, float, float, float, float]) -> tuple[float, float, float, float]:
+def _pose_quat(
+    pose: tuple[float, float, float, float, float, float, float],
+) -> tuple[float, float, float, float]:
     return (float(pose[3]), float(pose[4]), float(pose[5]), float(pose[6]))
 
 
-def _normalize_quat(quat_xyzw: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+def _normalize_quat(
+    quat_xyzw: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
     x, y, z, w = quat_xyzw
     norm = math.sqrt(x * x + y * y + z * z + w * w)
     if norm <= 0.0:
@@ -768,7 +981,9 @@ def _quat_error_vector_body(
     error = _quat_multiply(_quat_conjugate(current_quat_xyzw), target_quat_xyzw)
     if error[3] < 0.0:
         error = tuple(-value for value in error)  # type: ignore[assignment]
-    vector_norm = math.sqrt(error[0] * error[0] + error[1] * error[1] + error[2] * error[2])
+    vector_norm = math.sqrt(
+        error[0] * error[0] + error[1] * error[1] + error[2] * error[2]
+    )
     if vector_norm <= 1.0e-12:
         return [0.0, 0.0, 0.0]
     angle = 2.0 * math.atan2(vector_norm, max(min(error[3], 1.0), -1.0))
@@ -776,7 +991,9 @@ def _quat_error_vector_body(
     return [error[0] * scale, error[1] * scale, error[2] * scale]
 
 
-def _quat_conjugate(quat_xyzw: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+def _quat_conjugate(
+    quat_xyzw: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
     return (-quat_xyzw[0], -quat_xyzw[1], -quat_xyzw[2], quat_xyzw[3])
 
 
@@ -794,7 +1011,9 @@ def _quat_multiply(
     )
 
 
-def _quat_to_matrix(quat_xyzw: tuple[float, float, float, float]) -> tuple[tuple[float, float, float], ...]:
+def _quat_to_matrix(
+    quat_xyzw: tuple[float, float, float, float],
+) -> tuple[tuple[float, float, float], ...]:
     x, y, z, w = _normalize_quat(quat_xyzw)
     return (
         (1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)),
@@ -803,7 +1022,9 @@ def _quat_to_matrix(quat_xyzw: tuple[float, float, float, float]) -> tuple[tuple
     )
 
 
-def _transpose(matrix: tuple[tuple[float, float, float], ...]) -> tuple[tuple[float, float, float], ...]:
+def _transpose(
+    matrix: tuple[tuple[float, float, float], ...],
+) -> tuple[tuple[float, float, float], ...]:
     return (
         (matrix[0][0], matrix[1][0], matrix[2][0]),
         (matrix[0][1], matrix[1][1], matrix[2][1]),
@@ -833,7 +1054,9 @@ def _cross(
     )
 
 
-def _inertia_matrix_from_inertia6(values: list[float]) -> tuple[tuple[float, float, float], ...]:
+def _inertia_matrix_from_inertia6(
+    values: list[float],
+) -> tuple[tuple[float, float, float], ...]:
     if len(values) != 6:
         raise SchemaValidationError("inertia_body must have 6 values")
     ixx, ixy, ixz, iyy, iyz, izz = (float(value) for value in values)

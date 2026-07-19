@@ -17,13 +17,18 @@ from amsrr.controllers.qp_allocator_interface import (
     RotorAllocationSpec,
     VirtualThrustQPAllocator,
 )
-from amsrr.controllers.qpid_controller import QPIDController, QPIDControllerConfig
+from amsrr.controllers.qpid_controller import (
+    QPIDController,
+    QPIDControllerConfig,
+    QPIDTrackingProfile,
+)
 from amsrr.controllers.rigid_body_model import (
     RigidBodyControlModel,
     RigidBodyControlModelBuilder,
     RotorControlElement,
 )
 from amsrr.robot_model.physical_model_builder import build_module_capability_token, build_physical_model_from_config
+from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.morphology import ModuleNode, MorphologyGraph
 from amsrr.schemas.policies import (
     POLICY_COMMAND_CONTRACT_CENTROIDAL,
@@ -642,6 +647,64 @@ def test_qpid_controller_builds_pid_wrench_from_policy_body_target_and_feedforwa
     assert desired[3] == pytest.approx(expected_torque[0] + 4.0)
     assert desired[4] == pytest.approx(expected_torque[1] + 5.0)
     assert desired[5] == pytest.approx(expected_torque[2] + 6.0)
+
+
+def test_qpid_tracking_profile_disables_pose_pi_but_retains_damping_and_feedforward() -> None:
+    physical_model = _physical_model()
+    runtime = _runtime_observation()
+    runtime.module_states[0].twist_world = [0.4, 0.0, 0.0, 0.0, 0.0, 0.0]
+    allocator = _RecordingAllocator()
+    controller = QPIDController(
+        allocator=allocator,
+        config=QPIDControllerConfig(control_dt_s=0.005),
+    )
+    context = ControllerContext(
+        runtime_observation=runtime,
+        morphology_graph=runtime.morphology_graph,
+        physical_model=physical_model,
+        active_knot=InteractionKnot(t_rel_s=0.0, contact_assignments=[]),
+        policy_command=PolicyCommand(
+            desired_body_pose=(0.3, 0.0, 0.2, 0.0, 0.0, 0.0, 1.0),
+            desired_body_twist=[0.1, 0.0, 0.0, 0.0, 0.0, 0.0],
+            residual_wrench_body=[1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        ),
+    )
+
+    controller.compute(context)
+    assert controller._position_error_integral_world[0] > 0.0
+    previous_integral = controller._position_error_integral_world[0]
+
+    output = controller.compute(
+        context,
+        tracking_profile=QPIDTrackingProfile(
+            proportional_gain_scale=0.0,
+            integral_gain_scale=0.0,
+            derivative_gain_scale=1.0,
+            integrator_accumulation_scale=0.0,
+            integrator_decay_rate_per_s=20.0,
+        ),
+    )
+
+    assert allocator.problem is not None
+    desired = allocator.problem.desired_wrench_body
+    assert desired is not None
+    mass = physical_model.aggregate_mass_kg
+    assert desired[0] == pytest.approx(mass * 2.0 * (0.1 - 0.4) + 1.0)
+    assert desired[2] == pytest.approx(mass * 9.80665)
+    assert controller._position_error_integral_world[0] < previous_integral
+    metrics = output.controller_status.metrics
+    assert metrics["tracking_proportional_gain_scale"] == 0.0
+    assert metrics["tracking_integral_gain_scale"] == 0.0
+    assert metrics["tracking_derivative_gain_scale"] == 1.0
+    assert metrics["tracking_integrator_accumulation_scale"] == 0.0
+    assert metrics["tracking_integrator_decay_rate_per_s"] == 20.0
+
+
+def test_qpid_tracking_profile_rejects_out_of_range_scales() -> None:
+    with pytest.raises(SchemaValidationError, match="must not exceed one"):
+        QPIDTrackingProfile(proportional_gain_scale=1.01).validate()
+    with pytest.raises(SchemaValidationError, match="finite and non-negative"):
+        QPIDTrackingProfile(integrator_decay_rate_per_s=-1.0).validate()
 
 
 def test_qpid_controller_payload_coupling_changes_target_wrench_and_metrics() -> None:

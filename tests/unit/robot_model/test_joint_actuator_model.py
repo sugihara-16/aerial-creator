@@ -16,6 +16,7 @@ def test_joint_actuator_model_loads_official_motor_limits() -> None:
     assert vectoring.no_load_speed_rad_s == pytest.approx(10.890854)
     assert vectoring.continuous_torque_limit_nm == pytest.approx(0.152)
     assert vectoring.simulation_drive.safe_velocity_limit_rad_s == pytest.approx(3.0)
+    assert vectoring.simulation_drive.armature_kg_m2 == pytest.approx(0.0)
 
     dock = model.actuator_roles["dock"]
     assert dock.model == "AK40-10 KV170"
@@ -25,6 +26,8 @@ def test_joint_actuator_model_loads_official_motor_limits() -> None:
     assert dock.no_load_speed_rad_s == pytest.approx(45.553093)
     assert dock.protocol_torque_limit_nm == pytest.approx(5.0)
     assert dock.backlash_rad == pytest.approx(0.005236)
+    assert dock.simulation_drive.armature_kg_m2 == pytest.approx(0.01)
+    assert dock.simulation_drive.damping == pytest.approx(5.0)
 
 
 def test_joint_actuator_model_matches_joint_roles() -> None:

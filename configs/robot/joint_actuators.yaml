@@ -80,14 +80,20 @@ joint_actuator_model:
         - mit
       simulation_drive:
         stiffness: 200.0
-        damping: 2.0
+        damping: 5.0
+        armature_kg_m2: 0.01
         safe_velocity_limit_rad_s: 3.0
         provenance: >-
           P4 fixed-dock neutral-hold and dynamic-assembly tuning; 200 Nm/rad
           keeps the torque at the 0.005236 rad specified backlash below the
-          1.3 Nm rated torque. Damping 2 Nms/rad suppresses the small-amplitude
-          zero-hold velocity chatter observed in real Isaac attach-only A/B runs.
-          These are simulation control settings, not manufacturer gain specifications.
+          1.3 Nm rated torque. Damping 5 Nms/rad is the AK MIT-mode Kd ceiling
+          and suppresses the high-friction Order8 acquisition overshoot that
+          saturated the position drive at lower damping; it also retains the
+          small-amplitude zero-hold stability established by attach-only A/B runs.
+          Reflected armature 0.01 kg m^2 suppresses contact-acquisition servo
+          transients observed in the Order8 minimum diagnostic without changing
+          the AK40-10 torque, speed, current, or position limits. These are
+          simulation control settings, not manufacturer gain specifications.
       sources:
         - https://www.cubemars.com/product/ak40-10-robotic-actuator.html
         - https://www.cubemars.com/images/file/20250522/1747899365958473.pdf
