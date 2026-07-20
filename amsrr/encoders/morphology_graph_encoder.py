@@ -461,41 +461,52 @@ class _EdgeMessageLayer(nn.Module):
         edge_embeddings: torch.Tensor,
         batch: MorphologyGraphBatch,
     ) -> torch.Tensor:
-        updated_rows: list[torch.Tensor] = []
-        for batch_index in range(nodes.shape[0]):
-            node_row = nodes[batch_index]
-            valid_edges = batch.edge_mask[batch_index]
-            aggregate = torch.zeros_like(node_row)
-            degree = torch.zeros(
-                (node_row.shape[0], 1),
-                dtype=node_row.dtype,
-                device=node_row.device,
-            )
-            if bool(valid_edges.any().item()):
-                sources = batch.edge_index[batch_index, 0, valid_edges]
-                destinations = batch.edge_index[batch_index, 1, valid_edges]
-                edge_row = edge_embeddings[batch_index, valid_edges]
-                message_input = torch.cat(
-                    (node_row[sources], node_row[destinations], edge_row),
-                    dim=-1,
-                )
-                messages = self.message(message_input) * self.gate(message_input)
-                aggregate.index_add_(0, destinations, messages)
-                degree.index_add_(
-                    0,
-                    destinations,
-                    torch.ones(
-                        (destinations.shape[0], 1),
-                        dtype=node_row.dtype,
-                        device=node_row.device,
-                    ),
-                )
-                aggregate = aggregate / torch.sqrt(torch.clamp(degree, min=1.0))
-            delta = self.update(torch.cat((node_row, aggregate), dim=-1))
-            next_row = self.norm(node_row + self.dropout(delta))
-            next_row = next_row * batch.node_mask[batch_index].unsqueeze(-1).to(node_row.dtype)
-            updated_rows.append(next_row)
-        return torch.stack(updated_rows, dim=0)
+        batch_size, node_width, hidden_width = nodes.shape
+        edge_width = edge_embeddings.shape[1]
+        safe_sources = batch.edge_index[:, 0].clamp(min=0)
+        safe_destinations = batch.edge_index[:, 1].clamp(min=0)
+        gather_width = hidden_width
+        source_nodes = torch.gather(
+            nodes,
+            1,
+            safe_sources.unsqueeze(-1).expand(-1, -1, gather_width),
+        )
+        destination_nodes = torch.gather(
+            nodes,
+            1,
+            safe_destinations.unsqueeze(-1).expand(-1, -1, gather_width),
+        )
+        message_input = torch.cat(
+            (source_nodes, destination_nodes, edge_embeddings), dim=-1
+        )
+        edge_weights = batch.edge_mask.unsqueeze(-1).to(nodes.dtype)
+        messages = self.message(message_input) * self.gate(message_input) * edge_weights
+
+        batch_offsets = (
+            torch.arange(batch_size, device=nodes.device, dtype=torch.long)
+            .reshape(-1, 1)
+            .expand(-1, edge_width)
+            * node_width
+        )
+        flat_destinations = (safe_destinations + batch_offsets).reshape(-1)
+        aggregate_flat = torch.zeros(
+            (batch_size * node_width, hidden_width),
+            dtype=nodes.dtype,
+            device=nodes.device,
+        )
+        aggregate_flat.index_add_(0, flat_destinations, messages.reshape(-1, hidden_width))
+        degree_flat = torch.zeros(
+            (batch_size * node_width, 1),
+            dtype=nodes.dtype,
+            device=nodes.device,
+        )
+        degree_flat.index_add_(0, flat_destinations, edge_weights.reshape(-1, 1))
+        aggregate = aggregate_flat.reshape(batch_size, node_width, hidden_width)
+        degree = degree_flat.reshape(batch_size, node_width, 1)
+        aggregate = aggregate / torch.sqrt(torch.clamp(degree, min=1.0))
+        delta = self.update(torch.cat((nodes, aggregate), dim=-1))
+        next_nodes = self.norm(nodes + self.dropout(delta))
+        return next_nodes * batch.node_mask.unsqueeze(-1).to(nodes.dtype)
 
 
 class MorphologyGraphEncoder(nn.Module):

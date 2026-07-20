@@ -6,10 +6,10 @@ from typing import Any, Literal
 
 from amsrr.schemas.common import SchemaBase, SchemaValidationError, StrEnum, require_non_empty
 from amsrr.schemas.contact_candidates import AssignmentFeasibilityResult, ContactCandidateSet
-from amsrr.schemas.feasibility import FeasibilityResult
+from amsrr.schemas.feasibility import FeasibilityResult, TrajectoryFeasibilityResult
 from amsrr.schemas.interaction_envelope import InteractionEnvelope
 from amsrr.schemas.irg import InteractionRequirementGraph
-from amsrr.schemas.morphology import DesignOutput, MorphologyGraph
+from amsrr.schemas.morphology import DesignAction, DesignOutput, MorphologyGraph
 from amsrr.schemas.policies import (
     ContactWrenchTrajectory,
     ControllerCommand,
@@ -17,9 +17,11 @@ from amsrr.schemas.policies import (
     PolicyCommand,
 )
 from amsrr.schemas.runtime import RuntimeObservation
+from amsrr.schemas.task_spec import TaskSpec
 
 
-P4_3_DATASET_SCHEMA_VERSION = "p4_3_dataset_v1"
+P4_3_DATASET_SCHEMA_LEGACY_VERSION = "p4_3_dataset_v1"
+P4_3_DATASET_SCHEMA_VERSION = "p4_3_dataset_v2"
 
 
 class DatasetSplit(StrEnum):
@@ -33,6 +35,54 @@ class DatasetKind(StrEnum):
     LOW_LEVEL_CONTROL = "low_level_control"
     INTERACTION_TRAJECTORY = "interaction_trajectory"
     DESIGN_OUTCOME = "design_outcome"
+    DESIGN_ACTION_TRAJECTORY = "design_action_trajectory"
+
+
+# P4.3 v1/v2 predates the sequential design-action records introduced for
+# Order 9.  Keep its required shard set explicit so extending DatasetKind does
+# not retroactively change the acceptance contract of archived P4.3 data.
+P4_3_DATASET_KINDS = (
+    DatasetKind.ISAAC_ROLLOUT,
+    DatasetKind.LOW_LEVEL_CONTROL,
+    DatasetKind.INTERACTION_TRAJECTORY,
+    DatasetKind.DESIGN_OUTCOME,
+)
+
+
+class TrajectorySourceKind(StrEnum):
+    DETERMINISTIC_TEACHER = "deterministic_teacher"
+    LEARNED_POLICY = "learned_policy"
+    DETERMINISTIC_FALLBACK = "deterministic_fallback"
+    IMPORTED_LEGACY = "imported_legacy"
+
+
+class HighLevelTransitionKind(StrEnum):
+    """How one learned high-level proposal entered the rollout dataset."""
+
+    EXECUTED_TRAJECTORY = "executed_trajectory"
+    CHECKER_REJECTION = "checker_rejection"
+
+
+@dataclass
+class TrajectoryProvenance(SchemaBase):
+    source_kind: TrajectorySourceKind
+    source_version: str
+    policy_checkpoint_sha256: str | None = None
+    parent_record_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def validate(self) -> None:
+        require_non_empty(self.source_version, "TrajectoryProvenance.source_version")
+        if self.policy_checkpoint_sha256 is not None:
+            require_non_empty(
+                self.policy_checkpoint_sha256,
+                "TrajectoryProvenance.policy_checkpoint_sha256",
+            )
+        if self.parent_record_id is not None:
+            require_non_empty(
+                self.parent_record_id,
+                "TrajectoryProvenance.parent_record_id",
+            )
 
 
 @dataclass
@@ -43,6 +93,58 @@ class StageDecisionMasks(SchemaBase):
     high_level_decision_mask: bool = False
     low_level_control_mask: bool = False
     assembly_execution_mask: bool = False
+
+
+@dataclass
+class PolicyBehaviorTrace(SchemaBase):
+    """Exact behavior-policy action needed for BC/PPO replay."""
+
+    policy_family: Literal["pi_l", "pi_h", "pi_d"]
+    policy_version: str
+    action_semantics: str
+    action_payload: dict[str, Any]
+    stochastic: bool = False
+    policy_checkpoint_sha256: str | None = None
+    old_log_prob: float | None = None
+    old_value: float | None = None
+    recurrent_state_in: list[float] = field(default_factory=list)
+    recurrent_state_out: list[float] = field(default_factory=list)
+
+    def validate(self) -> None:
+        require_non_empty(self.policy_version, "PolicyBehaviorTrace.policy_version")
+        require_non_empty(self.action_semantics, "PolicyBehaviorTrace.action_semantics")
+        _require_json_finite(self.action_payload, "PolicyBehaviorTrace.action_payload")
+        if (self.old_log_prob is None) != (self.old_value is None):
+            raise SchemaValidationError(
+                "PolicyBehaviorTrace.old_log_prob and old_value must both be present or absent"
+            )
+        if self.old_log_prob is not None:
+            _require_finite(self.old_log_prob, "PolicyBehaviorTrace.old_log_prob")
+            _require_finite(self.old_value, "PolicyBehaviorTrace.old_value")
+        for name in ("recurrent_state_in", "recurrent_state_out"):
+            values = getattr(self, name)
+            if not all(math.isfinite(float(value)) for value in values):
+                raise SchemaValidationError(f"PolicyBehaviorTrace.{name} must be finite")
+        if bool(self.recurrent_state_in) != bool(self.recurrent_state_out):
+            raise SchemaValidationError(
+                "PolicyBehaviorTrace recurrent states must both be present or absent"
+            )
+        if self.recurrent_state_in and len(self.recurrent_state_in) != len(
+            self.recurrent_state_out
+        ):
+            raise SchemaValidationError(
+                "PolicyBehaviorTrace recurrent state widths must match"
+            )
+        if self.policy_checkpoint_sha256 is not None:
+            _require_sha256(
+                self.policy_checkpoint_sha256,
+                "PolicyBehaviorTrace.policy_checkpoint_sha256",
+            )
+        if self.stochastic:
+            if self.policy_checkpoint_sha256 is None or self.old_log_prob is None:
+                raise SchemaValidationError(
+                    "stochastic PolicyBehaviorTrace requires checkpoint hash and old policy values"
+                )
 
 
 @dataclass
@@ -72,6 +174,13 @@ class LowLevelControlRecord(SchemaBase):
     reward: float | None
     terminal: bool
     stage_masks: StageDecisionMasks
+    task_type: str | None = None
+    task_adapter_id: str | None = None
+    phase_index: int | None = None
+    phase_count: int | None = None
+    truncated: bool = False
+    bootstrap_value: float = 0.0
+    behavior_trace: PolicyBehaviorTrace | None = None
 
     def validate(self) -> None:
         _require_record_identity(self.record_id, self.episode_id, self.task_id, type(self).__name__)
@@ -98,6 +207,42 @@ class LowLevelControlRecord(SchemaBase):
         if self.reward_terms is not None:
             _require_finite_mapping(self.reward_terms, "LowLevelControlRecord.reward_terms")
             _require_finite(self.reward, "LowLevelControlRecord.reward")
+        if self.terminal and self.truncated:
+            raise SchemaValidationError(
+                "LowLevelControlRecord cannot be terminal and truncated simultaneously"
+            )
+        _require_finite(self.bootstrap_value, "LowLevelControlRecord.bootstrap_value")
+        if not self.truncated and not math.isclose(self.bootstrap_value, 0.0, abs_tol=1.0e-12):
+            raise SchemaValidationError(
+                "LowLevelControlRecord bootstrap_value is restricted to truncation boundaries"
+            )
+        phase_fields = (
+            self.task_type,
+            self.task_adapter_id,
+            self.phase_index,
+            self.phase_count,
+        )
+        if any(value is not None for value in phase_fields):
+            if any(value is None for value in phase_fields):
+                raise SchemaValidationError(
+                    "LowLevelControlRecord Order9 task/phase fields must be supplied together"
+                )
+            require_non_empty(
+                self.task_adapter_id or "", "LowLevelControlRecord.task_adapter_id"
+            )
+            require_non_empty(
+                self.task_type or "", "LowLevelControlRecord.task_type"
+            )
+            if self.phase_count is None or self.phase_count < 1:
+                raise SchemaValidationError("LowLevelControlRecord.phase_count must be positive")
+            if self.phase_index is None or not 0 <= self.phase_index < self.phase_count:
+                raise SchemaValidationError(
+                    "LowLevelControlRecord.phase_index must lie within phase_count"
+                )
+        if self.behavior_trace is not None and self.behavior_trace.policy_family != "pi_l":
+            raise SchemaValidationError(
+                "LowLevelControlRecord behavior trace must belong to pi_l"
+            )
 
 
 @dataclass
@@ -120,6 +265,18 @@ class InteractionTrajectoryRecord(SchemaBase):
     assignment_feasibility_results: list[AssignmentFeasibilityResult]
     decision_return: float
     stage_masks: StageDecisionMasks
+    decision_reward: float | None = None
+    trajectory_provenance: TrajectoryProvenance | None = None
+    trajectory_feasibility_result: TrajectoryFeasibilityResult | None = None
+    terminal: bool = False
+    truncated: bool = False
+    bootstrap_value: float = 0.0
+    behavior_trace: PolicyBehaviorTrace | None = None
+    transition_kind: HighLevelTransitionKind = (
+        HighLevelTransitionKind.EXECUTED_TRAJECTORY
+    )
+    proposal_attempt_index: int = 0
+    fallback_reward_credited: bool = False
 
     def validate(self) -> None:
         _require_record_identity(self.record_id, self.episode_id, self.task_id, type(self).__name__)
@@ -129,6 +286,11 @@ class InteractionTrajectoryRecord(SchemaBase):
             "InteractionTrajectoryRecord.decision_time_s",
         )
         _require_finite(self.decision_return, "InteractionTrajectoryRecord.decision_return")
+        if self.decision_reward is not None:
+            _require_finite(
+                self.decision_reward,
+                "InteractionTrajectoryRecord.decision_reward",
+            )
         if not math.isclose(
             self.decision_time_s,
             self.runtime_observation.time_s,
@@ -197,6 +359,245 @@ class InteractionTrajectoryRecord(SchemaBase):
                     "InteractionTrajectoryRecord.assignment_feasibility_results reference unknown "
                     f"candidate ids: {unknown_result_ids}"
                 )
+        if self.trajectory_feasibility_result is not None:
+            result = self.trajectory_feasibility_result
+            if result.contract_version != self.trajectory.contract_version:
+                raise SchemaValidationError(
+                    "InteractionTrajectoryRecord trajectory feasibility contract must "
+                    "match trajectory.contract_version"
+                )
+            if len(result.knot_results) != len(self.trajectory.knots):
+                raise SchemaValidationError(
+                    "InteractionTrajectoryRecord trajectory feasibility result must "
+                    "cover every trajectory knot"
+                )
+        if self.terminal and self.truncated:
+            raise SchemaValidationError(
+                "InteractionTrajectoryRecord cannot be terminal and truncated simultaneously"
+            )
+        _require_finite(
+            self.bootstrap_value, "InteractionTrajectoryRecord.bootstrap_value"
+        )
+        if not self.truncated and not math.isclose(self.bootstrap_value, 0.0, abs_tol=1.0e-12):
+            raise SchemaValidationError(
+                "InteractionTrajectoryRecord bootstrap_value is restricted to truncation boundaries"
+            )
+        if self.behavior_trace is not None and self.behavior_trace.policy_family != "pi_h":
+            raise SchemaValidationError(
+                "InteractionTrajectoryRecord behavior trace must belong to pi_h"
+            )
+        if (
+            self.behavior_trace is not None
+            and self.behavior_trace.stochastic
+            and self.decision_reward is None
+        ):
+            raise SchemaValidationError(
+                "stochastic InteractionTrajectoryRecord requires decision_reward for PPO"
+            )
+        _require_non_negative_int(
+            self.proposal_attempt_index,
+            "InteractionTrajectoryRecord.proposal_attempt_index",
+        )
+        if self.fallback_reward_credited:
+            raise SchemaValidationError(
+                "deterministic fallback reward cannot be credited to pi_h"
+            )
+        if self.transition_kind == HighLevelTransitionKind.CHECKER_REJECTION:
+            if (
+                self.trajectory_feasibility_result is None
+                or self.trajectory_feasibility_result.feasible
+            ):
+                raise SchemaValidationError(
+                    "checker-rejection transition requires an infeasible C_H result"
+                )
+            if not self.terminal or self.truncated:
+                raise SchemaValidationError(
+                    "checker-rejection transition must be an independent terminal GAE boundary"
+                )
+            if self.decision_reward is None or self.decision_reward >= 0.0:
+                raise SchemaValidationError(
+                    "checker-rejection transition requires a negative decision reward"
+                )
+            if self.behavior_trace is None or not self.behavior_trace.stochastic:
+                raise SchemaValidationError(
+                    "checker-rejection transition requires its stochastic pi_H behavior"
+                )
+        elif (
+            self.trajectory_feasibility_result is not None
+            and not self.trajectory_feasibility_result.feasible
+        ):
+            raise SchemaValidationError(
+                "an infeasible pi_H trajectory cannot be marked as executed"
+            )
+
+
+@dataclass
+class DesignActionCandidateRecord(SchemaBase):
+    candidate_index: int
+    action: DesignAction
+    valid: bool
+    reason_code: str
+    score_prior: float = 0.0
+
+    def validate(self) -> None:
+        _require_non_negative_int(
+            self.candidate_index, "DesignActionCandidateRecord.candidate_index"
+        )
+        require_non_empty(self.reason_code, "DesignActionCandidateRecord.reason_code")
+        _require_finite(self.score_prior, "DesignActionCandidateRecord.score_prior")
+
+
+@dataclass
+class SequentialDesignStepRecord(SchemaBase):
+    step_index: int
+    partial_action_history: list[DesignAction]
+    candidates: list[DesignActionCandidateRecord]
+    selected_candidate_index: int
+    reward: float
+    terminal: bool
+    truncated: bool
+    bootstrap_value: float = 0.0
+    behavior_trace: PolicyBehaviorTrace | None = None
+
+    def validate(self) -> None:
+        _require_non_negative_int(self.step_index, "SequentialDesignStepRecord.step_index")
+        if not self.candidates:
+            raise SchemaValidationError("SequentialDesignStepRecord.candidates must be non-empty")
+        if [candidate.candidate_index for candidate in self.candidates] != list(
+            range(len(self.candidates))
+        ):
+            raise SchemaValidationError(
+                "SequentialDesignStepRecord candidate indices must be contiguous and ordered"
+            )
+        if not 0 <= self.selected_candidate_index < len(self.candidates):
+            raise SchemaValidationError(
+                "SequentialDesignStepRecord selected candidate index is out of range"
+            )
+        if not self.candidates[self.selected_candidate_index].valid:
+            raise SchemaValidationError(
+                "SequentialDesignStepRecord selected candidate must pass the deterministic mask"
+            )
+        _require_finite(self.reward, "SequentialDesignStepRecord.reward")
+        _require_finite(self.bootstrap_value, "SequentialDesignStepRecord.bootstrap_value")
+        if self.terminal and self.truncated:
+            raise SchemaValidationError(
+                "SequentialDesignStepRecord cannot be terminal and truncated simultaneously"
+            )
+        if not self.truncated and not math.isclose(self.bootstrap_value, 0.0, abs_tol=1.0e-12):
+            raise SchemaValidationError(
+                "SequentialDesignStepRecord bootstrap_value is restricted to truncation boundaries"
+            )
+        if self.behavior_trace is not None:
+            if self.behavior_trace.policy_family != "pi_d":
+                raise SchemaValidationError(
+                    "SequentialDesignStepRecord behavior trace must belong to pi_d"
+                )
+            selected = self.candidates[self.selected_candidate_index].action.to_dict()
+            payload_selected = self.behavior_trace.action_payload.get("selected_action")
+            if payload_selected is not None and payload_selected != selected:
+                raise SchemaValidationError(
+                    "SequentialDesignStepRecord selected action conflicts with behavior trace"
+                )
+
+
+@dataclass
+class SequentialDesignTrajectoryRecord(SchemaBase):
+    """One complete sequential pi_D decision with exact runtime masks."""
+
+    record_id: str
+    episode_id: str
+    task_id: str
+    split: DatasetSplit
+    task_spec: TaskSpec
+    irg: InteractionRequirementGraph
+    interaction_envelope: InteractionEnvelope
+    physical_model_hash: str
+    steps: list[SequentialDesignStepRecord]
+    design_output: DesignOutput | None
+    feasibility_result: FeasibilityResult | None
+    episode_return: float
+    task_success: bool
+    failure_reason: str | None
+    stage_masks: StageDecisionMasks
+    trajectory_provenance: TrajectoryProvenance
+
+    def validate(self) -> None:
+        _require_record_identity(self.record_id, self.episode_id, self.task_id, type(self).__name__)
+        require_non_empty(
+            self.physical_model_hash,
+            "SequentialDesignTrajectoryRecord.physical_model_hash",
+        )
+        if self.task_spec.task_id != self.task_id or self.irg.task_id != self.task_id:
+            raise SchemaValidationError(
+                "SequentialDesignTrajectoryRecord task identity mismatch"
+            )
+        if self.interaction_envelope.task_id != self.task_id:
+            raise SchemaValidationError(
+                "SequentialDesignTrajectoryRecord envelope task identity mismatch"
+            )
+        if not self.stage_masks.design_decision_mask:
+            raise SchemaValidationError(
+                "SequentialDesignTrajectoryRecord requires design_decision_mask"
+            )
+        if not self.steps:
+            raise SchemaValidationError(
+                "SequentialDesignTrajectoryRecord.steps must be non-empty"
+            )
+        if [step.step_index for step in self.steps] != list(range(len(self.steps))):
+            raise SchemaValidationError(
+                "SequentialDesignTrajectoryRecord step indices must be contiguous and ordered"
+            )
+        selected_history: list[DesignAction] = []
+        for step in self.steps:
+            if [action.to_dict() for action in step.partial_action_history] != [
+                action.to_dict() for action in selected_history
+            ]:
+                raise SchemaValidationError(
+                    "SequentialDesignTrajectoryRecord partial action history is not replayable"
+                )
+            selected_history.append(
+                step.candidates[step.selected_candidate_index].action
+            )
+        boundaries = [
+            index
+            for index, step in enumerate(self.steps)
+            if step.terminal or step.truncated
+        ]
+        if boundaries != [len(self.steps) - 1]:
+            raise SchemaValidationError(
+                "SequentialDesignTrajectoryRecord requires exactly one final boundary"
+            )
+        if (self.design_output is None) != (self.feasibility_result is None):
+            raise SchemaValidationError(
+                "SequentialDesignTrajectoryRecord design and feasibility must both be present or absent"
+            )
+        if self.design_output is not None:
+            if self.design_output.task_id != self.task_id:
+                raise SchemaValidationError(
+                    "SequentialDesignTrajectoryRecord design task identity mismatch"
+                )
+            if [action.to_dict() for action in self.design_output.design_actions] != [
+                action.to_dict() for action in selected_history
+            ]:
+                raise SchemaValidationError(
+                    "SequentialDesignTrajectoryRecord design action trace mismatch"
+                )
+        if self.task_success:
+            if self.design_output is None or not self.feasibility_result.feasible:
+                raise SchemaValidationError(
+                    "successful SequentialDesignTrajectoryRecord requires a feasible design"
+                )
+            if self.failure_reason is not None:
+                raise SchemaValidationError(
+                    "successful SequentialDesignTrajectoryRecord cannot have failure_reason"
+                )
+        elif self.failure_reason is None:
+            raise SchemaValidationError(
+                "failed SequentialDesignTrajectoryRecord requires failure_reason"
+            )
+        _require_finite(
+            self.episode_return, "SequentialDesignTrajectoryRecord.episode_return"
+        )
 
 
 @dataclass
@@ -288,7 +689,7 @@ class P4_3DatasetManifest(SchemaBase):
     """Task-disjoint split and provenance contract for P4.3a-d artifacts."""
 
     dataset_id: str
-    schema_version: Literal["p4_3_dataset_v1"]
+    schema_version: Literal["p4_3_dataset_v1", "p4_3_dataset_v2"]
     source_archive_paths: list[str]
     source_episode_ids: list[str]
     train_task_ids: list[str]
@@ -427,3 +828,28 @@ def _require_non_empty_mapping(values: dict[str, str], path: str) -> None:
     for key, value in values.items():
         require_non_empty(key, f"{path}.key")
         require_non_empty(value, f"{path}[{key!r}]")
+
+
+def _require_sha256(value: str, path: str) -> None:
+    if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
+        raise SchemaValidationError(f"{path} must be a lowercase SHA-256 digest")
+
+
+def _require_json_finite(value: Any, path: str) -> None:
+    if value is None or isinstance(value, (str, bool)):
+        return
+    if isinstance(value, (int, float)):
+        if not math.isfinite(float(value)):
+            raise SchemaValidationError(f"{path} must not contain non-finite numbers")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _require_json_finite(item, f"{path}[{index}]")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str) or not key:
+                raise SchemaValidationError(f"{path} keys must be non-empty strings")
+            _require_json_finite(item, f"{path}[{key!r}]")
+        return
+    raise SchemaValidationError(f"{path} contains a non-JSON value")

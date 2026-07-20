@@ -46,6 +46,9 @@ from amsrr.utils.hashing import hash_file, stable_hash
 
 
 ORDER3_POLICY_OUTPUT_MODE = "bounded_centroidal_twist_wrench_residual_v1"
+MORPHOLOGY_POLICY_RUNTIME_STATE_VERSION = (
+    "morphology_conditioned_policy_runtime_state_v1"
+)
 _GRAVITY_MPS2 = 9.81
 _EPSILON = 1.0e-6
 
@@ -352,6 +355,9 @@ class Order3PolicyInference:
     recurrent_state_out: list[float]
     learned_policy_applied: bool
     fallback_reason: str | None
+    normalized_joint_action: list[list[float]] = field(default_factory=list)
+    joint_action_mean: list[list[float]] = field(default_factory=list)
+    module_ids: list[int] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -465,6 +471,59 @@ class MorphologyConditionedLowLevelPolicy:
         self._last_graph_id = None
         self._last_time_s = None
 
+    def export_runtime_state(self) -> dict[str, object]:
+        """Export recurrent behavior state for an isolated shadow rollout."""
+
+        return {
+            "runtime_state_version": MORPHOLOGY_POLICY_RUNTIME_STATE_VERSION,
+            "checkpoint_sha256": self.checkpoint_sha256,
+            "hidden": self._hidden.detach().cpu().tolist(),
+            "previous_action": self._previous_action.detach().cpu().tolist(),
+            "last_graph_id": self._last_graph_id,
+            "last_time_s": self._last_time_s,
+        }
+
+    def restore_runtime_state(self, payload: dict[str, object]) -> None:
+        """Restore recurrent behavior state after validating the whole payload."""
+
+        if payload.get("runtime_state_version") != MORPHOLOGY_POLICY_RUNTIME_STATE_VERSION:
+            raise SchemaValidationError("morphology policy runtime state version mismatch")
+        checkpoint = payload.get("checkpoint_sha256")
+        if checkpoint != self.checkpoint_sha256:
+            raise SchemaValidationError(
+                "morphology policy runtime state checkpoint mismatch"
+            )
+        hidden = _runtime_tensor(
+            payload.get("hidden"),
+            expected_shape=tuple(self._hidden.shape),
+            device=self.device,
+            dtype=self._hidden.dtype,
+            name="hidden",
+        )
+        previous = _runtime_tensor(
+            payload.get("previous_action"),
+            expected_shape=tuple(self._previous_action.shape),
+            device=self.device,
+            dtype=self._previous_action.dtype,
+            name="previous_action",
+        )
+        graph_id = payload.get("last_graph_id")
+        if graph_id is not None and (not isinstance(graph_id, str) or not graph_id):
+            raise SchemaValidationError("morphology policy last_graph_id is invalid")
+        last_time = payload.get("last_time_s")
+        if last_time is not None:
+            if (
+                not isinstance(last_time, (int, float))
+                or not math.isfinite(float(last_time))
+                or float(last_time) < 0.0
+            ):
+                raise SchemaValidationError("morphology policy last_time_s is invalid")
+            last_time = float(last_time)
+        self._hidden = hidden
+        self._previous_action = previous
+        self._last_graph_id = graph_id
+        self._last_time_s = last_time
+
     def command(self, context: LowLevelPolicyContext) -> PolicyCommand:
         return self.command_with_trace(context).command
 
@@ -516,6 +575,12 @@ class MorphologyConditionedLowLevelPolicy:
                     [privileged], dtype=self._hidden.dtype, device=self.device
                 ),
                 deterministic=True,
+                **_optional_phase_step_kwargs(
+                    self.model,
+                    context,
+                    device=self.device,
+                    dtype=self._hidden.dtype,
+                ),
             )
         value = float(step.value[0].detach().cpu().item())
         if not math.isfinite(value):
@@ -596,6 +661,12 @@ class MorphologyConditionedLowLevelPolicy:
                         [privileged], dtype=self._hidden.dtype, device=self.device
                     ),
                     deterministic=self.deterministic,
+                    **_optional_phase_step_kwargs(
+                        self.model,
+                        context,
+                        device=self.device,
+                        dtype=self._hidden.dtype,
+                    ),
                 )
         except (RuntimeError, SchemaValidationError, TypeError, ValueError):
             return self._fallback(baseline, "model_inference_error", context.morphology_graph.graph_id)
@@ -636,6 +707,30 @@ class MorphologyConditionedLowLevelPolicy:
             ],
             learned_policy_applied=True,
             fallback_reason=None,
+            normalized_joint_action=(
+                [
+                    [float(value) for value in row]
+                    for row in step.joint_action[0].detach().cpu().tolist()
+                ]
+                if hasattr(step, "joint_action")
+                else []
+            ),
+            joint_action_mean=(
+                [
+                    [float(value) for value in row]
+                    for row in step.joint_action_mean[0].detach().cpu().tolist()
+                ]
+                if hasattr(step, "joint_action_mean")
+                else []
+            ),
+            module_ids=[
+                int(value)
+                for value in step.graph_encoding.module_ids[0]
+                .detach()
+                .cpu()
+                .tolist()
+                if int(value) >= 0
+            ],
         )
 
     def _decode_command(
@@ -1073,6 +1168,23 @@ def _dock_mechanism_joint_ids(physical_model: PhysicalModel) -> list[str]:
     )
 
 
+def _optional_phase_step_kwargs(
+    model: nn.Module,
+    context: LowLevelPolicyContext,
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> dict[str, torch.Tensor]:
+    """Supply the additive Order-9 phase contract without changing Order-3 calls."""
+
+    builder = getattr(model, "phase_feature_tensor", None)
+    if builder is None:
+        return {}
+    return {
+        "phase_features": builder(context, device=device, dtype=dtype),
+    }
+
+
 def _orientation_error_body(current_pose: Pose7D, target_pose: Pose7D) -> list[float]:
     current_rotation = quat_to_matrix(tuple(float(value) for value in current_pose[3:7]))
     target_rotation = quat_to_matrix(tuple(float(value) for value in target_pose[3:7]))
@@ -1111,9 +1223,36 @@ def _require_tensor_shape(tensor: torch.Tensor, shape: tuple[int, ...], name: st
         raise ValueError(f"Order3 {name} must be finite")
 
 
+def _runtime_tensor(
+    value: object,
+    *,
+    expected_shape: tuple[int, ...],
+    device: torch.device,
+    dtype: torch.dtype,
+    name: str,
+) -> torch.Tensor:
+    try:
+        tensor = torch.as_tensor(value, device=device, dtype=dtype)
+    except (TypeError, ValueError) as exc:
+        raise SchemaValidationError(
+            f"morphology policy runtime {name} is not numeric"
+        ) from exc
+    if tuple(tensor.shape) != expected_shape:
+        raise SchemaValidationError(
+            f"morphology policy runtime {name} has shape {tuple(tensor.shape)}, "
+            f"expected {expected_shape}"
+        )
+    if not bool(torch.isfinite(tensor).all().item()):
+        raise SchemaValidationError(
+            f"morphology policy runtime {name} must be finite"
+        )
+    return tensor.clone()
+
+
 __all__ = [
     "ORDER3_ACTOR_FEATURE_NAMES",
     "ORDER3_POLICY_OUTPUT_MODE",
+    "MORPHOLOGY_POLICY_RUNTIME_STATE_VERSION",
     "LoadedOrder3PolicyCheckpoint",
     "MorphologyConditionedActorCritic",
     "MorphologyConditionedLowLevelPolicy",

@@ -17,7 +17,10 @@ from amsrr.schemas.datasets import (
     InteractionTrajectoryRecord,
     LowLevelControlRecord,
     P4_3DatasetManifest,
+    P4_3_DATASET_KINDS,
     StageDecisionMasks,
+    TrajectoryProvenance,
+    TrajectorySourceKind,
 )
 from amsrr.schemas.policies import ContactWrenchTrajectory, InteractionKnot
 from amsrr.training.p4_3_reward import P4_3RewardConfig, compute_p4_3_archive_rewards
@@ -254,6 +257,20 @@ def _trajectory_record(
         assignment_feasibility_results=feasibility,
         decision_return=float(sum(record["reward"] for record in rewards)),
         stage_masks=StageDecisionMasks(high_level_decision_mask=True),
+        trajectory_provenance=TrajectoryProvenance(
+            source_kind=TrajectorySourceKind.IMPORTED_LEGACY,
+            source_version=str(
+                archive.rollout_artifacts.get(
+                    "high_level_policy_version",
+                    trajectory.derived_mode_label or "legacy_archive_unknown",
+                )
+            ),
+            metadata={
+                "source_archive_episode_id": archive.episode_id,
+                "trajectory_feasibility_not_reconstructed": True,
+            },
+        ),
+        trajectory_feasibility_result=None,
     )
 
 
@@ -385,7 +402,7 @@ def _manifest(
     )
     record_counts = {
         kind.value: sum(shard.record_count for shard in shards if shard.dataset_kind == kind)
-        for kind in DatasetKind
+        for kind in P4_3_DATASET_KINDS
     }
     split_tasks = {
         split: sorted(task_id for task_id, value in split_by_task.items() if value == split)

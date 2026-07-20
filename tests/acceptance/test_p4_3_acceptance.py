@@ -15,6 +15,7 @@ from amsrr.policies.learned_low_level_policy import (
     PI_L_TARGET_NAMES,
 )
 from amsrr.schemas.datasets import (
+    P4_3_DATASET_KINDS,
     DatasetKind,
     DatasetShard,
     DatasetSplit,
@@ -365,7 +366,7 @@ def _write_manifest(tmp_path: Path) -> Path:
     }
     shards: list[DatasetShard] = []
     source_episode_ids: list[str] = []
-    for kind in DatasetKind:
+    for kind in P4_3_DATASET_KINDS:
         for split in DatasetSplit:
             task_id = task_by_split[split]
             episode_id = f"episode-{split.value}"
@@ -410,7 +411,7 @@ def _write_manifest(tmp_path: Path) -> Path:
         validation_task_ids=["task-validation"],
         held_out_task_ids=["task-held"],
         shards=shards,
-        record_counts={kind.value: 3 for kind in DatasetKind},
+        record_counts={kind.value: 3 for kind in P4_3_DATASET_KINDS},
         source_hash="source",
         config_hash="config",
         robot_model_hash="robot",

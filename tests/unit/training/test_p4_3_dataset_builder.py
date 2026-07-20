@@ -11,6 +11,7 @@ from amsrr.training.p4_0_full_pipeline_runner import (
 )
 from amsrr.training.p4_3_dataset_builder import build_p4_3_dataset
 from amsrr.training.p4_3_reward import compute_p4_3_archive_rewards
+from amsrr.training.order9_dataset import load_order9_dataset
 from amsrr.training.p2_inspection_context import default_grasp_carry_task_spec
 from amsrr.irg.irg_builder import IRGBuilder
 from amsrr.policies.contact_candidate_sampler import ContactCandidateSampler
@@ -113,6 +114,10 @@ def test_p4_3_dataset_builder_writes_aligned_task_disjoint_shards(tmp_path: Path
             assert final.reward_terms["state_transition_data_available"] == 0.0
             assert final.reward_terms["terminal_reward_data_available"] == 0.0
     assert Path(built.manifest_path).is_file()
+    verified = load_order9_dataset(built.manifest_path)
+    assert verified.manifest_sha256
+    assert len(verified.low_level_records) == len(built.low_level_records)
+    assert len(verified.trajectory_records) == len(built.trajectory_records)
 
 
 def _sampled_indices(count: int, *, stride: int) -> list[int]:

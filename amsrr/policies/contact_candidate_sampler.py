@@ -4,6 +4,10 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+from amsrr.geometry.contact_material import (
+    ContactFrictionResolution,
+    resolve_contact_friction,
+)
 from amsrr.geometry.surface_patch_graph import dot, normalize, orthonormal_basis
 from amsrr.policies.contact_candidate_set import build_contact_candidate_set
 from amsrr.schemas.common import ContactMode, Pose7D, SchemaValidationError, Vector3
@@ -16,7 +20,7 @@ from amsrr.schemas.runtime import RuntimeObservation
 from amsrr.schemas.task_spec import TaskSpec
 
 
-CONTACT_CANDIDATE_SAMPLER_VERSION = "p1_agent_h_sampler_v1"
+CONTACT_CANDIDATE_SAMPLER_VERSION = "p1_agent_h_sampler_v2_material_combine"
 CONTACT_MODE_TO_ANCHOR_TYPE = {
     ContactMode.GRASP: "grasp",
     ContactMode.SUPPORT: "support",
@@ -122,8 +126,21 @@ class ContactCandidateSampler:
         pose_world = _contact_pose_world(task_spec, slot.target_entity_id, region, patch, sample_index)
         normal_world = _normal_world(task_spec, slot.target_entity_id, region.normal_summary_object)
         tangent_u, tangent_v = orthonormal_basis(normal_world)
+        friction = resolve_contact_friction(
+            task_spec.metadata,
+            target_entity_id=slot.target_entity_id,
+            contact_mode=slot.contact_mode,
+            target_surface_friction=region.friction,
+        )
         violations = _unary_violations(slot, region, anchor, normal_world, runtime_observation)
-        scores = _candidate_scores(slot, region, anchor, normal_world, violations)
+        scores = _candidate_scores(
+            slot,
+            region,
+            anchor,
+            normal_world,
+            violations,
+            friction=friction,
+        )
         return ContactCandidate(
             candidate_id=candidate_id,
             slot_id=slot.slot_id,
@@ -135,7 +152,7 @@ class ContactCandidateSampler:
             normal_world=normal_world,
             tangent_basis_world=[*tangent_u, *tangent_v],
             contact_mode=slot.contact_mode,
-            friction=region.friction,
+            friction=friction.effective_friction,
             patch_area_m2=region.area_m2,
             candidate_scores=scores,
             unary_valid=not violations,
@@ -353,8 +370,14 @@ def _candidate_scores(
     anchor: RobotAnchor,
     normal_world: Vector3,
     violations: list[str],
+    *,
+    friction: ContactFrictionResolution,
 ) -> dict[str, float]:
-    friction = region.friction if region.friction is not None else 0.5
+    effective_friction = (
+        friction.effective_friction
+        if friction.effective_friction is not None
+        else 0.5
+    )
     min_force = _optional_float(slot.required_anchor_capability.get("min_force_n")) or 0.0
     max_force = _optional_float(anchor.capability.get("max_force_n")) or max(min_force, 1.0)
     return {
@@ -364,8 +387,25 @@ def _candidate_scores(
         "surface_quality": min(1.0, max(region.area_m2, 0.0) / 0.01),
         "moment_arm_quality": _moment_arm_quality(region.normal_summary_object),
         "support_quality": 1.0 if slot.contact_mode == ContactMode.SUPPORT and normal_world[2] > 0.0 else 0.5,
-        "friction_plausibility": min(1.0, max(friction, 0.0)),
+        "friction_plausibility": min(1.0, max(effective_friction, 0.0)),
         "anchor_capability": 1.0 if min_force <= 0.0 else min(1.0, max_force / max(min_force, 1.0e-9)),
+        "material_contract_applied": 1.0 if friction.task_material_applied else 0.0,
+        "material_target_surface_friction": (
+            0.0
+            if friction.target_surface_friction is None
+            else friction.target_surface_friction
+        ),
+        "material_robot_surface_friction": (
+            0.0
+            if friction.robot_surface_friction is None
+            else friction.robot_surface_friction
+        ),
+        "material_effective_friction": (
+            0.0
+            if friction.effective_friction is None
+            else friction.effective_friction
+        ),
+        "material_friction_combine_mode_code": friction.combine_mode_code,
     }
 
 

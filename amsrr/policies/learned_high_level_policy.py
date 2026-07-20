@@ -191,12 +191,12 @@ class P4_3HighLevelRanker(nn.Module):
 
 
 class LearnedHighLevelPolicy:
-    """Safe learned pi_H selector with a deterministic P4.2 planner fallback.
+    """Compatibility runtime for the P4.3 candidate-ranker warm-up model.
 
-    The learned model only ranks existing candidate/group IDs and may shift
-    interior knot times by a bounded residual. Deterministic code constructs and
-    validates the final ``ContactWrenchTrajectory``. It never emits controller or
-    actuator commands.
+    This class is not the final pure pi_H: its learned component only ranks
+    existing candidate/group IDs, while deterministic code decodes a trajectory
+    and ``plan`` owns a legacy fallback. New Order 9 runtime code calls
+    ``propose`` and applies the separate C_H/fallback boundary instead.
     """
 
     def __init__(
@@ -242,49 +242,56 @@ class LearnedHighLevelPolicy:
         )
 
     def plan(self, context: HighLevelPolicyContext) -> ContactWrenchTrajectory:
-        _validate_high_level_context(context)
+        """Legacy safe wrapper retained for P4.3 checkpoint compatibility."""
+
         try:
-            encoding = self.encoder.encode(context.contact_candidate_set)
-            scores = self.score_provider.predict(encoding)
-            selected_ids, selected_group_id = self._select_candidate_ids(
-                context.contact_candidate_set,
-                encoding,
-                scores,
-                context=context,
-            )
-            timing_residual = self._validated_timing_residual(scores.timing_residual_s)
-            feasibility = evaluate_selected_candidate_ids(
-                context,
-                selected_ids,
-                update_cache=True,
-            )
-            if not feasibility.feasible:
-                raise SchemaValidationError(
-                    "learned pi_H selection failed deterministic assignment feasibility: "
-                    + ",".join(feasibility.violation_codes)
-                )
-            trajectory = self._decode_trajectory(
-                context,
-                selected_ids=selected_ids,
-                selected_group_id=selected_group_id,
-                timing_residual_s=timing_residual,
-            )
-            _validate_decoded_trajectory(
-                trajectory,
-                context.contact_candidate_set,
-                expected_candidate_ids=set(selected_ids),
-            )
-            self.last_decision = HighLevelPolicyDecision(
-                used_fallback=False,
-                fallback_reason=None,
-                selected_candidate_ids=tuple(sorted(selected_ids)),
-                selected_group_id=selected_group_id,
-                timing_residual_s=timing_residual,
-                assignment_feasible=True,
-            )
-            return trajectory
+            return self.propose(context)
         except (SchemaValidationError, ValueError, KeyError, RuntimeError) as exc:
             return self._fallback(context, reason=f"{type(exc).__name__}: {exc}")
+
+    def propose(self, context: HighLevelPolicyContext) -> ContactWrenchTrajectory:
+        """Return the warm-up model proposal without invoking fallback."""
+
+        _validate_high_level_context(context)
+        encoding = self.encoder.encode(context.contact_candidate_set)
+        scores = self.score_provider.predict(encoding)
+        selected_ids, selected_group_id = self._select_candidate_ids(
+            context.contact_candidate_set,
+            encoding,
+            scores,
+            context=context,
+        )
+        timing_residual = self._validated_timing_residual(scores.timing_residual_s)
+        feasibility = evaluate_selected_candidate_ids(
+            context,
+            selected_ids,
+            update_cache=True,
+        )
+        if not feasibility.feasible:
+            raise SchemaValidationError(
+                "learned pi_H selection failed deterministic assignment feasibility: "
+                + ",".join(feasibility.violation_codes)
+            )
+        trajectory = self._decode_trajectory(
+            context,
+            selected_ids=selected_ids,
+            selected_group_id=selected_group_id,
+            timing_residual_s=timing_residual,
+        )
+        _validate_decoded_trajectory(
+            trajectory,
+            context.contact_candidate_set,
+            expected_candidate_ids=set(selected_ids),
+        )
+        self.last_decision = HighLevelPolicyDecision(
+            used_fallback=False,
+            fallback_reason=None,
+            selected_candidate_ids=tuple(sorted(selected_ids)),
+            selected_group_id=selected_group_id,
+            timing_residual_s=timing_residual,
+            assignment_feasible=True,
+        )
+        return trajectory
 
     def _select_candidate_ids(
         self,

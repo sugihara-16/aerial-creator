@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
+import pytest
+
+from amsrr.geometry.contact_material import with_selected_robot_contact_material
 from amsrr.irg.envelope_extractor import InteractionEnvelopeExtractor
 from amsrr.irg.irg_builder import IRGBuilder
 from amsrr.policies.contact_candidate_sampler import CONTACT_CANDIDATE_SAMPLER_VERSION, ContactCandidateSampler
@@ -99,3 +104,41 @@ def test_contact_candidate_sampler_uses_robot_anchor_associations(grasp_carry_di
         for candidate in candidate_set.candidates
     } <= anchor_slot_pairs
     assert type(candidate_set).from_json(candidate_set.to_json()).to_dict() == candidate_set.to_dict()
+
+
+def test_contact_candidate_sampler_archives_effective_selected_surface_friction(
+    grasp_carry_dict: dict,
+) -> None:
+    data = deepcopy(grasp_carry_dict)
+    target_id = str(data["scene"]["objects"][0]["object_id"])
+    data["metadata"] = with_selected_robot_contact_material(
+        data.get("metadata", {}),
+        target_entity_ids=[target_id],
+        contact_modes=[ContactMode.GRASP],
+        robot_static_friction=4.5,
+        friction_combine_mode="max",
+    )
+    task, irg, envelope, descriptors, design = _pipeline(data)
+
+    candidate_set = ContactCandidateSampler().sample(
+        task_spec=task,
+        irg=irg,
+        interaction_envelope=envelope,
+        morphology_graph=design.target_morphology,
+        geometry_descriptors=descriptors,
+    )
+
+    grasp = [
+        item for item in candidate_set.candidates
+        if item.contact_mode == ContactMode.GRASP
+    ]
+    support = [
+        item for item in candidate_set.candidates
+        if item.contact_mode == ContactMode.SUPPORT
+    ]
+    assert grasp
+    assert support
+    assert all(item.friction == pytest.approx(4.5) for item in grasp)
+    assert all(item.candidate_scores["material_contract_applied"] == 1.0 for item in grasp)
+    assert all(item.candidate_scores["material_effective_friction"] == pytest.approx(4.5) for item in grasp)
+    assert all(item.candidate_scores["material_contract_applied"] == 0.0 for item in support)

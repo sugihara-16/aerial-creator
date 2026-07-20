@@ -28,8 +28,20 @@ from amsrr.policies.morphology_conditioned_low_level_policy import (
     order3_graph_feature_schema_hash,
     save_order3_policy_checkpoint,
 )
+from amsrr.policies.order9_low_level_policy import (
+    Order9LowLevelPolicyConfig,
+    Order9PhaseConditionedActorCritic,
+    order9_phase_actor_feature_vector,
+)
+from amsrr.policies.order9_low_level_runtime import Order9LowLevelRuntimePolicy
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
 from amsrr.schemas.common import SchemaValidationError
+from amsrr.schemas.datasets import (
+    DatasetSplit,
+    LowLevelControlRecord,
+    PolicyBehaviorTrace,
+    StageDecisionMasks,
+)
 from amsrr.schemas.morphology import MorphologyGraph
 from amsrr.schemas.order3 import (
     ORDER3_ACTION_NAMES,
@@ -47,6 +59,7 @@ from amsrr.schemas.policies import (
     POLICY_COMMAND_CONTRACT_CENTROIDAL,
     CentroidalTarget,
     ContactWrenchTrajectory,
+    ControllerCommand,
     ControllerStatus,
     InteractionKnot,
 )
@@ -55,6 +68,26 @@ from amsrr.schemas.runtime import (
     ModuleRuntimeState,
     RuntimeObservation,
     TaskProgressState,
+)
+from amsrr.training.order9_pi_l_learning import (
+    compute_order9_pi_l_behavior_cloning_loss,
+    compute_order9_pi_l_ppo_loss,
+    encode_order9_pi_l_teacher_action,
+)
+from amsrr.training.order9_curriculum import Order9PPOOptimizationConfig
+from amsrr.training.order9_checkpoints import save_order9_policy_checkpoint
+from amsrr.training.order9_curriculum import load_order9_learning_config
+from amsrr.training.order9_offline_training import build_order9_checkpoint_metadata
+from amsrr.training.order9_pipeline import order9_schedule_hash, order9_stage_by_id
+from amsrr.training.order9_ppo import (
+    ORDER9_PI_L_ACTION_SEMANTICS,
+    order9_pi_l_behavior_trace_from_inference,
+    update_order9_pi_l_ppo,
+)
+from amsrr.training.order9_tensor_runtime import (
+    Order9CentroidalTensorObservation,
+    Order9TensorizedTopologyBucket,
+    order9_low_level_actor_features_from_tensors,
 )
 from amsrr.utils.hashing import hash_file, stable_hash
 
@@ -123,6 +156,446 @@ def test_actor_critic_shapes_masks_and_backpropagate_through_graph_and_gru(
     assert torch.count_nonzero(model.recurrent.weight_ih.grad).item() > 0
     assert model.actor_mean.weight.grad is not None
     assert torch.count_nonzero(model.actor_mean.weight.grad).item() > 0
+
+
+def test_policy_runtime_state_round_trip_restores_recurrent_behavior(
+    physical_model: PhysicalModel,
+) -> None:
+    config = _small_config()
+    runtime = MorphologyConditionedLowLevelPolicy(
+        model=MorphologyConditionedActorCritic(config),
+        physical_model=physical_model,
+        config=config,
+    )
+    runtime.checkpoint_sha256 = "a" * 64
+    runtime._hidden.fill_(0.25)
+    runtime._previous_action.fill_(-0.5)
+    runtime._last_graph_id = "runtime-graph"
+    runtime._last_time_s = 1.25
+    exported = runtime.export_runtime_state()
+
+    runtime.reset()
+    runtime.restore_runtime_state(exported)
+
+    assert torch.allclose(runtime._hidden, torch.full_like(runtime._hidden, 0.25))
+    assert torch.allclose(
+        runtime._previous_action,
+        torch.full_like(runtime._previous_action, -0.5),
+    )
+    assert runtime._last_graph_id == "runtime-graph"
+    assert runtime._last_time_s == pytest.approx(1.25)
+
+
+def test_policy_runtime_state_fails_closed_on_nonfinite_hidden(
+    physical_model: PhysicalModel,
+) -> None:
+    config = _small_config()
+    runtime = MorphologyConditionedLowLevelPolicy(
+        model=MorphologyConditionedActorCritic(config),
+        physical_model=physical_model,
+        config=config,
+    )
+    runtime.checkpoint_sha256 = "b" * 64
+    exported = runtime.export_runtime_state()
+    exported["hidden"][0][0] = float("nan")  # type: ignore[index]
+
+    with pytest.raises(SchemaValidationError, match="must be finite"):
+        runtime.restore_runtime_state(exported)
+
+
+def test_order9_actor_conditions_on_phase_and_includes_joint_action_in_log_prob(
+    physical_model: PhysicalModel,
+    morphology_distribution: RandomConnectedMorphologyDistribution,
+) -> None:
+    graphs = [
+        morphology_distribution.sample(seed=911, module_count=2),
+        morphology_distribution.sample(seed=912, module_count=5),
+    ]
+    contexts = [
+        replace(
+            _context(graph, physical_model),
+            task_type="object_grasp_carry",
+            task_adapter_id="object_grasp_carry_v1",
+            phase_index=index,
+            phase_count=11,
+        )
+        for index, graph in enumerate(graphs)
+    ]
+    config = Order9LowLevelPolicyConfig(
+        graph_hidden_dim=16,
+        graph_message_layers=1,
+        recurrent_hidden_dim=24,
+        max_local_joint_slots=4,
+    )
+    model = Order9PhaseConditionedActorCritic(config)
+    phase_features = torch.tensor(
+        [order9_phase_actor_feature_vector(context, config) for context in contexts]
+    )
+    step = model.step(
+        graphs,
+        [context.runtime_observation for context in contexts],
+        torch.zeros((2, len(ORDER3_ACTOR_FEATURE_NAMES))),
+        torch.zeros((2, ORDER3_ACTION_SIZE)),
+        model.initial_state(2),
+        phase_features=phase_features,
+        deterministic=False,
+    )
+
+    assert step.action.shape == (2, ORDER3_ACTION_SIZE)
+    assert step.joint_action.shape == (2, 5, 3 * config.max_local_joint_slots)
+    assert torch.count_nonzero(step.joint_action[0, 2:]).item() == 0
+    assert torch.isfinite(step.log_prob).all()
+    assert torch.isfinite(step.entropy).all()
+    loss = step.log_prob.mean() + step.value.mean() + step.joint_action.square().mean()
+    loss.backward()
+    assert model.joint_decoder[0].weight.grad is not None
+    assert model.joint_actor_log_std.grad is not None
+
+
+def test_order9_model_warm_starts_order3_trunk_and_deploys_with_phase_context(
+    physical_model: PhysicalModel,
+    morphology_distribution: RandomConnectedMorphologyDistribution,
+) -> None:
+    graph = morphology_distribution.sample(seed=913, module_count=3)
+    config = Order9LowLevelPolicyConfig(
+        graph_hidden_dim=16,
+        graph_message_layers=1,
+        recurrent_hidden_dim=24,
+        max_local_joint_slots=4,
+    )
+    order3 = MorphologyConditionedActorCritic(config)
+    model = Order9PhaseConditionedActorCritic(config)
+    missing, unexpected = model.initialize_from_order3(order3)
+    context = replace(
+        _context(graph, physical_model),
+        task_type="object_grasp_carry",
+        task_adapter_id="object_grasp_carry_v1",
+        phase_index=3,
+        phase_count=11,
+    )
+    wrapper = MorphologyConditionedLowLevelPolicy(
+        model=model,
+        physical_model=physical_model,
+        config=config,
+        deterministic=True,
+    )
+
+    inference = wrapper.command_with_trace(context)
+
+    assert missing
+    assert unexpected == []
+    assert inference.learned_policy_applied
+    assert inference.normalized_joint_action
+    assert inference.joint_action_mean
+    assert inference.command.control_contract_version == POLICY_COMMAND_CONTRACT_CENTROIDAL
+    assert inference.command.joint_position_targets
+
+
+def test_order9_pi_l_teacher_codec_and_losses_cover_both_action_heads(
+    physical_model: PhysicalModel,
+    morphology_distribution: RandomConnectedMorphologyDistribution,
+) -> None:
+    graph = morphology_distribution.sample(seed=914, module_count=3)
+    context = replace(
+        _context(graph, physical_model),
+        task_type="object_grasp_carry",
+        task_adapter_id="object_grasp_carry_v1",
+        phase_index=2,
+        phase_count=11,
+    )
+    config = Order9LowLevelPolicyConfig(
+        graph_hidden_dim=16,
+        graph_message_layers=1,
+        recurrent_hidden_dim=24,
+        max_local_joint_slots=4,
+    )
+    teacher_model = Order9PhaseConditionedActorCritic(config)
+    teacher_policy = MorphologyConditionedLowLevelPolicy(
+        model=teacher_model,
+        physical_model=physical_model,
+        config=config,
+        deterministic=True,
+    )
+    teacher_trace = teacher_policy.command_with_trace(context)
+    baseline = BaselineLowLevelPolicy(
+        BaselineLowLevelPolicyConfig(
+            control_contract_version=POLICY_COMMAND_CONTRACT_CENTROIDAL
+        )
+    ).command(context)
+    control_model = RigidBodyControlModelBuilder().build(
+        graph, physical_model, context.runtime_observation
+    )
+
+    encoded = encode_order9_pi_l_teacher_action(
+        context=context,
+        teacher_command=teacher_trace.command,
+        baseline_command=baseline,
+        control_model=control_model,
+        config=config,
+    )
+
+    assert encoded.global_action == pytest.approx(teacher_trace.normalized_action)
+    assert torch.allclose(
+        torch.tensor(encoded.joint_action),
+        torch.tensor(teacher_trace.normalized_joint_action),
+        atol=1.0e-6,
+    )
+    student = Order9PhaseConditionedActorCritic(config)
+    loss = compute_order9_pi_l_behavior_cloning_loss(
+        student,
+        [context],
+        [teacher_trace.command],
+        baseline_commands=[baseline],
+        decision_returns=[1.5],
+    )
+    assert loss.active_joint_coordinate_count > 0
+    assert torch.isfinite(loss.total)
+    loss.total.backward()
+    assert student.actor_mean.weight.grad is not None
+    assert student.joint_decoder[0].weight.grad is not None
+
+    ppo = compute_order9_pi_l_ppo_loss(
+        new_log_prob=torch.tensor([-0.2], requires_grad=True),
+        old_log_prob=torch.tensor([-0.3]),
+        advantages=torch.tensor([1.0]),
+        new_values=torch.tensor([0.4], requires_grad=True),
+        returns=torch.tensor([0.8]),
+        entropy=torch.tensor([0.5]),
+    )
+    assert torch.isfinite(ppo)
+
+    excessive_twist = list(teacher_trace.command.desired_body_twist or [0.0] * 6)
+    excessive_twist[0] += 10.0
+    with pytest.raises(SchemaValidationError, match="exceeds the actor trust region"):
+        encode_order9_pi_l_teacher_action(
+            context=context,
+            teacher_command=replace(
+                teacher_trace.command, desired_body_twist=excessive_twist
+            ),
+            baseline_command=baseline,
+            control_model=control_model,
+            config=config,
+        )
+
+
+def test_order9_pi_l_recurrent_behavior_trace_replays_through_ppo(
+    physical_model: PhysicalModel,
+    morphology_distribution: RandomConnectedMorphologyDistribution,
+) -> None:
+    graph = morphology_distribution.sample(seed=916, module_count=3)
+    context = replace(
+        _context(graph, physical_model),
+        task_type="object_grasp_carry",
+        task_adapter_id="object_grasp_carry_v1",
+        phase_index=2,
+        phase_count=11,
+    )
+    config = Order9LowLevelPolicyConfig(
+        graph_hidden_dim=16,
+        graph_message_layers=1,
+        recurrent_hidden_dim=24,
+        max_local_joint_slots=4,
+    )
+    model = Order9PhaseConditionedActorCritic(config)
+    wrapper = MorphologyConditionedLowLevelPolicy(
+        model=model,
+        physical_model=physical_model,
+        config=config,
+        deterministic=False,
+    )
+    inference = wrapper.command_with_trace(context)
+    checkpoint_sha = "c" * 64
+    module_ids = sorted(module.module_id for module in graph.modules)
+    behavior = PolicyBehaviorTrace(
+        policy_family="pi_l",
+        policy_version="order9_phase_conditioned_morphology_pi_l_v1",
+        action_semantics=ORDER9_PI_L_ACTION_SEMANTICS,
+        action_payload={
+            "global_action": inference.normalized_action,
+            "module_ids": module_ids,
+            "joint_action": inference.normalized_joint_action,
+            "previous_global_action": inference.previous_action,
+            "privileged_disturbance_body": [0.0] * 6,
+        },
+        stochastic=True,
+        policy_checkpoint_sha256=checkpoint_sha,
+        old_log_prob=inference.log_prob,
+        old_value=inference.value,
+        recurrent_state_in=inference.recurrent_state_in,
+        recurrent_state_out=inference.recurrent_state_out,
+    )
+    record = LowLevelControlRecord(
+        record_id="order9-pi-l-ppo-0",
+        episode_id="order9-pi-l-ppo-episode",
+        task_id="order9-pi-l-ppo-task",
+        split=DatasetSplit.TRAIN,
+        step_index=0,
+        time_s=context.runtime_observation.time_s,
+        trajectory_record_id="order9-pi-l-trajectory-0",
+        active_trajectory_index=0,
+        active_knot_index=0,
+        runtime_observation=context.runtime_observation,
+        active_knot=context.active_knot,
+        policy_command=inference.command,
+        controller_command=ControllerCommand(
+            rotor_thrusts_n={},
+            vectoring_joint_targets={},
+            joint_torque_commands={},
+            dock_mechanism_commands={},
+            controller_status=context.runtime_observation.controller_status,
+            control_contract_version=POLICY_COMMAND_CONTRACT_CENTROIDAL,
+        ),
+        actuator_target_record={},
+        reward_terms={"task": 1.0},
+        reward=1.0,
+        terminal=True,
+        stage_masks=StageDecisionMasks(low_level_control_mask=True),
+        task_type="object_grasp_carry",
+        task_adapter_id="object_grasp_carry_v1",
+        phase_index=2,
+        phase_count=11,
+        behavior_trace=behavior,
+    )
+    optimizer = torch.optim.Adam(model.parameters(), lr=1.0e-4)
+
+    result = update_order9_pi_l_ppo(
+        model,
+        [record],
+        physical_model=physical_model,
+        optimizer=optimizer,
+        config=Order9PPOOptimizationConfig(
+            rollout_steps_per_environment=1,
+            epochs_per_update=1,
+            minibatch_size=1,
+        ),
+        behavior_checkpoint_sha256=checkpoint_sha,
+        seed=9,
+        sequence_length=1,
+    )
+
+    assert result.policy_family == "pi_l"
+    assert result.sample_count == 1
+    assert result.optimizer_step_count == 1
+
+
+def test_order9_tensor_hot_path_matches_schema_features_and_graph_encoding(
+    physical_model: PhysicalModel,
+    morphology_distribution: RandomConnectedMorphologyDistribution,
+) -> None:
+    graph = morphology_distribution.sample(seed=915, module_count=3)
+    context = replace(
+        _context(graph, physical_model, time_s=0.7),
+        task_type="object_grasp_carry",
+        task_adapter_id="object_grasp_carry_v1",
+        phase_index=2,
+        phase_count=11,
+    )
+    control_model = RigidBodyControlModelBuilder().build(
+        graph, physical_model, context.runtime_observation
+    )
+    target_pose = (0.4, -0.2, 1.8, 0.0, 0.0, 0.0, 1.0)
+    target_twist = [0.1, -0.1, 0.0, 0.02, 0.0, -0.03]
+    expected_features = order3_actor_feature_vector(
+        context.runtime_observation,
+        control_model,
+        target_pose_world=target_pose,
+        target_twist=target_twist,
+    )
+    status_order = ("ok", "warning", "infeasible", "fault")
+    tensor_features = order9_low_level_actor_features_from_tensors(
+        Order9CentroidalTensorObservation(
+            time_s=torch.tensor([context.runtime_observation.time_s]),
+            module_count=torch.tensor([float(len(graph.modules))]),
+            total_mass_kg=torch.tensor([control_model.total_mass_kg]),
+            inertia_body=torch.tensor([control_model.inertia_body]),
+            body_pose_world=torch.tensor([control_model.body_pose_world]),
+            body_twist_world=torch.tensor([control_model.body_twist_world]),
+            target_pose_world=torch.tensor([target_pose]),
+            target_twist=torch.tensor([target_twist]),
+            controller_qp_feasible=torch.tensor([1.0]),
+            controller_status_one_hot=torch.tensor(
+                [[1.0 if context.runtime_observation.controller_status.status == item else 0.0 for item in status_order]]
+            ),
+            allocation_residual_norm=torch.tensor(
+                [
+                    context.runtime_observation.controller_status.metrics.get(
+                        "allocation_residual_norm",
+                        context.runtime_observation.controller_status.metrics.get(
+                            "residual_norm", 0.0
+                        ),
+                    )
+                ]
+            ),
+            task_progress_ratio=torch.tensor(
+                [context.runtime_observation.task_progress.progress_ratio]
+            ),
+            task_success=torch.tensor(
+                [float(context.runtime_observation.task_progress.success)]
+            ),
+        )
+    )
+    assert torch.allclose(
+        tensor_features,
+        torch.tensor([expected_features]),
+        atol=1.0e-6,
+    )
+
+    states = sorted(context.runtime_observation.module_states, key=lambda item: item.module_id)
+    joint_ids = sorted({joint_id for state in states for joint_id in state.joint_positions})
+    positions = torch.zeros((1, len(states), len(joint_ids)))
+    velocities = torch.zeros_like(positions)
+    joint_mask = torch.zeros_like(positions, dtype=torch.bool)
+    for module_index, state in enumerate(states):
+        for joint_index, joint_id in enumerate(joint_ids):
+            if joint_id in state.joint_positions:
+                positions[0, module_index, joint_index] = state.joint_positions[joint_id]
+                velocities[0, module_index, joint_index] = state.joint_velocities[joint_id]
+                joint_mask[0, module_index, joint_index] = True
+    bucket = Order9TensorizedTopologyBucket(graph, batch_size=1, device="cpu")
+    graph_batch = bucket.update_runtime_(
+        module_pose_world=torch.tensor([[state.pose_world for state in states]]),
+        module_twist_world=torch.tensor([[state.twist_world for state in states]]),
+        module_health=torch.tensor([[state.health for state in states]]),
+        joint_positions=positions,
+        joint_velocities=velocities,
+        joint_mask=joint_mask,
+        strict=True,
+    )
+    config = Order9LowLevelPolicyConfig(
+        graph_hidden_dim=16,
+        graph_message_layers=1,
+        recurrent_hidden_dim=24,
+        max_local_joint_slots=4,
+    )
+    model = Order9PhaseConditionedActorCritic(config)
+    phase = torch.tensor([order9_phase_actor_feature_vector(context, config)])
+    previous = torch.zeros((1, ORDER3_ACTION_SIZE))
+    hidden = model.initial_state(1)
+    schema_step = model.step(
+        [graph],
+        [context.runtime_observation],
+        tensor_features,
+        previous,
+        hidden,
+        phase_features=phase,
+        deterministic=True,
+    )
+    tensor_step = model.step(
+        graph_batch,
+        None,
+        tensor_features,
+        previous,
+        hidden,
+        phase_features=phase,
+        deterministic=True,
+    )
+    assert torch.allclose(
+        schema_step.graph_encoding.tokens,
+        tensor_step.graph_encoding.tokens,
+        atol=1.0e-6,
+    )
+    assert torch.allclose(schema_step.action, tensor_step.action, atol=1.0e-6)
+    assert torch.allclose(schema_step.joint_action, tensor_step.joint_action, atol=1.0e-6)
 
 
 def test_deterministic_and_stochastic_actions_have_consistent_log_prob_contract(
@@ -611,6 +1084,70 @@ def test_privileged_critic_input_changes_value_without_changing_actor_outputs(
     assert torch.equal(nominal.recurrent_state, disturbed.recurrent_state)
     assert torch.equal(nominal.log_prob, disturbed.log_prob)
     assert not torch.equal(nominal.value, disturbed.value)
+
+
+def test_order9_runtime_loads_strict_checkpoint_and_preserves_exact_action_trace(
+    tmp_path: Path,
+    physical_model: PhysicalModel,
+    morphology_distribution: RandomConnectedMorphologyDistribution,
+) -> None:
+    config = load_order9_learning_config()
+    stage = order9_stage_by_id(config, "c1_pi_l_bc_fixed_nominal")
+    policy = Order9PhaseConditionedActorCritic(
+        Order9LowLevelPolicyConfig(
+            graph_hidden_dim=16,
+            graph_message_layers=1,
+            recurrent_hidden_dim=24,
+            max_local_joint_slots=4,
+        )
+    )
+    metadata = build_order9_checkpoint_metadata(
+        policy,
+        stage=stage,
+        schedule_hash=order9_schedule_hash(config),
+        physical_model_hash=physical_model.stable_hash(),
+        git_revision="unit-test",
+        random_seed=19,
+        input_artifact_hashes={"unit": "a" * 64},
+        parent_checkpoint_sha256=None,
+        source_order3_checkpoint_sha256=None,
+        metrics={"loss": 1.0},
+        trainer_version="unit_test",
+    )
+    checkpoint = tmp_path / "order9-pi-l.pt"
+    checkpoint_sha = save_order9_policy_checkpoint(
+        checkpoint,
+        model=policy,
+        metadata=metadata,
+    )
+    runtime = Order9LowLevelRuntimePolicy.from_checkpoint(
+        checkpoint,
+        physical_model=physical_model,
+        expected_sha256=checkpoint_sha,
+        expected_schedule_hash=order9_schedule_hash(config),
+        deterministic=False,
+    )
+    graph = morphology_distribution.sample(seed=919, module_count=3)
+    context = replace(
+        _context(graph, physical_model),
+        task_type="object_grasp_carry",
+        task_adapter_id="object_grasp_carry_v1",
+        phase_index=2,
+        phase_count=11,
+    )
+
+    inference = runtime.command_with_trace(context)
+    trace = order9_pi_l_behavior_trace_from_inference(
+        inference,
+        checkpoint_sha256=checkpoint_sha,
+    )
+
+    assert inference.learned_policy_applied
+    assert inference.module_ids == sorted(module.module_id for module in graph.modules)
+    assert trace.stochastic
+    assert trace.policy_checkpoint_sha256 == checkpoint_sha
+    assert trace.action_payload["module_ids"] == inference.module_ids
+    assert trace.action_payload["joint_action"] == inference.normalized_joint_action
 
 
 def _small_config(**overrides) -> Order3MorphologyConditionedPolicyConfig:

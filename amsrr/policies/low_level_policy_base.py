@@ -30,6 +30,13 @@ class LowLevelPolicyContext:
     contact_wrench_trajectory: ContactWrenchTrajectory
     active_knot: InteractionKnot | None = None
     controller_status: ControllerStatus | None = None
+    # Order 9 actor context.  These are explicit normal observations, not
+    # privileged contact truth.  Legacy callers may omit them and remain on
+    # the deterministic/Order-3 path.
+    task_type: str | None = None
+    task_adapter_id: str | None = None
+    phase_index: int | None = None
+    phase_count: int | None = None
 
 
 class LowLevelPolicyBase(Protocol):

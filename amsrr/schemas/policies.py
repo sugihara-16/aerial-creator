@@ -9,10 +9,17 @@ from amsrr.schemas.common import ContactMode, Condition, Pose7D, SchemaBase, Vec
 
 POLICY_COMMAND_CONTRACT_LEGACY = "legacy_contact_bias_v1"
 POLICY_COMMAND_CONTRACT_CENTROIDAL = "centroidal_local_joint_v2"
+CONTACT_WRENCH_CONTRACT_IMPLICIT_WORLD = "implicit_world_v1"
+CONTACT_WRENCH_CONTRACT_CONTACT_FRAME = "contact_frame_robot_on_target_v2"
 PolicyCommandContractVersion = Literal[
     "legacy_contact_bias_v1",
     "centroidal_local_joint_v2",
 ]
+ContactWrenchContractVersion = Literal[
+    "implicit_world_v1",
+    "contact_frame_robot_on_target_v2",
+]
+ContactWrenchFrame = Literal["world", "contact"]
 
 
 @dataclass
@@ -26,6 +33,7 @@ class ContactAssignment(SchemaBase):
     wrench_lower: list[float] | None = None
     wrench_upper: list[float] | None = None
     priority: float = 1.0
+    wrench_frame: ContactWrenchFrame = "world"
 
     def validate(self) -> None:
         if min(self.slot_id, self.anchor_id, self.candidate_id) < 0:
@@ -36,6 +44,44 @@ class ContactAssignment(SchemaBase):
             value = getattr(self, name)
             if value is not None:
                 require_len(value, 6, f"ContactAssignment.{name}")
+                if not all(math.isfinite(float(item)) for item in value):
+                    from amsrr.schemas.common import SchemaValidationError
+
+                    raise SchemaValidationError(
+                        f"ContactAssignment.{name} must contain finite values"
+                    )
+        if not math.isfinite(float(self.priority)) or self.priority < 0.0:
+            from amsrr.schemas.common import SchemaValidationError
+
+            raise SchemaValidationError(
+                "ContactAssignment.priority must be finite and non-negative"
+            )
+        if self.wrench_lower is not None and self.wrench_upper is not None:
+            for index, (lower, upper) in enumerate(
+                zip(self.wrench_lower, self.wrench_upper)
+            ):
+                if lower > upper:
+                    from amsrr.schemas.common import SchemaValidationError
+
+                    raise SchemaValidationError(
+                        "ContactAssignment wrench bounds must satisfy lower <= upper; "
+                        f"axis {index} has {lower} > {upper}"
+                    )
+        if (
+            self.wrench_target is not None
+            and self.wrench_lower is not None
+            and self.wrench_upper is not None
+        ):
+            for index, (lower, target, upper) in enumerate(
+                zip(self.wrench_lower, self.wrench_target, self.wrench_upper)
+            ):
+                if target < lower or target > upper:
+                    from amsrr.schemas.common import SchemaValidationError
+
+                    raise SchemaValidationError(
+                        "ContactAssignment wrench_target must lie within its bounds; "
+                        f"axis {index} has {target} outside [{lower}, {upper}]"
+                    )
 
 
 @dataclass
@@ -96,12 +142,34 @@ class ContactWrenchTrajectory(SchemaBase):
     dt_s: float
     knots: list[InteractionKnot]
     derived_mode_label: str | None = None
+    contract_version: ContactWrenchContractVersion = CONTACT_WRENCH_CONTRACT_IMPLICIT_WORLD
 
     def validate(self) -> None:
         if self.horizon_s <= 0.0 or self.dt_s <= 0.0:
             from amsrr.schemas.common import SchemaValidationError
 
             raise SchemaValidationError("ContactWrenchTrajectory horizon_s and dt_s must be positive")
+        if not math.isfinite(float(self.horizon_s)) or not math.isfinite(float(self.dt_s)):
+            from amsrr.schemas.common import SchemaValidationError
+
+            raise SchemaValidationError(
+                "ContactWrenchTrajectory horizon_s and dt_s must be finite"
+            )
+        expected_frame = (
+            "contact"
+            if self.contract_version == CONTACT_WRENCH_CONTRACT_CONTACT_FRAME
+            else "world"
+        )
+        for knot_index, knot in enumerate(self.knots):
+            for assignment_index, assignment in enumerate(knot.contact_assignments):
+                if assignment.wrench_frame != expected_frame:
+                    from amsrr.schemas.common import SchemaValidationError
+
+                    raise SchemaValidationError(
+                        "ContactWrenchTrajectory contract/frame mismatch at "
+                        f"knot {knot_index}, assignment {assignment_index}: "
+                        f"{self.contract_version} requires {expected_frame!r}"
+                    )
 
 
 @dataclass

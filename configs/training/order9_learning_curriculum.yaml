@@ -1,0 +1,438 @@
+curriculum:
+  schedule_version: order9_curriculum_v1
+  contact_wrench_contract_version: contact_frame_robot_on_target_v2
+  pi_h_is_learned_proposal_only: true
+  deterministic_checker_projects_actions: false
+  dynamic_assembly_policy_learned: false
+  stages:
+    - stage_id: c0_order8_teacher_collection
+      stage_index: 0
+      learning_mode: collection
+      learning_target: dataset
+      min_modules: 3
+      max_modules: 3
+      topology_randomized: false
+      object_distribution: nominal
+      deterministic_teacher_required: true
+      pi_h_output_scope: full_contact_wrench_trajectory
+      phase_conditioned_actor_required: true
+      design_action_mask_required: false
+      assembly_evaluation_mode: separate
+      end_to_end_episode_fraction: 0.0
+      environment_steps: 0
+      minimum_episodes: 100
+      minimum_success_rate: 0.95
+      minimum_no_fallback_success_rate: 0.0
+      maximum_fallback_rate: 1.0
+      maximum_safety_failure_episodes: 0
+      held_out_only: false
+      task_adapter_ids: [object_grasp_carry_v1]
+
+    - stage_id: c1_pi_l_bc_fixed_nominal
+      stage_index: 1
+      learning_mode: behavior_cloning
+      learning_target: pi_l
+      min_modules: 3
+      max_modules: 3
+      topology_randomized: false
+      object_distribution: nominal
+      deterministic_teacher_required: true
+      pi_h_output_scope: not_applicable
+      phase_conditioned_actor_required: true
+      design_action_mask_required: false
+      assembly_evaluation_mode: separate
+      end_to_end_episode_fraction: 0.0
+      environment_steps: 0
+      minimum_episodes: 100
+      minimum_success_rate: 0.90
+      minimum_no_fallback_success_rate: 0.0
+      maximum_fallback_rate: 1.0
+      maximum_safety_failure_episodes: 0
+      held_out_only: false
+      task_adapter_ids: [object_grasp_carry_v1]
+
+    - stage_id: c2_pi_l_ppo_fixed_conservative
+      stage_index: 2
+      learning_mode: ppo
+      learning_target: pi_l
+      min_modules: 3
+      max_modules: 3
+      topology_randomized: false
+      object_distribution: conservative_order8_anchor
+      deterministic_teacher_required: false
+      pi_h_output_scope: not_applicable
+      phase_conditioned_actor_required: true
+      design_action_mask_required: false
+      assembly_evaluation_mode: separate
+      end_to_end_episode_fraction: 0.0
+      environment_steps: 3000000
+      # Provisional RTX 4090 production setting.  Preserve the original PPO
+      # generation size (2048 * 16 = 32768) while measuring collection/update
+      # speed and load before selecting C3+ parallelism.
+      parallel_environment_count: 2048
+      rollout_steps_per_environment: 16
+      minimum_episodes: 200
+      minimum_success_rate: 0.85
+      minimum_no_fallback_success_rate: 0.0
+      maximum_fallback_rate: 1.0
+      maximum_safety_failure_episodes: 0
+      held_out_only: false
+      task_adapter_ids: [object_grasp_carry_v1]
+
+    - stage_id: c3_pi_l_ppo_arbitrary_morphology
+      stage_index: 3
+      learning_mode: ppo
+      learning_target: pi_l
+      min_modules: 2
+      max_modules: 8
+      topology_randomized: true
+      object_distribution: conservative_order8_anchor
+      deterministic_teacher_required: false
+      pi_h_output_scope: not_applicable
+      phase_conditioned_actor_required: true
+      design_action_mask_required: false
+      assembly_evaluation_mode: separate
+      end_to_end_episode_fraction: 0.0
+      environment_steps: 7000000
+      minimum_episodes: 400
+      minimum_success_rate: 0.80
+      minimum_no_fallback_success_rate: 0.0
+      maximum_fallback_rate: 1.0
+      maximum_safety_failure_episodes: 0
+      held_out_only: false
+      task_adapter_ids: [object_grasp_carry_v1]
+
+    - stage_id: c4_pi_h_assignment_bc_warmup
+      stage_index: 4
+      learning_mode: behavior_cloning
+      learning_target: pi_h_assignment
+      min_modules: 2
+      max_modules: 8
+      topology_randomized: true
+      object_distribution: conservative_order8_anchor
+      deterministic_teacher_required: true
+      pi_h_output_scope: assignment_only_warmup
+      phase_conditioned_actor_required: true
+      design_action_mask_required: false
+      assembly_evaluation_mode: separate
+      end_to_end_episode_fraction: 0.0
+      environment_steps: 0
+      minimum_episodes: 200
+      minimum_success_rate: 0.85
+      minimum_no_fallback_success_rate: 0.0
+      maximum_fallback_rate: 1.0
+      maximum_safety_failure_episodes: 0
+      held_out_only: false
+      task_adapter_ids: [object_grasp_carry_v1]
+
+    - stage_id: c5_pi_h_full_trajectory_bc
+      stage_index: 5
+      learning_mode: behavior_cloning
+      learning_target: pi_h_trajectory
+      min_modules: 2
+      max_modules: 8
+      topology_randomized: true
+      object_distribution: conservative_order8_anchor
+      deterministic_teacher_required: true
+      pi_h_output_scope: full_contact_wrench_trajectory
+      phase_conditioned_actor_required: true
+      design_action_mask_required: false
+      assembly_evaluation_mode: separate
+      end_to_end_episode_fraction: 0.0
+      environment_steps: 0
+      minimum_episodes: 500
+      minimum_success_rate: 0.85
+      minimum_no_fallback_success_rate: 0.75
+      maximum_fallback_rate: 0.20
+      maximum_safety_failure_episodes: 0
+      held_out_only: false
+      task_adapter_ids: [object_grasp_carry_v1]
+
+    - stage_id: c6_pi_h_full_trajectory_ppo
+      stage_index: 6
+      learning_mode: ppo
+      learning_target: pi_h_trajectory
+      min_modules: 2
+      max_modules: 8
+      topology_randomized: true
+      object_distribution: conservative_order8_anchor
+      deterministic_teacher_required: false
+      pi_h_output_scope: full_contact_wrench_trajectory
+      phase_conditioned_actor_required: true
+      design_action_mask_required: false
+      assembly_evaluation_mode: separate
+      end_to_end_episode_fraction: 0.0
+      environment_steps: 10000000
+      minimum_episodes: 500
+      minimum_success_rate: 0.80
+      minimum_no_fallback_success_rate: 0.75
+      maximum_fallback_rate: 0.10
+      maximum_safety_failure_episodes: 0
+      held_out_only: false
+      task_adapter_ids: [object_grasp_carry_v1]
+
+    - stage_id: c7_pi_d_structured_bc
+      stage_index: 7
+      learning_mode: behavior_cloning
+      learning_target: pi_d
+      min_modules: 2
+      max_modules: 8
+      topology_randomized: true
+      object_distribution: expanded_primitives
+      deterministic_teacher_required: true
+      pi_h_output_scope: not_applicable
+      phase_conditioned_actor_required: false
+      design_action_mask_required: true
+      assembly_evaluation_mode: separate
+      end_to_end_episode_fraction: 0.0
+      environment_steps: 0
+      minimum_episodes: 500
+      minimum_success_rate: 0.80
+      minimum_no_fallback_success_rate: 0.0
+      maximum_fallback_rate: 1.0
+      maximum_safety_failure_episodes: 0
+      held_out_only: false
+      task_adapter_ids: [object_grasp_carry_v1]
+
+    - stage_id: c8_pi_d_masked_ppo
+      stage_index: 8
+      learning_mode: ppo
+      learning_target: pi_d
+      min_modules: 2
+      max_modules: 8
+      topology_randomized: true
+      object_distribution: expanded_primitives
+      deterministic_teacher_required: false
+      pi_h_output_scope: not_applicable
+      phase_conditioned_actor_required: false
+      design_action_mask_required: true
+      assembly_evaluation_mode: separate
+      end_to_end_episode_fraction: 0.0
+      environment_steps: 5000000
+      minimum_episodes: 500
+      minimum_success_rate: 0.75
+      minimum_no_fallback_success_rate: 0.0
+      maximum_fallback_rate: 1.0
+      maximum_safety_failure_episodes: 0
+      held_out_only: false
+      task_adapter_ids: [object_grasp_carry_v1]
+
+    - stage_id: c9_joint_object_task_ppo
+      stage_index: 9
+      learning_mode: ppo
+      learning_target: joint_object_task
+      min_modules: 2
+      max_modules: 8
+      topology_randomized: true
+      object_distribution: expanded_primitives
+      deterministic_teacher_required: false
+      pi_h_output_scope: full_contact_wrench_trajectory
+      phase_conditioned_actor_required: true
+      design_action_mask_required: true
+      assembly_evaluation_mode: subset_end_to_end
+      end_to_end_episode_fraction: 0.10
+      environment_steps: 15000000
+      minimum_episodes: 1000
+      minimum_success_rate: 0.75
+      minimum_no_fallback_success_rate: 0.70
+      maximum_fallback_rate: 0.05
+      maximum_safety_failure_episodes: 0
+      held_out_only: false
+      task_adapter_ids: [object_grasp_carry_v1]
+
+    - stage_id: c10_held_out_full_system_evaluation
+      stage_index: 10
+      learning_mode: evaluation
+      learning_target: full_system
+      min_modules: 2
+      max_modules: 8
+      topology_randomized: true
+      object_distribution: held_out_shapes_and_inertia
+      deterministic_teacher_required: false
+      pi_h_output_scope: full_contact_wrench_trajectory
+      phase_conditioned_actor_required: true
+      design_action_mask_required: true
+      assembly_evaluation_mode: subset_end_to_end
+      end_to_end_episode_fraction: 0.10
+      environment_steps: 0
+      minimum_episodes: 1000
+      minimum_success_rate: 0.70
+      minimum_no_fallback_success_rate: 0.65
+      maximum_fallback_rate: 0.05
+      maximum_safety_failure_episodes: 0
+      held_out_only: true
+      task_adapter_ids: [object_grasp_carry_v1]
+
+runtime_benchmark:
+  environment_count_candidates: [32, 64, 128]
+  initial_environment_count: 64
+  control_dt_s: 0.02
+  minimum_aggregate_env_steps_per_s: 500.0
+  # Production collector measurements deliberately include the cold first
+  # control step; this is a conservative end-to-end throughput gate.
+  warmup_steps: 0
+  measurement_steps: 64
+  maximum_wall_time_s: 900.0
+  topology_bucketed: true
+  phase_specific_resets: true
+  per_step_json_logging: false
+  require_tensorized_pi_l_inference: true
+
+optimization:
+  pi_l_bc:
+    epochs: 40
+    batch_size: 64
+    learning_rate: 0.0003
+    value_loss_weight: 0.5
+    max_grad_norm: 0.5
+    sequence_length: 16
+    burn_in_steps: 4
+  pi_h_assignment_bc:
+    epochs: 30
+    batch_size: 32
+    learning_rate: 0.0003
+    value_loss_weight: 0.5
+    max_grad_norm: 0.5
+    sequence_length: 1
+    burn_in_steps: 0
+  pi_h_full_bc:
+    epochs: 40
+    batch_size: 32
+    learning_rate: 0.0003
+    value_loss_weight: 0.5
+    max_grad_norm: 0.5
+    sequence_length: 1
+    burn_in_steps: 0
+  pi_d_bc:
+    epochs: 40
+    batch_size: 16
+    learning_rate: 0.0003
+    value_loss_weight: 0.5
+    max_grad_norm: 0.5
+    sequence_length: 1
+    burn_in_steps: 0
+  pi_l_ppo:
+    rollout_steps_per_environment: 256
+    epochs_per_update: 4
+    minibatch_size: 4096
+    learning_rate: 0.0001
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_ratio: 0.20
+    value_loss_weight: 0.5
+    entropy_bonus_weight: 0.001
+    max_grad_norm: 0.5
+    target_kl: 0.02
+  pi_h_ppo:
+    rollout_steps_per_environment: 64
+    epochs_per_update: 4
+    minibatch_size: 512
+    learning_rate: 0.0001
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_ratio: 0.20
+    value_loss_weight: 0.5
+    entropy_bonus_weight: 0.005
+    max_grad_norm: 0.5
+    target_kl: 0.02
+    hard_checker_rejection_penalty: 1.0
+  pi_d_ppo:
+    rollout_steps_per_environment: 16
+    epochs_per_update: 4
+    minibatch_size: 256
+    learning_rate: 0.0001
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_ratio: 0.20
+    value_loss_weight: 0.5
+    entropy_bonus_weight: 0.01
+    max_grad_norm: 0.5
+    target_kl: 0.02
+    hard_checker_rejection_penalty: 1.0
+  joint_ppo:
+    rollout_steps_per_environment: 256
+    epochs_per_update: 4
+    minibatch_size: 4096
+    learning_rate: 0.00005
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_ratio: 0.20
+    value_loss_weight: 0.5
+    entropy_bonus_weight: 0.001
+    max_grad_norm: 0.5
+    target_kl: 0.01
+    hard_checker_rejection_penalty: 1.0
+
+production_runtime:
+  seed: 9009
+  device: cuda:0
+  artifact_root: artifacts/p4_full/order9
+  selected_environment_count: 128
+  runtime_load_sample_interval_s: 1.0
+  runtime_benchmark_report_path: artifacts/p4_full/order9/runtime_benchmark.json
+  runtime_benchmark_report_sha256: a70e6264aa10464177a25157c5ce5d303130c33e4bb5f94355369430658b3d9a
+  checkpoint_interval_updates: 10
+  metrics_flush_interval_updates: 1
+  full_mesh_evaluation_interval_updates: 25
+  full_mesh_evaluation_episode_count: 8
+  canonical_order8_report_path: artifacts/p4_full/order8_natural_contact/order8_mu4p5_dt20ms_full_v406.json
+  canonical_order8_report_sha256: d0f75cca2ae540c79971766ab722d4530dd4fb44842276256bac40aafdb8cc49
+  robot_model_config_path: configs/robot/robot_model.yaml
+  tensorized_rollout_hot_path: true
+  raw_contact_actor_input: false
+  full_mesh_acceptance_replaced: false
+
+hard_checker:
+  backend: hybrid_lightweight_qp_persistent_isaac_shadow
+  max_proposal_attempts: 2
+  qp_residual_threshold: 0.0001
+  wrench_residual_threshold: 0.001
+  qp_force_scale_n: 30.0
+  qp_torque_scale_nm: 5.0
+  qp_solver_absolute_tolerance: 0.00001
+  qp_solver_relative_tolerance: 0.00001
+  qp_solver_max_iterations: 4000
+  shadow_rollout_horizon_s: 2.0
+  shadow_control_dt_s: 0.02
+  require_isolated_persistent_worker: true
+  require_current_pi_l_checkpoint: true
+  main_state_digest_required: true
+  projection_allowed: false
+  allowed_contact_semantics: explicit_active_assignment_pairs_only
+
+randomization:
+  dimension_scale: [0.975, 1.025]
+  mass_scale: [0.95, 1.05]
+  initial_xy_offset_m: [-0.005, 0.005]
+  support_gap_m: [0.0, 0.005]
+  initial_yaw_rad: [-0.034906585, 0.034906585]
+  selected_gripper_friction: [4.275, 4.725]
+  contact_stiffness_scale: [0.95, 1.05]
+  estimated_mass_scale: [0.98, 1.02]
+  estimated_com_error_m: [-0.001, 0.001]
+  nominal_selected_gripper_friction: 4.5
+  nominal_contact_stiffness_n_per_m: 7500.0
+  nominal_contact_damping_n_s_per_m: 75.0
+  support_top_z_m: 0.15
+
+expanded_randomization:
+  equivalent_volume_scale: [0.80, 1.20]
+  mass_scale: [0.80, 1.20]
+  train_box_xy_ratio: [0.65, 0.90]
+  train_box_zy_ratio: [0.30, 0.50]
+  train_cylinder_height_diameter_ratio: [0.60, 1.20]
+  held_out_box_xy_ratio: [0.95, 1.25]
+  held_out_box_zy_ratio: [0.55, 0.80]
+  held_out_cylinder_height_diameter_ratio: [1.40, 2.00]
+  held_out_capsule_cylinder_height_diameter_ratio: [0.75, 1.50]
+  initial_xy_offset_m: [-0.015, 0.015]
+  support_gap_m: [0.0, 0.008]
+  initial_yaw_rad: [-0.174532925, 0.174532925]
+  object_friction: [0.54, 0.72]
+  selected_gripper_friction: [4.0, 5.0]
+  contact_stiffness_scale: [0.90, 1.10]
+  estimated_mass_scale: [0.95, 1.05]
+  estimated_com_error_m: [-0.003, 0.003]
+  nominal_contact_stiffness_n_per_m: 7500.0
+  nominal_contact_damping_n_s_per_m: 75.0
+  support_top_z_m: 0.15

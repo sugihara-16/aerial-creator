@@ -16,7 +16,12 @@ from amsrr.policies.learned_low_level_policy import (
     PI_L_TARGET_NAMES,
 )
 from amsrr.schemas.common import SchemaBase
-from amsrr.schemas.datasets import DatasetKind, DatasetSplit, P4_3DatasetManifest
+from amsrr.schemas.datasets import (
+    P4_3_DATASET_KINDS,
+    DatasetKind,
+    DatasetSplit,
+    P4_3DatasetManifest,
+)
 from amsrr.training.p2_learning_dataset import P2_LEARNING_FEATURE_NAMES
 from amsrr.training.p4_3_pi_d_training import P4_3_PI_D_CHECKPOINT_TASK
 from amsrr.utils.hashing import hash_file
@@ -261,7 +266,7 @@ def _validate_dataset_artifacts(
 
     expected_pairs = {
         (kind, split)
-        for kind in DatasetKind
+        for kind in P4_3_DATASET_KINDS
         for split in DatasetSplit
     }
     if seen_pairs != expected_pairs:

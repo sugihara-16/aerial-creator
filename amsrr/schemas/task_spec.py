@@ -92,6 +92,8 @@ class ObjectSpec(SchemaBase):
     contact_allowed: bool = True
     semantic_tags: list[str] = field(default_factory=list)
     kinematic_model: ObjectKinematicModel | None = None
+    center_of_mass_object: Vector3 | None = None
+    density_kg_m3: float | None = None
 
     def validate(self) -> None:
         require_non_empty(self.object_id, "ObjectSpec.object_id")
@@ -103,6 +105,14 @@ class ObjectSpec(SchemaBase):
             require_len(self.inertia_kgm2, 6, "ObjectSpec.inertia_kgm2")
         if self.friction is not None:
             require_non_negative(self.friction, "ObjectSpec.friction")
+        if self.center_of_mass_object is not None:
+            require_len(
+                self.center_of_mass_object,
+                3,
+                "ObjectSpec.center_of_mass_object",
+            )
+        if self.density_kg_m3 is not None:
+            require_positive(self.density_kg_m3, "ObjectSpec.density_kg_m3")
 
 
 @dataclass
@@ -274,4 +284,3 @@ class TaskSpec(SchemaBase):
             for obj in targets:
                 if obj.movable and obj.mass_kg is None:
                     raise SchemaValidationError("object_grasp_carry target movable object requires mass_kg")
-
