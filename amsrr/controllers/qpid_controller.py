@@ -33,6 +33,9 @@ from amsrr.schemas.policies import (
 from amsrr.schemas.runtime import RuntimeObservation
 
 
+QPID_CONTROLLER_RUNTIME_STATE_VERSION = "qpid_controller_runtime_state_v1"
+
+
 @dataclass(frozen=True)
 class QPIDControllerConfig:
     allocation_mode: str = "bounded_vertical"
@@ -229,6 +232,71 @@ class QPIDController:
         self._attitude_error_integral_body = [0.0, 0.0, 0.0]
         self._pending_position_error_integral_world = None
         self._pending_attitude_error_integral_body = None
+
+    def export_runtime_state(self) -> dict[str, object]:
+        """Return every controller-owned value that can affect the next step."""
+
+        return {
+            "runtime_state_version": QPID_CONTROLLER_RUNTIME_STATE_VERSION,
+            "position_error_integral_world": list(
+                self._position_error_integral_world
+            ),
+            "attitude_error_integral_body": list(
+                self._attitude_error_integral_body
+            ),
+            "pending_position_error_integral_world": (
+                None
+                if self._pending_position_error_integral_world is None
+                else list(self._pending_position_error_integral_world)
+            ),
+            "pending_attitude_error_integral_body": (
+                None
+                if self._pending_attitude_error_integral_body is None
+                else list(self._pending_attitude_error_integral_body)
+            ),
+            "reference_metrics": {
+                str(key): float(value)
+                for key, value in self._reference_metrics.items()
+            },
+        }
+
+    def restore_runtime_state(self, payload: dict[str, object]) -> None:
+        """Restore a hash-bound shadow copy without partially applying data."""
+
+        if payload.get("runtime_state_version") != QPID_CONTROLLER_RUNTIME_STATE_VERSION:
+            raise SchemaValidationError("QPID runtime state version mismatch")
+        position = _runtime_state_vector3(
+            payload.get("position_error_integral_world"),
+            "position_error_integral_world",
+        )
+        attitude = _runtime_state_vector3(
+            payload.get("attitude_error_integral_body"),
+            "attitude_error_integral_body",
+        )
+        pending_position = _optional_runtime_state_vector3(
+            payload.get("pending_position_error_integral_world"),
+            "pending_position_error_integral_world",
+        )
+        pending_attitude = _optional_runtime_state_vector3(
+            payload.get("pending_attitude_error_integral_body"),
+            "pending_attitude_error_integral_body",
+        )
+        raw_metrics = payload.get("reference_metrics")
+        if not isinstance(raw_metrics, dict):
+            raise SchemaValidationError("QPID runtime reference_metrics must be a map")
+        metrics: dict[str, float] = {}
+        for key, value in raw_metrics.items():
+            if not isinstance(key, str) or not isinstance(value, (int, float)):
+                raise SchemaValidationError("QPID runtime metrics must be numeric")
+            parsed = float(value)
+            if not math.isfinite(parsed):
+                raise SchemaValidationError("QPID runtime metrics must be finite")
+            metrics[key] = parsed
+        self._position_error_integral_world = position
+        self._attitude_error_integral_body = attitude
+        self._pending_position_error_integral_world = pending_position
+        self._pending_attitude_error_integral_body = pending_attitude
+        self._reference_metrics = metrics
 
     @staticmethod
     def _default_allocator(config: QPIDControllerConfig) -> QPAllocatorInterface:
@@ -1065,3 +1133,18 @@ def _inertia_matrix_from_inertia6(
         (ixy, iyy, iyz),
         (ixz, iyz, izz),
     )
+
+
+def _runtime_state_vector3(value: object, name: str) -> list[float]:
+    if not isinstance(value, (list, tuple)) or len(value) != 3:
+        raise SchemaValidationError(f"QPID runtime {name} must contain three values")
+    parsed = [float(item) for item in value]
+    if not all(math.isfinite(item) for item in parsed):
+        raise SchemaValidationError(f"QPID runtime {name} must be finite")
+    return parsed
+
+
+def _optional_runtime_state_vector3(
+    value: object, name: str
+) -> list[float] | None:
+    return None if value is None else _runtime_state_vector3(value, name)

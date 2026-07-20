@@ -753,3 +753,33 @@ def test_qpid_controller_payload_coupling_changes_target_wrench_and_metrics() ->
     assert controller_command.controller_status.metrics["pid_target_builder_active"] == 1.0
     assert controller_command.controller_status.metrics["target_pos_error_m"] == pytest.approx(0.0)
     assert controller_command.controller_status.metrics["target_rot_error_rad"] == pytest.approx(0.0)
+
+
+def test_qpid_runtime_state_round_trip_restores_all_integrators() -> None:
+    controller = QPIDController()
+    controller._position_error_integral_world = [1.0, 2.0, 3.0]
+    controller._attitude_error_integral_body = [-1.0, -2.0, -3.0]
+    controller._pending_position_error_integral_world = [0.1, 0.2, 0.3]
+    controller._pending_attitude_error_integral_body = [-0.1, -0.2, -0.3]
+    controller._reference_metrics = {"qp_shadow_test": 0.25}
+    exported = controller.export_runtime_state()
+
+    controller.reset_integrators()
+    controller.restore_runtime_state(exported)
+
+    assert controller._position_error_integral_world == [1.0, 2.0, 3.0]
+    assert controller._attitude_error_integral_body == [-1.0, -2.0, -3.0]
+    assert controller._pending_position_error_integral_world == [0.1, 0.2, 0.3]
+    assert controller._pending_attitude_error_integral_body == [-0.1, -0.2, -0.3]
+    assert controller._reference_metrics == {"qp_shadow_test": 0.25}
+
+
+def test_qpid_runtime_state_rejects_partial_nonfinite_restore() -> None:
+    controller = QPIDController()
+    exported = controller.export_runtime_state()
+    exported["position_error_integral_world"] = [0.0, math.nan, 0.0]
+
+    with pytest.raises(SchemaValidationError, match="must be finite"):
+        controller.restore_runtime_state(exported)
+
+    assert controller._position_error_integral_world == [0.0, 0.0, 0.0]

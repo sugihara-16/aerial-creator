@@ -293,6 +293,25 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--order9-teacher-output",
+        default=None,
+        help=(
+            "Directory for one verified C0 teacher episode bundle. This is "
+            "available only on the complete Order-8 path."
+        ),
+    )
+    parser.add_argument("--order9-teacher-episode-id", default=None)
+    parser.add_argument("--order9-teacher-task-id", default=None)
+    parser.add_argument(
+        "--order9-teacher-split",
+        choices=("train", "validation", "held_out"),
+        default="train",
+    )
+    parser.add_argument("--order9-teacher-low-level-stride", type=int, default=1)
+    parser.add_argument("--order9-teacher-high-level-stride", type=int, default=5)
+    parser.add_argument("--order9-teacher-window-horizon-s", type=float, default=2.0)
+    parser.add_argument("--order9-teacher-window-knot-dt-s", type=float, default=0.1)
+    parser.add_argument(
         "--order8-diagnostic-only",
         action="store_true",
         help=(
@@ -1283,6 +1302,35 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
     ):
         raise RuntimeError(
             "--order8-natural-contact requires morphology graph and config JSON"
+        )
+    if args.order9_teacher_output is not None and not order8_natural_contact_requested:
+        raise RuntimeError(
+            "--order9-teacher-output requires --order8-natural-contact"
+        )
+    if args.order9_teacher_output is not None and args.order8_diagnostic_only:
+        raise RuntimeError(
+            "Order9 teacher capture requires the complete Order8 path"
+        )
+    if (
+        args.order9_teacher_low_level_stride < 1
+        or args.order9_teacher_high_level_stride < 1
+    ):
+        raise RuntimeError("Order9 teacher strides must be positive")
+    if (
+        args.order9_teacher_window_horizon_s <= 0.0
+        or args.order9_teacher_window_knot_dt_s <= 0.0
+        or not math.isclose(
+            args.order9_teacher_window_horizon_s
+            / args.order9_teacher_window_knot_dt_s,
+            round(
+                args.order9_teacher_window_horizon_s
+                / args.order9_teacher_window_knot_dt_s
+            ),
+            abs_tol=1.0e-9,
+        )
+    ):
+        raise RuntimeError(
+            "Order9 teacher window horizon must be a positive integer multiple of knot dt"
         )
     if args.order8_diagnostic_only and not order8_natural_contact_requested:
         raise RuntimeError("--order8-diagnostic-only requires --order8-natural-contact")

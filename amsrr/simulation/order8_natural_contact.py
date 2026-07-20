@@ -144,6 +144,15 @@ class Order8IsaacNaturalContactEnv:
         realtime_playback: bool = False,
         keep_open_after_rollout_s: float = 0.0,
         seed: int = 0,
+        order9_teacher_output: str | Path | None = None,
+        order9_teacher_episode_id: str | None = None,
+        order9_teacher_task_id: str | None = None,
+        order9_teacher_split: str = "train",
+        order9_teacher_low_level_stride: int = 1,
+        order9_teacher_high_level_stride: int = 5,
+        order9_teacher_window_horizon_s: float = 2.0,
+        order9_teacher_window_knot_dt_s: float = 0.1,
+        force_convert: bool = True,
         command_executor: Callable[[list[str], float], dict[str, Any]] | None = None,
     ) -> None:
         config.validate()
@@ -171,6 +180,32 @@ class Order8IsaacNaturalContactEnv:
             raise SchemaValidationError("Order8 generated_usd_dir must be non-empty")
         if not isinstance(seed, int) or isinstance(seed, bool) or seed < 0:
             raise SchemaValidationError("Order8 seed must be a non-negative integer")
+        if order9_teacher_split not in {"train", "validation", "held_out"}:
+            raise SchemaValidationError("Order9 teacher split is invalid")
+        if order9_teacher_low_level_stride < 1 or order9_teacher_high_level_stride < 1:
+            raise SchemaValidationError("Order9 teacher strides must be positive")
+        if (
+            not _finite_positive(order9_teacher_window_horizon_s)
+            or not _finite_positive(order9_teacher_window_knot_dt_s)
+            or not math.isclose(
+                order9_teacher_window_horizon_s
+                / order9_teacher_window_knot_dt_s,
+                round(
+                    order9_teacher_window_horizon_s
+                    / order9_teacher_window_knot_dt_s
+                ),
+                abs_tol=1.0e-9,
+            )
+        ):
+            raise SchemaValidationError(
+                "Order9 teacher window horizon must be an integer multiple of knot dt"
+            )
+        for name, value in (
+            ("order9_teacher_episode_id", order9_teacher_episode_id),
+            ("order9_teacher_task_id", order9_teacher_task_id),
+        ):
+            if value is not None and not value:
+                raise SchemaValidationError(f"Order8 {name} must be non-empty when set")
         self.config = config
         self.backend = backend
         self.physical_model = physical_model
@@ -183,6 +218,21 @@ class Order8IsaacNaturalContactEnv:
         self.realtime_playback = bool(realtime_playback)
         self.keep_open_after_rollout_s = float(keep_open_after_rollout_s)
         self.seed = int(seed)
+        self.order9_teacher_output = (
+            None if order9_teacher_output is None else str(order9_teacher_output)
+        )
+        self.order9_teacher_episode_id = order9_teacher_episode_id
+        self.order9_teacher_task_id = order9_teacher_task_id
+        self.order9_teacher_split = order9_teacher_split
+        self.order9_teacher_low_level_stride = int(order9_teacher_low_level_stride)
+        self.order9_teacher_high_level_stride = int(order9_teacher_high_level_stride)
+        self.order9_teacher_window_horizon_s = float(
+            order9_teacher_window_horizon_s
+        )
+        self.order9_teacher_window_knot_dt_s = float(
+            order9_teacher_window_knot_dt_s
+        )
+        self.force_convert = bool(force_convert)
         self.command_executor = command_executor or _run_json_command
 
     @property
@@ -213,8 +263,8 @@ class Order8IsaacNaturalContactEnv:
         )
         command = self.backend.holon_spawn_probe_command(
             config_path=self.backend_config_path,
-            convert_if_missing=False,
-            force_convert=True,
+            convert_if_missing=not self.force_convert,
+            force_convert=self.force_convert,
             generated_usd_dir=self.generated_usd_dir,
             steps=self.requested_steps,
             viewer=self.viewer,
@@ -236,6 +286,31 @@ class Order8IsaacNaturalContactEnv:
                 "centroidal_local_joint_v2",
             ]
         )
+        if self.order9_teacher_output is not None:
+            command.extend(
+                [
+                    "--order9-teacher-output",
+                    self.order9_teacher_output,
+                    "--order9-teacher-split",
+                    self.order9_teacher_split,
+                    "--order9-teacher-low-level-stride",
+                    str(self.order9_teacher_low_level_stride),
+                    "--order9-teacher-high-level-stride",
+                    str(self.order9_teacher_high_level_stride),
+                    "--order9-teacher-window-horizon-s",
+                    str(self.order9_teacher_window_horizon_s),
+                    "--order9-teacher-window-knot-dt-s",
+                    str(self.order9_teacher_window_knot_dt_s),
+                ]
+            )
+            if self.order9_teacher_episode_id is not None:
+                command.extend(
+                    ["--order9-teacher-episode-id", self.order9_teacher_episode_id]
+                )
+            if self.order9_teacher_task_id is not None:
+                command.extend(
+                    ["--order9-teacher-task-id", self.order9_teacher_task_id]
+                )
         return command
 
     def run(
@@ -308,6 +383,7 @@ class Order8IsaacNaturalContactEnv:
             requested_steps=self.requested_steps,
             expected_seed=self.seed,
             expected_simulation_dt_s=self.simulation_dt_s,
+            expected_force_usd_conversion=self.force_convert,
         )
         return Order8IsaacNaturalContactResult(
             **common,
@@ -396,6 +472,7 @@ def order8_natural_contact_report_failures(
     requested_steps: int | None = None,
     expected_seed: int | None = None,
     expected_simulation_dt_s: float | None = None,
+    expected_force_usd_conversion: bool = True,
 ) -> list[str]:
     failures: list[str] = []
 
@@ -580,7 +657,10 @@ def order8_natural_contact_report_failures(
         "order8_natural_contact_generated_usd_bundle_hash",
     ):
         _require_sha256(report, key, failures)
-    true("order8_natural_contact_force_usd_conversion")
+    exact(
+        "order8_natural_contact_force_usd_conversion",
+        bool(expected_force_usd_conversion),
+    )
     exact(
         "order8_natural_contact_dock_collision_type",
         "Convex Decomposition",

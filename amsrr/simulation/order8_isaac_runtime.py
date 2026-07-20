@@ -35,18 +35,24 @@ from amsrr.geometry.pose_math import (
     transform_from_xyz_rpy,
     transpose,
 )
+from amsrr.geometry.contact_material import combine_friction
 from amsrr.schemas.common import Pose7D, SchemaValidationError
 from amsrr.schemas.morphology import MorphologyGraph
 from amsrr.schemas.order8 import Order8NaturalContactPhase
 from amsrr.schemas.policies import ControllerStatus
 from amsrr.schemas.runtime import (
     ModuleRuntimeState,
+    ObjectRuntimeState,
     RuntimeObservation,
     TaskProgressState,
 )
 from amsrr.simulation.order8_side_proxy_pad import (
     build_order8_side_proxy_pad_specs,
     load_order8_side_proxy_pad_preview_config,
+)
+from amsrr.training.order9_teacher import (
+    build_order8_grasp_carry_task_spec,
+    compile_high_level_context,
 )
 
 ORDER8_ISAAC_REPORT_VERSION = "order8_natural_contact_isaac_report_v1"
@@ -4210,12 +4216,33 @@ def run_order8_isaac_runtime(
                 region_id=f"order8_object_face:{candidate_id}",
                 contact_pose_world=object_pose,
                 contact_frame_world=object_pose,
-                normal_world=tuple(float(value) for value in normal),
+                # ``normal`` is the robot-on-object inward command direction;
+                # ContactCandidate stores the target surface's outward normal.
+                normal_world=tuple(-float(value) for value in normal),
                 tangent_basis_world=_tangent_basis(normal),
                 contact_mode=ContactMode.GRASP,
-                friction=float(config.object_friction),
+                friction=combine_friction(
+                    float(config.object_friction),
+                    float(config.selected_gripper_friction),
+                    ORDER8_SELECTED_GRIPPER_FRICTION_COMBINE_MODE,
+                ),
                 patch_area_m2=0.01,
-                candidate_scores={"deterministic_order8": 1.0},
+                candidate_scores={
+                    "deterministic_order8": 1.0,
+                    "material_contract_applied": 1.0,
+                    "material_target_surface_friction": float(
+                        config.object_friction
+                    ),
+                    "material_robot_surface_friction": float(
+                        config.selected_gripper_friction
+                    ),
+                    "material_effective_friction": combine_friction(
+                        float(config.object_friction),
+                        float(config.selected_gripper_friction),
+                        ORDER8_SELECTED_GRIPPER_FRICTION_COMBINE_MODE,
+                    ),
+                    "material_friction_combine_mode_code": 3.0,
+                },
                 unary_valid=True,
             )
         )
@@ -4292,9 +4319,25 @@ def run_order8_isaac_runtime(
         selected_gripper_local_aabbs_by_anchor[int(selection.anchor_id)] = (
             matching_bounds
         )
+    order9_teacher_output_raw = getattr(args, "order9_teacher_output", None)
+    order9_teacher_output_path = (
+        None
+        if order9_teacher_output_raw is None
+        else Path(str(order9_teacher_output_raw)).resolve()
+    )
+    if order9_teacher_output_path is not None and diagnostic_only:
+        raise RuntimeError("Order9 teacher capture rejects Order8 diagnostic-only runs")
+    order9_teacher_task_id = str(
+        getattr(args, "order9_teacher_task_id", None)
+        or (
+            f"order9-c0-task-{int(args.order8_seed):06d}"
+            if order9_teacher_output_path is not None
+            else "order8-natural-contact-smoke"
+        )
+    )
     candidate_set = ContactCandidateSet(
-        set_id="order8-natural-contact-selected-pair",
-        task_id="order8-natural-contact-smoke",
+        set_id=f"{order9_teacher_task_id}:selected-pair",
+        task_id=order9_teacher_task_id,
         morphology_graph_id=morphology_graph.graph_id,
         candidates=candidates,
         candidate_mask=[True] * len(candidates),
@@ -4310,13 +4353,25 @@ def run_order8_isaac_runtime(
         pairwise_compatibility_score=[[1.0] * len(candidates) for _ in candidates],
         group_proposals=[],
         assignment_feasibility_cache={},
-        sampler_version="order8_mesh_backed_selected_pair_v1",
+        sampler_version="order8_mesh_backed_selected_pair_v2_material_combine",
     )
-    policy_context = HighLevelPolicyContext(
-        irg=None,  # type: ignore[arg-type]
-        interaction_envelope=None,  # type: ignore[arg-type]
-        morphology_graph=morphology_graph,
-        contact_candidate_set=candidate_set,
+    order8_task_spec = build_order8_grasp_carry_task_spec(
+        object_pose_world=object_pose,
+        object_size_m=tuple(float(value) for value in config.object_size_m),
+        object_mass_kg=float(config.object_mass_kg),
+        object_friction=float(config.object_friction),
+        required_transport_distance_m=float(config.required_transport_distance_m),
+        support_height_m=float(config.object_support_height_m),
+        max_contact_force_n=float(config.max_force_per_contact_n),
+        max_contact_torque_nm=float(config.max_torque_per_contact_nm),
+        task_id=order9_teacher_task_id,
+        selected_gripper_friction=float(config.selected_gripper_friction),
+        friction_combine_mode=ORDER8_SELECTED_GRIPPER_FRICTION_COMBINE_MODE,
+    )
+    policy_context = compile_high_level_context(
+        order8_task_spec,
+        morphology_graph,
+        candidate_set,
     )
     max_steps = max(1, int(args.steps))
     requested_simulation_duration_s = float(max_steps) * sim_dt
@@ -4344,6 +4399,40 @@ def run_order8_isaac_runtime(
         selections,
         config=planner_config,
     )
+    order9_teacher_collector = None
+    if order9_teacher_output_path is not None:
+        from amsrr.schemas.datasets import DatasetSplit
+        from amsrr.training.order9_teacher_collection import (
+            Order9TeacherCollectionConfig,
+            Order9TeacherEpisodeCollector,
+        )
+
+        order9_teacher_collector = Order9TeacherEpisodeCollector(
+            task_spec=order8_task_spec,
+            morphology_graph=morphology_graph,
+            contact_candidate_set=candidate_set,
+            config=Order9TeacherCollectionConfig(
+                episode_id=str(
+                    getattr(args, "order9_teacher_episode_id", None)
+                    or f"order9-c0-episode-{int(args.order8_seed):06d}"
+                ),
+                split=DatasetSplit(
+                    str(getattr(args, "order9_teacher_split", "train"))
+                ),
+                low_level_stride=int(
+                    getattr(args, "order9_teacher_low_level_stride", 1)
+                ),
+                high_level_stride=int(
+                    getattr(args, "order9_teacher_high_level_stride", 5)
+                ),
+                window_horizon_s=float(
+                    getattr(args, "order9_teacher_window_horizon_s", 2.0)
+                ),
+                window_knot_dt_s=float(
+                    getattr(args, "order9_teacher_window_knot_dt_s", 0.1)
+                ),
+            ),
+        )
     suppressed_safe_hold_reason_counts: dict[str, int] = {}
     suppressed_safe_hold_first_time_s_by_reason: dict[str, float] = {}
 
@@ -4688,6 +4777,111 @@ def run_order8_isaac_runtime(
             phase_label=planner.phase.value,
         )
 
+    def order9_teacher_observations(
+        *,
+        evidence: Any | None,
+        raw_contact_valid: bool,
+        phase_transitioned_now: bool = False,
+    ) -> tuple[RuntimeObservation, RuntimeObservation]:
+        """Build actor-safe state and a separate privileged reward view."""
+
+        base = whole_structure_observation()
+        measured_object = _object_state(object_asset)
+        object_runtime_state = ObjectRuntimeState(
+            object_id="order8_object",
+            pose_world=tuple(float(value) for value in measured_object["pose"]),
+            twist_world=[float(value) for value in measured_object["twist"]],
+        )
+        phase = planner.phase
+        phase_timeout = (
+            float(planner_config.contact_acquisition_timeout_s)
+            if phase == Order8NaturalContactPhase.CONTACT_ACQUISITION
+            else float(planner_config.phase_timeout_s)
+        )
+        progress_ratio = (
+            1.0
+            if phase == Order8NaturalContactPhase.COMPLETE
+            else min(
+                1.0,
+                (
+                    0.0
+                    if phase_transitioned_now
+                    else max(0.0, current_time_s - phase_started_s)
+                )
+                / phase_timeout,
+            )
+        )
+        actor_progress = TaskProgressState(
+            phase_label=phase.value,
+            progress_ratio=progress_ratio,
+            success=phase == Order8NaturalContactPhase.COMPLETE,
+            # A raw-monitor reason is intentionally not persisted in actor data.
+            failure_reason=None,
+            metrics={},
+        )
+        actor = RuntimeObservation(
+            time_s=float(current_time_s),
+            morphology_graph=morphology_graph,
+            module_states=base.module_states,
+            object_states=[object_runtime_state],
+            contact_states=[],
+            controller_status=base.controller_status,
+            task_progress=actor_progress,
+        )
+        reward_metrics: dict[str, float] = {
+            "grasp_data_available": 0.0,
+            "contact_data_available": 0.0,
+            "slip_data_available": 0.0,
+            "collision_data_available": 0.0,
+        }
+        reward_failure_reason = None
+        if evidence is not None and raw_contact_valid:
+            required_contacts = max(1, int(config.required_distinct_dock_links))
+            reward_metrics.update(
+                {
+                    "grasp_data_available": 1.0,
+                    "contact_data_available": 1.0,
+                    "grasp_maintenance": min(
+                        1.0,
+                        float(evidence.selected_distinct_contact_count)
+                        / float(required_contacts),
+                    ),
+                    "slip_data_available": 1.0,
+                    "slip_speed_mps": float(
+                        evidence.max_tangential_slip_speed_mps
+                    ),
+                    "collision_data_available": 1.0,
+                    "hard_collision": 1.0
+                    if (
+                        bool(evidence.unintended_contact_link_ids)
+                        or float(evidence.max_penetration_m)
+                        > float(config.max_penetration_m) + 1.0e-12
+                    )
+                    else 0.0,
+                }
+            )
+            reward_failure_reason = (
+                ",".join(evidence.failure_reasons)
+                if evidence.failure_reasons
+                else None
+            )
+        reward = RuntimeObservation(
+            time_s=actor.time_s,
+            morphology_graph=morphology_graph,
+            module_states=actor.module_states,
+            object_states=actor.object_states,
+            contact_states=[],
+            controller_status=actor.controller_status,
+            task_progress=TaskProgressState(
+                phase_label=phase.value,
+                progress_ratio=progress_ratio,
+                success=actor_progress.success,
+                failure_reason=reward_failure_reason,
+                metrics=reward_metrics,
+            ),
+        )
+        return actor, reward
+
     def full_joint_vector(
         *,
         neutral_positions: dict[str, float] | None = None,
@@ -4770,6 +4964,7 @@ def run_order8_isaac_runtime(
         tracking_profile: QPIDTrackingProfile | None = None,
         admittance_active: bool = False,
         external_wrench_estimate: CentroidalExternalWrenchEstimate | None = None,
+        order9_teacher_trajectory: Any | None = None,
         base_twist_world: tuple[float, float, float, float, float, float] = (
             0.0,
             0.0,
@@ -5113,6 +5308,18 @@ def run_order8_isaac_runtime(
             time_s=current_time_s,
             command_index=command_index,
         )
+        if order9_teacher_trajectory is not None:
+            if order9_teacher_collector is None:
+                raise RuntimeError(
+                    "Order9 teacher trajectory supplied without an active collector"
+                )
+            order9_teacher_collector.record_command(
+                trajectory=order9_teacher_trajectory,
+                policy_command=policy,
+                controller_command=command,
+                actuator_target_record=record.to_dict(),
+                decision_dt_s=sim_dt,
+            )
         for module_id in module_ids:
             application = _apply_record(
                 robots[module_id],
@@ -9561,6 +9768,21 @@ def run_order8_isaac_runtime(
                 reason=",".join(last_evidence.failure_reasons)
                 or "raw_monitor_hard_failure",
             )
+        if order9_teacher_collector is not None:
+            teacher_actor_observation, teacher_reward_observation = (
+                order9_teacher_observations(
+                    evidence=last_evidence,
+                    raw_contact_valid=bool(
+                        observation.raw_contact_valid
+                        and not observation.raw_contact_saturated
+                    ),
+                    phase_transitioned_now=planner.phase != phase,
+                )
+            )
+            order9_teacher_collector.observe_state(
+                actor_observation=teacher_actor_observation,
+                reward_observation=teacher_reward_observation,
+            )
         trajectory = planner.plan(policy_context)
         if planner.phase == Order8NaturalContactPhase.APPROACH:
             contact_motion_subphase = "mesh_open_staging"
@@ -10830,8 +11052,24 @@ def run_order8_isaac_runtime(
             external_wrench_estimate=last_external_wrench_estimate,
             base_twist_world=base_twist,
             zero_thrust=diagnostic_kinematic_base_isolation,
+            order9_teacher_trajectory=trajectory,
         )
         current_time_s += sim_dt
+
+    if order9_teacher_collector is not None and order9_teacher_collector.pending_command:
+        # A step-budget exit has no next-loop privileged contact query.  Close
+        # only the observable state transition and mark raw-contact reward
+        # terms unavailable instead of reusing stale truth.
+        teacher_actor_observation, teacher_reward_observation = (
+            order9_teacher_observations(
+                evidence=None,
+                raw_contact_valid=False,
+            )
+        )
+        order9_teacher_collector.observe_state(
+            actor_observation=teacher_actor_observation,
+            reward_observation=teacher_reward_observation,
+        )
 
     if runtime_profiler is not None:
         runtime_profiler.disable()
@@ -10879,6 +11117,81 @@ def run_order8_isaac_runtime(
         {reference[0] for reference in object_constraint_references}
     )
     collision_info = collision_approximation_evidence
+    order9_teacher_episode_manifest_path: str | None = None
+    if order9_teacher_collector is not None:
+        from amsrr.training.order9_teacher_collection import (
+            write_order9_teacher_episode,
+        )
+
+        teacher_success = bool(
+            result.passed
+            and not constraint_failures
+            and not object_constraint_references
+        )
+        teacher_failure_reason = None
+        if not teacher_success:
+            teacher_failure_reason = failure_reason or (
+                "constraint_identity_failure"
+                if constraint_failures
+                else "object_constraint_detected"
+                if object_constraint_references
+                else "order8_teacher_episode_failed"
+            )
+        lowered_failure = (teacher_failure_reason or "").lower()
+        teacher_episode_result = order9_teacher_collector.finalize(
+            success=teacher_success,
+            failure_reason=teacher_failure_reason,
+            release_valid=bool(
+                result.release_contact_free_acquired and result.settle_acquired
+            ),
+            object_dropped=bool(result.object_dropped),
+            hard_collision=bool(
+                result.unintended_contact_count > 0
+                or result.max_penetration_m
+                > float(config.max_penetration_m) + 1.0e-12
+            ),
+            timeout=bool(
+                "timeout" in lowered_failure
+                or (not teacher_success and command_index >= max_steps)
+            ),
+            qp_infeasible_terminal=bool(
+                not teacher_success
+                and (
+                    "qp" in lowered_failure
+                    or "controller" in lowered_failure
+                    or controller_failure_count > 0
+                )
+            ),
+        )
+        written_manifest = write_order9_teacher_episode(
+            teacher_episode_result,
+            order9_teacher_output_path,
+            random_seed=int(args.order8_seed),
+            robot_model_hash=physical_model.stable_hash(),
+            urdf_hash=hash_file(urdf_path),
+            thrust_model_hash=stable_hash(
+                [rotor.to_dict() for rotor in physical_model.rotors]
+            ),
+            config_hash=config.stable_hash(),
+            simulator_version="isaac_lab_order8_natural_contact",
+            simulator_hash=stable_hash(
+                {
+                    "backend_config_hash": backend_config_hash,
+                    "collision_approximation": collision_info,
+                    "device": device,
+                    "simulation_dt_s": sim_dt,
+                }
+            ),
+            metadata={
+                "teacher_task_id": order9_teacher_task_id,
+                "source_graph_hash": morphology_graph.stable_hash(),
+                "source_order8_result_hash": result.stable_hash(),
+                "raw_contact_actor_input": False,
+                "privileged_contact_role": "reward_and_safety_only",
+                "full_mesh_acceptance_replaced": False,
+            },
+        )
+        order9_teacher_episode_manifest_path = str(written_manifest)
     state_trace_payload: dict[str, object] | None = None
     if state_trace_output_path is not None:
         from amsrr.simulation.order8_state_trace import (
@@ -10929,6 +11242,10 @@ def run_order8_isaac_runtime(
             else 1
         ),
         "order8_natural_contact_enabled": True,
+        "order9_teacher_collection_enabled": order9_teacher_collector is not None,
+        "order9_teacher_episode_manifest_path": (
+            order9_teacher_episode_manifest_path
+        ),
         "order8_natural_contact_object_support_method": (
             "free_object_on_fixed_raised_platform_without_pose_constraint_v1"
         ),

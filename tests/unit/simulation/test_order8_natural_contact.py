@@ -103,6 +103,28 @@ def test_order8_command_force_converts_and_binds_graph_config_and_gui() -> None:
     assert _argument(command, "--keep-open-after-smoke-s") == "20.0"
 
 
+def test_order9_teacher_command_is_explicit_and_can_reuse_generated_asset() -> None:
+    env = _env(
+        force_convert=False,
+        order9_teacher_output="artifacts/order9/c0/episode-1",
+        order9_teacher_episode_id="episode-1",
+        order9_teacher_task_id="task-1",
+        order9_teacher_split="validation",
+    )
+
+    command = env.build_probe_command(env.representative_morphology())
+
+    assert "--convert-if-missing" in command
+    assert "--force-convert" not in command
+    assert _argument(command, "--order9-teacher-output") == (
+        "artifacts/order9/c0/episode-1"
+    )
+    assert _argument(command, "--order9-teacher-episode-id") == "episode-1"
+    assert _argument(command, "--order9-teacher-task-id") == "task-1"
+    assert _argument(command, "--order9-teacher-split") == "validation"
+    assert _argument(command, "--order9-teacher-high-level-stride") == "5"
+
+
 def test_representative_graph_is_exact_symmetric_two_anchor_three_module_design() -> (
     None
 ):

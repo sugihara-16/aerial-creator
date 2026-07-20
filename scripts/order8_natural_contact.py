@@ -50,8 +50,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--realtime-playback", action="store_true")
     parser.add_argument("--keep-open-after-rollout-s", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--order9-teacher-output", default=None)
+    parser.add_argument("--order9-teacher-episode-id", default=None)
+    parser.add_argument("--order9-teacher-task-id", default=None)
+    parser.add_argument(
+        "--order9-teacher-split",
+        choices=("train", "validation", "held_out"),
+        default="train",
+    )
+    parser.add_argument("--order9-teacher-low-level-stride", type=int, default=1)
+    parser.add_argument("--order9-teacher-high-level-stride", type=int, default=5)
+    parser.add_argument("--order9-teacher-window-horizon-s", type=float, default=2.0)
+    parser.add_argument("--order9-teacher-window-knot-dt-s", type=float, default=0.1)
     parser.add_argument("--report-path", default=str(DEFAULT_REPORT_PATH))
     parser.add_argument("--print-command", action="store_true")
+    parser.add_argument(
+        "--reuse-generated-asset",
+        action="store_true",
+        help="Reuse the hash-audited generated USD instead of forcing conversion.",
+    )
     return parser
 
 
@@ -70,6 +87,18 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--keep-open-after-rollout-s must be non-negative")
     if args.seed < 0:
         parser.error("--seed must be non-negative")
+    if args.order9_teacher_output is not None and not args.real:
+        parser.error("--order9-teacher-output requires --real")
+    if (
+        args.order9_teacher_low_level_stride < 1
+        or args.order9_teacher_high_level_stride < 1
+    ):
+        parser.error("Order9 teacher strides must be positive")
+    if (
+        args.order9_teacher_window_horizon_s <= 0.0
+        or args.order9_teacher_window_knot_dt_s <= 0.0
+    ):
+        parser.error("Order9 teacher window values must be positive")
 
     config_path = Path(args.config).resolve()
     backend_config_path = Path(args.backend_config).resolve()
@@ -100,6 +129,15 @@ def main(argv: list[str] | None = None) -> int:
         realtime_playback=bool(args.realtime_playback),
         keep_open_after_rollout_s=float(args.keep_open_after_rollout_s),
         seed=int(args.seed),
+        order9_teacher_output=args.order9_teacher_output,
+        order9_teacher_episode_id=args.order9_teacher_episode_id,
+        order9_teacher_task_id=args.order9_teacher_task_id,
+        order9_teacher_split=args.order9_teacher_split,
+        order9_teacher_low_level_stride=args.order9_teacher_low_level_stride,
+        order9_teacher_high_level_stride=args.order9_teacher_high_level_stride,
+        order9_teacher_window_horizon_s=args.order9_teacher_window_horizon_s,
+        order9_teacher_window_knot_dt_s=args.order9_teacher_window_knot_dt_s,
+        force_convert=not args.reuse_generated_asset,
     )
     probe_command = env.build_probe_command(morphology)
     result = env.run(morphology, dry_run=not args.real)
@@ -129,7 +167,12 @@ def main(argv: list[str] | None = None) -> int:
         "simulation_dt_s": env.simulation_dt_s,
         "rollout_budget_s": env.rollout_budget_s,
         "generated_usd_dir": str(Path(env.generated_usd_dir).resolve()),
+        "force_convert": env.force_convert,
         "real_requested": bool(args.real),
+        "order9_teacher_output": args.order9_teacher_output,
+        "order9_teacher_episode_id": args.order9_teacher_episode_id,
+        "order9_teacher_task_id": args.order9_teacher_task_id,
+        "order9_teacher_split": args.order9_teacher_split,
     }
     output_path = Path(args.report_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
