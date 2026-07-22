@@ -61,12 +61,12 @@ from isaaclab.scene import InteractiveScene, InteractiveSceneCfg
 from isaaclab.utils.configclass import configclass
 
 from amsrr.policies.order9_low_level_policy import (
+    ORDER9_GLOBAL_ACTION_SIZE,
     ORDER9_PI_L_POLICY_VERSION,
     Order9LowLevelPolicyConfig,
     Order9PhaseConditionedActorCritic,
 )
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
-from amsrr.schemas.order3 import ORDER3_ACTION_SIZE
 from amsrr.schemas.task_spec import TaskType
 from amsrr.simulation.order8_natural_contact import (
     build_representative_order8_morphology,
@@ -223,7 +223,7 @@ class _TensorizedPiLRuntime:
         )
         self.policy.eval()
         self.previous_action = torch.zeros(
-            (self.batch_size, ORDER3_ACTION_SIZE),
+            (self.batch_size, ORDER9_GLOBAL_ACTION_SIZE),
             device=self.device,
             dtype=self.dtype,
         )
@@ -386,7 +386,7 @@ class _TensorizedPiLRuntime:
             "pi_l_model_config": self.config.to_dict(),
             "pi_l_model_config_hash": stable_hash(self.config.to_dict()),
             "pi_l_parameter_count": int(self.parameter_count),
-            "pi_l_global_action_dimension": ORDER3_ACTION_SIZE,
+            "pi_l_global_action_dimension": ORDER9_GLOBAL_ACTION_SIZE,
             "pi_l_joint_action_dimension_per_module": (
                 3 * self.config.max_local_joint_slots
             ),

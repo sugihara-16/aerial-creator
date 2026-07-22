@@ -6,12 +6,12 @@ import torch
 
 from amsrr.morphology.random_connected import RandomConnectedMorphologyDistribution
 from amsrr.policies.low_level_policy_base import LowLevelPolicyContext
-from amsrr.policies.morphology_conditioned_low_level_policy import (
-    MorphologyConditionedLowLevelPolicy,
-)
 from amsrr.policies.order9_low_level_policy import (
     Order9LowLevelPolicyConfig,
     Order9PhaseConditionedActorCritic,
+)
+from amsrr.policies.order9_low_level_runtime import (
+    Order9CompletePolicyCommandRuntime,
 )
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
 from amsrr.schemas.datasets import DatasetSplit
@@ -218,7 +218,7 @@ def _runtime_components():
         max_local_joint_slots=4,
     )
     torch.manual_seed(9019)
-    policy = MorphologyConditionedLowLevelPolicy(
+    policy = Order9CompletePolicyCommandRuntime(
         model=Order9PhaseConditionedActorCritic(config),
         physical_model=physical_model,
         config=config,

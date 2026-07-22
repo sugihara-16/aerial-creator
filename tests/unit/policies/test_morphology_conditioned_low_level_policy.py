@@ -29,11 +29,16 @@ from amsrr.policies.morphology_conditioned_low_level_policy import (
     save_order3_policy_checkpoint,
 )
 from amsrr.policies.order9_low_level_policy import (
+    ORDER9_GLOBAL_ACTION_SIZE,
+    ORDER9_PI_L_POLICY_VERSION,
     Order9LowLevelPolicyConfig,
     Order9PhaseConditionedActorCritic,
     order9_phase_actor_feature_vector,
 )
-from amsrr.policies.order9_low_level_runtime import Order9LowLevelRuntimePolicy
+from amsrr.policies.order9_low_level_runtime import (
+    Order9CompletePolicyCommandRuntime,
+    Order9LowLevelRuntimePolicy,
+)
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.datasets import (
@@ -235,13 +240,13 @@ def test_order9_actor_conditions_on_phase_and_includes_joint_action_in_log_prob(
         graphs,
         [context.runtime_observation for context in contexts],
         torch.zeros((2, len(ORDER3_ACTOR_FEATURE_NAMES))),
-        torch.zeros((2, ORDER3_ACTION_SIZE)),
+        torch.zeros((2, ORDER9_GLOBAL_ACTION_SIZE)),
         model.initial_state(2),
         phase_features=phase_features,
         deterministic=False,
     )
 
-    assert step.action.shape == (2, ORDER3_ACTION_SIZE)
+    assert step.action.shape == (2, ORDER9_GLOBAL_ACTION_SIZE)
     assert step.joint_action.shape == (2, 5, 3 * config.max_local_joint_slots)
     assert torch.count_nonzero(step.joint_action[0, 2:]).item() == 0
     assert torch.isfinite(step.log_prob).all()
@@ -263,7 +268,14 @@ def test_order9_model_warm_starts_order3_trunk_and_deploys_with_phase_context(
         recurrent_hidden_dim=24,
         max_local_joint_slots=4,
     )
-    order3 = MorphologyConditionedActorCritic(config)
+    order3 = MorphologyConditionedActorCritic(
+        Order3MorphologyConditionedPolicyConfig(
+            graph_hidden_dim=config.graph_hidden_dim,
+            graph_message_layers=config.graph_message_layers,
+            recurrent_hidden_dim=config.recurrent_hidden_dim,
+            max_local_joint_slots=config.max_local_joint_slots,
+        )
+    )
     model = Order9PhaseConditionedActorCritic(config)
     missing, unexpected = model.initialize_from_order3(order3)
     context = replace(
@@ -273,7 +285,7 @@ def test_order9_model_warm_starts_order3_trunk_and_deploys_with_phase_context(
         phase_index=3,
         phase_count=11,
     )
-    wrapper = MorphologyConditionedLowLevelPolicy(
+    wrapper = Order9CompletePolicyCommandRuntime(
         model=model,
         physical_model=physical_model,
         config=config,
@@ -310,18 +322,13 @@ def test_order9_pi_l_teacher_codec_and_losses_cover_both_action_heads(
         max_local_joint_slots=4,
     )
     teacher_model = Order9PhaseConditionedActorCritic(config)
-    teacher_policy = MorphologyConditionedLowLevelPolicy(
+    teacher_policy = Order9CompletePolicyCommandRuntime(
         model=teacher_model,
         physical_model=physical_model,
         config=config,
         deterministic=True,
     )
     teacher_trace = teacher_policy.command_with_trace(context)
-    baseline = BaselineLowLevelPolicy(
-        BaselineLowLevelPolicyConfig(
-            control_contract_version=POLICY_COMMAND_CONTRACT_CENTROIDAL
-        )
-    ).command(context)
     control_model = RigidBodyControlModelBuilder().build(
         graph, physical_model, context.runtime_observation
     )
@@ -329,7 +336,6 @@ def test_order9_pi_l_teacher_codec_and_losses_cover_both_action_heads(
     encoded = encode_order9_pi_l_teacher_action(
         context=context,
         teacher_command=teacher_trace.command,
-        baseline_command=baseline,
         control_model=control_model,
         config=config,
     )
@@ -345,7 +351,6 @@ def test_order9_pi_l_teacher_codec_and_losses_cover_both_action_heads(
         student,
         [context],
         [teacher_trace.command],
-        baseline_commands=[baseline],
         decision_returns=[1.5],
     )
     assert loss.active_joint_coordinate_count > 0
@@ -366,13 +371,12 @@ def test_order9_pi_l_teacher_codec_and_losses_cover_both_action_heads(
 
     excessive_twist = list(teacher_trace.command.desired_body_twist or [0.0] * 6)
     excessive_twist[0] += 10.0
-    with pytest.raises(SchemaValidationError, match="exceeds the actor trust region"):
+    with pytest.raises(SchemaValidationError, match="exceeds the actor authority"):
         encode_order9_pi_l_teacher_action(
             context=context,
             teacher_command=replace(
                 teacher_trace.command, desired_body_twist=excessive_twist
             ),
-            baseline_command=baseline,
             control_model=control_model,
             config=config,
         )
@@ -397,7 +401,7 @@ def test_order9_pi_l_recurrent_behavior_trace_replays_through_ppo(
         max_local_joint_slots=4,
     )
     model = Order9PhaseConditionedActorCritic(config)
-    wrapper = MorphologyConditionedLowLevelPolicy(
+    wrapper = Order9CompletePolicyCommandRuntime(
         model=model,
         physical_model=physical_model,
         config=config,
@@ -408,7 +412,7 @@ def test_order9_pi_l_recurrent_behavior_trace_replays_through_ppo(
     module_ids = sorted(module.module_id for module in graph.modules)
     behavior = PolicyBehaviorTrace(
         policy_family="pi_l",
-        policy_version="order9_phase_conditioned_morphology_pi_l_v1",
+        policy_version=ORDER9_PI_L_POLICY_VERSION,
         action_semantics=ORDER9_PI_L_ACTION_SEMANTICS,
         action_payload={
             "global_action": inference.normalized_action,
@@ -569,7 +573,7 @@ def test_order9_tensor_hot_path_matches_schema_features_and_graph_encoding(
     )
     model = Order9PhaseConditionedActorCritic(config)
     phase = torch.tensor([order9_phase_actor_feature_vector(context, config)])
-    previous = torch.zeros((1, ORDER3_ACTION_SIZE))
+    previous = torch.zeros((1, ORDER9_GLOBAL_ACTION_SIZE))
     hidden = model.initial_state(1)
     schema_step = model.step(
         [graph],

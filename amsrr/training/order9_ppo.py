@@ -13,11 +13,7 @@ from torch import nn
 from amsrr.controllers.rigid_body_model import RigidBodyControlModelBuilder
 from amsrr.policies.design_policy_base import DesignPolicyContext
 from amsrr.policies.high_level_policy_base import HighLevelPolicyContext
-from amsrr.policies.low_level_policy_base import (
-    BaselineLowLevelPolicy,
-    BaselineLowLevelPolicyConfig,
-    LowLevelPolicyContext,
-)
+from amsrr.policies.low_level_policy_base import LowLevelPolicyContext
 from amsrr.policies.morphology_conditioned_low_level_policy import (
     ORDER3_ACTOR_FEATURE_NAMES,
     Order3PolicyInference,
@@ -35,11 +31,13 @@ from amsrr.policies.order9_high_level_policy import (
     Order9PiHActionEvaluation,
 )
 from amsrr.policies.order9_low_level_policy import (
+    ORDER9_GLOBAL_ACTION_SIZE,
     ORDER9_PI_L_POLICY_VERSION,
     Order9LowLevelActorCriticStep,
     Order9PhaseConditionedActorCritic,
     order9_phase_actor_feature_vector,
 )
+from amsrr.policies.order9_policy_command import order9_pi_l_reference_command
 from amsrr.schemas.common import SchemaBase, SchemaValidationError
 from amsrr.schemas.datasets import (
     HighLevelTransitionKind,
@@ -48,9 +46,7 @@ from amsrr.schemas.datasets import (
     PolicyBehaviorTrace,
     SequentialDesignTrajectoryRecord,
 )
-from amsrr.schemas.order3 import ORDER3_ACTION_SIZE
 from amsrr.schemas.physical_model import PhysicalModel
-from amsrr.schemas.policies import POLICY_COMMAND_CONTRACT_CENTROIDAL
 from amsrr.training.order9_curriculum import Order9PPOOptimizationConfig
 from amsrr.training.order9_offline_training import (
     reconstruct_order9_pi_d_teacher_trace,
@@ -65,7 +61,9 @@ from amsrr.training.order9_pi_l_learning import (
 
 
 ORDER9_PPO_REPLAY_VERSION = "order9_ppo_exact_behavior_replay_v1"
-ORDER9_PI_L_ACTION_SEMANTICS = "squashed_global_and_module_joint_action_v1"
+ORDER9_PI_L_ACTION_SEMANTICS = (
+    "squashed_complete_policy_command_and_module_joint_action_v2"
+)
 ORDER9_PI_H_ACTION_SEMANTICS = "full_autoregressive_trajectory_tensor_action_v1"
 ORDER9_PI_D_ACTION_SEMANTICS = "masked_grammar_candidate_index_v1"
 
@@ -711,19 +709,14 @@ def _pi_l_features(
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     parameter = next(policy.parameters())
     device, dtype = parameter.device, parameter.dtype
-    baseline_policy = BaselineLowLevelPolicy(
-        BaselineLowLevelPolicyConfig(
-            control_contract_version=POLICY_COMMAND_CONTRACT_CENTROIDAL
-        )
-    )
     builder = RigidBodyControlModelBuilder()
     actor_rows = []
     phase_rows = []
     privileged_rows = []
     for context, trace in zip(contexts, traces):
-        baseline = baseline_policy.command(context)
-        if baseline.desired_body_pose is None:
-            raise SchemaValidationError("Order9 pi_L PPO baseline pose is missing")
+        reference = order9_pi_l_reference_command(context)
+        if reference.desired_body_pose is None:
+            raise SchemaValidationError("Order9 pi_L PPO reference pose is missing")
         control_model = builder.build(
             context.morphology_graph, physical_model, context.runtime_observation
         )
@@ -731,8 +724,8 @@ def _pi_l_features(
             order3_actor_feature_vector(
                 context.runtime_observation,
                 control_model,
-                target_pose_world=baseline.desired_body_pose,
-                target_twist=list(baseline.desired_body_twist or [0.0] * 6),
+                target_pose_world=reference.desired_body_pose,
+                target_twist=list(reference.desired_body_twist or [0.0] * 6),
                 max_modules=policy.config.max_modules,
             )
         )
@@ -771,7 +764,7 @@ def _pi_l_actions(
         joint_rows = payload.get("joint_action")
         if (
             not isinstance(global_action, list)
-            or len(global_action) != ORDER3_ACTION_SIZE
+            or len(global_action) != ORDER9_GLOBAL_ACTION_SIZE
             or not isinstance(module_ids, list)
             or not isinstance(joint_rows, list)
             or len(module_ids) != len(joint_rows)

@@ -6,8 +6,10 @@ from dataclasses import dataclass
 
 import torch
 
-from amsrr.policies.order9_low_level_policy import Order9LowLevelPolicyConfig
-from amsrr.schemas.order3 import ORDER3_ACTION_SIZE
+from amsrr.policies.order9_low_level_policy import (
+    ORDER9_GLOBAL_ACTION_SIZE,
+    Order9LowLevelPolicyConfig,
+)
 from amsrr.schemas.physical_model import PhysicalModel
 
 
@@ -62,34 +64,38 @@ class Order9TensorPolicyCommandDecoder:
     def decode(
         self,
         *,
-        baseline_body_pose_world: torch.Tensor,
-        baseline_body_twist: torch.Tensor,
-        baseline_residual_wrench_body: torch.Tensor,
+        reference_body_pose_world: torch.Tensor,
+        reference_body_twist: torch.Tensor,
         normalized_global_action: torch.Tensor,
         normalized_joint_action: torch.Tensor,
         policy_module_ids: torch.Tensor,
-        current_local_joint_positions_rad: torch.Tensor,
-        current_local_joint_mask: torch.Tensor,
+        reference_local_joint_positions_rad: torch.Tensor,
+        reference_local_joint_velocities_radps: torch.Tensor,
+        reference_local_joint_mask: torch.Tensor,
         total_mass_kg: torch.Tensor,
     ) -> Order9TensorPolicyCommand:
-        batch_size = baseline_body_pose_world.shape[0]
+        batch_size = reference_body_pose_world.shape[0]
         module_count = len(self.module_ids)
         slot_count = len(self.local_joint_ids)
         expected = {
-            "baseline_body_pose_world": (batch_size, 7),
-            "baseline_body_twist": (batch_size, 6),
-            "baseline_residual_wrench_body": (batch_size, 6),
-            "normalized_global_action": (batch_size, ORDER3_ACTION_SIZE),
+            "reference_body_pose_world": (batch_size, 7),
+            "reference_body_twist": (batch_size, 6),
+            "normalized_global_action": (batch_size, ORDER9_GLOBAL_ACTION_SIZE),
             "policy_module_ids": (
                 batch_size,
                 module_count,
             ),
-            "current_local_joint_positions_rad": (
+            "reference_local_joint_positions_rad": (
                 batch_size,
                 module_count,
                 slot_count,
             ),
-            "current_local_joint_mask": (
+            "reference_local_joint_velocities_radps": (
+                batch_size,
+                module_count,
+                slot_count,
+            ),
+            "reference_local_joint_mask": (
                 batch_size,
                 module_count,
                 slot_count,
@@ -112,25 +118,34 @@ class Order9TensorPolicyCommandDecoder:
         for value in (
             normalized_global_action,
             normalized_joint_action,
-            baseline_body_pose_world,
-            baseline_body_twist,
-            baseline_residual_wrench_body,
-            current_local_joint_positions_rad,
+            reference_body_pose_world,
+            reference_body_twist,
+            reference_local_joint_positions_rad,
+            reference_local_joint_velocities_radps,
             total_mass_kg,
         ):
             if not bool(torch.isfinite(value).all()):
                 raise ValueError("Order9 tensor command input must be finite")
-        blend = float(self.config.trust_region_blend)
+        desired_pose = _apply_centroidal_pose_action(
+            reference_body_pose_world,
+            normalized_global_action[:, :6],
+            position_limit_m=float(
+                self.config.centroidal_position_correction_limit_m
+            ),
+            orientation_limit_rad=float(
+                self.config.centroidal_orientation_correction_limit_rad
+            ),
+        )
         twist_limits = torch.tensor(
             [
                 *([self.config.linear_twist_correction_limit_mps] * 3),
                 *([self.config.angular_twist_correction_limit_radps] * 3),
             ],
-            device=baseline_body_twist.device,
-            dtype=baseline_body_twist.dtype,
+            device=reference_body_twist.device,
+            dtype=reference_body_twist.dtype,
         )
-        desired_twist = baseline_body_twist + (
-            blend * normalized_global_action[:, :6] * twist_limits
+        desired_twist = (
+            reference_body_twist + normalized_global_action[:, 6:12] * twist_limits
         )
         module_count_tensor = torch.full_like(total_mass_kg, float(module_count))
         force_scale = (
@@ -148,9 +163,7 @@ class Order9TensorPolicyCommandDecoder:
             ),
             dim=-1,
         )
-        residual_wrench = baseline_residual_wrench_body + (
-            blend * normalized_global_action[:, 6:12] * wrench_scale
-        )
+        residual_wrench = normalized_global_action[:, 12:18] * wrench_scale
 
         if not self._policy_identity_validated:
             expected_ids = list(self.module_ids)
@@ -162,18 +175,17 @@ class Order9TensorPolicyCommandDecoder:
             self._policy_identity_validated = True
         effort = torch.tensor(
             self._effort_limits,
-            device=baseline_body_pose_world.device,
-            dtype=baseline_body_pose_world.dtype,
+            device=reference_body_pose_world.device,
+            dtype=reference_body_pose_world.dtype,
         )
         q_delta = (
-            blend
-            * normalized_joint_action[:, :, :slot_count]
+            normalized_joint_action[:, :, :slot_count]
             * float(self.config.joint_position_delta_limit_rad)
         )
-        output_q = current_local_joint_positions_rad + q_delta
+        output_q = reference_local_joint_positions_rad + q_delta
         output_qdot = (
-            blend
-            * normalized_joint_action[
+            reference_local_joint_velocities_radps
+            + normalized_joint_action[
                 :,
                 :,
                 self.config.max_local_joint_slots : (
@@ -183,8 +195,7 @@ class Order9TensorPolicyCommandDecoder:
             * float(self.config.joint_velocity_limit_rad_s)
         )
         output_torque = (
-            blend
-            * normalized_joint_action[
+            normalized_joint_action[
                 :,
                 :,
                 2 * self.config.max_local_joint_slots : (
@@ -194,9 +205,9 @@ class Order9TensorPolicyCommandDecoder:
             * effort.reshape(1, 1, -1)
             * float(self.config.joint_torque_fraction)
         )
-        output_mask = current_local_joint_mask.clone()
+        output_mask = reference_local_joint_mask.clone()
         return Order9TensorPolicyCommand(
-            desired_body_pose_world=baseline_body_pose_world,
+            desired_body_pose_world=desired_pose,
             desired_body_twist=desired_twist,
             residual_wrench_body=residual_wrench,
             joint_position_targets_rad=output_q,
@@ -206,6 +217,53 @@ class Order9TensorPolicyCommandDecoder:
             module_ids=self.module_ids,
             local_joint_ids=self.local_joint_ids,
         )
+
+
+def _apply_centroidal_pose_action(
+    reference_pose_world: torch.Tensor,
+    normalized_pose_action: torch.Tensor,
+    *,
+    position_limit_m: float,
+    orientation_limit_rad: float,
+) -> torch.Tensor:
+    position = reference_pose_world[:, :3] + (
+        normalized_pose_action[:, :3] * position_limit_m
+    )
+    reference_quaternion = _normalize_quaternion(reference_pose_world[:, 3:7])
+    rotation_vector = normalized_pose_action[:, 3:6] * orientation_limit_rad
+    angle = torch.linalg.vector_norm(rotation_vector, dim=-1, keepdim=True)
+    half_angle = 0.5 * angle
+    small = angle <= 1.0e-8
+    vector_scale = torch.where(
+        small,
+        0.5 - angle.square() / 48.0,
+        torch.sin(half_angle) / angle.clamp_min(1.0e-12),
+    )
+    delta = torch.cat(
+        (rotation_vector * vector_scale, torch.cos(half_angle)), dim=-1
+    )
+    orientation = _quaternion_multiply(reference_quaternion, delta)
+    return torch.cat((position, orientation), dim=-1)
+
+
+def _quaternion_multiply(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+    lx, ly, lz, lw = left.unbind(dim=-1)
+    rx, ry, rz, rw = right.unbind(dim=-1)
+    value = torch.stack(
+        (
+            lw * rx + lx * rw + ly * rz - lz * ry,
+            lw * ry - lx * rz + ly * rw + lz * rx,
+            lw * rz + lx * ry - ly * rx + lz * rw,
+            lw * rw - lx * rx - ly * ry - lz * rz,
+        ),
+        dim=-1,
+    )
+    return _normalize_quaternion(value)
+
+
+def _normalize_quaternion(value: torch.Tensor) -> torch.Tensor:
+    normalized = value / value.norm(dim=-1, keepdim=True).clamp_min(1.0e-12)
+    return torch.where(normalized[:, 3:4] < 0.0, -normalized, normalized)
 
 
 __all__ = [

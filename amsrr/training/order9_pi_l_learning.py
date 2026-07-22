@@ -19,22 +19,23 @@ from amsrr.controllers.rigid_body_model import (
     RigidBodyControlModel,
     RigidBodyControlModelBuilder,
 )
-from amsrr.policies.low_level_policy_base import (
-    BaselineLowLevelPolicy,
-    BaselineLowLevelPolicyConfig,
-    LowLevelPolicyContext,
-)
+from amsrr.policies.low_level_policy_base import LowLevelPolicyContext
 from amsrr.policies.morphology_conditioned_low_level_policy import (
     ORDER3_ACTOR_FEATURE_NAMES,
     order3_actor_feature_vector,
 )
 from amsrr.policies.order9_low_level_policy import (
+    ORDER9_GLOBAL_ACTION_SIZE,
     Order9LowLevelPolicyConfig,
     Order9PhaseConditionedActorCritic,
     order9_phase_actor_feature_vector,
 )
+from amsrr.policies.order9_policy_command import (
+    encode_order9_centroidal_pose_action,
+    order9_joint_reference,
+    order9_pi_l_reference_command,
+)
 from amsrr.schemas.common import SchemaValidationError
-from amsrr.schemas.order3 import ORDER3_ACTION_SIZE
 from amsrr.schemas.policies import (
     POLICY_COMMAND_CONTRACT_CENTROIDAL,
     PolicyCommand,
@@ -42,7 +43,7 @@ from amsrr.schemas.policies import (
 from amsrr.training.order9_pi_h_learning import clipped_ppo_surrogate_loss
 
 
-ORDER9_PI_L_LEARNING_VERSION = "order9_phase_conditioned_pi_l_bc_ppo_v1"
+ORDER9_PI_L_LEARNING_VERSION = "order9_complete_policy_command_pi_l_bc_ppo_v2"
 _GRAVITY_MPS2 = 9.81
 _REPRESENTABILITY_TOLERANCE = 1.0e-6
 
@@ -72,25 +73,25 @@ def encode_order9_pi_l_teacher_action(
     *,
     context: LowLevelPolicyContext,
     teacher_command: PolicyCommand,
-    baseline_command: PolicyCommand,
     control_model: RigidBodyControlModel,
     config: Order9LowLevelPolicyConfig,
 ) -> Order9PiLTeacherAction:
-    """Invert the deployed decoder and reject out-of-authority demonstrations."""
+    """Invert the complete deployed decoder and reject clipped demonstrations."""
 
     if teacher_command.control_contract_version != POLICY_COMMAND_CONTRACT_CENTROIDAL:
         raise SchemaValidationError("Order9 pi_L teacher must use the centroidal-v2 contract")
-    if baseline_command.control_contract_version != POLICY_COMMAND_CONTRACT_CENTROIDAL:
-        raise SchemaValidationError("Order9 pi_L baseline must use the centroidal-v2 contract")
     config.validate()
-    blend = float(config.trust_region_blend)
-    base_twist = _six_vector(baseline_command.desired_body_twist, "baseline twist")
+    reference_command = order9_pi_l_reference_command(context)
+    reference_pose = _required_pose(reference_command)
+    teacher_pose = _required_pose(teacher_command)
+    reference_twist = _six_vector(
+        reference_command.desired_body_twist, "reference twist"
+    )
     teacher_twist = _six_vector(teacher_command.desired_body_twist, "teacher twist")
     twist_limits = (
         *([config.linear_twist_correction_limit_mps] * 3),
         *([config.angular_twist_correction_limit_radps] * 3),
     )
-    base_wrench = _six_vector(baseline_command.residual_wrench_body, "baseline wrench")
     teacher_wrench = _six_vector(teacher_command.residual_wrench_body, "teacher wrench")
     wrench_limits = (
         *(
@@ -109,14 +110,21 @@ def encode_order9_pi_l_teacher_action(
             * 3
         ),
     )
-    global_values = [
-        (teacher_twist[index] - base_twist[index]) / (blend * twist_limits[index])
-        for index in range(6)
-    ]
+    global_values = list(
+        encode_order9_centroidal_pose_action(
+            reference_pose, teacher_pose, config
+        )
+    )
     global_values.extend(
-        (teacher_wrench[index] - base_wrench[index]) / (blend * wrench_limits[index])
+        (teacher_twist[index] - reference_twist[index]) / twist_limits[index]
         for index in range(6)
     )
+    global_values.extend(
+        teacher_wrench[index] / wrench_limits[index]
+        for index in range(6)
+    )
+    if len(global_values) != ORDER9_GLOBAL_ACTION_SIZE:
+        raise RuntimeError("Order9 pi_L global action layout drifted")
 
     joint_ids = _dock_mechanism_joint_ids(context.physical_model)
     if len(joint_ids) > config.max_local_joint_slots:
@@ -138,17 +146,25 @@ def encode_order9_pi_l_teacher_action(
                 continue
             global_id = f"module_{module_id}:{joint_id}"
             current = float(state.joint_positions[joint_id])
+            q_reference, qdot_reference = order9_joint_reference(
+                reference_command,
+                global_joint_id=global_id,
+                local_joint_id=joint_id,
+                current_position_rad=current,
+            )
             q_target = float(teacher_command.joint_position_targets.get(global_id, current))
             qdot_target = float(teacher_command.joint_velocity_targets.get(global_id, 0.0))
             torque_target = float(teacher_command.joint_torque_bias.get(global_id, 0.0))
             row[slot] = (
-                q_target - current
-            ) / (blend * config.joint_position_delta_limit_rad)
-            row[config.max_local_joint_slots + slot] = qdot_target / (
-                blend * config.joint_velocity_limit_rad_s
+                q_target - q_reference
+            ) / config.joint_position_delta_limit_rad
+            row[config.max_local_joint_slots + slot] = (
+                qdot_target - qdot_reference
+            ) / (
+                config.joint_velocity_limit_rad_s
             )
             effort_limit = float(joint_by_id[joint_id].effort_limit or 0.0)
-            torque_scale = blend * effort_limit * config.joint_torque_fraction
+            torque_scale = effort_limit * config.joint_torque_fraction
             if torque_scale <= 0.0:
                 if not math.isclose(torque_target, 0.0, abs_tol=1.0e-12):
                     raise SchemaValidationError(
@@ -165,7 +181,7 @@ def encode_order9_pi_l_teacher_action(
     maximum = max((abs(value) for value in all_values), default=0.0)
     if maximum > 1.0 + _REPRESENTABILITY_TOLERANCE:
         raise SchemaValidationError(
-            "Order9 pi_L teacher command exceeds the actor trust region "
+            "Order9 pi_L teacher command exceeds the actor authority "
             f"(maximum normalized magnitude {maximum:.6g})"
         )
     return Order9PiLTeacherAction(
@@ -183,7 +199,6 @@ def compute_order9_pi_l_behavior_cloning_loss(
     contexts: Sequence[LowLevelPolicyContext],
     teacher_commands: Sequence[PolicyCommand],
     *,
-    baseline_commands: Sequence[PolicyCommand] | None = None,
     previous_actions: torch.Tensor | None = None,
     recurrent_state: torch.Tensor | None = None,
     privileged_disturbance_body: torch.Tensor | None = None,
@@ -195,8 +210,6 @@ def compute_order9_pi_l_behavior_cloning_loss(
 
     if not contexts or len(contexts) != len(teacher_commands):
         raise ValueError("Order9 pi_L BC requires equally sized non-empty batches")
-    if baseline_commands is not None and len(baseline_commands) != len(contexts):
-        raise ValueError("Order9 pi_L baseline batch size mismatch")
     if decision_returns is not None and len(decision_returns) != len(contexts):
         raise ValueError("Order9 pi_L return batch size mismatch")
     if joint_loss_weight < 0.0 or value_loss_weight < 0.0:
@@ -204,7 +217,7 @@ def compute_order9_pi_l_behavior_cloning_loss(
     config = policy.config
     parameter = next(policy.parameters())
     device, dtype = parameter.device, parameter.dtype
-    resolved_baselines = list(baseline_commands or _baseline_commands(contexts))
+    references = [order9_pi_l_reference_command(context) for context in contexts]
     builder = RigidBodyControlModelBuilder()
     control_models = [
         builder.build(
@@ -218,12 +231,11 @@ def compute_order9_pi_l_behavior_cloning_loss(
         encode_order9_pi_l_teacher_action(
             context=context,
             teacher_command=teacher,
-            baseline_command=baseline,
             control_model=control_model,
             config=config,
         )
-        for context, teacher, baseline, control_model in zip(
-            contexts, teacher_commands, resolved_baselines, control_models
+        for context, teacher, control_model in zip(
+            contexts, teacher_commands, control_models
         )
     ]
     actor_features = torch.tensor(
@@ -231,12 +243,14 @@ def compute_order9_pi_l_behavior_cloning_loss(
             order3_actor_feature_vector(
                 context.runtime_observation,
                 control_model,
-                target_pose_world=_required_pose(baseline),
-                target_twist=_six_vector(baseline.desired_body_twist, "baseline twist"),
+                target_pose_world=_required_pose(reference),
+                target_twist=_six_vector(
+                    reference.desired_body_twist, "reference twist"
+                ),
                 max_modules=config.max_modules,
             )
-            for context, control_model, baseline in zip(
-                contexts, control_models, resolved_baselines
+            for context, control_model, reference in zip(
+                contexts, control_models, references
             )
         ],
         dtype=dtype,
@@ -249,7 +263,9 @@ def compute_order9_pi_l_behavior_cloning_loss(
     )
     batch_size = len(contexts)
     previous = (
-        torch.zeros((batch_size, ORDER3_ACTION_SIZE), dtype=dtype, device=device)
+        torch.zeros(
+            (batch_size, ORDER9_GLOBAL_ACTION_SIZE), dtype=dtype, device=device
+        )
         if previous_actions is None
         else previous_actions.to(device=device, dtype=dtype)
     )
@@ -337,15 +353,6 @@ def compute_order9_pi_l_ppo_loss(
     return actor + value_loss_weight * critic - entropy_bonus_weight * entropy.mean()
 
 
-def _baseline_commands(contexts: Sequence[LowLevelPolicyContext]) -> list[PolicyCommand]:
-    baseline = BaselineLowLevelPolicy(
-        BaselineLowLevelPolicyConfig(
-            control_contract_version=POLICY_COMMAND_CONTRACT_CENTROIDAL
-        )
-    )
-    return [baseline.command(context) for context in contexts]
-
-
 def _joint_coordinate_mask(
     context: LowLevelPolicyContext,
     module_id: int,
@@ -379,7 +386,7 @@ def _dock_mechanism_joint_ids(physical_model) -> list[str]:
 
 def _required_pose(command: PolicyCommand):
     if command.desired_body_pose is None:
-        raise SchemaValidationError("Order9 pi_L BC baseline requires a centroidal pose")
+        raise SchemaValidationError("Order9 pi_L requires a centroidal pose")
     return command.desired_body_pose
 
 

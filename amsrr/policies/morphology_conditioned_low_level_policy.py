@@ -114,6 +114,18 @@ class Order3MorphologyConditionedPolicyConfig(SchemaBase):
     initial_log_std: float = -2.0
     ood_absolute_feature_limit: float = 1.0e6
 
+    @property
+    def expected_action_size(self) -> int:
+        """Global actor width owned by this policy contract.
+
+        Order 9 reuses the morphology/recurrent trunk but has a wider,
+        versioned PolicyCommand action contract.  Keeping the expected width
+        polymorphic prevents that newer contract from being silently squeezed
+        into the legacy Order-3 twelve-coordinate residual head.
+        """
+
+        return ORDER3_ACTION_SIZE
+
     def validate(self) -> None:
         for name in (
             "graph_hidden_dim",
@@ -130,9 +142,10 @@ class Order3MorphologyConditionedPolicyConfig(SchemaBase):
             raise SchemaValidationError(
                 "Order3MorphologyConditionedPolicyConfig.max_modules must be 8"
             )
-        if self.action_size != ORDER3_ACTION_SIZE:
+        if self.action_size != self.expected_action_size:
             raise SchemaValidationError(
-                f"Order3 policy action_size must be {ORDER3_ACTION_SIZE}"
+                "morphology policy action_size must be "
+                f"{self.expected_action_size}"
             )
         for name in (
             "update_rate_hz",
@@ -197,10 +210,7 @@ class MorphologyConditionedActorCritic(nn.Module):
             nn.Linear(self.config.graph_hidden_dim, self.config.graph_hidden_dim),
             nn.SiLU(),
         )
-        fusion_width = (
-            2 * self.config.graph_hidden_dim
-            + ORDER3_ACTION_SIZE
-        )
+        fusion_width = 2 * self.config.graph_hidden_dim + self.config.action_size
         self.fusion = nn.Sequential(
             nn.Linear(fusion_width, self.config.recurrent_hidden_dim),
             nn.LayerNorm(self.config.recurrent_hidden_dim),
@@ -210,9 +220,13 @@ class MorphologyConditionedActorCritic(nn.Module):
             self.config.recurrent_hidden_dim,
             self.config.recurrent_hidden_dim,
         )
-        self.actor_mean = nn.Linear(self.config.recurrent_hidden_dim, ORDER3_ACTION_SIZE)
+        self.actor_mean = nn.Linear(
+            self.config.recurrent_hidden_dim, self.config.action_size
+        )
         self.actor_log_std = nn.Parameter(
-            torch.full((ORDER3_ACTION_SIZE,), float(self.config.initial_log_std))
+            torch.full(
+                (self.config.action_size,), float(self.config.initial_log_std)
+            )
         )
         self.critic = nn.Sequential(
             nn.Linear(self.config.recurrent_hidden_dim + 6, self.config.recurrent_hidden_dim),
@@ -276,7 +290,7 @@ class MorphologyConditionedActorCritic(nn.Module):
         )
         _require_tensor_shape(
             previous_action,
-            (batch_size, ORDER3_ACTION_SIZE),
+            (batch_size, self.config.action_size),
             "previous_action",
         )
         _require_tensor_shape(
@@ -302,7 +316,7 @@ class MorphologyConditionedActorCritic(nn.Module):
             bounded_action = action.to(device=device, dtype=dtype)
             _require_tensor_shape(
                 bounded_action,
-                (batch_size, ORDER3_ACTION_SIZE),
+                (batch_size, self.config.action_size),
                 "action",
             )
             if bool((bounded_action.abs() > 1.0 + 1.0e-6).any().item()):
@@ -388,6 +402,13 @@ class MorphologyConditionedLowLevelPolicy:
         self.config = config or model.config
         if self.config.to_dict() != model.config.to_dict():
             raise ValueError("Order3 wrapper/model policy configs must match")
+        if (
+            type(self) is MorphologyConditionedLowLevelPolicy
+            and self.config.action_size != ORDER3_ACTION_SIZE
+        ):
+            raise ValueError(
+                "a non-Order3 action contract requires its versioned runtime wrapper"
+            )
         self.deterministic = bool(deterministic)
         self.baseline_policy = baseline_policy or BaselineLowLevelPolicy(
             BaselineLowLevelPolicyConfig(
@@ -403,7 +424,7 @@ class MorphologyConditionedLowLevelPolicy:
         self.rigid_body_builder = RigidBodyControlModelBuilder()
         self._hidden = self.model.initial_state(1, device=self.device)
         self._previous_action = torch.zeros(
-            (1, ORDER3_ACTION_SIZE),
+            (1, self.config.action_size),
             dtype=self._hidden.dtype,
             device=self.device,
         )
@@ -540,12 +561,13 @@ class MorphologyConditionedLowLevelPolicy:
             context.runtime_observation,
             self.physical_model,
         )
+        reference = self._learned_reference_command(context, baseline)
         reason = _runtime_fallback_reason(
             context,
             self.config,
             allowed_structural_hashes=self.allowed_structural_hashes,
         )
-        if reason is not None or baseline.desired_body_pose is None:
+        if reason is not None or reference.desired_body_pose is None:
             raise SchemaValidationError(
                 f"Order3 bootstrap value is unavailable at an unsafe boundary: {reason}"
             )
@@ -557,8 +579,8 @@ class MorphologyConditionedLowLevelPolicy:
         features = order3_actor_feature_vector(
             context.runtime_observation,
             control_model,
-            target_pose_world=baseline.desired_body_pose,
-            target_twist=list(baseline.desired_body_twist or [0.0] * 6),
+            target_pose_world=reference.desired_body_pose,
+            target_twist=list(reference.desired_body_twist or [0.0] * 6),
             max_modules=self.config.max_modules,
         )
         privileged = list(privileged_disturbance_body or [0.0] * 6)
@@ -605,9 +627,17 @@ class MorphologyConditionedLowLevelPolicy:
         )
         if fallback_reason is not None:
             return self._fallback(baseline, fallback_reason, context.morphology_graph.graph_id)
-        if baseline.desired_body_pose is None:
+        try:
+            reference = self._learned_reference_command(context, baseline)
+        except (SchemaValidationError, TypeError, ValueError):
+            return self._fallback(
+                baseline,
+                "invalid_learned_policy_reference",
+                context.morphology_graph.graph_id,
+            )
+        if reference.desired_body_pose is None:
             return self._fallback(baseline, "missing_centroidal_pose_target", context.morphology_graph.graph_id)
-        target_twist = list(baseline.desired_body_twist or [0.0] * 6)
+        target_twist = list(reference.desired_body_twist or [0.0] * 6)
         self._reset_recurrent_if_needed(
             context.morphology_graph.graph_id,
             context.runtime_observation.time_s,
@@ -621,7 +651,7 @@ class MorphologyConditionedLowLevelPolicy:
             features = order3_actor_feature_vector(
                 context.runtime_observation,
                 control_model,
-                target_pose_world=baseline.desired_body_pose,
+                target_pose_world=reference.desired_body_pose,
                 target_twist=target_twist,
                 max_modules=self.config.max_modules,
             )
@@ -672,11 +702,13 @@ class MorphologyConditionedLowLevelPolicy:
             return self._fallback(baseline, "model_inference_error", context.morphology_graph.graph_id)
         action = [float(value) for value in step.action[0].detach().cpu().tolist()]
         action_mean = [float(value) for value in step.action_mean[0].detach().cpu().tolist()]
-        if len(action) != ORDER3_ACTION_SIZE or not all(math.isfinite(value) for value in action):
+        if len(action) != self.config.action_size or not all(
+            math.isfinite(value) for value in action
+        ):
             return self._fallback(baseline, "invalid_model_action", context.morphology_graph.graph_id)
         try:
             command = self._decode_command(
-                baseline,
+                reference,
                 context.runtime_observation,
                 control_model,
                 action,
@@ -692,7 +724,7 @@ class MorphologyConditionedLowLevelPolicy:
             learned_policy_applied=True,
             fallback_reason=None,
             graph_id=context.morphology_graph.graph_id,
-            normalized_action=dict(zip(ORDER3_ACTION_NAMES, action)),
+            normalized_action=dict(zip(self._global_action_names(), action)),
         )
         return Order3PolicyInference(
             command=command,
@@ -775,6 +807,25 @@ class MorphologyConditionedLowLevelPolicy:
             joint_velocity_targets=joint_velocities,
             joint_torque_bias=joint_torque_bias,
         )
+
+    def _learned_reference_command(
+        self,
+        context: LowLevelPolicyContext,
+        deterministic_fallback: PolicyCommand,
+    ) -> PolicyCommand:
+        """Return the learned actor's upstream tracking reference.
+
+        Order 3 intentionally learns around its deterministic baseline.  The
+        Order 9 deployment subclass overrides this hook so the learned policy
+        is conditioned only on the active pi_H target while the deterministic
+        baseline remains a substitution used exclusively on fallback.
+        """
+
+        del context
+        return deterministic_fallback
+
+    def _global_action_names(self) -> Sequence[str]:
+        return ORDER3_ACTION_NAMES
 
     def _decode_joint_targets(
         self,
@@ -867,8 +918,8 @@ class MorphologyConditionedLowLevelPolicy:
         return Order3PolicyInference(
             command=command,
             previous_action=previous_action,
-            normalized_action=[0.0] * ORDER3_ACTION_SIZE,
-            action_mean=[0.0] * ORDER3_ACTION_SIZE,
+            normalized_action=[0.0] * self.config.action_size,
+            action_mean=[0.0] * self.config.action_size,
             log_prob=0.0,
             value=0.0,
             recurrent_state_in=hidden,

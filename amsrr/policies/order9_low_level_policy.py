@@ -17,17 +17,44 @@ from amsrr.policies.morphology_conditioned_low_level_policy import (
     Order3MorphologyConditionedPolicyConfig,
 )
 from amsrr.schemas.common import SchemaValidationError
-from amsrr.schemas.order3 import ORDER3_ACTION_SIZE
 from amsrr.schemas.task_spec import TaskType
 
 
-ORDER9_PI_L_POLICY_VERSION = "order9_phase_conditioned_morphology_pi_l_v1"
+ORDER9_PI_L_POLICY_VERSION = "order9_phase_conditioned_policy_command_pi_l_v2"
 ORDER9_MAX_PHASE_COUNT = 16
+ORDER9_GLOBAL_ACTION_NAMES: tuple[str, ...] = (
+    "centroidal_position_correction_world.x",
+    "centroidal_position_correction_world.y",
+    "centroidal_position_correction_world.z",
+    "centroidal_orientation_correction_body.rx",
+    "centroidal_orientation_correction_body.ry",
+    "centroidal_orientation_correction_body.rz",
+    "centroidal_twist_correction.linear_world.x",
+    "centroidal_twist_correction.linear_world.y",
+    "centroidal_twist_correction.linear_world.z",
+    "centroidal_twist_correction.angular_body.x",
+    "centroidal_twist_correction.angular_body.y",
+    "centroidal_twist_correction.angular_body.z",
+    "centroidal_wrench_bias_body.force.x",
+    "centroidal_wrench_bias_body.force.y",
+    "centroidal_wrench_bias_body.force.z",
+    "centroidal_wrench_bias_body.torque.x",
+    "centroidal_wrench_bias_body.torque.y",
+    "centroidal_wrench_bias_body.torque.z",
+)
+ORDER9_GLOBAL_ACTION_SIZE = len(ORDER9_GLOBAL_ACTION_NAMES)
 _EPSILON = 1.0e-6
 
 
 @dataclass
 class Order9LowLevelPolicyConfig(Order3MorphologyConditionedPolicyConfig):
+    action_size: int = ORDER9_GLOBAL_ACTION_SIZE
+    centroidal_position_correction_limit_m: float = 0.05
+    centroidal_orientation_correction_limit_rad: float = 0.25
+    # Order 9 owns a complete PolicyCommand action.  Its bounds are applied
+    # directly; the legacy Order-3 blend must not shrink or mix the command
+    # with a deterministic pi_L output.
+    trust_region_blend: float = 1.0
     max_phase_count: int = ORDER9_MAX_PHASE_COUNT
     joint_action_log_std_init: float = -2.0
     # The inherited field controlled whether the Order-3 joint decoder was
@@ -35,12 +62,29 @@ class Order9LowLevelPolicyConfig(Order3MorphologyConditionedPolicyConfig):
     # bounded local-joint output path.
     free_flight_joint_residual_enabled: bool = True
 
+    @property
+    def expected_action_size(self) -> int:
+        return ORDER9_GLOBAL_ACTION_SIZE
+
     def validate(self) -> None:
         super().validate()
         if self.max_phase_count < 1:
             raise SchemaValidationError("Order9 max_phase_count must be positive")
         if not math.isfinite(self.joint_action_log_std_init):
             raise SchemaValidationError("Order9 joint_action_log_std_init must be finite")
+        for name in (
+            "centroidal_position_correction_limit_m",
+            "centroidal_orientation_correction_limit_rad",
+        ):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value <= 0.0:
+                raise SchemaValidationError(
+                    f"Order9 {name} must be finite and positive"
+                )
+        if not math.isclose(self.trust_region_blend, 1.0, abs_tol=1.0e-12):
+            raise SchemaValidationError(
+                "Order9 complete PolicyCommand must use trust_region_blend=1"
+            )
         if not self.free_flight_joint_residual_enabled:
             raise SchemaValidationError(
                 "Order9 contact-task pi_L requires the bounded joint action path"
@@ -71,7 +115,7 @@ class Order9LowLevelActorCriticStep:
 
 
 class Order9PhaseConditionedActorCritic(MorphologyConditionedActorCritic):
-    """Order-3 compatible trunk plus phase input and stochastic joint action."""
+    """Morphology trunk with a complete phase-conditioned PolicyCommand head."""
 
     def __init__(self, config: Order9LowLevelPolicyConfig | None = None) -> None:
         resolved = config or Order9LowLevelPolicyConfig()
@@ -95,33 +139,37 @@ class Order9PhaseConditionedActorCritic(MorphologyConditionedActorCritic):
         self,
         source: MorphologyConditionedActorCritic,
     ) -> tuple[list[str], list[str]]:
-        """Warm-start the shared trunk; new phase/joint-noise parameters stay fresh."""
+        """Warm-start shape-compatible encoders while keeping the v2 head fresh."""
 
-        incompatible = self.load_state_dict(source.state_dict(), strict=False)
-        unexpected = [
-            key
-            for key in incompatible.unexpected_keys
-            if key not in {"joint_actor_log_std"}
-        ]
+        source_state = source.state_dict()
+        target_state = self.state_dict()
+        compatible = {
+            key: value
+            for key, value in source_state.items()
+            if key in target_state and target_state[key].shape == value.shape
+        }
+        incompatible = self.load_state_dict(compatible, strict=False)
+        unexpected = list(incompatible.unexpected_keys)
         if unexpected:
             raise SchemaValidationError(
                 f"Order3 initialization has unexpected parameters: {unexpected}"
             )
-        expected_missing = {
+        missing = sorted(incompatible.missing_keys)
+        required_fresh_prefixes = (
+            "actor_log_std",
+            "actor_mean.",
+            "fusion.0.",
             "joint_actor_log_std",
-            "phase_encoder.0.weight",
-            "phase_encoder.0.bias",
-            "phase_encoder.1.weight",
-            "phase_encoder.1.bias",
-            "phase_encoder.3.weight",
-            "phase_encoder.3.bias",
-        }
-        missing = set(incompatible.missing_keys)
-        if missing != expected_missing:
+            "phase_encoder.",
+        )
+        if any(
+            not key.startswith(required_fresh_prefixes)
+            for key in missing
+        ):
             raise SchemaValidationError(
-                f"Order3 initialization missing unexpected parameters: {sorted(missing)}"
+                f"Order3 initialization missing unexpected parameters: {missing}"
             )
-        return sorted(missing), sorted(incompatible.unexpected_keys)
+        return missing, unexpected
 
     def phase_feature_tensor(
         self,
@@ -177,7 +225,7 @@ class Order9PhaseConditionedActorCritic(MorphologyConditionedActorCritic):
         )
         _require_shape(
             previous_action,
-            (batch_size, ORDER3_ACTION_SIZE),
+            (batch_size, ORDER9_GLOBAL_ACTION_SIZE),
             "previous_action",
         )
         _require_shape(
@@ -203,7 +251,7 @@ class Order9PhaseConditionedActorCritic(MorphologyConditionedActorCritic):
             distribution,
             raw_mean,
             action,
-            expected_shape=(batch_size, ORDER3_ACTION_SIZE),
+            expected_shape=(batch_size, ORDER9_GLOBAL_ACTION_SIZE),
             deterministic=deterministic,
             label="action",
         )
