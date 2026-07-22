@@ -82,6 +82,15 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--estimated-inertia-body", nargs=6, type=float)
     parser.add_argument("--estimated-com-object", nargs=3, type=float)
     parser.add_argument(
+        "--tensorboard-log-dir",
+        help="Override the shared stage TensorBoard directory.",
+    )
+    parser.add_argument(
+        "--no-tensorboard",
+        action="store_true",
+        help="Disable live TensorBoard telemetry for diagnostic runs.",
+    )
+    parser.add_argument(
         "--canonical-phase-resets",
         choices=("auto", "yes", "no"),
         default="auto",
@@ -186,9 +195,14 @@ from amsrr.training.order9_teacher import (
 )
 from amsrr.training.order9_tensor_pi_l_runtime import Order9TensorPiLRuntime
 from amsrr.training.order9_tensor_reward import (
+    ORDER9_TENSOR_REWARD_TERM_NAMES,
     Order9TensorRewardEngine,
     Order9TensorRewardInput,
     Order9TensorRewardState,
+)
+from amsrr.training.order9_tensorboard import (
+    ORDER9_TENSORBOARD_LOGGER_VERSION,
+    Order9TensorBoardLogger,
 )
 from amsrr.training.order9_tensor_teacher_reference import (
     load_order9_nominal_tensor_teacher_reference,
@@ -777,19 +791,7 @@ def main() -> dict[str, object]:
         for index in range(scene.num_envs)
     ]
     split = DatasetSplit(args_cli.split)
-    reward_names = (
-        "weighted_object_goal_progress",
-        "weighted_object_pose_accuracy",
-        "weighted_grasp_maintenance",
-        "weighted_centroidal_stability",
-        "weighted_energy_penalty",
-        "weighted_qp_residual_penalty",
-        "weighted_slip_penalty",
-        "weighted_collision_penalty",
-        "weighted_actuator_saturation_penalty",
-        "terminal_success_bonus",
-        "terminal_failure_penalty",
-    )
+    reward_names = ORDER9_TENSOR_REWARD_TERM_NAMES
     buffer = Order9TensorRolloutBuffer(
         _rollout_metadata(
             config=config,
@@ -818,6 +820,34 @@ def main() -> dict[str, object]:
             teacher_reference=teacher_reference,
         )
     )
+    tensorboard_logger = None
+    tensorboard_update_index = None
+    tensorboard_log_dir = None
+    if not evaluation_mode and not args_cli.no_tensorboard:
+        tensorboard_update_index = _next_ppo_update_index(
+            checkpoint.metadata.metadata
+        )
+        tensorboard_log_dir = _tensorboard_log_dir(
+            repository,
+            artifact_root=config.production_runtime.artifact_root,
+            stage_id=stage.stage_id,
+            override=args_cli.tensorboard_log_dir,
+        ) / split.value
+        generation_environment_steps = (
+            configured_runtime.generation_environment_steps
+        )
+        if generation_environment_steps is None:
+            raise ValueError("Order9 TensorBoard PPO generation size is missing")
+        tensorboard_logger = Order9TensorBoardLogger(
+            tensorboard_log_dir,
+            stage_id=stage.stage_id,
+            generation_id=args_cli.generation_id,
+            split=split.value,
+            update_index=tensorboard_update_index,
+            generation_environment_steps=generation_environment_steps,
+            phase_labels=tuple(phase.value for phase in ORDER9_OBJECT_TASK_PHASES),
+            reward_term_names=reward_names,
+        )
     setup_elapsed = time.perf_counter() - setup_started
     rollout_started = time.perf_counter()
     terminal_count = 0
@@ -925,6 +955,25 @@ def main() -> dict[str, object]:
         terminal = reward.terminal_failure | completed_task
         terminal_count += int(terminal.sum().item())
         success_count += int(completed_task.sum().item())
+        if tensorboard_logger is not None:
+            tensorboard_logger.log_rollout_step(
+                rollout_index=rollout_index,
+                reward=reward.reward,
+                reward_terms=reward.terms,
+                phase_index=pre_phase,
+                statuses={
+                    "phase_success": reward.phase_success,
+                    "task_success": completed_task,
+                    "terminal": terminal,
+                    "hard_collision": reward.hard_collision,
+                    "object_dropped": reward.object_dropped,
+                    "qp_infeasible_terminal": reward.qp_infeasible_terminal,
+                    "timeout": reward.timeout,
+                    "qp_feasible": allocation.feasible,
+                },
+                elapsed_s=max(time.perf_counter() - rollout_started, 1.0e-12),
+                runtime_sample=load_monitor.latest_sample(),
+            )
         if evaluation_mode:
             evaluation_step_count[evaluation_active] += 1
             evaluation_return[evaluation_active] += reward.reward[evaluation_active]
@@ -1155,8 +1204,25 @@ def main() -> dict[str, object]:
             "evaluation_mode": bool(evaluation_mode),
             "deterministic_policy": bool(evaluation_mode),
             "initial_phase_zero": bool(evaluation_mode),
+            "tensorboard_enabled": tensorboard_logger is not None,
+            "tensorboard_log_dir": (
+                None if tensorboard_log_dir is None else str(tensorboard_log_dir)
+            ),
+            "tensorboard_update_index": tensorboard_update_index,
+            "tensorboard_logger_version": (
+                ORDER9_TENSORBOARD_LOGGER_VERSION
+                if tensorboard_logger is not None
+                else None
+            ),
         }
     )
+    if tensorboard_logger is not None:
+        tensorboard_logger.log_rollout_summary(
+            environment_steps=artifact.environment_step_count,
+            wall_elapsed_s=rollout_elapsed,
+            runtime_load=runtime_load,
+        )
+        tensorboard_logger.close()
     raw_sha = write_order9_tensor_rollout_artifact(args_cli.output_raw, artifact)
     evaluation_episode_count = 0
     if evaluation_mode:
@@ -1265,6 +1331,16 @@ def main() -> dict[str, object]:
         ),
         "deterministic_policy": evaluation_mode,
         "initial_phase_zero": evaluation_mode,
+        "tensorboard_enabled": tensorboard_logger is not None,
+        "tensorboard_log_dir": (
+            None if tensorboard_log_dir is None else str(tensorboard_log_dir)
+        ),
+        "tensorboard_update_index": tensorboard_update_index,
+        "tensorboard_logger_version": (
+            ORDER9_TENSORBOARD_LOGGER_VERSION
+            if tensorboard_logger is not None
+            else None
+        ),
         "canonical_phase_resets": canonical_resets,
         "unlocked_phase_indices": [
             index
@@ -1279,6 +1355,30 @@ def main() -> dict[str, object]:
     if not finite:
         raise RuntimeError("Order9 rollout produced non-finite physical state")
     return result
+
+
+def _next_ppo_update_index(metadata: dict[str, object]) -> int:
+    raw = metadata.get("ppo_update_index")
+    if raw is None:
+        return 0
+    if not isinstance(raw, int) or isinstance(raw, bool) or raw < 0:
+        raise ValueError("Order9 parent checkpoint PPO update index is invalid")
+    return raw + 1
+
+
+def _tensorboard_log_dir(
+    repository: Path,
+    *,
+    artifact_root: str,
+    stage_id: str,
+    override: str | None,
+) -> Path:
+    value = (
+        Path(override)
+        if override is not None
+        else Path(artifact_root) / "stages" / stage_id / "tensorboard"
+    )
+    return (repository / value).resolve() if not value.is_absolute() else value.resolve()
 
 
 def _load_task(repository: Path, config, canonical) -> TaskSpec:

@@ -125,6 +125,14 @@ class Order9RuntimeLoadMonitor:
         summary.update(self._torch_peaks(torch_module))
         return summary
 
+    def latest_sample(self) -> dict[str, Any]:
+        """Return a copy of the newest sample for live observers."""
+
+        if self._started_at is None:
+            raise RuntimeError("Order9 runtime-load monitor was not started")
+        with self._lock:
+            return dict(self._samples[-1]) if self._samples else {}
+
     def _sample_loop(self) -> None:
         while not self._stop_event.wait(self.sample_interval_s):
             self._sample()

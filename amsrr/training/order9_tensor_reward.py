@@ -13,6 +13,21 @@ from amsrr.simulation.order9_object_task_runtime import (
 from amsrr.training.p4_3_reward import P4_3RewardConfig
 
 
+ORDER9_TENSOR_REWARD_TERM_NAMES = (
+    "weighted_object_goal_progress",
+    "weighted_object_pose_accuracy",
+    "weighted_grasp_maintenance",
+    "weighted_centroidal_stability",
+    "weighted_energy_penalty",
+    "weighted_qp_residual_penalty",
+    "weighted_slip_penalty",
+    "weighted_collision_penalty",
+    "weighted_actuator_saturation_penalty",
+    "terminal_success_bonus",
+    "terminal_failure_penalty",
+)
+
+
 @dataclass(frozen=True)
 class Order9TensorRewardGateConfig:
     required_contact_count: int = 2

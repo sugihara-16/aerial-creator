@@ -461,6 +461,7 @@ def test_order9_pi_l_recurrent_behavior_trace_replays_through_ppo(
         behavior_trace=behavior,
     )
     optimizer = torch.optim.Adam(model.parameters(), lr=1.0e-4)
+    progress = []
 
     result = update_order9_pi_l_ppo(
         model,
@@ -475,11 +476,15 @@ def test_order9_pi_l_recurrent_behavior_trace_replays_through_ppo(
         behavior_checkpoint_sha256=checkpoint_sha,
         seed=9,
         sequence_length=1,
+        progress_callback=lambda step, metrics: progress.append((step, metrics)),
     )
 
     assert result.policy_family == "pi_l"
     assert result.sample_count == 1
     assert result.optimizer_step_count == 1
+    assert progress[0][0] == 1
+    assert progress[0][1]["optimizer_step"] == 1.0
+    assert "actor_loss" in progress[0][1]
 
 
 def test_order9_tensor_hot_path_matches_schema_features_and_graph_encoding(

@@ -17,7 +17,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import torch
 from torch import nn
@@ -195,6 +195,9 @@ def train_order9_ppo_update(
     update_index: int,
     device: str | torch.device | None = None,
     additional_input_artifact_paths: Mapping[str, str | Path] | None = None,
+    progress_callback: (
+        Callable[[int, Mapping[str, float], Mapping[str, Any]], None] | None
+    ) = None,
 ) -> Order9OnlineTrainingResult:
     """Consume one fresh on-policy generation and create one child checkpoint."""
 
@@ -248,6 +251,11 @@ def train_order9_ppo_update(
     )
     load_monitor.start(torch_module=torch)
     update_started = time.perf_counter()
+    live_callback = None
+    if progress_callback is not None:
+        live_callback = lambda step, metrics: progress_callback(
+            step, metrics, load_monitor.latest_sample()
+        )
     try:
         update = _apply_single_family_update(
             model,
@@ -258,6 +266,7 @@ def train_order9_ppo_update(
             optimization=optimization,
             behavior_checkpoint_sha256=parent.sha256,
             seed=seed,
+            progress_callback=live_callback,
         )
         if resolved_device.type == "cuda":
             torch.cuda.synchronize(resolved_device)
@@ -592,6 +601,7 @@ def _apply_single_family_update(
     optimization: Order9PPOOptimizationConfig,
     behavior_checkpoint_sha256: str,
     seed: int,
+    progress_callback: Callable[[int, Mapping[str, float]], None] | None = None,
 ) -> Order9PPOUpdateResult:
     if family == Order9PolicyFamily.PI_L:
         if not isinstance(model, Order9PhaseConditionedActorCritic):
@@ -607,6 +617,7 @@ def _apply_single_family_update(
             config=optimization,
             behavior_checkpoint_sha256=behavior_checkpoint_sha256,
             seed=seed,
+            progress_callback=progress_callback,
         )
     if family == Order9PolicyFamily.PI_H:
         if not isinstance(model, Order9AutoregressiveHighLevelPolicy):

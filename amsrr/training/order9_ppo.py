@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import torch
 from torch import nn
@@ -551,6 +551,7 @@ def update_order9_pi_l_ppo(
     behavior_checkpoint_sha256: str,
     seed: int,
     sequence_length: int = 16,
+    progress_callback: Callable[[int, Mapping[str, float]], None] | None = None,
 ) -> Order9PPOUpdateResult:
     """Run recurrent PPO with current-policy recurrence over stored sequences."""
 
@@ -586,6 +587,15 @@ def update_order9_pi_l_ppo(
             )
             metric_rows.append(metrics)
             optimizer_steps += 1
+            if progress_callback is not None:
+                progress_callback(
+                    optimizer_steps,
+                    {
+                        **metrics,
+                        "epoch_index": float(epoch),
+                        "optimizer_step": float(optimizer_steps),
+                    },
+                )
             if metrics["approximate_kl"] > config.target_kl:
                 early_stop = True
                 break

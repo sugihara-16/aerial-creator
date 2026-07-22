@@ -2,6 +2,18 @@
 
 ## Global Worklog
 
+### 2026-07-22 (Order 9 C2 live TensorBoard telemetry)
+- Active specification/work package: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the approved Order 9 curriculum/runtime supplements; Agent J/K C2 learned `pi_L` execution and observability.
+- Summary: Added default-on, live TensorBoard observation for C2 real-Isaac rollout and recurrent PPO updates. The implementation records the total reward and all eleven tensor reward terms at every control step, with current/running and global/per-phase views; it also records phase occupancy/success, task terminals and failure causes, QP feasibility, throughput, GPU/load telemetry, and every PPO minibatch's loss/entropy/KL/clip metrics. It does not alter reward values, gradients, actions, controller authority, stage gates, or artifacts used as learning evidence.
+- Files changed: `amsrr/training/order9_tensorboard.py`; `amsrr/training/{order9_online_training,order9_ppo,order9_runtime_load,order9_tensor_reward}.py`; `scripts/order9_{vectorized_isaac_rollout,train_ppo}.py`; focused policy/runtime/TensorBoard tests; design supplement; this worklog.
+- Schema/interface changes: None to persisted schemas, policy observations/actions, `PolicyCommand`, reward values, PPO replay, QPID/QP, safety, actuator authority, checkpoint selection, or promotion. Additive Python callback and CLI observability options only.
+- Runtime behavior: Default stage root is `artifacts/p4_full/order9/stages/<stage>/tensorboard`, with `train` and `validation` sub-runs. Both rollout and PPO append to the train run using hash-lineage-derived update indices; each live write is flushed. `--tensorboard-log-dir` overrides the root and `--no-tensorboard` supports explicit diagnostics. TensorBoard `2.21.0` is already installed in `isaaclab3`.
+- Tests/commands: Focused TensorBoard/PPO/runtime selection passed `35`; the dependency-complete `isaaclab3` focused set passed `39`; the full `isaaclab3` unit suite passed `1192` with `1` skip in `93.86 s`; compilation and `git diff --check` passed. The minimal base Python full suite reached `1189 passed, 3 skipped` and failed only the existing `trimesh`-dependent held-out mass-property test because that environment lacks `trimesh`; the same test passed in `isaaclab3`.
+- Real integration evidence: A default-writer event-file smoke was read back through TensorBoard's `EventAccumulator`. A real-Isaac diagnostic using the promoted C1 checkpoint then completed `2 environments x 2 steps`, finite and without terminal failure, at `artifacts/p4_full/order9/runtime_diagnostics/c2_tensorboard_2x2_smoke.pt` (SHA-256 `93afe5af372429bf9a67d5ca2f42eb80590cdd91e189f550e154d86d65e174ec`). Its live run exposed `142` scalar tags and the expected reward, phase, QP, and GPU series at environment steps `2` and `4`. This CLI-overridden smoke is not C2 training data or policy-quality evidence.
+- Assumptions/limitations: C2 has not started. With the configured `2048 x 16` generation, reward curves update once per control step (16 live points per rollout) and PPO curves once per optimizer minibatch. TensorBoard observation is local and does not replace immutable JSON/tensor metrics or promotion evaluation.
+- Blockers/open questions: None. No method-level decision was introduced.
+- Next steps: Start C2 from the promoted C1 checkpoint, run TensorBoard against the stage root, and use recorded full-generation throughput/load and learning curves before selecting C3+ parallelism.
+
 ### 2026-07-22 (Order 9 C0/C1 completed and C1 promoted)
 - Active specification/work package: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the approved Order 9 complete-`PolicyCommand`, bounded-diversity C0, actor-only C1, and articulated-graph runtime supplements; Agent J/K low-level learning and real-Isaac execution boundary.
 - Summary: Completed the corrected C0/C1 lineage. C0 collected and promoted 20/20 bounded-diversity real-Isaac teacher episodes with 26,103 low-level records and no safety failure. C1 trained a 595,197-parameter phase-conditioned `pi_L` for 24 phase-balanced recurrent-window epochs, restored best epoch 22, and achieved validation actor loss `5.27308176247542e-06`. The promoted checkpoint is `artifacts/p4_full/order9/stages/c1_pi_l_bc_fixed_nominal/checkpoint.pt`, SHA-256 `533d23e921a8e047878784a523c8c93124f1ae18fbaa476704df88bee67a37ce`.
@@ -3910,6 +3922,17 @@
 - Open questions: None for this work package. Statistical robustness across a larger held-out morphology cohort belongs to later training/evaluation, not this deterministic smoke completion.
 
 ### Agent J/K: Order 9 learned curriculum and physical execution
+
+#### 2026-07-22 (C2 live TensorBoard observability)
+- Scope: Make C2 reward, phase, safety, performance, load, and PPO optimization progress visible during execution without changing learning semantics.
+- Files changed: live TensorBoard logger; runtime latest-sample accessor; recurrent PPO progress callback; rollout/PPO CLIs; reward-term constant; unit tests; design/work logs.
+- Upstream dependencies: C2 `2048 x 16` runtime, tensor reward engine, immutable tensor rollout, one-generation/one-update PPO, existing runtime-load monitor, and promoted C1 checkpoint.
+- Implemented: Per-step total/all-term reward logging with global and per-phase current/running means; terminal/QP/load telemetry; per-minibatch PPO metrics; final summaries; train/validation run separation; default stage log directory and diagnostic opt-out.
+- Not implemented: No C2 training generation or update, no reward tuning, no dashboard-server process management, and no C3+ parallelism decision.
+- Schema/interface changes: None to persisted or controller-facing contracts; additive observer callback/CLI only.
+- Tests passed: `35` focused; `39` dependency-complete focused; full `isaaclab3` unit suite `1192 passed, 1 skipped`; real event readback and learned-checkpoint `2 x 2` real-Isaac integration smoke passed.
+- Handoff notes: Launch `tensorboard --logdir artifacts/p4_full/order9/stages/c2_pi_l_ppo_fixed_conservative/tensorboard --port 6006`; open `http://localhost:6006`. The diagnostic smoke under `runtime_diagnostics` is excluded from training.
+- Open questions: None.
 
 #### 2026-07-22 (C0/C1 completion and promotion)
 - Scope: Finish C0/C1 after the approved articulated graph-asset direction, correct tensor policy observations to the C0 contract, run the learned physical gate, and finalize hash-bound C1 promotion.

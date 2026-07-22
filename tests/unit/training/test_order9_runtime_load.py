@@ -35,8 +35,11 @@ def test_runtime_load_monitor_records_gpu_and_process_peaks() -> None:
         },
     )
     monitor.start()
+    latest = monitor.latest_sample()
     report = monitor.stop()
 
+    assert latest["gpu_memory_used_mib"] == 1001.0
+    assert latest["process_rss_mib"] == 512.0
     assert report["gpu_monitor_available"] is True
     assert report["gpu_sample_count"] == 2
     assert report["gpu_memory_used_mib_peak"] == 1002.0
@@ -63,6 +66,7 @@ def test_runtime_load_monitor_is_explicitly_unavailable_on_cpu() -> None:
         },
     )
     monitor.start()
+    assert monitor.latest_sample()["process_rss_mib"] == 128.0
     report = monitor.stop()
 
     assert report["gpu_index"] is None
