@@ -86,6 +86,15 @@ class Order9GAEResult:
     returns: tuple[float, ...]
 
 
+@dataclass(frozen=True)
+class _PiLReplayCache:
+    index_by_record_id: dict[str, int]
+    actor_graph_observations: tuple[RuntimeObservation, ...]
+    actor_features: torch.Tensor
+    phase_features: torch.Tensor
+    privileged_disturbance_body: torch.Tensor
+
+
 @dataclass
 class Order9PPOUpdateResult(SchemaBase):
     replay_version: str
@@ -594,11 +603,16 @@ def update_order9_pi_l_ppo(
         family="pi_l",
         checkpoint_sha256=behavior_checkpoint_sha256,
     )
+    replay_cache = _build_pi_l_replay_cache(
+        records,
+        policy=policy,
+        physical_model=physical_model,
+    )
     sequences = _low_level_sequences(records, sequence_length=sequence_length)
     replay_metrics = _validate_pi_l_exact_behavior_replay(
         policy,
         sequences,
-        physical_model=physical_model,
+        replay_cache=replay_cache,
     )
     advantage_by_id, return_by_id = _pi_l_advantages(records, config)
     normalized_values = _normalize_advantages(list(advantage_by_id.values()))
@@ -615,11 +629,11 @@ def update_order9_pi_l_ppo(
             metrics = _pi_l_sequence_ppo_step(
                 policy,
                 sequence_batch,
-                physical_model=physical_model,
                 optimizer=optimizer,
                 config=config,
                 advantages=normalized,
                 returns=return_by_id,
+                replay_cache=replay_cache,
             )
             metric_rows.append(metrics)
             optimizer_steps += 1
@@ -651,6 +665,7 @@ def update_order9_pi_l_ppo(
             "sequence_length": sequence_length,
             "recurrent_replay": True,
             "timestep_batched_active_sequences": True,
+            "record_invariant_replay_cache": True,
             "exact_behavior_replay_validated": True,
             **replay_metrics,
         },
@@ -661,11 +676,11 @@ def _pi_l_sequence_ppo_step(
     policy: Order9PhaseConditionedActorCritic,
     sequences: Sequence[Sequence[LowLevelControlRecord]],
     *,
-    physical_model: PhysicalModel,
     optimizer: torch.optim.Optimizer,
     config: Order9PPOOptimizationConfig,
     advantages: Mapping[str, float],
     returns: Mapping[str, float],
+    replay_cache: _PiLReplayCache,
 ) -> dict[str, float]:
     # Batch all active sequences at the same recurrent timestep.  This is the
     # same independent recurrence as sequence-at-a-time replay, but lets the
@@ -704,21 +719,13 @@ def _pi_l_sequence_ppo_step(
         ]
         records = [sequences[index][timestep] for index in active_indices]
         traces = [_pi_l_trace(record) for record in records]
-        contexts = [_pi_l_context(record, physical_model) for record in records]
-        actor_features, phase_features, privileged = _pi_l_features(
-            contexts, traces, policy, physical_model
+        actor_features, phase_features, privileged, actor_observations = (
+            _pi_l_cached_batch(records, replay_cache)
         )
         global_action, joint_action = _pi_l_actions(records, traces, policy)
         step = policy.step(
-            [context.morphology_graph for context in contexts],
-            [
-                _pi_l_actor_graph_observation(
-                    context.runtime_observation,
-                    trace,
-                    physical_model,
-                )
-                for context, trace in zip(contexts, traces)
-            ],
+            [record.runtime_observation.morphology_graph for record in records],
+            actor_observations,
             actor_features,
             torch.stack([previous_by_sequence[index] for index in active_indices]),
             torch.stack([hidden_by_sequence[index] for index in active_indices]),
@@ -773,19 +780,30 @@ def _pi_l_sequence_ppo_step(
     )
 
 
-def _pi_l_features(
-    contexts: Sequence[LowLevelPolicyContext],
-    traces: Sequence[PolicyBehaviorTrace],
+def _build_pi_l_replay_cache(
+    records: Sequence[LowLevelControlRecord],
+    *,
     policy: Order9PhaseConditionedActorCritic,
     physical_model: PhysicalModel,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> _PiLReplayCache:
+    if not records:
+        raise SchemaValidationError("Order9 pi_L replay cache requires records")
     parameter = next(policy.parameters())
     device, dtype = parameter.device, parameter.dtype
     builder = RigidBodyControlModelBuilder()
+    index_by_record_id: dict[str, int] = {}
+    actor_observations = []
     actor_rows = []
     phase_rows = []
     privileged_rows = []
-    for context, trace in zip(contexts, traces):
+    for index, record in enumerate(records):
+        if record.record_id in index_by_record_id:
+            raise SchemaValidationError(
+                f"Order9 pi_L replay record id is duplicated: {record.record_id}"
+            )
+        index_by_record_id[record.record_id] = index
+        trace = _pi_l_trace(record)
+        context = _pi_l_context(record, physical_model)
         reference = order9_pi_l_reference_command(context)
         if reference.desired_body_pose is None:
             raise SchemaValidationError("Order9 pi_L PPO reference pose is missing")
@@ -806,13 +824,49 @@ def _pi_l_features(
         if not isinstance(privileged, list) or len(privileged) != 6:
             raise SchemaValidationError("Order9 pi_L behavior lacks privileged critic input")
         privileged_rows.append(privileged)
+        actor_observations.append(
+            _pi_l_actor_graph_observation(
+                context.runtime_observation,
+                trace,
+                physical_model,
+            )
+        )
     actor = torch.tensor(actor_rows, device=device, dtype=dtype)
     if actor.shape[1] != len(ORDER3_ACTOR_FEATURE_NAMES):
         raise RuntimeError("Order9 pi_L actor feature layout drifted")
+    return _PiLReplayCache(
+        index_by_record_id=index_by_record_id,
+        actor_graph_observations=tuple(actor_observations),
+        actor_features=actor,
+        phase_features=torch.tensor(phase_rows, device=device, dtype=dtype),
+        privileged_disturbance_body=torch.tensor(
+            privileged_rows, device=device, dtype=dtype
+        ),
+    )
+
+
+def _pi_l_cached_batch(
+    records: Sequence[LowLevelControlRecord],
+    cache: _PiLReplayCache,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[RuntimeObservation]]:
+    if not records:
+        raise SchemaValidationError("Order9 pi_L cached replay batch is empty")
+    try:
+        indices = [cache.index_by_record_id[record.record_id] for record in records]
+    except KeyError as exc:
+        raise SchemaValidationError(
+            f"Order9 pi_L replay cache misses record {exc.args[0]}"
+        ) from exc
+    index = torch.tensor(
+        indices,
+        device=cache.actor_features.device,
+        dtype=torch.long,
+    )
     return (
-        actor,
-        torch.tensor(phase_rows, device=device, dtype=dtype),
-        torch.tensor(privileged_rows, device=device, dtype=dtype),
+        cache.actor_features.index_select(0, index),
+        cache.phase_features.index_select(0, index),
+        cache.privileged_disturbance_body.index_select(0, index),
+        [cache.actor_graph_observations[value] for value in indices],
     )
 
 
@@ -1334,7 +1388,7 @@ def _validate_pi_l_exact_behavior_replay(
     policy: Order9PhaseConditionedActorCritic,
     sequences: Sequence[Sequence[LowLevelControlRecord]],
     *,
-    physical_model: PhysicalModel,
+    replay_cache: _PiLReplayCache,
     absolute_tolerance: float = 2.0e-5,
 ) -> dict[str, float | int]:
     """Fail before optimization unless every stored actor result replays."""
@@ -1405,21 +1459,13 @@ def _validate_pi_l_exact_behavior_replay(
                 records=records,
                 field="previous_global_action",
             )
-            contexts = [_pi_l_context(record, physical_model) for record in records]
-            actor_features, phase_features, privileged = _pi_l_features(
-                contexts, traces, policy, physical_model
+            actor_features, phase_features, privileged, actor_observations = (
+                _pi_l_cached_batch(records, replay_cache)
             )
             global_action, joint_action = _pi_l_actions(records, traces, policy)
             step = policy.step(
-                [context.morphology_graph for context in contexts],
-                [
-                    _pi_l_actor_graph_observation(
-                        context.runtime_observation,
-                        trace,
-                        physical_model,
-                    )
-                    for context, trace in zip(contexts, traces)
-                ],
+                [record.runtime_observation.morphology_graph for record in records],
+                actor_observations,
                 actor_features,
                 previous,
                 hidden,
@@ -1480,6 +1526,7 @@ def _validate_pi_l_exact_behavior_replay(
         "maximum_recurrent_replay_error": maximum_recurrent_error,
         "exact_replay_absolute_tolerance": absolute_tolerance,
         "exact_replay_timestep_batched_active_sequences": True,
+        "exact_replay_record_invariant_cache": True,
     }
 
 

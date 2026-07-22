@@ -492,9 +492,11 @@ def test_order9_pi_l_recurrent_behavior_trace_replays_through_ppo(
     assert result.metadata["exact_behavior_replay_validated"] is True
     assert result.metadata["exact_replay_record_count"] == 1
     assert result.metadata["timestep_batched_active_sequences"] is True
+    assert result.metadata["record_invariant_replay_cache"] is True
     assert (
         result.metadata["exact_replay_timestep_batched_active_sequences"] is True
     )
+    assert result.metadata["exact_replay_record_invariant_cache"] is True
 
 
 def test_order9_tensor_hot_path_matches_schema_features_and_graph_encoding(
