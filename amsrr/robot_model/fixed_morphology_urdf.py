@@ -10,7 +10,9 @@ from amsrr.geometry.pose_math import (
     compose_pose,
     dock_module_relative_pose,
     inverse_pose,
+    pose_from_transform,
     pose_to_xyz_rpy,
+    transform_from_xyz_rpy,
 )
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.morphology import MorphologyGraph
@@ -264,6 +266,19 @@ class ArticulatedDockConnection:
     parent_connect_to_child_root_pose: tuple[float, float, float, float, float, float, float]
 
 
+@dataclass(frozen=True)
+class ArticulatedGraphDockConnection:
+    edge_id: int
+    parent_module_id: int
+    child_module_id: int
+    parent_port_id: str
+    child_port_id: str
+    parent_connect_link: str
+    child_connect_link: str
+    parent_mechanism_joint_id: str | None
+    child_mechanism_joint_id: str | None
+
+
 def _fixed_morphology_parent_module_ids(module_count: int) -> dict[int, int]:
     return {module_id: module_id - 1 for module_id in range(1, module_count)}
 
@@ -297,6 +312,202 @@ def _morphology_graph_tree_edges(morphology_graph: MorphologyGraph) -> list[tupl
     if len(tree_edges) != len(module_ids) - 1:
         raise SchemaValidationError("morphology graph must be a tree for fixed graph URDF generation")
     return tree_edges
+
+
+def _oriented_morphology_graph_edges(morphology_graph: MorphologyGraph):
+    module_ids = {module.module_id for module in morphology_graph.modules}
+    if morphology_graph.base_module_id not in module_ids:
+        raise SchemaValidationError("morphology graph base module is missing")
+    if len(morphology_graph.dock_edges) != max(0, len(module_ids) - 1):
+        raise SchemaValidationError(
+            "articulated morphology graph must contain exactly one tree edge per non-base module"
+        )
+    edge_ids = [edge.edge_id for edge in morphology_graph.dock_edges]
+    if len(edge_ids) != len(set(edge_ids)):
+        raise SchemaValidationError("morphology graph repeats a dock edge id")
+    adjacency = {module_id: [] for module_id in module_ids}
+    for edge in morphology_graph.dock_edges:
+        if edge.src_module_id not in module_ids or edge.dst_module_id not in module_ids:
+            raise SchemaValidationError("dock edge references a missing module")
+        if edge.src_module_id == edge.dst_module_id:
+            raise SchemaValidationError("dock edge cannot connect a module to itself")
+        adjacency[edge.src_module_id].append((edge.dst_module_id, edge))
+        adjacency[edge.dst_module_id].append((edge.src_module_id, edge))
+
+    visited = {morphology_graph.base_module_id}
+    frontier = [morphology_graph.base_module_id]
+    oriented = []
+    while frontier:
+        parent = frontier.pop(0)
+        for child, edge in sorted(
+            adjacency[parent], key=lambda item: (item[0], item[1].edge_id)
+        ):
+            if child in visited:
+                continue
+            visited.add(child)
+            frontier.append(child)
+            oriented.append((parent, child, edge))
+    if visited != module_ids or len(oriented) != max(0, len(module_ids) - 1):
+        raise SchemaValidationError("morphology graph is disconnected")
+    return oriented
+
+
+def _reroot_module_tree(
+    module_root: ET.Element,
+    *,
+    new_root_link: str,
+    old_root_link: str,
+) -> None:
+    """Reverse the unique joint path from a Dock link to the module root.
+
+    For an active original joint ``T0 * motion(q)``, the reversed transform is
+    ``motion(-q) * inverse(T0)``.  A zero-origin active joint followed by a
+    fixed offset represents that transform while retaining the original joint
+    name and generalized-coordinate sign.
+    """
+
+    links = _named_children(module_root, "link")
+    if new_root_link not in links or old_root_link not in links:
+        raise SchemaValidationError("module re-root link is missing")
+    joints = _iter_named_joints(module_root)
+    joint_by_child: dict[str, ET.Element] = {}
+    for joint in joints:
+        child = _child(joint, "child")
+        if child is None or not child.attrib.get("link"):
+            raise SchemaValidationError("source URDF joint has no child link")
+        child_link = child.attrib["link"]
+        if child_link in joint_by_child:
+            raise SchemaValidationError("source URDF link has multiple parent joints")
+        joint_by_child[child_link] = joint
+
+    path: list[ET.Element] = []
+    current = new_root_link
+    visited: set[str] = set()
+    while current != old_root_link:
+        if current in visited:
+            raise SchemaValidationError("source URDF joint path contains a cycle")
+        visited.add(current)
+        joint = joint_by_child.get(current)
+        if joint is None:
+            raise SchemaValidationError(
+                f"Dock link {new_root_link!r} does not descend from {old_root_link!r}"
+            )
+        parent = _child(joint, "parent")
+        if parent is None or not parent.attrib.get("link"):
+            raise SchemaValidationError("source URDF joint has no parent link")
+        path.append(joint)
+        current = parent.attrib["link"]
+
+    existing_link_names = set(links)
+    existing_joint_names = {joint.attrib["name"] for joint in joints}
+    for joint in path:
+        joint_name = joint.attrib["name"]
+        joint_type = joint.attrib.get("type", "fixed")
+        parent = _child(joint, "parent")
+        child = _child(joint, "child")
+        if parent is None or child is None:
+            raise SchemaValidationError("source URDF joint endpoints are incomplete")
+        old_parent = parent.attrib["link"]
+        old_child = child.attrib["link"]
+        origin_pose = _joint_origin_pose(joint)
+        inverse_origin = inverse_pose(origin_pose)
+
+        if joint_type == "fixed":
+            parent.attrib["link"] = old_child
+            child.attrib["link"] = old_parent
+            _set_joint_origin_pose(joint, inverse_origin)
+            continue
+        if joint_type not in {"revolute", "continuous", "prismatic"}:
+            raise SchemaValidationError(
+                f"Cannot re-root unsupported URDF joint type {joint_type!r}"
+            )
+        axis = _child(joint, "axis")
+        if axis is None or not axis.attrib.get("xyz"):
+            raise SchemaValidationError(
+                f"Active URDF joint {joint_name!r} has no axis"
+            )
+        axis_values = _parse_vec3(axis.attrib["xyz"], f"joint {joint_name} axis")
+        dummy_link = f"{joint_name}__reroot_offset_link"
+        offset_joint_name = f"{joint_name}__reroot_offset"
+        if dummy_link in existing_link_names or offset_joint_name in existing_joint_names:
+            raise SchemaValidationError("URDF re-root helper name collision")
+        existing_link_names.add(dummy_link)
+        existing_joint_names.add(offset_joint_name)
+
+        parent.attrib["link"] = old_child
+        child.attrib["link"] = dummy_link
+        _set_joint_origin_pose(
+            joint, (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+        )
+        axis.attrib["xyz"] = _format_vec(tuple(-value for value in axis_values))
+        helper_link = ET.Element("link", {"name": dummy_link})
+        inertial = ET.SubElement(helper_link, "inertial")
+        ET.SubElement(inertial, "origin", {"xyz": "0 0 0", "rpy": "0 0 0"})
+        ET.SubElement(inertial, "mass", {"value": "1e-6"})
+        ET.SubElement(
+            inertial,
+            "inertia",
+            {
+                "ixx": "1e-12",
+                "ixy": "0",
+                "ixz": "0",
+                "iyy": "1e-12",
+                "iyz": "0",
+                "izz": "1e-12",
+            },
+        )
+        module_root.append(helper_link)
+        offset = ET.Element(
+            "joint", {"name": offset_joint_name, "type": "fixed"}
+        )
+        xyz, rpy = pose_to_xyz_rpy(inverse_origin)
+        ET.SubElement(
+            offset, "origin", {"xyz": _format_vec(xyz), "rpy": _format_vec(rpy)}
+        )
+        ET.SubElement(offset, "parent", {"link": dummy_link})
+        ET.SubElement(offset, "child", {"link": old_parent})
+        ET.SubElement(offset, "axis", {"xyz": "0 0 0"})
+        module_root.append(offset)
+
+
+def _joint_origin_pose(
+    joint: ET.Element,
+) -> tuple[float, float, float, float, float, float, float]:
+    origin = _child(joint, "origin")
+    xyz = (
+        _parse_vec3(origin.attrib.get("xyz", "0 0 0"), "joint origin xyz")
+        if origin is not None
+        else (0.0, 0.0, 0.0)
+    )
+    rpy = (
+        _parse_vec3(origin.attrib.get("rpy", "0 0 0"), "joint origin rpy")
+        if origin is not None
+        else (0.0, 0.0, 0.0)
+    )
+    return pose_from_transform(transform_from_xyz_rpy(xyz, rpy))
+
+
+def _set_joint_origin_pose(
+    joint: ET.Element,
+    pose: tuple[float, float, float, float, float, float, float],
+) -> None:
+    origin = _child(joint, "origin")
+    if origin is None:
+        origin = ET.Element("origin")
+        joint.insert(0, origin)
+    xyz, rpy = pose_to_xyz_rpy(pose)
+    origin.attrib["xyz"] = _format_vec(xyz)
+    origin.attrib["rpy"] = _format_vec(rpy)
+
+
+def _parse_vec3(value: str, label: str) -> tuple[float, float, float]:
+    try:
+        parsed = tuple(float(item) for item in value.split())
+    except ValueError as exc:
+        raise SchemaValidationError(f"{label} is not numeric") from exc
+    if len(parsed) != 3:
+        raise SchemaValidationError(f"{label} must contain three values")
+    return parsed
 
 
 def _safe_graph_name(graph_id: str) -> str:
@@ -335,6 +546,207 @@ def articulated_morphology_connections(
             )
         )
     return connections
+
+
+def articulated_morphology_graph_connections(
+    source_urdf_path: str | Path,
+    *,
+    morphology_graph: MorphologyGraph,
+) -> list[ArticulatedGraphDockConnection]:
+    """Resolve graph edges to exact parent/child Dock links.
+
+    Edges are oriented away from ``base_module_id``.  The child module will be
+    re-rooted at the selected Dock connect link by
+    :func:`write_articulated_morphology_graph_urdf`.
+    """
+
+    morphology_graph.validate()
+    if not morphology_graph.modules:
+        raise SchemaValidationError(
+            "articulated morphology graph requires at least one module"
+        )
+    if morphology_graph.is_closed_loop:
+        raise SchemaValidationError(
+            "articulated morphology graph requires a tree morphology"
+        )
+    port_by_global_id = {
+        port.port_global_id: port for port in morphology_graph.ports
+    }
+    records = _connect_port_records(load_urdf(Path(source_urdf_path).resolve()))
+    record_by_port_id = {record.port_id: record for record in records}
+    if len(record_by_port_id) != len(records):
+        raise SchemaValidationError("source URDF repeats a Dock port id")
+
+    connections: list[ArticulatedGraphDockConnection] = []
+    for parent_module_id, child_module_id, edge in _oriented_morphology_graph_edges(
+        morphology_graph
+    ):
+        if edge.src_module_id == parent_module_id:
+            parent_global_port_id = edge.src_port_id
+            child_global_port_id = edge.dst_port_id
+        else:
+            parent_global_port_id = edge.dst_port_id
+            child_global_port_id = edge.src_port_id
+        parent_port = port_by_global_id.get(parent_global_port_id)
+        child_port = port_by_global_id.get(child_global_port_id)
+        if parent_port is None or child_port is None:
+            raise SchemaValidationError("dock edge references a missing graph port")
+        if (
+            parent_port.module_id != parent_module_id
+            or child_port.module_id != child_module_id
+        ):
+            raise SchemaValidationError(
+                "dock edge port ownership differs from its module ids"
+            )
+        parent_record = record_by_port_id.get(parent_port.port_local_id)
+        child_record = record_by_port_id.get(child_port.port_local_id)
+        if parent_record is None or child_record is None:
+            raise SchemaValidationError(
+                "graph Dock port is absent from the source Holon URDF"
+            )
+        if not _ports_compatible(parent_record.port_type, child_record.port_type):
+            raise SchemaValidationError("graph Dock edge connects incompatible ports")
+        connections.append(
+            ArticulatedGraphDockConnection(
+                edge_id=edge.edge_id,
+                parent_module_id=parent_module_id,
+                child_module_id=child_module_id,
+                parent_port_id=parent_record.port_id,
+                child_port_id=child_record.port_id,
+                parent_connect_link=parent_record.connect_link,
+                child_connect_link=child_record.connect_link,
+                parent_mechanism_joint_id=parent_record.mechanism_joint_id,
+                child_mechanism_joint_id=child_record.mechanism_joint_id,
+            )
+        )
+    return connections
+
+
+def write_articulated_morphology_graph_urdf(
+    source_urdf_path: str | Path,
+    output_urdf_path: str | Path,
+    *,
+    morphology_graph: MorphologyGraph,
+    prefix_separator: str = FIXED_MODULE_PREFIX_SEPARATOR,
+    mesh_search_dirs: list[str | Path] | None = None,
+) -> Path:
+    """Write a graph-exact articulated multi-module URDF.
+
+    A dynamic Order-8 Dock constraint joins both selected mechanism links.  A
+    single URDF can represent the same open-tree kinematics only when every
+    non-base module is re-rooted at its selected connect frame.  Reversing the
+    child-side path preserves both Dock mechanism DOFs in the structural chain;
+    a root-to-root fixed joint would incorrectly remove them.
+    """
+
+    source_path = Path(source_urdf_path).resolve()
+    output_path = Path(output_urdf_path)
+    source_root = ET.parse(source_path).getroot()
+    if _tag_name(source_root) != "robot":
+        raise SchemaValidationError(f"Expected <robot> root in {source_path}")
+    source_links = _named_children(source_root, "link")
+    if "root" not in source_links:
+        raise SchemaValidationError("source Holon URDF must contain root link")
+    search_dirs = _normalise_mesh_search_dirs(mesh_search_dirs)
+    connections = articulated_morphology_graph_connections(
+        source_path,
+        morphology_graph=morphology_graph,
+    )
+    connection_by_child = {
+        connection.child_module_id: connection for connection in connections
+    }
+    module_ids = sorted(module.module_id for module in morphology_graph.modules)
+
+    output_root = ET.Element(
+        "robot",
+        {
+            "name": (
+                "holon_articulated_graph_"
+                f"{_safe_graph_name(morphology_graph.graph_id)}"
+            )
+        },
+    )
+    ET.SubElement(
+        output_root,
+        "baselink",
+        {
+            "name": _prefixed_name(
+                morphology_graph.base_module_id, "fc", prefix_separator
+            )
+        },
+    )
+    ET.SubElement(output_root, "thrust_link", {"name": "thrust"})
+
+    for module_id in module_ids:
+        module_root = ET.Element("robot", {"name": f"module_{module_id}"})
+        for child in list(source_root):
+            if _tag_name(child) in {"baselink", "thrust_link", "m_f_rate"}:
+                continue
+            module_root.append(copy.deepcopy(child))
+        connection = connection_by_child.get(module_id)
+        if connection is not None:
+            _reroot_module_tree(
+                module_root,
+                new_root_link=connection.child_connect_link,
+                old_root_link="root",
+            )
+        prefix = f"module_{module_id}{prefix_separator}"
+        for child in list(module_root):
+            _prefix_element(
+                child,
+                prefix=prefix,
+                source_dir=source_path.parent,
+                mesh_search_dirs=search_dirs,
+            )
+            output_root.append(child)
+
+    for connection in connections:
+        xyz, rpy = pose_to_xyz_rpy(FACE_TO_FACE_DOCK_RELATION)
+        joint = ET.SubElement(
+            output_root,
+            "joint",
+            {
+                "name": (
+                    f"articulated_graph_edge_{connection.edge_id}_module_"
+                    f"{connection.child_module_id}_to_module_"
+                    f"{connection.parent_module_id}"
+                ),
+                "type": "fixed",
+            },
+        )
+        ET.SubElement(
+            joint, "origin", {"xyz": _format_vec(xyz), "rpy": _format_vec(rpy)}
+        )
+        ET.SubElement(
+            joint,
+            "parent",
+            {
+                "link": _prefixed_name(
+                    connection.parent_module_id,
+                    connection.parent_connect_link,
+                    prefix_separator,
+                )
+            },
+        )
+        ET.SubElement(
+            joint,
+            "child",
+            {
+                "link": _prefixed_name(
+                    connection.child_module_id,
+                    connection.child_connect_link,
+                    prefix_separator,
+                )
+            },
+        )
+        ET.SubElement(joint, "axis", {"xyz": "0 0 0"})
+
+    _indent(output_root)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    ET.ElementTree(output_root).write(
+        output_path, encoding="utf-8", xml_declaration=True
+    )
+    return output_path
 
 
 def write_articulated_morphology_urdf(

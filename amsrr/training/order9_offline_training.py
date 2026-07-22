@@ -8,11 +8,13 @@ promotion remains a separate online/full-mesh evaluation decision owned by
 """
 
 import csv
+import hashlib
 import io
 import math
 import os
 import random
 import tempfile
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,6 +48,7 @@ from amsrr.policies.order9_low_level_policy import (
 )
 from amsrr.schemas.common import SchemaBase, SchemaValidationError, require_non_empty
 from amsrr.schemas.datasets import (
+    DatasetKind,
     DatasetSplit,
     InteractionTrajectoryRecord,
     LowLevelControlRecord,
@@ -78,8 +81,11 @@ from amsrr.training.order9_curriculum import (
 )
 from amsrr.training.order9_dataset import (
     Order9DatasetBundle,
+    Order9DatasetIndex,
     load_order9_dataset,
+    load_order9_dataset_index,
     validate_order9_dataset_for_stage,
+    validate_order9_pi_l_dataset_for_stage_streaming,
 )
 from amsrr.training.order9_pi_d_learning import (
     compute_order9_pi_d_behavior_cloning_loss,
@@ -92,10 +98,16 @@ from amsrr.training.order9_pi_l_learning import (
     compute_order9_pi_l_behavior_cloning_loss,
 )
 from amsrr.training.order9_pipeline import order9_schedule_hash, order9_stage_by_id
+from amsrr.training.order9_runtime_load import Order9RuntimeLoadMonitor
+from amsrr.training.order9_teacher_collection import (
+    load_order9_teacher_episode_manifest,
+    load_order9_teacher_low_level_records,
+)
 from amsrr.utils.hashing import hash_file, stable_hash
 
 
-ORDER9_OFFLINE_TRAINING_VERSION = "order9_offline_bc_trainer_v1"
+ORDER9_OFFLINE_TRAINING_VERSION = "order9_offline_bc_trainer_v3_pi_l_actor_selection"
+PI_L_BC_SELECTION_METRIC = "global_action_plus_joint_action"
 
 
 @dataclass
@@ -194,8 +206,15 @@ def train_order9_behavior_cloning(
     seed = config.production_runtime.seed + stage.stage_index
     _seed_everything(seed)
 
-    bundle = load_order9_dataset(dataset_manifest_path)
-    validation = validate_order9_dataset_for_stage(bundle, stage)
+    expected_family = _stage_family(stage)
+    if expected_family == Order9PolicyFamily.PI_L:
+        dataset: Order9DatasetBundle | Order9DatasetIndex = load_order9_dataset_index(
+            dataset_manifest_path
+        )
+        validation = validate_order9_pi_l_dataset_for_stage_streaming(dataset, stage)
+    else:
+        dataset = load_order9_dataset(dataset_manifest_path)
+        validation = validate_order9_dataset_for_stage(dataset, stage)
     if not validation.valid:
         raise SchemaValidationError(
             "Order9 BC dataset failed replay contract: " + ",".join(validation.failures)
@@ -211,68 +230,102 @@ def train_order9_behavior_cloning(
     )
     optimization = _bc_optimization(config, stage)
     optimizer = torch.optim.Adam(model.parameters(), lr=optimization.learning_rate)
+    load_monitor = Order9RuntimeLoadMonitor(
+        sample_interval_s=config.production_runtime.runtime_load_sample_interval_s,
+        device=str(resolved_device),
+    )
+    load_monitor.start(torch_module=torch)
+    training_started = time.perf_counter()
+    try:
+        if family == Order9PolicyFamily.PI_L:
+            if not isinstance(dataset, Order9DatasetIndex):
+                raise AssertionError("pi_L BC requires the streaming dataset index")
+            sources = _order9_pi_l_teacher_sources(dataset)
+            training_record_count = int(validation.metadata["train_record_count"])
+            validation_record_count = int(validation.metadata["validation_record_count"])
+            rows = _train_pi_l_streaming(
+                model,
+                sources[DatasetSplit.TRAIN],
+                sources[DatasetSplit.VALIDATION],
+                expected_training_records=training_record_count,
+                expected_validation_records=validation_record_count,
+                physical_model=physical_model,
+                optimizer=optimizer,
+                optimization=optimization,
+                seed=seed,
+                gamma=config.optimization.pi_l_ppo.gamma,
+            )
+        elif family == Order9PolicyFamily.PI_H:
+            if not isinstance(dataset, Order9DatasetBundle):
+                raise AssertionError("pi_H BC requires a materialized dataset")
+            train_records = _split_records(dataset.trajectory_records, DatasetSplit.TRAIN)
+            validation_records = _split_records(
+                dataset.trajectory_records, DatasetSplit.VALIDATION
+            )
+            training_record_count = len(train_records)
+            validation_record_count = len(validation_records)
+            rows = _train_pi_h(
+                model,
+                train_records,
+                validation_records,
+                optimizer=optimizer,
+                optimization=optimization,
+                seed=seed,
+                assignment_only=(
+                    stage.learning_target == Order9LearningTarget.PI_H_ASSIGNMENT
+                ),
+            )
+        elif family == Order9PolicyFamily.PI_D:
+            if not isinstance(dataset, Order9DatasetBundle):
+                raise AssertionError("pi_D BC requires a materialized dataset")
+            train_records = _split_records(
+                dataset.sequential_design_records, DatasetSplit.TRAIN
+            )
+            validation_records = _split_records(
+                dataset.sequential_design_records, DatasetSplit.VALIDATION
+            )
+            training_record_count = len(train_records)
+            validation_record_count = len(validation_records)
+            rows = _train_pi_d(
+                model,
+                train_records,
+                validation_records,
+                physical_model=physical_model,
+                optimizer=optimizer,
+                optimization=optimization,
+                seed=seed,
+            )
+        else:  # pragma: no cover - model dispatch is exhaustive.
+            raise AssertionError(family)
+    except BaseException:
+        load_monitor.stop(torch_module=torch)
+        raise
+    if resolved_device.type == "cuda":
+        torch.cuda.synchronize(resolved_device)
+    training_wall_time_s = time.perf_counter() - training_started
+    runtime_load = load_monitor.stop(torch_module=torch)
 
-    if family == Order9PolicyFamily.PI_L:
-        train_records = _split_records(bundle.low_level_records, DatasetSplit.TRAIN)
-        validation_records = _split_records(
-            bundle.low_level_records, DatasetSplit.VALIDATION
-        )
-        rows = _train_pi_l(
-            model,
-            train_records,
-            validation_records,
-            physical_model=physical_model,
-            optimizer=optimizer,
-            optimization=optimization,
-            seed=seed,
-            gamma=config.optimization.pi_l_ppo.gamma,
-        )
-    elif family == Order9PolicyFamily.PI_H:
-        train_records = _split_records(bundle.trajectory_records, DatasetSplit.TRAIN)
-        validation_records = _split_records(
-            bundle.trajectory_records, DatasetSplit.VALIDATION
-        )
-        rows = _train_pi_h(
-            model,
-            train_records,
-            validation_records,
-            optimizer=optimizer,
-            optimization=optimization,
-            seed=seed,
-            assignment_only=(
-                stage.learning_target == Order9LearningTarget.PI_H_ASSIGNMENT
-            ),
-        )
-    elif family == Order9PolicyFamily.PI_D:
-        train_records = _split_records(
-            bundle.sequential_design_records, DatasetSplit.TRAIN
-        )
-        validation_records = _split_records(
-            bundle.sequential_design_records, DatasetSplit.VALIDATION
-        )
-        rows = _train_pi_d(
-            model,
-            train_records,
-            validation_records,
-            physical_model=physical_model,
-            optimizer=optimizer,
-            optimization=optimization,
-            seed=seed,
-        )
-    else:  # pragma: no cover - model dispatch is exhaustive.
-        raise AssertionError(family)
-
-    best_index = min(range(len(rows)), key=lambda index: rows[index]["validation_total"])
+    selection_metric = _checkpoint_selection_metric(family)
+    best_index = min(
+        range(len(rows)),
+        key=lambda index: _row_selection_loss(
+            rows[index], family=family, split="validation"
+        ),
+    )
     # Each family trainer restores its best state before returning.
-    best_validation = float(rows[best_index]["validation_total"])
-    final_training = float(rows[-1]["training_total"])
+    best_validation = _row_selection_loss(
+        rows[best_index], family=family, split="validation"
+    )
+    final_training = _row_selection_loss(
+        rows[-1], family=family, split="training"
+    )
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     curve_path = output / "loss_curve.csv"
     _write_loss_curve(curve_path, rows)
 
     input_hashes = order9_checkpoint_input_hashes(
-        bundle,
+        dataset,
         parent_checkpoint_path=parent_checkpoint_path,
         source_order3_checkpoint_path=source_order3_checkpoint_path,
         additional_paths=additional_input_artifact_paths or {},
@@ -280,9 +333,17 @@ def train_order9_behavior_cloning(
     summary_metrics = {
         "best_validation_loss": best_validation,
         "final_training_loss": final_training,
+        "best_validation_total": float(rows[best_index]["validation_total"]),
+        "final_training_total": float(rows[-1]["training_total"]),
         "best_epoch": float(best_index),
-        "training_record_count": float(len(train_records)),
-        "validation_record_count": float(len(validation_records)),
+        "training_record_count": float(training_record_count),
+        "validation_record_count": float(validation_record_count),
+        "training_wall_time_s": float(training_wall_time_s),
+        "effective_record_visits_per_s": float(
+            optimization.epochs
+            * (training_record_count + validation_record_count)
+            / training_wall_time_s
+        ),
     }
     metadata = build_order9_checkpoint_metadata(
         model,
@@ -296,6 +357,7 @@ def train_order9_behavior_cloning(
         source_order3_checkpoint_sha256=order3_sha,
         metrics=summary_metrics,
         trainer_version=ORDER9_OFFLINE_TRAINING_VERSION,
+        extra_metadata={"checkpoint_selection_metric": selection_metric},
     )
     checkpoint_path = output / "checkpoint.pt"
     checkpoint_sha = save_order9_policy_checkpoint(
@@ -308,16 +370,18 @@ def train_order9_behavior_cloning(
         "stage_index": stage.stage_index,
         "policy_family": family.value,
         "schedule_hash": order9_schedule_hash(config),
-        "dataset_manifest_path": bundle.manifest_path,
-        "dataset_manifest_sha256": bundle.manifest_sha256,
+        "dataset_manifest_path": dataset.manifest_path,
+        "dataset_manifest_sha256": dataset.manifest_sha256,
         "physical_model_hash": physical_model.stable_hash(),
         "checkpoint_path": str(checkpoint_path),
         "checkpoint_sha256": checkpoint_sha,
         "loss_curve_path": str(curve_path),
         "loss_curve_sha256": hash_file(curve_path),
         "optimization": optimization.to_dict(),
+        "checkpoint_selection_metric": selection_metric,
         "metrics": summary_metrics,
         "epochs": rows,
+        "runtime_load": runtime_load,
         "promotion_evaluation_completed": False,
     }
     _atomic_write_text(metrics_path, _json_text(metrics_payload))
@@ -328,8 +392,8 @@ def train_order9_behavior_cloning(
         training_version=ORDER9_OFFLINE_TRAINING_VERSION,
         stage_id=stage.stage_id,
         policy_family=family,
-        dataset_manifest_path=bundle.manifest_path,
-        dataset_manifest_sha256=bundle.manifest_sha256,
+        dataset_manifest_path=dataset.manifest_path,
+        dataset_manifest_sha256=dataset.manifest_sha256,
         checkpoint_path=str(checkpoint_path),
         checkpoint_sha256=checkpoint_sha,
         metrics_path=str(metrics_path),
@@ -337,8 +401,8 @@ def train_order9_behavior_cloning(
         loss_curve_path=str(curve_path),
         loss_curve_sha256=hash_file(curve_path),
         epoch_count=len(rows),
-        training_record_count=len(train_records),
-        validation_record_count=len(validation_records),
+        training_record_count=training_record_count,
+        validation_record_count=validation_record_count,
         best_validation_loss=best_validation,
         final_training_loss=final_training,
         parameter_count=sum(parameter.numel() for parameter in model.parameters()),
@@ -350,6 +414,8 @@ def train_order9_behavior_cloning(
             "result_path": str(result_path),
             "device": str(resolved_device),
             "best_state_restored": True,
+            "checkpoint_selection_metric": selection_metric,
+            "runtime_load": runtime_load,
             "promotion_evaluation_completed": False,
         },
     )
@@ -553,11 +619,178 @@ def _train_pi_l(
         )
         row = _epoch_row(epoch, train, validation)
         rows.append(row)
-        if validation["total"] < best_loss:
-            best_loss = validation["total"]
+        selection_loss = _pi_l_actor_selection_loss(validation)
+        if selection_loss < best_loss:
+            best_loss = selection_loss
             best_state = _cpu_state_dict(model)
     _restore_best(model, best_state)
     return rows
+
+
+def _order9_pi_l_teacher_sources(
+    index: Order9DatasetIndex,
+) -> dict[DatasetSplit, tuple[Path, ...]]:
+    """Resolve and bind C0 episode members used by bounded-memory C1 training."""
+
+    manifest_path = Path(index.manifest_path)
+    sources: dict[DatasetSplit, list[Path]] = {
+        split: [] for split in DatasetSplit
+    }
+    episode_ids: list[str] = []
+    source_digests: list[str] = []
+    source_record_counts = {split: 0 for split in DatasetSplit}
+    episodes_by_source = {}
+    allowed_tasks = {
+        DatasetSplit.TRAIN: set(index.manifest.train_task_ids),
+        DatasetSplit.VALIDATION: set(index.manifest.validation_task_ids),
+        DatasetSplit.HELD_OUT: set(index.manifest.held_out_task_ids),
+    }
+    low_shards_by_split = {
+        shard.split: shard
+        for shard in index.manifest.shards
+        if shard.dataset_kind == DatasetKind.LOW_LEVEL_CONTROL
+    }
+    for raw in index.manifest.source_archive_paths:
+        source = _resolve_dataset_source_path(raw, manifest_path.parent)
+        resolved, episode = load_order9_teacher_episode_manifest(source)
+        if not episode.success:
+            raise SchemaValidationError(
+                f"C1 cannot train from failed teacher episode {episode.episode_id!r}"
+            )
+        if episode.task_spec.task_id not in allowed_tasks[episode.split]:
+            raise SchemaValidationError(
+                f"C1 teacher task {episode.task_spec.task_id!r} is outside its split"
+            )
+        sources[episode.split].append(resolved)
+        episodes_by_source[resolved] = episode
+        episode_ids.append(episode.episode_id)
+        source_digests.append(hash_file(resolved))
+        source_record_counts[episode.split] += episode.low_level_record_count
+    if episode_ids != index.manifest.source_episode_ids:
+        raise SchemaValidationError(
+            "C1 teacher source episode ordering/identity differs from dataset manifest"
+        )
+    if stable_hash(sorted(source_digests)) != index.manifest.source_hash:
+        raise SchemaValidationError("C1 teacher source manifest hash mismatch")
+    for split in DatasetSplit:
+        shard = low_shards_by_split.get(split)
+        if shard is None or shard.record_count != source_record_counts[split]:
+            raise SchemaValidationError(
+                f"C1 teacher source count differs from {split.value} dataset shard"
+            )
+        member_paths = []
+        for source in sources[split]:
+            episode = episodes_by_source[source]
+            member_paths.append(source.parent / episode.low_level_shard_path)
+        if _concatenated_sha256(member_paths) != shard.sha256:
+            raise SchemaValidationError(
+                f"C1 teacher members differ from {split.value} dataset shard"
+            )
+    if not sources[DatasetSplit.TRAIN] or not sources[DatasetSplit.VALIDATION]:
+        raise SchemaValidationError("C1 teacher sources require train and validation splits")
+    return {split: tuple(paths) for split, paths in sources.items()}
+
+
+def _train_pi_l_streaming(
+    model: nn.Module,
+    training_sources: Sequence[Path],
+    validation_sources: Sequence[Path],
+    *,
+    expected_training_records: int,
+    expected_validation_records: int,
+    physical_model: PhysicalModel,
+    optimizer: torch.optim.Optimizer,
+    optimization: Order9BCOptimizationConfig,
+    seed: int,
+    gamma: float,
+) -> list[dict[str, float]]:
+    if not isinstance(model, Order9PhaseConditionedActorCritic):
+        raise TypeError("pi_L BC model type mismatch")
+    rows: list[dict[str, float]] = []
+    best_loss = math.inf
+    best_state: dict[str, torch.Tensor] | None = None
+    for epoch in range(optimization.epochs):
+        randomizer = random.Random(seed + epoch)
+        epoch_sources = list(training_sources)
+        randomizer.shuffle(epoch_sources)
+        model.train()
+        train = _pi_l_streaming_epoch(
+            model,
+            epoch_sources,
+            expected_record_count=expected_training_records,
+            physical_model=physical_model,
+            optimizer=optimizer,
+            optimization=optimization,
+            gamma=gamma,
+            randomizer=randomizer,
+            training=True,
+        )
+        model.eval()
+        validation = _pi_l_streaming_epoch(
+            model,
+            validation_sources,
+            expected_record_count=expected_validation_records,
+            physical_model=physical_model,
+            optimizer=None,
+            optimization=optimization,
+            gamma=gamma,
+            randomizer=None,
+            training=False,
+        )
+        row = _epoch_row(epoch, train, validation)
+        rows.append(row)
+        selection_loss = _pi_l_actor_selection_loss(validation)
+        if selection_loss < best_loss:
+            best_loss = selection_loss
+            best_state = _cpu_state_dict(model)
+    _restore_best(model, best_state)
+    return rows
+
+
+def _pi_l_streaming_epoch(
+    model: Order9PhaseConditionedActorCritic,
+    sources: Sequence[Path],
+    *,
+    expected_record_count: int,
+    physical_model: PhysicalModel,
+    optimizer: torch.optim.Optimizer | None,
+    optimization: Order9BCOptimizationConfig,
+    gamma: float,
+    randomizer: random.Random | None,
+    training: bool,
+) -> dict[str, float]:
+    totals: defaultdict[str, float] = defaultdict(float)
+    trained_steps = 0
+    observed_records = 0
+    for source in sources:
+        _, records = load_order9_teacher_low_level_records(source)
+        observed_records += len(records)
+        returns = _low_level_returns(records, gamma=gamma)
+        windows = _pi_l_windows(
+            records,
+            sequence_length=optimization.sequence_length,
+            burn_in_steps=optimization.burn_in_steps,
+        )
+        metrics = _pi_l_epoch(
+            model,
+            windows,
+            physical_model=physical_model,
+            returns=returns,
+            optimizer=optimizer,
+            optimization=optimization,
+            randomizer=randomizer,
+            training=training,
+        )
+        weight = sum(len(window.training) for window in windows)
+        trained_steps += weight
+        for name, value in metrics.items():
+            totals[name] += float(value) * weight
+    if observed_records != expected_record_count:
+        raise SchemaValidationError(
+            "C1 streaming record count drifted: "
+            f"{observed_records} != {expected_record_count}"
+        )
+    return _normalize_metrics(totals, trained_steps)
 
 
 def _pi_l_epoch(
@@ -571,8 +804,16 @@ def _pi_l_epoch(
     randomizer: random.Random | None,
     training: bool,
 ) -> dict[str, float]:
+    sampled_windows = list(windows)
+    if training and optimization.phase_balanced_sampling:
+        if randomizer is None:
+            raise AssertionError("phase-balanced pi_L sampling requires an RNG")
+        sampled_windows = _phase_balanced_pi_l_windows(
+            sampled_windows,
+            randomizer=randomizer,
+        )
     groups: dict[tuple[int, int], list[_PiLWindow]] = defaultdict(list)
-    for window in windows:
+    for window in sampled_windows:
         groups[(len(window.burn_in), len(window.training))].append(window)
     batches: list[list[_PiLWindow]] = []
     for key in sorted(groups):
@@ -647,6 +888,43 @@ def _pi_l_epoch(
             value = torch.stack([getattr(item, name) for item in losses]).mean()
             totals[name] += float(value.detach().cpu().item()) * weight
     return _normalize_metrics(totals, trained_steps)
+
+
+def _phase_balanced_pi_l_windows(
+    windows: Sequence[_PiLWindow],
+    *,
+    randomizer: random.Random,
+) -> list[_PiLWindow]:
+    """Sample phase buckets uniformly while preserving the epoch window budget."""
+
+    by_phase: dict[int, list[_PiLWindow]] = defaultdict(list)
+    for window in windows:
+        phase_counts: dict[int, int] = defaultdict(int)
+        for record in window.training:
+            if record.phase_index is None:
+                raise SchemaValidationError(
+                    "phase-balanced pi_L sampling requires phase_index"
+                )
+            phase_counts[int(record.phase_index)] += 1
+        phase = min(
+            phase_counts,
+            key=lambda value: (-phase_counts[value], value),
+        )
+        by_phase[phase].append(window)
+    if not by_phase:
+        raise SchemaValidationError("phase-balanced pi_L sampling has no windows")
+    phase_ids = sorted(by_phase)
+    for bucket in by_phase.values():
+        randomizer.shuffle(bucket)
+    selected = [
+        by_phase[phase_ids[index % len(phase_ids)]][
+            (index // len(phase_ids))
+            % len(by_phase[phase_ids[index % len(phase_ids)]])
+        ]
+        for index in range(len(windows))
+    ]
+    randomizer.shuffle(selected)
+    return selected
 
 
 def _train_pi_h(
@@ -990,7 +1268,7 @@ def build_order9_checkpoint_metadata(
         Order9PolicyFamily.PI_L: (
             "task_phase_morphology_centroidal_no_raw_contact_v1",
             "actor_plus_privileged_disturbance_v1",
-            "bounded_global_and_masked_local_joint_residual_v1",
+            "bounded_complete_centroidal_and_absolute_local_joint_command_v2",
         ),
         Order9PolicyFamily.PI_H: (
             "irg_envelope_morphology_candidates_runtime_object_no_raw_contact_v1",
@@ -1034,7 +1312,7 @@ def build_order9_checkpoint_metadata(
 
 
 def order9_checkpoint_input_hashes(
-    bundle: Order9DatasetBundle,
+    bundle: Order9DatasetBundle | Order9DatasetIndex,
     *,
     parent_checkpoint_path: str | Path | None,
     source_order3_checkpoint_path: str | Path | None,
@@ -1053,6 +1331,24 @@ def order9_checkpoint_input_hashes(
             raise SchemaValidationError(f"duplicate Order9 input artifact key {key!r}")
         result[key] = hash_file(path)
     return result
+
+
+def _resolve_dataset_source_path(raw: str, manifest_dir: Path) -> Path:
+    source = Path(raw)
+    candidates = (source, manifest_dir / source, manifest_dir / source.name)
+    for candidate in candidates:
+        if candidate.is_file() or candidate.is_dir():
+            return candidate
+    raise FileNotFoundError(f"Order9 dataset source does not exist: {raw}")
+
+
+def _concatenated_sha256(paths: Sequence[Path]) -> str:
+    digest = hashlib.sha256()
+    for path in paths:
+        with path.open("rb") as handle:
+            while chunk := handle.read(1024 * 1024):
+                digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _optimizer_step(
@@ -1093,6 +1389,45 @@ def _normalize_metrics(
     if "total" not in result or not all(math.isfinite(value) for value in result.values()):
         raise FloatingPointError("Order9 epoch metrics are incomplete or non-finite")
     return result
+
+
+def _pi_l_actor_selection_loss(metrics: Mapping[str, float]) -> float:
+    """Return the controller-facing imitation loss used to select C1 checkpoints."""
+
+    try:
+        loss = float(metrics["global_action"]) + float(metrics["joint_action"])
+    except KeyError as exc:
+        raise SchemaValidationError(
+            "pi_L BC checkpoint selection requires global_action and joint_action losses"
+        ) from exc
+    if not math.isfinite(loss):
+        raise FloatingPointError("pi_L BC checkpoint selection loss is non-finite")
+    return loss
+
+
+def _checkpoint_selection_metric(family: Order9PolicyFamily) -> str:
+    if family == Order9PolicyFamily.PI_L:
+        return PI_L_BC_SELECTION_METRIC
+    return "total"
+
+
+def _row_selection_loss(
+    row: Mapping[str, float],
+    *,
+    family: Order9PolicyFamily,
+    split: str,
+) -> float:
+    if family == Order9PolicyFamily.PI_L:
+        return _pi_l_actor_selection_loss(
+            {
+                "global_action": row[f"{split}_global_action"],
+                "joint_action": row[f"{split}_joint_action"],
+            }
+        )
+    loss = float(row[f"{split}_total"])
+    if not math.isfinite(loss):
+        raise FloatingPointError("Order9 BC checkpoint selection loss is non-finite")
+    return loss
 
 
 def _epoch_row(

@@ -13,11 +13,18 @@ from amsrr.schemas.common import SchemaBase, SchemaValidationError, require_non_
 from amsrr.schemas.datasets import DatasetSplit
 from amsrr.schemas.morphology import MorphologyGraph
 from amsrr.schemas.order3 import Order3MorphologyPoolManifest
-from amsrr.robot_model.fixed_morphology_urdf import write_fixed_morphology_graph_urdf
+from amsrr.robot_model.fixed_morphology_urdf import (
+    write_articulated_morphology_graph_urdf,
+)
 from amsrr.utils.hashing import hash_file, stable_hash
 
 
-ORDER9_MORPHOLOGY_ASSET_MANIFEST_VERSION = "order9_morphology_asset_manifest_v1"
+ORDER9_MORPHOLOGY_ASSET_MANIFEST_VERSION = (
+    "order9_morphology_asset_manifest_v2_articulated_graph"
+)
+ORDER9_MORPHOLOGY_ASSEMBLY_KINEMATICS = (
+    "graph_dock_connected_child_reroot_v2_explicit_helper_body"
+)
 
 
 @dataclass
@@ -152,10 +159,13 @@ def stage_order9_morphology_urdfs(
         bucket.mkdir(parents=True, exist_ok=True)
         graph_path = bucket / "morphology_graph.json"
         _write_or_verify_text(graph_path, graph.to_json(indent=2) + "\n")
-        urdf_path = bucket / f"holon_order9_{structural_hash[:12]}.urdf"
+        urdf_path = (
+            bucket
+            / f"holon_order9_articulated_v2_{structural_hash[:12]}.urdf"
+        )
         temporary = bucket / f".{urdf_path.name}.generated"
         try:
-            write_fixed_morphology_graph_urdf(
+            write_articulated_morphology_graph_urdf(
                 source,
                 temporary,
                 morphology_graph=graph,
@@ -176,7 +186,7 @@ def stage_order9_morphology_urdfs(
                 split=entry.split,
                 morphology_graph_path=graph_path,
                 urdf_path=urdf_path,
-                usd_directory=bucket / "usd",
+                usd_directory=bucket / "usd_articulated_v2",
             )
         )
     return sorted(staged, key=lambda item: (item.module_count, item.structural_hash))
@@ -215,6 +225,7 @@ def order9_morphology_asset_entry(
         metadata={
             "graph_id": graph.graph_id,
             "asset_bucket_directory": _portable_path(usd.parent.parent, repository),
+            "assembly_kinematics": ORDER9_MORPHOLOGY_ASSEMBLY_KINEMATICS,
         },
     )
 
@@ -350,6 +361,7 @@ def _require_sha256(value: str, name: str) -> None:
 
 __all__ = [
     "ORDER9_MORPHOLOGY_ASSET_MANIFEST_VERSION",
+    "ORDER9_MORPHOLOGY_ASSEMBLY_KINEMATICS",
     "Order9MorphologyAssetEntry",
     "Order9MorphologyAssetManifest",
     "Order9StagedMorphologyAsset",

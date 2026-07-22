@@ -54,6 +54,7 @@ from isaaclab.sim.converters import UrdfConverter, UrdfConverterCfg
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
 from amsrr.schemas.order3 import Order3MorphologyPoolManifest
 from amsrr.simulation.order9_morphology_assets import (
+    ORDER9_MORPHOLOGY_ASSEMBLY_KINEMATICS,
     Order9MorphologyAssetManifest,
     load_order9_morphology_asset_manifest,
     order9_morphology_asset_entry,
@@ -167,6 +168,7 @@ def main() -> int:
             "collision_approximation": "Convex Decomposition",
             "merge_fixed_joints": False,
             "fix_base": False,
+            "assembly_kinematics": ORDER9_MORPHOLOGY_ASSEMBLY_KINEMATICS,
             "mesh_search_dirs": [_portable(path) for path in mesh_dirs],
         },
     )

@@ -17,8 +17,8 @@ from amsrr.controllers.batched_rigid_body_model import (
     BatchedRigidBodyControlModel,
     BatchedRigidBodyControlModelBuilder,
 )
-from amsrr.policies.low_level_policy_base import BaselineLowLevelPolicyConfig
 from amsrr.policies.order9_low_level_policy import (
+    ORDER9_GLOBAL_ACTION_SIZE,
     Order9LowLevelActorCriticStep,
     Order9LowLevelPolicyConfig,
     Order9PhaseConditionedActorCritic,
@@ -32,7 +32,7 @@ from amsrr.schemas.physical_model import PhysicalModel
 from amsrr.schemas.task_spec import TaskType
 from amsrr.simulation.order9_object_task_runtime import (
     ORDER9_OBJECT_TASK_ADAPTER_ID,
-    ORDER9_OBJECT_TASK_PHASES,
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_COUNT,
 )
 from amsrr.simulation.order9_tensor_isaac_io import Order9TensorIsaacState
 from amsrr.simulation.order9_tensor_object_task import Order9TensorObjectTaskTarget
@@ -43,7 +43,7 @@ from amsrr.training.order9_tensor_runtime import (
 )
 
 
-ORDER9_TENSOR_PI_L_RUNTIME_VERSION = "order9_tensor_pi_l_qpid_runtime_v1"
+ORDER9_TENSOR_PI_L_RUNTIME_VERSION = "order9_tensor_complete_pi_l_qpid_runtime_v3"
 
 
 @dataclass(frozen=True)
@@ -60,7 +60,6 @@ class Order9TensorPiLStep:
     policy_step: Order9LowLevelActorCriticStep
     policy_command: Order9TensorPolicyCommand
     controller_result: BatchedQPIDResult
-    baseline_residual_wrench_body: torch.Tensor
     privileged_disturbance_body: torch.Tensor
 
 
@@ -79,7 +78,7 @@ class Order9TensorPiLRuntime:
         device: torch.device | str,
         dtype: torch.dtype = torch.float32,
         controller: BatchedQPIDController | None = None,
-        baseline_config: BaselineLowLevelPolicyConfig | None = None,
+        policy_frame_origins_world: torch.Tensor | None = None,
     ) -> None:
         if batch_size < 1:
             raise ValueError("Order9 tensor pi_L batch size must be positive")
@@ -112,9 +111,13 @@ class Order9TensorPiLRuntime:
             config=self.config,
         )
         self.controller = controller or BatchedQPIDController()
-        self.baseline_config = baseline_config or BaselineLowLevelPolicyConfig()
+        self.policy_frame_origins_world = self._prepare_policy_frame_origins(
+            policy_frame_origins_world
+        )
         self.previous_action = torch.zeros(
-            (self.batch_size, 12), device=self.device, dtype=self.dtype
+            (self.batch_size, ORDER9_GLOBAL_ACTION_SIZE),
+            device=self.device,
+            dtype=self.dtype,
         )
         self.recurrent_state = self.policy.initial_state(
             self.batch_size, device=self.device, dtype=self.dtype
@@ -143,14 +146,35 @@ class Order9TensorPiLRuntime:
             device=self.device,
             dtype=self.dtype,
         )
-        self.joint_mask = torch.ones(
-            (
-                self.batch_size,
-                self.builder.module_count,
-                self.builder.local_joint_count,
-            ),
+        joint_type_by_id = {
+            joint.joint_id: joint.joint_type
+            for joint in self.physical_model.joints
+        }
+        active_joint_mask = torch.tensor(
+            [
+                joint_type_by_id[joint_id] != "fixed"
+                for joint_id in self.builder.local_joint_ids
+            ],
             device=self.device,
             dtype=torch.bool,
+        )
+        self.joint_mask = active_joint_mask.reshape(1, 1, -1).expand(
+            self.batch_size,
+            self.builder.module_count,
+            self.builder.local_joint_count,
+        )
+        self.bucket.batch.metadata.update(
+            {
+                "runtime_pose_translation_frame": (
+                    "world"
+                    if self.policy_frame_origins_world is None
+                    else "world_minus_policy_frame_origin"
+                ),
+                "runtime_joint_summary_semantics": "non_fixed_joints_only",
+                "runtime_active_local_joint_count": int(
+                    active_joint_mask.sum().item()
+                ),
+            }
         )
         self._command_joint_indices = tuple(
             self.builder.local_joint_ids.index(joint_id)
@@ -189,8 +213,14 @@ class Order9TensorPiLRuntime:
             module_twist_world=state.module_twist_world,
             local_joint_positions_rad=state.local_joint_positions_rad,
         )
+        policy_module_pose_world = state.module_pose_world
+        if self.policy_frame_origins_world is not None:
+            policy_module_pose_world = state.module_pose_world.clone()
+            policy_module_pose_world[..., :3].sub_(
+                self.policy_frame_origins_world[:, None, :]
+            )
         graph_batch = self.bucket.update_runtime_(
-            module_pose_world=state.module_pose_world,
+            module_pose_world=policy_module_pose_world,
             module_twist_world=state.module_twist_world,
             module_health=self.module_health,
             joint_positions=state.local_joint_positions_rad,
@@ -250,27 +280,18 @@ class Order9TensorPiLRuntime:
             privileged_disturbance_body=privileged,
             deterministic=deterministic,
         )
-        baseline_residual = self._baseline_object_residual(
-            object_pose_world=state.object_pose_world,
-            object_twist_world=state.object_twist_world,
-            desired_object_pose_world=task_target.desired_object_pose_world,
-        )
-        command_joint_indices = torch.tensor(
-            self._command_joint_indices, device=self.device, dtype=torch.long
-        )
-        command_current_q = state.local_joint_positions_rad.index_select(
-            2, command_joint_indices
-        )
-        command_mask = torch.ones_like(command_current_q, dtype=torch.bool)
+        command_reference_q = task_target.nominal_joint_positions_rad
+        command_reference_qdot = task_target.nominal_joint_velocities_radps
+        command_mask = torch.ones_like(command_reference_q, dtype=torch.bool)
         command = self.decoder.decode(
-            baseline_body_pose_world=task_target.desired_robot_root_pose_world,
-            baseline_body_twist=task_target.desired_robot_root_twist_world,
-            baseline_residual_wrench_body=baseline_residual,
+            reference_body_pose_world=task_target.desired_robot_root_pose_world,
+            reference_body_twist=task_target.desired_robot_root_twist_world,
             normalized_global_action=policy_step.action,
             normalized_joint_action=policy_step.joint_action,
             policy_module_ids=policy_step.graph_encoding.module_ids,
-            current_local_joint_positions_rad=command_current_q,
-            current_local_joint_mask=command_mask,
+            reference_local_joint_positions_rad=command_reference_q,
+            reference_local_joint_velocities_radps=command_reference_qdot,
+            reference_local_joint_mask=command_mask,
             total_mass_kg=control_model.total_mass_kg,
         )
         payload_offset_body = self._payload_offset_body(
@@ -326,7 +347,6 @@ class Order9TensorPiLRuntime:
             policy_step=policy_step,
             policy_command=command,
             controller_result=controller_result,
-            baseline_residual_wrench_body=baseline_residual,
             privileged_disturbance_body=privileged,
         )
 
@@ -437,49 +457,19 @@ class Order9TensorPiLRuntime:
         values[:, progress_offset + 2] = math.cos(2.0 * math.pi * adapter)
         return values
 
-    def _baseline_object_residual(
-        self,
-        *,
-        object_pose_world: torch.Tensor,
-        object_twist_world: torch.Tensor,
-        desired_object_pose_world: torch.Tensor,
-    ) -> torch.Tensor:
-        cfg = self.baseline_config
-        force = (
-            cfg.object_position_gain_n_per_m
-            * (desired_object_pose_world[:, :3] - object_pose_world[:, :3])
-            - cfg.object_velocity_gain_n_per_mps * object_twist_world[:, :3]
-        ).clamp(
-            min=-cfg.residual_force_limit_n,
-            max=cfg.residual_force_limit_n,
-        )
-        torque = (
-            -cfg.object_angular_velocity_gain_nm_per_radps
-            * object_twist_world[:, 3:6]
-        ).clamp(
-            min=-cfg.residual_torque_limit_nm,
-            max=cfg.residual_torque_limit_nm,
-        )
-        residual = torch.cat((force, torque), dim=-1)
-        warning_scale = torch.where(
-            self.controller_status_one_hot[:, 1] > 0.5,
-            torch.full_like(
-                self.allocation_residual_norm,
-                cfg.controller_warning_residual_scale,
-            ),
-            torch.ones_like(self.allocation_residual_norm),
-        )
-        usable = self.controller_qp_feasible & (
-            self.controller_status_one_hot[:, 2] < 0.5
-        ) & (self.controller_status_one_hot[:, 3] < 0.5)
-        scale = torch.where(
-            usable,
-            warning_scale,
-            torch.full_like(
-                warning_scale, cfg.controller_infeasible_residual_scale
-            ),
-        )
-        return residual * scale.unsqueeze(-1)
+    def _prepare_policy_frame_origins(
+        self, origins_world: torch.Tensor | None
+    ) -> torch.Tensor | None:
+        if origins_world is None:
+            return None
+        if tuple(origins_world.shape) != (self.batch_size, 3):
+            raise ValueError(
+                "Order9 policy-frame origins must have shape [batch_size, 3]"
+            )
+        origins = origins_world.to(device=self.device, dtype=self.dtype).clone()
+        if not bool(torch.isfinite(origins).all().item()):
+            raise ValueError("Order9 policy-frame origins must be finite")
+        return origins
 
     @staticmethod
     def _payload_offset_body(
@@ -516,7 +506,13 @@ class Order9TensorPiLRuntime:
                 "Order9 tensor runtime estimated_payload_com_object shape differs"
             )
         if bool((values["phase_index"] < 0).any()) or bool(
-            (values["phase_index"] >= len(ORDER9_OBJECT_TASK_PHASES)).any()
+            (
+                values["phase_index"]
+                >= min(
+                    self.config.max_phase_count,
+                    ORDER9_OBJECT_TASK_ACTOR_PHASE_COUNT,
+                )
+            ).any()
         ):
             raise ValueError("Order9 tensor runtime phase index is invalid")
         state = values["state"]
@@ -525,6 +521,26 @@ class Order9TensorPiLRuntime:
         target = values["task_target"]
         if target.desired_robot_root_pose_world.shape != (batch, 7):
             raise ValueError("Order9 tensor runtime target pose shape differs")
+        if (
+            target.desired_robot_root_twist_world.shape != (batch, 6)
+            or target.desired_object_pose_world.shape != (batch, 7)
+            or target.phase_goal_robot_root_pose_world.shape != (batch, 7)
+            or target.phase_goal_object_pose_world.shape != (batch, 7)
+        ):
+            raise ValueError("Order9 tensor runtime task-target shape differs")
+        expected_joint_shape = (
+            batch,
+            self.builder.module_count,
+            len(self._command_joint_indices),
+        )
+        if (
+            target.nominal_joint_positions_rad.shape != expected_joint_shape
+            or target.nominal_joint_velocities_radps.shape
+            != expected_joint_shape
+        ):
+            raise ValueError(
+                "Order9 tensor runtime target joint posture shape differs"
+            )
         privileged = values["privileged_disturbance_body"]
         if privileged is not None and privileged.shape != (batch, 6):
             raise ValueError("Order9 privileged disturbance shape differs")

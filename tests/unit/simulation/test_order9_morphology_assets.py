@@ -34,7 +34,11 @@ def test_staged_topology_asset_is_structurally_hash_bound(tmp_path) -> None:
     assert staged[0].structural_hash == source_entry.structural_hash
     assert staged[0].morphology_graph_path.is_file()
     assert staged[0].urdf_path.is_file()
-    assert "module_0__root" in staged[0].urdf_path.read_text(encoding="utf-8")
+    assert "articulated_v2" in staged[0].urdf_path.name
+    payload = staged[0].urdf_path.read_text(encoding="utf-8")
+    assert "module_0__root" in payload
+    if staged[0].module_count > 1:
+        assert "articulated_graph_edge_" in payload
 
 
 def test_manifest_validates_every_usd_payload_byte(tmp_path) -> None:

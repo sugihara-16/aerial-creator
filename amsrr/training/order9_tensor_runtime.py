@@ -11,12 +11,12 @@ from amsrr.encoders.morphology_graph_encoder import (
     MorphologyGraphBatch,
     MorphologyGraphTensorizer,
 )
+from amsrr.policies.order9_low_level_policy import ORDER9_GLOBAL_ACTION_SIZE
 from amsrr.schemas.morphology import MorphologyGraph
-from amsrr.schemas.order3 import ORDER3_ACTION_SIZE
 from amsrr.utils.hashing import stable_hash
 
 
-ORDER9_TENSOR_RUNTIME_VERSION = "order9_topology_bucket_tensor_runtime_v1"
+ORDER9_TENSOR_RUNTIME_VERSION = "order9_topology_bucket_tensor_runtime_v2"
 
 
 @dataclass(frozen=True)
@@ -83,6 +83,9 @@ class Order9TensorizedTopologyBucket:
                 "topology_bucketed": True,
                 "structural_hash": self.structural_hash,
                 "batch_size": batch_size,
+                "runtime_pose_quaternion_semantics": (
+                    "normalized_xyzw_with_nonnegative_qw"
+                ),
             },
         )
 
@@ -118,7 +121,11 @@ class Order9TensorizedTopologyBucket:
         features = self.batch.node_features
         device, dtype = features.device, features.dtype
         features[..., _NODE_RUNTIME_PRESENT] = self.batch.node_mask.to(dtype)
-        features[..., _NODE_RUNTIME_POSE] = module_pose_world.to(device=device, dtype=dtype)
+        pose = module_pose_world.to(device=device, dtype=dtype)
+        features[..., _NODE_RUNTIME_POSE_XYZ] = pose[..., :3]
+        features[..., _NODE_RUNTIME_POSE_QUATERNION] = (
+            _canonicalize_quaternion_xyzw(pose[..., 3:7])
+        )
         features[..., _NODE_RUNTIME_TWIST] = module_twist_world.to(device=device, dtype=dtype)
         features[..., _NODE_RUNTIME_HEALTH] = module_health.to(device=device, dtype=dtype)
         mask = joint_mask.to(device=device, dtype=torch.bool)
@@ -205,7 +212,9 @@ def initial_order9_policy_state(
     dtype: torch.dtype = torch.float32,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     return (
-        torch.zeros((batch_size, ORDER3_ACTION_SIZE), device=device, dtype=dtype),
+        torch.zeros(
+            (batch_size, ORDER9_GLOBAL_ACTION_SIZE), device=device, dtype=dtype
+        ),
         torch.zeros(
             (batch_size, recurrent_hidden_dim), device=device, dtype=dtype
         ),
@@ -224,6 +233,20 @@ def _masked_summary(values: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     minimum = torch.where(empty, torch.zeros_like(minimum), minimum)
     maximum = torch.where(empty, torch.zeros_like(maximum), maximum)
     return torch.stack((count, mean, rms, minimum, maximum), dim=-1)
+
+
+def _canonicalize_quaternion_xyzw(quaternion: torch.Tensor) -> torch.Tensor:
+    """Match the scalar graph tensorizer's ``normalize_quat`` contract."""
+
+    normalized = quaternion / quaternion.norm(
+        dim=-1, keepdim=True
+    ).clamp_min(1.0e-12)
+    sign = torch.where(
+        normalized[..., 3:4] < 0.0,
+        -torch.ones_like(normalized[..., 3:4]),
+        torch.ones_like(normalized[..., 3:4]),
+    )
+    return normalized * sign
 
 
 def _quaternion_to_matrix(quaternion: torch.Tensor) -> torch.Tensor:
@@ -281,8 +304,12 @@ def _shape(tensor: torch.Tensor, expected: tuple[int, ...], name: str) -> None:
 
 
 _NODE_RUNTIME_PRESENT = MORPHOLOGY_NODE_FEATURE_NAMES.index("runtime.present")
-_NODE_RUNTIME_POSE = slice(
+_NODE_RUNTIME_POSE_XYZ = slice(
     MORPHOLOGY_NODE_FEATURE_NAMES.index("runtime.pose.x"),
+    MORPHOLOGY_NODE_FEATURE_NAMES.index("runtime.pose.z") + 1,
+)
+_NODE_RUNTIME_POSE_QUATERNION = slice(
+    MORPHOLOGY_NODE_FEATURE_NAMES.index("runtime.pose.qx"),
     MORPHOLOGY_NODE_FEATURE_NAMES.index("runtime.pose.qw") + 1,
 )
 _NODE_RUNTIME_TWIST = slice(

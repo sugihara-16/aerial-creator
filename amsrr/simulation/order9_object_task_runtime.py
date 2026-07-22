@@ -22,6 +22,28 @@ from amsrr.simulation.order9_object_task_state import (
 ORDER9_OBJECT_TASK_RUNTIME_VERSION = "order9_object_grasp_carry_runtime_v1"
 ORDER9_OBJECT_TASK_ADAPTER_ID = "object_grasp_carry_v1"
 
+# Actor-visible phase identity is the task-adapter contract used by C0 teacher
+# records.  The deterministic target generator below has fewer executable
+# phases because ``apply_wrench`` is folded into contact acquisition and
+# ``complete``/``safe_hold`` are terminal states.  Never feed the compact
+# runtime index directly to a learned policy.
+ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS = (
+    "approach",
+    "establish_contact",
+    "apply_wrench",
+    "lift",
+    "transport",
+    "place",
+    "release",
+    "retreat",
+    "settle",
+    "complete",
+    "safe_hold",
+)
+ORDER9_OBJECT_TASK_ACTOR_PHASE_COUNT = len(
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS
+)
+
 
 class Order9ObjectTaskPhase(StrEnum):
     APPROACH = "approach"
@@ -35,20 +57,49 @@ class Order9ObjectTaskPhase(StrEnum):
 
 
 ORDER9_OBJECT_TASK_PHASES = tuple(Order9ObjectTaskPhase)
+ORDER9_OBJECT_TASK_ACTOR_PHASE_INDEX_BY_RUNTIME = (
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS.index("approach"),
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS.index("establish_contact"),
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS.index("lift"),
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS.index("transport"),
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS.index("place"),
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS.index("release"),
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS.index("retreat"),
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS.index("settle"),
+)
+
+
+def order9_object_task_actor_phase_index(runtime_phase_index: int) -> int:
+    """Map compact target-generator phase identity to the actor contract."""
+
+    if not 0 <= int(runtime_phase_index) < len(
+        ORDER9_OBJECT_TASK_ACTOR_PHASE_INDEX_BY_RUNTIME
+    ):
+        raise SchemaValidationError(
+            "Order9 object-task runtime phase index is invalid"
+        )
+    return ORDER9_OBJECT_TASK_ACTOR_PHASE_INDEX_BY_RUNTIME[
+        int(runtime_phase_index)
+    ]
 
 
 @dataclass
 class Order9ObjectTaskRuntimeConfig(SchemaBase):
     phase_duration_s: dict[str, float] = field(
         default_factory=lambda: {
-            Order9ObjectTaskPhase.APPROACH.value: 2.0,
-            Order9ObjectTaskPhase.CONTACT_ACQUISITION.value: 2.0,
-            Order9ObjectTaskPhase.LIFT.value: 2.5,
-            Order9ObjectTaskPhase.TRANSPORT.value: 4.0,
-            Order9ObjectTaskPhase.PLACE.value: 2.5,
-            Order9ObjectTaskPhase.RELEASE.value: 2.0,
-            Order9ObjectTaskPhase.RETREAT.value: 2.0,
-            Order9ObjectTaskPhase.SETTLE.value: 1.0,
+            # Match the normalized phase clocks used by the real-Isaac C0
+            # Order 8 teacher: 30 s normally and 90 s while acquiring contact.
+            # These are timeout/progress horizons, not forced dwell times;
+            # phase success still advances immediately when its physical gates
+            # pass.
+            Order9ObjectTaskPhase.APPROACH.value: 30.0,
+            Order9ObjectTaskPhase.CONTACT_ACQUISITION.value: 90.0,
+            Order9ObjectTaskPhase.LIFT.value: 30.0,
+            Order9ObjectTaskPhase.TRANSPORT.value: 30.0,
+            Order9ObjectTaskPhase.PLACE.value: 30.0,
+            Order9ObjectTaskPhase.RELEASE.value: 30.0,
+            Order9ObjectTaskPhase.RETREAT.value: 30.0,
+            Order9ObjectTaskPhase.SETTLE.value: 30.0,
         }
     )
     approach_offset_m: float = 0.30
@@ -440,6 +491,9 @@ def _finite_vector(value: tuple[float, ...], length: int, label: str) -> None:
 
 __all__ = [
     "ORDER9_OBJECT_TASK_ADAPTER_ID",
+    "ORDER9_OBJECT_TASK_ACTOR_PHASE_COUNT",
+    "ORDER9_OBJECT_TASK_ACTOR_PHASE_INDEX_BY_RUNTIME",
+    "ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS",
     "ORDER9_OBJECT_TASK_PHASES",
     "ORDER9_OBJECT_TASK_RUNTIME_VERSION",
     "Order9ObjectTaskPhase",
@@ -447,4 +501,5 @@ __all__ = [
     "Order9ObjectTaskRuntime",
     "Order9ObjectTaskRuntimeConfig",
     "Order9ObjectTaskTarget",
+    "order9_object_task_actor_phase_index",
 ]

@@ -16,6 +16,7 @@ from amsrr.policies.order9_design_grammar import Order9DesignGrammar
 from amsrr.policies.order9_design_policy import Order9DesignPolicyConfig
 from amsrr.policies.order9_design_policy import Order9AutoregressiveDesignPolicy
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
+from amsrr.schemas.order9 import Order9PolicyFamily
 from amsrr.schemas.datasets import (
     P4_3_DATASET_SCHEMA_VERSION,
     DatasetKind,
@@ -36,6 +37,9 @@ from amsrr.training.order9_curriculum import (
     load_order9_learning_config,
 )
 from amsrr.training.order9_offline_training import (
+    PI_L_BC_SELECTION_METRIC,
+    _checkpoint_selection_metric,
+    _row_selection_loss,
     reconstruct_order9_pi_d_teacher_trace,
     train_order9_behavior_cloning,
 )
@@ -44,6 +48,39 @@ from amsrr.training.order9_ppo import (
     update_order9_pi_d_ppo,
 )
 from amsrr.utils.hashing import hash_file
+
+
+def test_pi_l_checkpoint_selection_ignores_value_loss() -> None:
+    actor_best = {
+        "validation_global_action": 0.01,
+        "validation_joint_action": 0.02,
+        "validation_value": 1000.0,
+        "validation_total": 500.03,
+    }
+    value_best = {
+        "validation_global_action": 0.4,
+        "validation_joint_action": 0.3,
+        "validation_value": 0.01,
+        "validation_total": 0.705,
+    }
+
+    assert _checkpoint_selection_metric(Order9PolicyFamily.PI_L) == (
+        PI_L_BC_SELECTION_METRIC
+    )
+    assert _row_selection_loss(
+        actor_best,
+        family=Order9PolicyFamily.PI_L,
+        split="validation",
+    ) < _row_selection_loss(
+        value_best,
+        family=Order9PolicyFamily.PI_L,
+        split="validation",
+    )
+    assert _row_selection_loss(
+        value_best,
+        family=Order9PolicyFamily.PI_D,
+        split="validation",
+    ) == value_best["validation_total"]
 
 
 def test_order9_pi_d_offline_bc_replays_masks_and_writes_strict_checkpoint(

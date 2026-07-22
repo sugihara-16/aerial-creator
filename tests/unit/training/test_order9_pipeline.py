@@ -60,6 +60,7 @@ def test_order9_pipeline_preflights_and_promotes_collection_atomically(
     assert final.promoted
     assert final.status.value == "promoted"
     assert not final.promotion_failed_gates
+    assert final.metadata["promotion_evaluation_completed"] is True
     assert load_order9_stage_manifest(final_path).to_dict() == final.to_dict()
 
 

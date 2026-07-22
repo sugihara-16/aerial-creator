@@ -16,6 +16,11 @@ from pathlib import Path
 import sys
 import traceback
 
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
+
 from isaaclab.app import AppLauncher
 
 
@@ -31,6 +36,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--split", choices=("train", "validation"), required=True)
     parser.add_argument("--output-raw", required=True)
     parser.add_argument(
+        "--evaluation-jsonl",
+        help=(
+            "Write deterministic, phase-zero, first-terminal episode evidence "
+            "for BC-stage promotion."
+        ),
+    )
+    parser.add_argument("--evaluation-episode-count", type=int, default=100)
+    parser.add_argument(
         "--num-envs",
         type=int,
         help="Diagnostic override; production defaults to the selected stage runtime.",
@@ -45,13 +58,23 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--env-spacing", type=float, default=3.0)
     parser.add_argument(
         "--robot-usd",
-        default=(
-            "artifacts/isaac/robots/holon/holon_p4_2_graph/"
-            "holon_p4_2_graph.usda"
-        ),
+        help="Explicit topology-bucket USD; fixed C1/C2 must match its manifest.",
+    )
+    parser.add_argument(
+        "--fixed-nominal-asset-manifest",
+        default="artifacts/p4_full/order9/fixed_nominal_asset/manifest.json",
+        help="Hash-bound fixed-morphology USD used by C1/C2.",
     )
     parser.add_argument("--morphology-graph-json")
     parser.add_argument("--task-spec-json")
+    parser.add_argument(
+        "--teacher-dataset-manifest",
+        default="artifacts/p4_full/order9/c0_teacher/dataset/manifest.json",
+        help=(
+            "Checkpoint-bound C0 source for the fixed-nominal C1 active-knot "
+            "reference."
+        ),
+    )
     parser.add_argument("--selected-gripper-friction", type=float)
     parser.add_argument("--contact-stiffness", type=float, default=7500.0)
     parser.add_argument("--contact-damping", type=float, default=75.0)
@@ -75,6 +98,10 @@ if (args_cli.num_envs is not None and args_cli.num_envs < 1) or (
     raise ValueError("Order9 rollout environment/step counts must be positive")
 if args_cli.seed < 0 or args_cli.dt <= 0.0 or args_cli.env_spacing <= 0.0:
     raise ValueError("Order9 rollout seed/dt/spacing is invalid")
+if args_cli.evaluation_episode_count < 1:
+    raise ValueError("Order9 evaluation episode count must be positive")
+if args_cli.evaluation_jsonl is not None and args_cli.split != "validation":
+    raise ValueError("Order9 BC promotion evidence must use the validation split")
 for name in ("contact_stiffness", "contact_damping"):
     if not math.isfinite(float(getattr(args_cli, name))) or float(
         getattr(args_cli, name)
@@ -85,7 +112,7 @@ app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
 import time
-from dataclasses import fields
+from dataclasses import fields, replace
 
 import torch
 
@@ -99,12 +126,16 @@ from pxr import PhysxSchema, Sdf, Usd, UsdPhysics, UsdShade
 
 from amsrr.controllers.batched_qpid_controller import BatchedQPIDController
 from amsrr.controllers.qpid_controller import QPIDControllerConfig
+from amsrr.geometry.pose_math import compose_pose, inverse_pose
 from amsrr.geometry.contact_material import resolve_contact_friction
 from amsrr.irg.envelope_extractor import InteractionEnvelopeExtractor
 from amsrr.irg.irg_builder import IRGBuilder
 from amsrr.policies.contact_candidate_sampler import ContactCandidateSampler
 from amsrr.policies.contact_wrench_trajectory import GraspCarryBaselinePlanner
 from amsrr.policies.high_level_policy_base import HighLevelPolicyContext
+from amsrr.robot_model.fixed_morphology_urdf import (
+    articulated_morphology_graph_connections,
+)
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
 from amsrr.schemas.common import ContactMode
 from amsrr.schemas.datasets import DatasetSplit
@@ -114,12 +145,18 @@ from amsrr.schemas.task_spec import GeometryType, TaskSpec
 from amsrr.simulation.order8_natural_contact import (
     build_representative_order8_morphology,
 )
+from amsrr.simulation.order9_fixed_nominal_asset import (
+    load_order9_fixed_nominal_asset_manifest,
+    validate_order9_fixed_nominal_asset_manifest_bytes,
+)
 from amsrr.simulation.order9_actuator_runtime import (
     Order9ActuatorRuntimeValues,
     order9_actuator_runtime_values,
     validate_order9_actuator_readback,
 )
 from amsrr.simulation.order9_object_task_runtime import (
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_INDEX_BY_RUNTIME,
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS,
     ORDER9_OBJECT_TASK_PHASES,
     Order9ObjectTaskRuntime,
     Order9ObjectTaskRuntimeConfig,
@@ -137,6 +174,10 @@ from amsrr.training.order9_curriculum import (
     load_order9_learning_config,
     resolve_order9_stage_runtime,
 )
+from amsrr.training.order9_evaluation import (
+    Order9EvaluationEpisode,
+    write_order9_evaluation_episodes_jsonl,
+)
 from amsrr.training.order9_pipeline import order9_schedule_hash, order9_stage_by_id
 from amsrr.training.order9_runtime_load import Order9RuntimeLoadMonitor
 from amsrr.training.order9_teacher import (
@@ -148,6 +189,9 @@ from amsrr.training.order9_tensor_reward import (
     Order9TensorRewardEngine,
     Order9TensorRewardInput,
     Order9TensorRewardState,
+)
+from amsrr.training.order9_tensor_teacher_reference import (
+    load_order9_nominal_tensor_teacher_reference,
 )
 from amsrr.training.order9_tensor_rollout_artifact import (
     ORDER9_PRODUCTION_COLLECTOR_VERSION,
@@ -312,12 +356,20 @@ def main() -> dict[str, object]:
     config_path = (repository / args_cli.config).resolve()
     config = load_order9_learning_config(config_path)
     stage = order9_stage_by_id(config, args_cli.stage)
-    if stage.learning_target.value != "pi_l" or stage.learning_mode.value != "ppo":
-        raise ValueError("vectorized pi_L rollout requires a pi_L PPO stage")
+    evaluation_mode = args_cli.evaluation_jsonl is not None
+    if stage.learning_target.value != "pi_l" or (
+        stage.learning_mode.value != "ppo" and not evaluation_mode
+    ):
+        raise ValueError(
+            "vectorized pi_L rollout requires a pi_L PPO stage or evaluation mode"
+        )
     if bool(stage.topology_randomized) and args_cli.morphology_graph_json is None:
         raise ValueError("topology-randomized stage requires --morphology-graph-json")
     configured_runtime = resolve_order9_stage_runtime(config, stage)
-    if configured_runtime.rollout_steps_per_environment is None:
+    if (
+        configured_runtime.rollout_steps_per_environment is None
+        and not evaluation_mode
+    ):
         raise ValueError("vectorized pi_L rollout requires a PPO stage runtime")
     runtime_override_used = (
         args_cli.num_envs is not None or args_cli.rollout_steps is not None
@@ -325,7 +377,15 @@ def main() -> dict[str, object]:
     if args_cli.num_envs is None:
         args_cli.num_envs = configured_runtime.environment_count
     if args_cli.rollout_steps is None:
+        if configured_runtime.rollout_steps_per_environment is None:
+            raise ValueError(
+                "BC-stage evaluation requires an explicit --rollout-steps"
+            )
         args_cli.rollout_steps = configured_runtime.rollout_steps_per_environment
+    if evaluation_mode and args_cli.evaluation_episode_count > args_cli.num_envs:
+        raise ValueError(
+            "evaluation episode count cannot exceed the environment count"
+        )
     physical = build_physical_model_from_config(
         repository / config.production_runtime.robot_model_config_path
     )
@@ -342,7 +402,33 @@ def main() -> dict[str, object]:
         else build_representative_order8_morphology(physical)
     )
     morphology.validate()
-    robot_usd = Path(args_cli.robot_usd).resolve()
+    robot_asset_manifest = None
+    if bool(stage.topology_randomized):
+        if args_cli.robot_usd is None:
+            raise ValueError(
+                "topology-randomized rollout requires --robot-usd"
+            )
+        robot_usd = Path(args_cli.robot_usd).resolve()
+    else:
+        robot_asset_manifest_path = (
+            repository / args_cli.fixed_nominal_asset_manifest
+        ).resolve()
+        robot_asset_manifest = load_order9_fixed_nominal_asset_manifest(
+            robot_asset_manifest_path
+        )
+        robot_usd = validate_order9_fixed_nominal_asset_manifest_bytes(
+            robot_asset_manifest,
+            repository_root=repository,
+            expected_morphology=morphology,
+            expected_physical_model_hash=physical.stable_hash(),
+        )
+        if (
+            args_cli.robot_usd is not None
+            and Path(args_cli.robot_usd).resolve() != robot_usd
+        ):
+            raise ValueError(
+                "fixed rollout --robot-usd differs from its hash-bound manifest"
+            )
     if not robot_usd.is_file():
         raise FileNotFoundError(robot_usd)
     task = _load_task(repository, config, canonical)
@@ -372,11 +458,29 @@ def main() -> dict[str, object]:
     articulated_link_ids = tuple(
         link.link_id for link in physical.links if float(link.mass_kg) > 0.0
     )
-    robot_body_names_expected = tuple(
+    physical_robot_body_names = tuple(
         f"module_{module.module_id}__{link.link_id}"
         for module in sorted(morphology.modules, key=lambda value: value.module_id)
         for link in physical.links
         if link.link_id in articulated_link_ids
+    )
+    internal_robot_body_names: tuple[str, ...] = ()
+    if robot_asset_manifest is not None:
+        source_urdf = Path(robot_asset_manifest.source_urdf_path)
+        if not source_urdf.is_absolute():
+            source_urdf = repository / source_urdf
+        internal_robot_body_names = tuple(
+            f"module_{connection.child_module_id}__"
+            f"{connection.child_mechanism_joint_id}__reroot_offset_link"
+            for connection in articulated_morphology_graph_connections(
+                source_urdf,
+                morphology_graph=morphology,
+            )
+            if connection.child_mechanism_joint_id is not None
+        )
+    robot_body_names_expected = (
+        *physical_robot_body_names,
+        *internal_robot_body_names,
     )
     scene_cfg = _scene_cfg(
         robot_usd=robot_usd,
@@ -490,11 +594,42 @@ def main() -> dict[str, object]:
         batch_size=scene.num_envs,
         device=scene.device,
         controller=controller,
+        policy_frame_origins_world=scene.env_origins,
     )
     task_runtime = Order9TensorObjectTaskRuntime()
+    teacher_reference = None
+    if stage.stage_id == "c1_pi_l_bc_fixed_nominal":
+        dataset_manifest_sha256 = checkpoint.metadata.input_artifact_hashes.get(
+            "dataset_manifest"
+        )
+        if dataset_manifest_sha256 is None:
+            raise ValueError("C1 checkpoint does not bind its C0 dataset manifest")
+        teacher_reference = load_order9_nominal_tensor_teacher_reference(
+            repository / args_cli.teacher_dataset_manifest,
+            expected_dataset_manifest_sha256=dataset_manifest_sha256,
+            repository_root=repository,
+            module_ids=policy_runtime.builder.module_ids,
+            joint_ids=policy_runtime.decoder.local_joint_ids,
+            device=scene.device,
+            dtype=torch.float32,
+        )
+        if (
+            teacher_reference.provenance["source_graph_hash"]
+            != morphology.stable_hash()
+        ):
+            raise ValueError("C1 teacher reference morphology hash differs")
+    scalar_task_runtime = Order9ObjectTaskRuntime(canonical, config=task_runtime.config)
+    joint_reference_start, joint_reference_end = _canonical_joint_reference_banks(
+        scalar_task_runtime,
+        module_ids=policy_runtime.builder.module_ids,
+        joint_ids=policy_runtime.decoder.local_joint_ids,
+        device=torch.device(scene.device),
+        dtype=torch.float32,
+    )
     reward_engine = Order9TensorRewardEngine(control_dt_s=float(args_cli.dt))
     phase_count = len(ORDER9_OBJECT_TASK_PHASES)
     bank = _PhaseStateBank(scene, phase_count)
+    teacher_phase_zero_expected = None
     canonical_resets = _canonical_resets_enabled(
         morphology, canonical.metadata["source_graph_hash"]
     )
@@ -506,6 +641,15 @@ def main() -> dict[str, object]:
             task=task,
             robot_joint_names=tuple(robot.joint_names),
         )
+        if teacher_reference is not None:
+            teacher_phase_zero_expected = _install_teacher_phase_zero(
+                bank,
+                scene,
+                io=io,
+                teacher_reference=teacher_reference,
+                robot_joint_names=tuple(robot.joint_names),
+                task_object_pose_world=tuple(target_object.pose_world),
+            )
     else:
         _align_arbitrary_phase_zero(
             scene,
@@ -529,7 +673,9 @@ def main() -> dict[str, object]:
         )
     all_ids = torch.arange(scene.num_envs, device=scene.device, dtype=torch.long)
     phase_index = (
-        all_ids.remainder(phase_count)
+        torch.zeros_like(all_ids)
+        if evaluation_mode
+        else all_ids.remainder(phase_count)
         if canonical_resets
         else torch.zeros_like(all_ids)
     )
@@ -537,6 +683,11 @@ def main() -> dict[str, object]:
     sim.forward()
     scene.update(0.0)
     state = io.gather_state(robot=robot, object_asset=obj)
+    if teacher_phase_zero_expected is not None:
+        _validate_teacher_phase_zero_alignment(
+            state,
+            expected=teacher_phase_zero_expected,
+        )
     control = policy_runtime.builder.build(
         module_pose_world=state.module_pose_world,
         module_twist_world=state.module_twist_world,
@@ -558,6 +709,11 @@ def main() -> dict[str, object]:
     transport_distance = torch.full_like(
         phase_elapsed, _transport_distance(task, target_object.object_id)
     )
+    task_object_position_world = torch.tensor(
+        target_object.pose_world[:3],
+        device=scene.device,
+        dtype=phase_elapsed.dtype,
+    )
     duration_values = torch.tensor(
         [
             task_runtime.config.phase_duration_s[phase.value]
@@ -571,12 +727,25 @@ def main() -> dict[str, object]:
         phase_elapsed_s=phase_elapsed,
         reset_robot_root_pose_world=phase_start_body_pose,
         reset_object_pose_world=phase_start_object_pose,
+        reset_joint_positions_rad=joint_reference_start.index_select(
+            0, phase_index
+        ),
+        phase_end_joint_positions_rad=joint_reference_end.index_select(
+            0, phase_index
+        ),
         lift_clearance_m=lift_clearance,
         transport_distance_m=transport_distance,
     )
+    target = _condition_target_on_teacher_reference(
+        target,
+        teacher_reference=teacher_reference,
+        phase_index=phase_index,
+        scene_origins=scene.env_origins,
+        task_object_position_world=task_object_position_world,
+    )
     reward_state = reward_engine.initial_state(
         object_pose_world=state.object_pose_world,
-        desired_object_pose_world=target.desired_object_pose_world,
+        desired_object_pose_world=target.phase_goal_object_pose_world,
     )
     estimated_mass = torch.full_like(
         phase_elapsed,
@@ -636,6 +805,7 @@ def main() -> dict[str, object]:
             selected_friction=selected_friction,
             canonical_resets=canonical_resets,
             robot_usd=robot_usd,
+            robot_asset_manifest=robot_asset_manifest,
             estimated_mass_kg=float(estimated_mass[0].item()),
             estimated_inertia_body=tuple(
                 float(value) for value in estimated_inertia[0].tolist()
@@ -645,16 +815,26 @@ def main() -> dict[str, object]:
             ),
             object_mass_properties_readback=object_mass_properties_readback,
             actuator_readback=actuator_readback,
+            teacher_reference=teacher_reference,
         )
     )
     setup_elapsed = time.perf_counter() - setup_started
     rollout_started = time.perf_counter()
     terminal_count = 0
     success_count = 0
+    evaluation_active = torch.ones(
+        scene.num_envs, device=scene.device, dtype=torch.bool
+    )
+    evaluation_step_count = torch.zeros(
+        scene.num_envs, device=scene.device, dtype=torch.long
+    )
+    evaluation_return = torch.zeros_like(phase_elapsed)
+    evaluation_outcomes: list[dict[str, object]] = []
     for rollout_index in range(int(args_cli.rollout_steps)):
         pre_state = state
         pre_target = target
         pre_phase = phase_index.clone()
+        pre_actor_phase = _actor_phase_indices(pre_phase)
         pre_elapsed = phase_elapsed.clone()
         pre_time = episode_time.clone()
         pre_serial = episode_serial.clone()
@@ -662,14 +842,14 @@ def main() -> dict[str, object]:
         payload_active = (pre_phase >= 2) & (pre_phase <= 5)
         policy_step = policy_runtime.compute(
             time_s=pre_time,
-            phase_index=pre_phase,
+            phase_index=pre_actor_phase,
             task_target=pre_target,
             state=pre_state,
             estimated_payload_mass_kg=estimated_mass,
             estimated_payload_inertia_body=estimated_inertia,
             payload_active=payload_active,
             estimated_payload_com_object=estimated_com,
-            deterministic=False,
+            deterministic=evaluation_mode,
         )
         io.apply(
             robot=robot,
@@ -720,8 +900,10 @@ def main() -> dict[str, object]:
                 module_twist_world=state.module_twist_world,
                 object_pose_world=state.object_pose_world,
                 object_twist_world=state.object_twist_world,
-                desired_robot_pose_world=pre_target.desired_robot_root_pose_world,
-                desired_object_pose_world=pre_target.desired_object_pose_world,
+                desired_robot_pose_world=(
+                    pre_target.phase_goal_robot_root_pose_world
+                ),
+                desired_object_pose_world=pre_target.phase_goal_object_pose_world,
                 selected_contact_forces_world=contact.selected_contact_forces_world,
                 selected_link_twist_world=contact.selected_link_twist_world,
                 selected_contact_mask=contact.selected_contact_mask,
@@ -743,6 +925,60 @@ def main() -> dict[str, object]:
         terminal = reward.terminal_failure | completed_task
         terminal_count += int(terminal.sum().item())
         success_count += int(completed_task.sum().item())
+        if evaluation_mode:
+            evaluation_step_count[evaluation_active] += 1
+            evaluation_return[evaluation_active] += reward.reward[evaluation_active]
+            evaluation_terminal = terminal & evaluation_active
+            for environment in torch.nonzero(
+                evaluation_terminal, as_tuple=False
+            ).flatten().tolist():
+                succeeded = bool(completed_task[environment].item())
+                failure_reason = None
+                if not succeeded:
+                    if bool(reward.hard_collision[environment].item()):
+                        failure_reason = "hard_collision"
+                    elif bool(reward.object_dropped[environment].item()):
+                        failure_reason = "object_dropped"
+                    elif bool(
+                        reward.qp_infeasible_terminal[environment].item()
+                    ):
+                        failure_reason = "qp_infeasible_terminal"
+                    elif bool(reward.timeout[environment].item()):
+                        failure_reason = "phase_timeout"
+                    else:  # pragma: no cover - terminal causes are exhaustive.
+                        failure_reason = "terminal_failure"
+                evaluation_outcomes.append(
+                    {
+                        "environment": environment,
+                        "task_success": succeeded,
+                        "safety_failure": bool(
+                            reward.hard_collision[environment].item()
+                            or reward.object_dropped[environment].item()
+                            or reward.qp_infeasible_terminal[environment].item()
+                        ),
+                        "failure_reason": failure_reason,
+                        "environment_step_count": int(
+                            evaluation_step_count[environment].item()
+                        ),
+                        "episode_return": float(
+                            evaluation_return[environment].item()
+                        ),
+                        "terminal_phase_index": int(
+                            pre_actor_phase[environment].item()
+                        ),
+                        "hard_collision": bool(
+                            reward.hard_collision[environment].item()
+                        ),
+                        "object_dropped": bool(
+                            reward.object_dropped[environment].item()
+                        ),
+                        "qp_infeasible_terminal": bool(
+                            reward.qp_infeasible_terminal[environment].item()
+                        ),
+                        "timeout": bool(reward.timeout[environment].item()),
+                    }
+                )
+            evaluation_active &= ~evaluation_terminal
         next_phase_mask = reward.phase_success & ~last_phase
         next_ids = torch.nonzero(next_phase_mask, as_tuple=False).flatten()
         if next_ids.numel():
@@ -761,16 +997,35 @@ def main() -> dict[str, object]:
             phase_elapsed_s=phase_elapsed,
             reset_robot_root_pose_world=phase_start_body_pose,
             reset_object_pose_world=phase_start_object_pose,
+            reset_joint_positions_rad=joint_reference_start.index_select(
+                0, phase_index
+            ),
+            phase_end_joint_positions_rad=joint_reference_end.index_select(
+                0, phase_index
+            ),
             lift_clearance_m=lift_clearance,
             transport_distance_m=transport_distance,
+        )
+        target = _condition_target_on_teacher_reference(
+            target,
+            teacher_reference=teacher_reference,
+            phase_index=phase_index,
+            scene_origins=scene.env_origins,
+            task_object_position_world=task_object_position_world,
         )
         reward_state = _reset_goal_distance_for_phase_transition(
             reward.next_state,
             env_ids=next_ids,
             object_pose_world=state.object_pose_world,
-            desired_object_pose_world=target.desired_object_pose_world,
+            desired_object_pose_world=target.phase_goal_object_pose_world,
         )
-        final_collection_step = rollout_index + 1 == int(args_cli.rollout_steps)
+        evaluation_complete = bool(
+            evaluation_mode and not bool(evaluation_active.any())
+        )
+        final_collection_step = (
+            rollout_index + 1 == int(args_cli.rollout_steps)
+            or evaluation_complete
+        )
         truncated = torch.zeros_like(terminal)
         bootstrap = torch.zeros_like(phase_elapsed)
         if final_collection_step:
@@ -778,7 +1033,7 @@ def main() -> dict[str, object]:
             if bool(truncated.any()):
                 bootstrap_value = policy_runtime.evaluate_bootstrap_value(
                     time_s=episode_time,
-                    phase_index=phase_index,
+                    phase_index=_actor_phase_indices(phase_index),
                     task_target=target,
                     state=state,
                     estimated_payload_mass_kg=estimated_mass,
@@ -791,7 +1046,7 @@ def main() -> dict[str, object]:
             _artifact_step(
                 valid=torch.ones_like(terminal),
                 pre_time=pre_time,
-                pre_phase=pre_phase,
+                pre_phase=pre_actor_phase,
                 pre_elapsed=pre_elapsed,
                 duration=duration_values[pre_phase],
                 pre_serial=pre_serial,
@@ -815,6 +1070,8 @@ def main() -> dict[str, object]:
             terminal_or_reset=terminal,
             current_vectoring_angles_rad=post_control.current_vectoring_angles_rad,
         )
+        if evaluation_complete:
+            break
         reset_ids = torch.nonzero(terminal, as_tuple=False).flatten()
         if reset_ids.numel() and not final_collection_step:
             episode_serial[reset_ids] += 1
@@ -843,14 +1100,27 @@ def main() -> dict[str, object]:
                 phase_elapsed_s=phase_elapsed,
                 reset_robot_root_pose_world=phase_start_body_pose,
                 reset_object_pose_world=phase_start_object_pose,
+                reset_joint_positions_rad=joint_reference_start.index_select(
+                    0, phase_index
+                ),
+                phase_end_joint_positions_rad=joint_reference_end.index_select(
+                    0, phase_index
+                ),
                 lift_clearance_m=lift_clearance,
                 transport_distance_m=transport_distance,
+            )
+            target = _condition_target_on_teacher_reference(
+                target,
+                teacher_reference=teacher_reference,
+                phase_index=phase_index,
+                scene_origins=scene.env_origins,
+                task_object_position_world=task_object_position_world,
             )
             reward_state = reward_engine.reset_state_subset(
                 reward_state,
                 reset_ids,
                 object_pose_world=state.object_pose_world,
-                desired_object_pose_world=target.desired_object_pose_world,
+                desired_object_pose_world=target.phase_goal_object_pose_world,
             )
     if str(args_cli.device).startswith("cuda"):
         torch.cuda.synchronize()
@@ -869,7 +1139,8 @@ def main() -> dict[str, object]:
                 artifact.environment_step_count / (setup_elapsed + rollout_elapsed)
             ),
             "environment_count": int(scene.num_envs),
-            "rollout_steps": int(args_cli.rollout_steps),
+            "rollout_steps": int(artifact.step_count),
+            "requested_rollout_steps": int(args_cli.rollout_steps),
             "configured_environment_count": configured_runtime.environment_count,
             "configured_rollout_steps_per_environment": (
                 configured_runtime.rollout_steps_per_environment
@@ -881,9 +1152,76 @@ def main() -> dict[str, object]:
             "runtime_load": runtime_load,
             "terminal_count": int(terminal_count),
             "successful_terminal_count": int(success_count),
+            "evaluation_mode": bool(evaluation_mode),
+            "deterministic_policy": bool(evaluation_mode),
+            "initial_phase_zero": bool(evaluation_mode),
         }
     )
     raw_sha = write_order9_tensor_rollout_artifact(args_cli.output_raw, artifact)
+    evaluation_episode_count = 0
+    if evaluation_mode:
+        requested = int(args_cli.evaluation_episode_count)
+        if len(evaluation_outcomes) < requested:
+            raise RuntimeError(
+                "Order9 evaluation rollout produced "
+                f"{len(evaluation_outcomes)} first-terminal episodes; "
+                f"{requested} required"
+            )
+        selected_outcomes = sorted(
+            evaluation_outcomes, key=lambda item: int(item["environment"])
+        )[:requested]
+        raw_path = Path(args_cli.output_raw).resolve()
+        evaluation_episodes = []
+        for outcome in selected_outcomes:
+            environment = int(outcome["environment"])
+            succeeded = bool(outcome["task_success"])
+            evaluation_episodes.append(
+                Order9EvaluationEpisode(
+                    episode_id=(
+                        f"{args_cli.generation_id}:evaluation:env:{environment:04d}"
+                    ),
+                    task_id=translated_tasks[environment].task_id,
+                    split=split,
+                    random_seed=int(args_cli.seed) + environment,
+                    task_success=succeeded,
+                    no_fallback_success=succeeded,
+                    safety_failure=bool(outcome["safety_failure"]),
+                    high_level_decision_count=0,
+                    fallback_decision_count=0,
+                    environment_step_count=int(
+                        outcome["environment_step_count"]
+                    ),
+                    isaac_backed=True,
+                    full_mesh_evaluation=True,
+                    source_artifact_path=str(raw_path),
+                    source_artifact_sha256=raw_sha,
+                    failure_reason=outcome["failure_reason"],
+                    metrics={
+                        "episode_return": float(outcome["episode_return"]),
+                        "terminal_phase_index": float(
+                            outcome["terminal_phase_index"]
+                        ),
+                        "hard_collision": float(outcome["hard_collision"]),
+                        "object_dropped": float(outcome["object_dropped"]),
+                        "qp_infeasible_terminal": float(
+                            outcome["qp_infeasible_terminal"]
+                        ),
+                        "timeout": float(outcome["timeout"]),
+                    },
+                    metadata={
+                        "environment_index": environment,
+                        "generation_id": args_cli.generation_id,
+                        "deterministic_policy": True,
+                        "initial_phase_index": 0,
+                        "first_terminal_only": True,
+                        "raw_contact_actor_input": False,
+                    },
+                )
+            )
+        write_order9_evaluation_episodes_jsonl(
+            args_cli.evaluation_jsonl, evaluation_episodes
+        )
+        evaluation_episode_count = len(evaluation_episodes)
     finite = bool(
         torch.isfinite(state.robot_root_pose_world).all()
         and torch.isfinite(state.object_pose_world).all()
@@ -896,7 +1234,8 @@ def main() -> dict[str, object]:
         "raw_artifact_path": str(Path(args_cli.output_raw).resolve()),
         "raw_artifact_sha256": raw_sha,
         "environment_count": scene.num_envs,
-        "rollout_steps": int(args_cli.rollout_steps),
+        "rollout_steps": int(artifact.step_count),
+        "requested_rollout_steps": int(args_cli.rollout_steps),
         "environment_steps": artifact.environment_step_count,
         "wall_elapsed_s": rollout_elapsed,
         "setup_wall_elapsed_s": setup_elapsed,
@@ -917,6 +1256,15 @@ def main() -> dict[str, object]:
         },
         "terminal_count": terminal_count,
         "successful_terminal_count": success_count,
+        "evaluation_mode": evaluation_mode,
+        "evaluation_episode_count": evaluation_episode_count,
+        "evaluation_jsonl": (
+            None
+            if args_cli.evaluation_jsonl is None
+            else str(Path(args_cli.evaluation_jsonl).resolve())
+        ),
+        "deterministic_policy": evaluation_mode,
+        "initial_phase_zero": evaluation_mode,
         "canonical_phase_resets": canonical_resets,
         "unlocked_phase_indices": [
             index
@@ -1294,6 +1642,179 @@ def _seed_canonical_bank(
             )
 
 
+def _install_teacher_phase_zero(
+    bank: _PhaseStateBank,
+    scene: InteractiveScene,
+    *,
+    io: Order9TensorIsaacIO,
+    teacher_reference,
+    robot_joint_names: tuple[str, ...],
+    task_object_pose_world: tuple[float, ...],
+) -> dict[str, torch.Tensor]:
+    """Install the exact successful C0 phase-zero physical distribution.
+
+    C0 used one articulation per module, whereas the tensor runtime uses one
+    rigid fixed-morphology articulation.  Align its root through module 0's
+    physical-model frame, then fail closed later if every module does not land
+    on the C0 geometry within the rigid-assembly tolerance.
+    """
+
+    robot = scene["robot"]
+    device = torch.device(scene.device)
+    if tuple(teacher_reference.module_ids) != tuple(io.module_ids):
+        raise RuntimeError(
+            "Order9 C0 initial module identity differs from the fixed USD"
+        )
+    default_q = _torch(robot.data.default_joint_pos)
+    dtype = default_q.dtype
+    source_object_position = teacher_reference.initial_object_pose_world[:3]
+    task_offset = torch.tensor(
+        task_object_pose_world[:3], device=device, dtype=dtype
+    ) - source_object_position.to(device=device, dtype=dtype)
+
+    current_root = _torch(robot.data.root_pose_w)[0].detach().cpu().tolist()
+    module_zero_index = io.module_ids.index(0)
+    current_module_zero = _torch(robot.data.body_pose_w)[
+        0, io.module_body_indices[module_zero_index]
+    ]
+    # The caller validates body identity before this helper.  Remove the copied
+    # environment origin so scalar pose composition remains in local world.
+    origin_zero = scene.env_origins[0]
+    current_root[:3] = (
+        torch.tensor(current_root[:3], device=device, dtype=dtype) - origin_zero
+    ).detach().cpu().tolist()
+    current_module_zero_local = current_module_zero.clone()
+    current_module_zero_local[:3] -= origin_zero
+    root_to_module_zero = compose_pose(
+        inverse_pose(tuple(float(value) for value in current_root)),
+        tuple(float(value) for value in current_module_zero_local.detach().cpu()),
+    )
+
+    initial_module_pose = teacher_reference.initial_module_pose_world.to(
+        device=device, dtype=dtype
+    ).clone()
+    initial_module_pose[:, :3] += task_offset
+    desired_root_pose = compose_pose(
+        tuple(float(value) for value in initial_module_pose[0].detach().cpu()),
+        inverse_pose(root_to_module_zero),
+    )
+    module_zero_twist = teacher_reference.initial_module_twist_world[0].to(
+        device=device, dtype=dtype
+    )
+    root_position = torch.tensor(
+        desired_root_pose[:3], device=device, dtype=dtype
+    )
+    root_to_module_world = initial_module_pose[0, :3] - root_position
+    root_linear_velocity = module_zero_twist[:3] - torch.linalg.cross(
+        module_zero_twist[3:], root_to_module_world, dim=-1
+    )
+    root_twist = torch.cat((root_linear_velocity, module_zero_twist[3:]))
+
+    joint_lookup = {name: index for index, name in enumerate(robot_joint_names)}
+    missing = sorted(
+        set(teacher_reference.initial_joint_positions_rad) - set(joint_lookup)
+    )
+    if missing:
+        raise RuntimeError(
+            f"Order9 C0 initial joints are missing from fixed USD: {missing}"
+        )
+    initial_object_pose = teacher_reference.initial_object_pose_world.to(
+        device=device, dtype=dtype
+    ).clone()
+    initial_object_pose[:3] += task_offset
+    initial_object_twist = teacher_reference.initial_object_twist_world.to(
+        device=device, dtype=dtype
+    )
+    for env_id in range(scene.num_envs):
+        q = default_q[env_id].clone()
+        qdot = torch.zeros_like(q)
+        for name, value in teacher_reference.initial_joint_positions_rad.items():
+            q[joint_lookup[name]] = float(value)
+            qdot[joint_lookup[name]] = float(
+                teacher_reference.initial_joint_velocities_radps[name]
+            )
+        bank.install(
+            env_id=env_id,
+            phase_index=0,
+            robot_root_pose_local=torch.tensor(
+                desired_root_pose, device=device, dtype=dtype
+            ),
+            robot_root_twist=root_twist,
+            joint_position=q,
+            joint_velocity=qdot,
+            object_pose_local=initial_object_pose,
+            object_twist=initial_object_twist,
+        )
+
+    origins = scene.env_origins.to(dtype=dtype)
+    expected_module_pose = initial_module_pose.unsqueeze(0).expand(
+        scene.num_envs, -1, -1
+    ).clone()
+    expected_module_pose[:, :, :3] += origins.unsqueeze(1)
+    expected_object_pose = initial_object_pose.unsqueeze(0).expand(
+        scene.num_envs, -1
+    ).clone()
+    expected_object_pose[:, :3] += origins
+    return {
+        "module_pose_world": expected_module_pose,
+        "module_twist_world": teacher_reference.initial_module_twist_world.to(
+            device=device, dtype=dtype
+        ).unsqueeze(0).expand(scene.num_envs, -1, -1),
+        "object_pose_world": expected_object_pose,
+        "object_twist_world": initial_object_twist.unsqueeze(0).expand(
+            scene.num_envs, -1
+        ),
+    }
+
+
+def _validate_teacher_phase_zero_alignment(
+    state,
+    *,
+    expected: dict[str, torch.Tensor],
+) -> None:
+    module_position_error = torch.linalg.vector_norm(
+        state.module_pose_world[..., :3]
+        - expected["module_pose_world"][..., :3],
+        dim=-1,
+    )
+    module_orientation_error = _quaternion_distance_rad(
+        state.module_pose_world[..., 3:7],
+        expected["module_pose_world"][..., 3:7],
+    )
+    object_position_error = torch.linalg.vector_norm(
+        state.object_pose_world[..., :3]
+        - expected["object_pose_world"][..., :3],
+        dim=-1,
+    )
+    object_orientation_error = _quaternion_distance_rad(
+        state.object_pose_world[..., 3:7],
+        expected["object_pose_world"][..., 3:7],
+    )
+    maxima = {
+        "module_position_m": float(module_position_error.max().item()),
+        "module_orientation_rad": float(module_orientation_error.max().item()),
+        "object_position_m": float(object_position_error.max().item()),
+        "object_orientation_rad": float(object_orientation_error.max().item()),
+    }
+    if (
+        maxima["module_position_m"] > 2.0e-3
+        or maxima["module_orientation_rad"] > 3.0e-3
+        or maxima["object_position_m"] > 1.0e-4
+        or maxima["object_orientation_rad"] > 1.0e-4
+    ):
+        raise RuntimeError(
+            "Order9 fixed USD cannot reproduce the exact C0 phase-zero "
+            f"physical state: {maxima}"
+        )
+
+
+def _quaternion_distance_rad(actual: torch.Tensor, expected: torch.Tensor) -> torch.Tensor:
+    actual = actual / actual.norm(dim=-1, keepdim=True).clamp_min(1.0e-12)
+    expected = expected / expected.norm(dim=-1, keepdim=True).clamp_min(1.0e-12)
+    dot = (actual * expected).sum(dim=-1).abs().clamp(0.0, 1.0)
+    return 2.0 * torch.acos(dot)
+
+
 def _align_arbitrary_phase_zero(
     scene: InteractiveScene,
     *,
@@ -1380,11 +1901,13 @@ def _rollout_metadata(
     selected_friction,
     canonical_resets,
     robot_usd,
+    robot_asset_manifest,
     estimated_mass_kg,
     estimated_inertia_body,
     estimated_com_object,
     object_mass_properties_readback,
     actuator_readback,
+    teacher_reference,
 ):
     thrust_model_hash = str(physical.metadata.get("thrust_model_hash", ""))
     if not thrust_model_hash:
@@ -1401,6 +1924,11 @@ def _rollout_metadata(
         "urdf_hash": hash_file(physical.urdf_path),
         "thrust_model_hash": thrust_model_hash,
         "robot_usd_sha256": hash_file(robot_usd),
+        "robot_asset_manifest": (
+            None
+            if robot_asset_manifest is None
+            else robot_asset_manifest.to_dict()
+        ),
         "simulator_version": _SIMULATOR_VERSION,
         "device": str(args_cli.device),
         "simulator_hash": stable_hash(
@@ -1418,6 +1946,11 @@ def _rollout_metadata(
         "estimated_payload_com_object": list(estimated_com_object),
         "object_mass_properties_readback": dict(object_mass_properties_readback),
         "actuator_readback": dict(actuator_readback),
+        "teacher_reference": (
+            None
+            if teacher_reference is None
+            else dict(teacher_reference.provenance)
+        ),
         "task_specs": [task.to_dict() for task in tasks],
         "environment_splits": [split.value for _ in tasks],
         "assignment_templates_by_environment": [
@@ -1448,7 +1981,105 @@ def _rollout_metadata(
         "contact_damping_n_s_per_m": float(args_cli.contact_damping),
         "canonical_phase_resets": bool(canonical_resets),
         "phase_reset_state_labels_reused": False,
+        "runtime_phase_labels": [
+            phase.value for phase in ORDER9_OBJECT_TASK_PHASES
+        ],
+        "actor_phase_labels": list(ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS),
+        "actor_phase_index_by_runtime": list(
+            ORDER9_OBJECT_TASK_ACTOR_PHASE_INDEX_BY_RUNTIME
+        ),
+        "phase_duration_s": dict(
+            Order9ObjectTaskRuntimeConfig().phase_duration_s
+        ),
+        "evaluation_mode": bool(args_cli.evaluation_jsonl is not None),
+        "deterministic_policy": bool(args_cli.evaluation_jsonl is not None),
+        "initial_phase_zero": bool(args_cli.evaluation_jsonl is not None),
     }
+
+
+def _actor_phase_indices(runtime_phase_indices: torch.Tensor) -> torch.Tensor:
+    mapping = torch.tensor(
+        ORDER9_OBJECT_TASK_ACTOR_PHASE_INDEX_BY_RUNTIME,
+        device=runtime_phase_indices.device,
+        dtype=runtime_phase_indices.dtype,
+    )
+    return mapping[runtime_phase_indices.long()]
+
+
+def _condition_target_on_teacher_reference(
+    target,
+    *,
+    teacher_reference,
+    phase_index: torch.Tensor,
+    scene_origins: torch.Tensor,
+    task_object_position_world: torch.Tensor,
+):
+    if teacher_reference is None:
+        return target
+    source_object_position = teacher_reference.desired_object_pose_world[0, 0, :3]
+    task_offset = task_object_position_world - source_object_position
+    sample = teacher_reference.sample(
+        phase_index=phase_index,
+        phase_progress=target.phase_progress,
+        position_offset_world=scene_origins + task_offset.unsqueeze(0),
+    )
+    return replace(
+        target,
+        desired_robot_root_pose_world=sample.desired_body_pose_world,
+        desired_robot_root_twist_world=sample.desired_body_twist,
+        nominal_joint_positions_rad=sample.nominal_joint_positions_rad,
+        nominal_joint_velocities_radps=sample.nominal_joint_velocities_radps,
+        desired_object_pose_world=sample.desired_object_pose_world,
+        phase_goal_robot_root_pose_world=sample.phase_goal_body_pose_world,
+        phase_goal_object_pose_world=sample.phase_goal_object_pose_world,
+    )
+
+
+def _canonical_joint_reference_banks(
+    runtime: Order9ObjectTaskRuntime,
+    *,
+    module_ids,
+    joint_ids,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Materialize the deterministic active-knot posture reference."""
+
+    starts = []
+    ends = []
+    for phase_index in range(runtime.phase_count):
+        reset = runtime.reset_for_phase(phase_index)
+        end = runtime.target(
+            phase_index,
+            runtime.duration_s(phase_index),
+            reset=reset,
+        )
+        phase_start = []
+        phase_end = []
+        for module_id in module_ids:
+            start_row = []
+            end_row = []
+            for joint_id in joint_ids:
+                global_id = f"module_{module_id}:{joint_id}"
+                if (
+                    global_id not in reset.joint_positions_rad
+                    or global_id not in end.nominal_joint_positions_rad
+                ):
+                    raise RuntimeError(
+                        "Order9 deterministic posture reference does not cover "
+                        f"{global_id}; arbitrary-morphology reference generation "
+                        "must be supplied before this topology is trained"
+                    )
+                start_row.append(float(reset.joint_positions_rad[global_id]))
+                end_row.append(float(end.nominal_joint_positions_rad[global_id]))
+            phase_start.append(start_row)
+            phase_end.append(end_row)
+        starts.append(phase_start)
+        ends.append(phase_end)
+    return (
+        torch.tensor(starts, device=device, dtype=dtype),
+        torch.tensor(ends, device=device, dtype=dtype),
+    )
 
 
 def policy_command_joint_ids(physical) -> tuple[str, ...]:
@@ -1488,8 +2119,16 @@ def _artifact_step(**values):
         "object_pose_world": pre_state.object_pose_world,
         "object_twist_world": pre_state.object_twist_world,
         "desired_body_pose_world": pre_target.desired_robot_root_pose_world,
-        "desired_body_twist_baseline": pre_target.desired_robot_root_twist_world,
+        "desired_body_twist_reference": pre_target.desired_robot_root_twist_world,
         "desired_object_pose_world": pre_target.desired_object_pose_world,
+        "phase_goal_body_pose_world": (
+            pre_target.phase_goal_robot_root_pose_world
+        ),
+        "phase_goal_object_pose_world": pre_target.phase_goal_object_pose_world,
+        "desired_joint_positions_rad": pre_target.nominal_joint_positions_rad,
+        "desired_joint_velocities_radps": (
+            pre_target.nominal_joint_velocities_radps
+        ),
         "selected_assignment_mask": values["selected_mask"],
         "contact_schedule_index": pre_target.contact_schedule_index,
         "actor_controller_qp_feasible": step.actor_controller_qp_feasible,
@@ -1504,6 +2143,7 @@ def _artifact_step(**values):
         "old_log_prob": step.policy_step.log_prob,
         "old_value": step.policy_step.value,
         "privileged_disturbance_body": step.privileged_disturbance_body,
+        "command_body_pose_world": command.desired_body_pose_world,
         "command_body_twist": command.desired_body_twist,
         "command_residual_wrench_body": command.residual_wrench_body,
         "command_joint_position_targets_rad": command.joint_position_targets_rad,

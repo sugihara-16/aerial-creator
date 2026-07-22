@@ -17,7 +17,10 @@ from typing import Any, Mapping, Sequence
 
 import torch
 
-from amsrr.policies.order9_low_level_policy import ORDER9_PI_L_POLICY_VERSION
+from amsrr.policies.order9_low_level_policy import (
+    ORDER9_GLOBAL_ACTION_SIZE,
+    ORDER9_PI_L_POLICY_VERSION,
+)
 from amsrr.schemas.common import ContactMode, SchemaValidationError
 from amsrr.schemas.datasets import (
     DatasetSplit,
@@ -46,17 +49,19 @@ from amsrr.schemas.runtime import (
 from amsrr.schemas.task_spec import TaskSpec
 from amsrr.simulation.order9_object_task_runtime import (
     ORDER9_OBJECT_TASK_ADAPTER_ID,
-    ORDER9_OBJECT_TASK_PHASES,
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_COUNT,
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_INDEX_BY_RUNTIME,
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS,
 )
 from amsrr.training.order9_ppo import ORDER9_PI_L_ACTION_SEMANTICS
 from amsrr.utils.hashing import hash_file
 
 
 ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION = (
-    "order9_tensor_isaac_pi_l_rollout_v2_provenance"
+    "order9_tensor_isaac_complete_pi_l_rollout_v7_command_body_pose"
 )
 ORDER9_PRODUCTION_COLLECTOR_VERSION = (
-    "order9_vectorized_isaac_pi_l_collector_v3"
+    "order9_vectorized_isaac_complete_pi_l_collector_v8_command_body_pose"
 )
 
 
@@ -76,8 +81,12 @@ _REQUIRED_TENSORS = {
     "object_pose_world",
     "object_twist_world",
     "desired_body_pose_world",
-    "desired_body_twist_baseline",
+    "desired_body_twist_reference",
+    "desired_joint_positions_rad",
+    "desired_joint_velocities_radps",
     "desired_object_pose_world",
+    "phase_goal_body_pose_world",
+    "phase_goal_object_pose_world",
     "selected_assignment_mask",
     "contact_schedule_index",
     "actor_controller_qp_feasible",
@@ -92,6 +101,7 @@ _REQUIRED_TENSORS = {
     "old_log_prob",
     "old_value",
     "privileged_disturbance_body",
+    "command_body_pose_world",
     "command_body_twist",
     "command_residual_wrench_body",
     "command_joint_position_targets_rad",
@@ -213,6 +223,10 @@ class Order9TensorRolloutArtifact:
             "reward_term_names",
             "control_dt_s",
             "raw_contact_actor_input",
+            "runtime_phase_labels",
+            "actor_phase_labels",
+            "actor_phase_index_by_runtime",
+            "phase_duration_s",
         }
         missing_metadata = sorted(required_metadata - set(self.metadata))
         if missing_metadata:
@@ -222,6 +236,27 @@ class Order9TensorRolloutArtifact:
         if self.metadata["raw_contact_actor_input"] is not False:
             raise SchemaValidationError(
                 "Order9 tensor rollout actor must exclude raw contact"
+            )
+        if tuple(self.metadata["actor_phase_labels"]) != (
+            ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS
+        ):
+            raise SchemaValidationError(
+                "Order9 tensor rollout actor phase vocabulary differs"
+            )
+        if tuple(self.metadata["actor_phase_index_by_runtime"]) != (
+            ORDER9_OBJECT_TASK_ACTOR_PHASE_INDEX_BY_RUNTIME
+        ):
+            raise SchemaValidationError(
+                "Order9 tensor rollout runtime/actor phase mapping differs"
+            )
+        if bool((self.tensors["phase_index"] < 0).any()) or bool(
+            (
+                self.tensors["phase_index"]
+                >= ORDER9_OBJECT_TASK_ACTOR_PHASE_COUNT
+            ).any()
+        ):
+            raise SchemaValidationError(
+                "Order9 tensor rollout actor phase index is invalid"
             )
         _require_sha256(
             str(self.metadata["pi_l_checkpoint_sha256"]),
@@ -346,10 +381,33 @@ class Order9TensorRolloutArtifact:
                 local_joint_count,
             ),
             "desired_body_pose_world": (steps, environments, 7),
-            "desired_body_twist_baseline": (steps, environments, 6),
+            "desired_body_twist_reference": (steps, environments, 6),
             "desired_object_pose_world": (steps, environments, 7),
-            "global_action": (steps, environments, 12),
-            "previous_global_action": (steps, environments, 12),
+            "phase_goal_body_pose_world": (steps, environments, 7),
+            "phase_goal_object_pose_world": (steps, environments, 7),
+            "desired_joint_positions_rad": (
+                steps,
+                environments,
+                module_count,
+                command_joint_count,
+            ),
+            "desired_joint_velocities_radps": (
+                steps,
+                environments,
+                module_count,
+                command_joint_count,
+            ),
+            "global_action": (
+                steps,
+                environments,
+                ORDER9_GLOBAL_ACTION_SIZE,
+            ),
+            "previous_global_action": (
+                steps,
+                environments,
+                ORDER9_GLOBAL_ACTION_SIZE,
+            ),
+            "command_body_pose_world": (steps, environments, 7),
             "command_body_twist": (steps, environments, 6),
             "command_residual_wrench_body": (steps, environments, 6),
             "command_joint_position_targets_rad": (
@@ -557,7 +615,7 @@ def order9_pi_l_records_from_tensor_artifact(
     for time_index, environment in valid_rows:
         task = tasks[environment]
         phase_index = int(tensors["phase_index"][time_index, environment].item())
-        phase = ORDER9_OBJECT_TASK_PHASES[phase_index]
+        phase_label = ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS[phase_index]
         serial = int(tensors["episode_serial"][time_index, environment].item())
         step_index = int(tensors["step_index"][time_index, environment].item())
         shard = (
@@ -611,7 +669,7 @@ def order9_pi_l_records_from_tensor_artifact(
             tensors["desired_body_pose_world"][time_index, environment]
         )
         desired_twist = _float_list(
-            tensors["desired_body_twist_baseline"][time_index, environment]
+            tensors["desired_body_twist_reference"][time_index, environment]
         )
         desired_object = _float_list(
             tensors["desired_object_pose_world"][time_index, environment]
@@ -629,7 +687,23 @@ def order9_pi_l_records_from_tensor_artifact(
                     ]
                 ),
             ),
-            posture_target=PostureTarget(free_anchor_pose_targets={}),
+            posture_target=PostureTarget(
+                joint_pos_target=_joint_target_map(
+                    tensors["desired_joint_positions_rad"][
+                        time_index, environment
+                    ],
+                    module_ids=module_ids,
+                    joint_ids=command_joint_ids,
+                ),
+                joint_vel_target=_joint_target_map(
+                    tensors["desired_joint_velocities_radps"][
+                        time_index, environment
+                    ],
+                    module_ids=module_ids,
+                    joint_ids=command_joint_ids,
+                ),
+                free_anchor_pose_targets={},
+            ),
             object_targets=[
                 ObjectTarget(
                     object_id=object_id,
@@ -638,7 +712,7 @@ def order9_pi_l_records_from_tensor_artifact(
             ],
             priority_weights={"order9_object_task": 1.0},
             guard_conditions=[
-                {"type": "order9_task_phase", "phase_label": phase.value}
+                {"type": "order9_task_phase", "phase_label": phase_label}
             ],
         )
         policy_command = _policy_command(
@@ -647,7 +721,6 @@ def order9_pi_l_records_from_tensor_artifact(
             environment=environment,
             module_ids=module_ids,
             joint_ids=command_joint_ids,
-            desired_pose=desired_pose,
         )
         controller_command = _controller_command(
             tensors=tensors,
@@ -747,7 +820,7 @@ def order9_pi_l_records_from_tensor_artifact(
             task_type=task.task_type.value,
             task_adapter_id=ORDER9_OBJECT_TASK_ADAPTER_ID,
             phase_index=phase_index,
-            phase_count=len(ORDER9_OBJECT_TASK_PHASES),
+            phase_count=ORDER9_OBJECT_TASK_ACTOR_PHASE_COUNT,
             behavior_trace=behavior,
         )
         record.validate()
@@ -805,12 +878,12 @@ def _runtime_observation(
         contact_states=[],
         controller_status=controller_status,
         task_progress=TaskProgressState(
-            phase_label=ORDER9_OBJECT_TASK_PHASES[phase_index].value,
+            phase_label=ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS[phase_index],
             progress_ratio=phase_progress,
             success=task_success,
             metrics={
                 "phase_index": float(phase_index),
-                "phase_count": float(len(ORDER9_OBJECT_TASK_PHASES)),
+                "phase_count": float(ORDER9_OBJECT_TASK_ACTOR_PHASE_COUNT),
             },
         ),
     )
@@ -853,6 +926,21 @@ def _active_assignments(
     return output
 
 
+def _joint_target_map(
+    values: torch.Tensor,
+    *,
+    module_ids: tuple[int, ...],
+    joint_ids: tuple[str, ...],
+) -> dict[str, float]:
+    if values.shape != (len(module_ids), len(joint_ids)):
+        raise SchemaValidationError("Order9 active-knot joint target shape differs")
+    return {
+        f"module_{module_id}:{joint_id}": float(values[module_index, joint_index])
+        for module_index, module_id in enumerate(module_ids)
+        for joint_index, joint_id in enumerate(joint_ids)
+    }
+
+
 def _policy_command(
     *,
     tensors: Mapping[str, torch.Tensor],
@@ -860,13 +948,14 @@ def _policy_command(
     environment: int,
     module_ids: tuple[int, ...],
     joint_ids: tuple[str, ...],
-    desired_pose: list[float],
 ) -> PolicyCommand:
     q = tensors["command_joint_position_targets_rad"][time_index, environment]
     qdot = tensors["command_joint_velocity_targets_radps"][time_index, environment]
     torque = tensors["command_joint_torque_bias_nm"][time_index, environment]
     return PolicyCommand(
-        desired_body_pose=tuple(desired_pose),
+        desired_body_pose=_float_list(
+            tensors["command_body_pose_world"][time_index, environment]
+        ),
         desired_body_twist=_float_list(
             tensors["command_body_twist"][time_index, environment]
         ),

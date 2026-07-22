@@ -29,6 +29,11 @@ def test_tensor_object_task_targets_match_scalar_phase_runtime() -> None:
     scalar = Order9ObjectTaskRuntime(canonical)
     tensor = Order9TensorObjectTaskRuntime(scalar.config)
     resets = [scalar.reset_for_phase(index) for index in range(scalar.phase_count)]
+    joint_ids = tuple(sorted(canonical.joint_positions_rad))
+    phase_ends = [
+        scalar.target(index, scalar.duration_s(index), reset=resets[index])
+        for index in range(scalar.phase_count)
+    ]
     elapsed = torch.tensor(
         [0.37 * scalar.duration_s(index) for index in range(scalar.phase_count)],
         dtype=torch.float64,
@@ -41,6 +46,25 @@ def test_tensor_object_task_targets_match_scalar_phase_runtime() -> None:
         ),
         reset_object_pose_world=torch.tensor(
             [reset.object_pose_world for reset in resets], dtype=torch.float64
+        ),
+        reset_joint_positions_rad=torch.tensor(
+            [
+                [[reset.joint_positions_rad[joint_id] for joint_id in joint_ids]]
+                for reset in resets
+            ],
+            dtype=torch.float64,
+        ),
+        phase_end_joint_positions_rad=torch.tensor(
+            [
+                [
+                    [
+                        phase_end.nominal_joint_positions_rad[joint_id]
+                        for joint_id in joint_ids
+                    ]
+                ]
+                for phase_end in phase_ends
+            ],
+            dtype=torch.float64,
         ),
         lift_clearance_m=torch.full(
             (scalar.phase_count,), canonical.lift_clearance_m, dtype=torch.float64
@@ -69,6 +93,12 @@ def test_tensor_object_task_targets_match_scalar_phase_runtime() -> None:
         )
         assert output.desired_object_pose_world[index].tolist() == pytest.approx(
             expected.desired_object_pose_world
+        )
+        assert output.nominal_joint_positions_rad[index, 0].tolist() == pytest.approx(
+            [expected.nominal_joint_positions_rad[joint_id] for joint_id in joint_ids]
+        )
+        assert output.nominal_joint_velocities_radps[index, 0].tolist() == pytest.approx(
+            [expected.nominal_joint_velocities_radps[joint_id] for joint_id in joint_ids]
         )
         assert output.phase_progress[index].item() == pytest.approx(
             expected.phase_progress

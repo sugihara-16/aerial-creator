@@ -6,12 +6,20 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from amsrr.schemas.order9 import Order9PolicyFamily
 from amsrr.training.order9_curriculum import load_order9_learning_config
 from amsrr.training.order9_evaluation import (
     Order9EvaluationEpisode,
     build_order9_stage_evaluation_report,
+    order9_teacher_evaluation_episodes,
+    write_order9_evaluation_episodes_jsonl,
     write_order9_stage_evaluation_report,
 )
 from amsrr.training.order9_pipeline import (
@@ -32,6 +40,16 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
 
     commands.add_parser("list", help="Print the validated curriculum stages.")
+
+    teacher_evaluation = commands.add_parser(
+        "build-teacher-evaluation-episodes",
+        help="Convert verified C0 teacher manifests into raw promotion rows.",
+    )
+    teacher_evaluation.add_argument("--episode-root", action="append", default=[])
+    teacher_evaluation.add_argument(
+        "--episode-manifest", action="append", default=[]
+    )
+    teacher_evaluation.add_argument("--output", required=True)
 
     preflight = commands.add_parser(
         "preflight", help="Create one fail-closed prepared-stage manifest."
@@ -76,6 +94,23 @@ def main() -> int:
                 f"{stage.stage_index:02d} {stage.stage_id} "
                 f"{stage.learning_mode.value} {stage.learning_target.value}"
             )
+        return 0
+    if args.command == "build-teacher-evaluation-episodes":
+        manifests = [Path(path) for path in args.episode_manifest]
+        for root in args.episode_root:
+            manifests.extend(
+                sorted(Path(root).glob("*/episode_manifest.json"))
+            )
+        manifests = sorted({path.resolve() for path in manifests})
+        if not manifests:
+            raise SystemExit(
+                "teacher evaluation requires --episode-root or --episode-manifest"
+            )
+        episodes = order9_teacher_evaluation_episodes(manifests)
+        write_order9_evaluation_episodes_jsonl(args.output, episodes)
+        print(f"episodes: {len(episodes)}")
+        print(f"successes: {sum(episode.task_success for episode in episodes)}")
+        print(f"episode_jsonl: {args.output}")
         return 0
     if args.command == "preflight":
         inputs = _key_paths(args.input, label="input")

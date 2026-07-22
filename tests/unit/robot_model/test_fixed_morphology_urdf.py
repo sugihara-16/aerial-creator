@@ -6,6 +6,7 @@ import pytest
 
 from amsrr.geometry.pose_math import FACE_TO_FACE_DOCK_RELATION, compose_pose, inverse_pose
 from amsrr.robot_model.fixed_morphology_urdf import (
+    articulated_morphology_graph_connections,
     articulated_morphology_connections,
     fixed_module_joint_name,
     fixed_module_link_name,
@@ -13,6 +14,7 @@ from amsrr.robot_model.fixed_morphology_urdf import (
     morphology_graph_module_poses,
     morphology_graph_module_root_poses,
     split_fixed_module_name,
+    write_articulated_morphology_graph_urdf,
     write_articulated_morphology_urdf,
     write_fixed_morphology_urdf,
     write_fixed_morphology_graph_urdf,
@@ -23,6 +25,7 @@ from amsrr.robot_model.physical_model_builder import build_module_capability_tok
 from amsrr.schemas.morphology import ControlGroup, DockEdge, ModuleNode, MorphologyGraph
 from amsrr.robot_model.urdf_loader import load_urdf
 from amsrr.robot_model.urdf_transforms import link_poses_in_root_frame
+from amsrr.simulation.order8_natural_contact import build_representative_order8_morphology
 
 
 MESH_SEARCH_DIRS = [Path("module_urdf"), Path("module_urdf/mesh")]
@@ -173,6 +176,67 @@ def test_articulated_morphology_urdf_connects_child_root_to_parent_dock_port(tmp
     src_port = link_poses[fixed_module_link_name(0, connection.parent_connect_link)]
     dst_port = link_poses[fixed_module_link_name(1, connection.child_connect_link)]
     assert dst_port == pytest.approx(compose_pose(src_port, FACE_TO_FACE_DOCK_RELATION), abs=1.0e-6)
+
+
+def test_articulated_graph_urdf_preserves_both_dock_dofs_in_structure(
+    tmp_path: Path,
+) -> None:
+    physical_model = build_physical_model_from_config(
+        "configs/robot/robot_model.yaml"
+    )
+    morphology = build_representative_order8_morphology(physical_model)
+    output_path = write_articulated_morphology_graph_urdf(
+        "assets/robots/holon/holon.urdf",
+        tmp_path / "holon_articulated_graph.urdf",
+        morphology_graph=morphology,
+        mesh_search_dirs=MESH_SEARCH_DIRS,
+    )
+
+    model = load_urdf(output_path)
+    connections = articulated_morphology_graph_connections(
+        "assets/robots/holon/holon.urdf",
+        morphology_graph=morphology,
+    )
+    joints = {joint.name: joint for joint in model.joints}
+    parent_joint_by_child = {joint.child_link: joint for joint in model.joints}
+
+    assert model.frame_tree_valid is True
+    assert model.root_links == [fixed_module_link_name(0, "root")]
+    assert [(item.parent_module_id, item.child_module_id) for item in connections] == [
+        (0, 1),
+        (0, 2),
+    ]
+    for connection in connections:
+        edge_joint = joints[
+            f"articulated_graph_edge_{connection.edge_id}_module_"
+            f"{connection.child_module_id}_to_module_{connection.parent_module_id}"
+        ]
+        assert edge_joint.parent_link == fixed_module_link_name(
+            connection.parent_module_id, connection.parent_connect_link
+        )
+        assert edge_joint.child_link == fixed_module_link_name(
+            connection.child_module_id, connection.child_connect_link
+        )
+        structural_joint_name = fixed_module_joint_name(
+            connection.child_module_id,
+            str(connection.child_mechanism_joint_id),
+        )
+        assert structural_joint_name in joints
+        current = fixed_module_link_name(connection.child_module_id, "fc")
+        ancestor_joint_names: set[str] = set()
+        while current in parent_joint_by_child:
+            ancestor = parent_joint_by_child[current]
+            ancestor_joint_names.add(ancestor.name)
+            current = ancestor.parent_link
+        assert structural_joint_name in ancestor_joint_names
+
+    link_poses = link_poses_in_root_frame(model)
+    base_fc = link_poses[fixed_module_link_name(0, "fc")]
+    expected = morphology_graph_module_poses(morphology)
+    for module_id in (1, 2):
+        child_fc = link_poses[fixed_module_link_name(module_id, "fc")]
+        observed = compose_pose(inverse_pose(base_fc), child_fc)
+        assert observed == pytest.approx(expected[module_id], abs=1.0e-6)
 
 
 def test_resolved_mesh_urdf_points_asset_meshes_to_existing_files(tmp_path: Path) -> None:

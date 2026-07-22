@@ -24,7 +24,11 @@ ORDER9_CONTACT_SCHEDULE_RELEASE = 4
 class Order9TensorObjectTaskTarget:
     desired_robot_root_pose_world: torch.Tensor
     desired_robot_root_twist_world: torch.Tensor
+    nominal_joint_positions_rad: torch.Tensor
+    nominal_joint_velocities_radps: torch.Tensor
     desired_object_pose_world: torch.Tensor
+    phase_goal_robot_root_pose_world: torch.Tensor
+    phase_goal_object_pose_world: torch.Tensor
     phase_progress: torch.Tensor
     contact_schedule_index: torch.Tensor
 
@@ -51,6 +55,8 @@ class Order9TensorObjectTaskRuntime:
         phase_elapsed_s: torch.Tensor,
         reset_robot_root_pose_world: torch.Tensor,
         reset_object_pose_world: torch.Tensor,
+        reset_joint_positions_rad: torch.Tensor,
+        phase_end_joint_positions_rad: torch.Tensor,
         lift_clearance_m: torch.Tensor,
         transport_distance_m: torch.Tensor,
         phase_end_robot_pose_world: torch.Tensor | None = None,
@@ -68,6 +74,15 @@ class Order9TensorObjectTaskRuntime:
             value = locals()[name]
             if tuple(value.shape) != shape:
                 raise ValueError(f"{name} must have shape {shape}")
+        if (
+            reset_joint_positions_rad.ndim != 3
+            or phase_end_joint_positions_rad.shape
+            != reset_joint_positions_rad.shape
+            or reset_joint_positions_rad.shape[0] != batch_size
+        ):
+            raise ValueError(
+                "Order9 joint posture references must share shape [batch, module, joint]"
+            )
         if phase_index.dtype not in {
             torch.int8,
             torch.int16,
@@ -175,6 +190,26 @@ class Order9TensorObjectTaskRuntime:
         desired_twist = torch.cat(
             (linear_velocity, torch.zeros_like(linear_velocity)), dim=-1
         )
+        joint_displacement = (
+            phase_end_joint_positions_rad - reset_joint_positions_rad
+        )
+        joint_positions = reset_joint_positions_rad + (
+            smooth[:, None, None] * joint_displacement
+        )
+        joint_velocity_limit = torch.where(
+            phase
+            == ORDER9_OBJECT_TASK_PHASES.index(Order9ObjectTaskPhase.RELEASE),
+            torch.full_like(progress, self.config.release_joint_velocity_limit_radps),
+            torch.full_like(progress, self.config.contact_joint_velocity_limit_radps),
+        )
+        joint_velocities = (
+            joint_displacement
+            / durations[:, None, None]
+            * derivative[:, None, None]
+        ).clamp(
+            min=-joint_velocity_limit[:, None, None],
+            max=joint_velocity_limit[:, None, None],
+        )
         schedule = torch.full(
             (batch_size,),
             ORDER9_CONTACT_SCHEDULE_INACTIVE,
@@ -217,7 +252,19 @@ class Order9TensorObjectTaskRuntime:
         return Order9TensorObjectTaskTarget(
             desired_robot_root_pose_world=desired_root,
             desired_robot_root_twist_world=desired_twist,
+            nominal_joint_positions_rad=joint_positions,
+            nominal_joint_velocities_radps=joint_velocities,
             desired_object_pose_world=desired_object,
+            phase_goal_robot_root_pose_world=(
+                phase_end_robot_pose_world
+                if phase_end_robot_pose_world is not None
+                else _phase_end_pose(reset_robot_root_pose_world, displacement)
+            ),
+            phase_goal_object_pose_world=(
+                phase_end_object_pose_world
+                if phase_end_object_pose_world is not None
+                else _phase_end_pose(reset_object_pose_world, object_displacement)
+            ),
             phase_progress=progress,
             contact_schedule_index=schedule,
         )
@@ -230,6 +277,12 @@ def _normalized_lerp_quaternion(
     aligned_end = torch.where(dot < 0.0, -end, end)
     value = (1.0 - alpha.unsqueeze(-1)) * start + alpha.unsqueeze(-1) * aligned_end
     return value / value.norm(dim=-1, keepdim=True).clamp_min(1.0e-12)
+
+
+def _phase_end_pose(start: torch.Tensor, displacement: torch.Tensor) -> torch.Tensor:
+    value = start.clone()
+    value[:, :3] += displacement
+    return value
 
 
 __all__ = [

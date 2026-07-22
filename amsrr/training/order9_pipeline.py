@@ -28,7 +28,9 @@ from amsrr.training.order9_curriculum import (
 from amsrr.training.order9_dataset import (
     Order9DatasetStageValidation,
     load_order9_dataset,
+    load_order9_dataset_index,
     validate_order9_dataset_for_stage,
+    validate_order9_pi_l_dataset_for_stage_streaming,
 )
 from amsrr.training.order9_evaluation import (
     load_order9_stage_evaluation_report,
@@ -112,7 +114,6 @@ def preflight_order9_stage(
     ]
     dataset_validation = None
     if dataset_manifest_path is not None:
-        dataset = load_order9_dataset(dataset_manifest_path)
         if (
             behavior_checkpoint_sha256 is not None
             and behavior_checkpoint_sha256_by_family is not None
@@ -120,22 +121,34 @@ def preflight_order9_stage(
             raise SchemaValidationError(
                 "Order9 preflight accepts either one behavior hash or a family map"
             )
-        dataset_validation = validate_order9_dataset_for_stage(
-            dataset,
-            stage,
-            behavior_checkpoint_sha256=(
-                behavior_checkpoint_sha256_by_family
-                if behavior_checkpoint_sha256_by_family is not None
-                else behavior_checkpoint_sha256
-            ),
-        )
+        if (
+            stage.learning_target == Order9LearningTarget.PI_L
+            and stage.learning_mode == Order9LearningMode.BEHAVIOR_CLONING
+        ):
+            dataset_index = load_order9_dataset_index(dataset_manifest_path)
+            dataset_validation = validate_order9_pi_l_dataset_for_stage_streaming(
+                dataset_index, stage
+            )
+            dataset_manifest = dataset_index.manifest_path
+        else:
+            dataset = load_order9_dataset(dataset_manifest_path)
+            dataset_validation = validate_order9_dataset_for_stage(
+                dataset,
+                stage,
+                behavior_checkpoint_sha256=(
+                    behavior_checkpoint_sha256_by_family
+                    if behavior_checkpoint_sha256_by_family is not None
+                    else behavior_checkpoint_sha256
+                ),
+            )
+            dataset_manifest = dataset.manifest_path
         if not dataset_validation.valid:
             raise SchemaValidationError(
                 "Order9 dataset failed stage replay contract: "
                 + ",".join(dataset_validation.failures)
             )
         dataset_binding = _artifact_binding(
-            "dataset_manifest", dataset.manifest_path
+            "dataset_manifest", dataset_manifest
         )
         if all(item.path != dataset_binding.path for item in bindings):
             bindings.append(dataset_binding)
@@ -255,6 +268,7 @@ def finalize_order9_stage(
         promoted=decision.promote,
         metadata={
             **prepared.metadata,
+            "promotion_evaluation_completed": True,
             "promotion_decision": decision.to_dict(),
         },
     )

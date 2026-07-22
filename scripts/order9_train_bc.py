@@ -4,6 +4,12 @@ from __future__ import annotations
 import argparse
 import subprocess
 from pathlib import Path
+import sys
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPOSITORY_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
 from amsrr.schemas.order9 import Order9PolicyFamily

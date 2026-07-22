@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 import torch
 
+from amsrr.policies.order9_low_level_policy import ORDER9_GLOBAL_ACTION_SIZE
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
 from amsrr.schemas.common import ContactMode, SchemaValidationError
 from amsrr.schemas.datasets import DatasetSplit
@@ -11,6 +12,12 @@ from amsrr.schemas.policies import ContactAssignment
 from amsrr.schemas.task_spec import TaskSpec
 from amsrr.simulation.order8_natural_contact import (
     build_representative_order8_morphology,
+)
+from amsrr.simulation.order9_object_task_runtime import (
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_INDEX_BY_RUNTIME,
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS,
+    ORDER9_OBJECT_TASK_PHASES,
+    Order9ObjectTaskRuntimeConfig,
 )
 from amsrr.training.order9_teacher import build_order8_grasp_carry_task_spec
 from amsrr.training.order9_online_dataset import write_order9_on_policy_dataset
@@ -122,6 +129,16 @@ def _artifact() -> Order9TensorRolloutArtifact:
         "reward_term_names": ["weighted_energy"],
         "control_dt_s": 0.02,
         "raw_contact_actor_input": False,
+        "runtime_phase_labels": [
+            phase.value for phase in ORDER9_OBJECT_TASK_PHASES
+        ],
+        "actor_phase_labels": list(ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS),
+        "actor_phase_index_by_runtime": list(
+            ORDER9_OBJECT_TASK_ACTOR_PHASE_INDEX_BY_RUNTIME
+        ),
+        "phase_duration_s": dict(
+            Order9ObjectTaskRuntimeConfig().phase_duration_s
+        ),
     }
     batch = 1
     module_count = len(modules)
@@ -159,8 +176,16 @@ def _artifact() -> Order9TensorRolloutArtifact:
             "object_pose_world": pose((batch, 7)),
             "object_twist_world": torch.zeros((batch, 6)),
             "desired_body_pose_world": pose((batch, 7)),
-            "desired_body_twist_baseline": torch.zeros((batch, 6)),
+            "desired_body_twist_reference": torch.zeros((batch, 6)),
             "desired_object_pose_world": pose((batch, 7)),
+            "phase_goal_body_pose_world": pose((batch, 7)),
+            "phase_goal_object_pose_world": pose((batch, 7)),
+            "desired_joint_positions_rad": torch.zeros(
+                (batch, module_count, command_count)
+            ),
+            "desired_joint_velocities_radps": torch.zeros(
+                (batch, module_count, command_count)
+            ),
             "selected_assignment_mask": torch.ones(
                 (batch, anchor_count), dtype=torch.bool
             ),
@@ -173,16 +198,21 @@ def _artifact() -> Order9TensorRolloutArtifact:
             ),
             "actor_allocation_residual_norm": torch.zeros((batch,)),
             "actor_task_success": torch.zeros((batch,), dtype=torch.bool),
-            "global_action": torch.zeros((batch, 12)),
+            "global_action": torch.zeros(
+                (batch, ORDER9_GLOBAL_ACTION_SIZE)
+            ),
             "joint_action": torch.zeros(
                 (batch, module_count, joint_action_width)
             ),
-            "previous_global_action": torch.zeros((batch, 12)),
+            "previous_global_action": torch.zeros(
+                (batch, ORDER9_GLOBAL_ACTION_SIZE)
+            ),
             "recurrent_state_in": torch.zeros((batch, hidden)),
             "recurrent_state_out": torch.zeros((batch, hidden)),
             "old_log_prob": torch.zeros((batch,)),
             "old_value": torch.full((batch,), 0.25),
             "privileged_disturbance_body": torch.zeros((batch, 6)),
+            "command_body_pose_world": pose((batch, 7)),
             "command_body_twist": torch.zeros((batch, 6)),
             "command_residual_wrench_body": torch.zeros((batch, 6)),
             "command_joint_position_targets_rad": torch.zeros(

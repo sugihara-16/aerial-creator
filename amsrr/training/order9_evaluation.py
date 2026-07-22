@@ -7,7 +7,7 @@ import os
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from amsrr.schemas.common import SchemaBase, SchemaValidationError, require_non_empty
 from amsrr.schemas.datasets import DatasetSplit
@@ -318,6 +318,104 @@ def write_order9_stage_evaluation_report(
         raise
 
 
+def order9_teacher_evaluation_episodes(
+    episode_manifest_paths: Iterable[str | Path],
+) -> tuple[Order9EvaluationEpisode, ...]:
+    """Convert hash-bound real-Isaac C0 episode manifests into gate evidence."""
+
+    from amsrr.training.order9_teacher_collection import (
+        Order9TeacherEpisodeManifest,
+    )
+
+    episodes: list[Order9EvaluationEpisode] = []
+    for raw_path in episode_manifest_paths:
+        manifest_path = Path(raw_path)
+        if manifest_path.is_dir():
+            manifest_path = manifest_path / "episode_manifest.json"
+        manifest = Order9TeacherEpisodeManifest.from_json(
+            manifest_path.read_text(encoding="utf-8")
+        )
+        transition_count = int(manifest.metrics["control_transition_count"])
+        decision_count = int(manifest.metrics["high_level_record_count"])
+        failure = (manifest.failure_reason or "").lower()
+        safety_failure = (not manifest.success) and any(
+            token in failure
+            for token in ("collision", "drop", "qp", "controller", "constraint")
+        )
+        resolved_path = manifest_path.resolve()
+        episodes.append(
+            Order9EvaluationEpisode(
+                episode_id=manifest.episode_id,
+                task_id=manifest.task_spec.task_id,
+                split=manifest.split,
+                random_seed=manifest.random_seed,
+                task_success=manifest.success,
+                no_fallback_success=manifest.success,
+                safety_failure=safety_failure,
+                high_level_decision_count=decision_count,
+                fallback_decision_count=0,
+                environment_step_count=transition_count,
+                isaac_backed=manifest.simulator_version.startswith("isaac"),
+                full_mesh_evaluation=True,
+                source_artifact_path=str(resolved_path),
+                source_artifact_sha256=hash_file(resolved_path),
+                failure_reason=manifest.failure_reason,
+                metrics=dict(manifest.metrics),
+                metadata={
+                    "evidence_source": "order9_c0_teacher_episode_manifest",
+                    "simulator_version": manifest.simulator_version,
+                    "simulator_hash": manifest.simulator_hash,
+                    "raw_contact_actor_input": False,
+                    "deterministic_teacher": True,
+                },
+            )
+        )
+    if not episodes:
+        raise SchemaValidationError(
+            "Order9 C0 evaluation requires teacher episode manifests"
+        )
+    if len({episode.episode_id for episode in episodes}) != len(episodes):
+        raise SchemaValidationError(
+            "Order9 C0 evaluation episode IDs must be unique"
+        )
+    for episode in episodes:
+        episode.validate()
+    return tuple(episodes)
+
+
+def write_order9_evaluation_episodes_jsonl(
+    path: str | Path,
+    episodes: Sequence[Order9EvaluationEpisode],
+) -> None:
+    """Atomically write raw episode rows consumed by ``order9_stage.py``."""
+
+    if not episodes:
+        raise SchemaValidationError("Order9 evaluation episode JSONL is empty")
+    for episode in episodes:
+        episode.validate()
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=destination.parent,
+        prefix=f".{destination.name}.",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            for episode in episodes:
+                handle.write(episode.to_json())
+                handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_name, destination)
+    except BaseException:
+        try:
+            os.unlink(temporary_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def _require_sha256(value: str, path: str) -> None:
     if len(value) != 64 or any(
         character not in "0123456789abcdef" for character in value
@@ -331,6 +429,8 @@ __all__ = [
     "Order9StageEvaluationReport",
     "build_order9_stage_evaluation_report",
     "load_order9_stage_evaluation_report",
+    "order9_teacher_evaluation_episodes",
     "validate_order9_stage_evaluation_report",
+    "write_order9_evaluation_episodes_jsonl",
     "write_order9_stage_evaluation_report",
 ]

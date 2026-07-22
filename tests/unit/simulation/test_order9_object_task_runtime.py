@@ -6,9 +6,13 @@ from pathlib import Path
 import pytest
 
 from amsrr.simulation.order9_object_task_runtime import (
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_COUNT,
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_INDEX_BY_RUNTIME,
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS,
     ORDER9_OBJECT_TASK_PHASES,
     Order9ObjectTaskPhase,
     Order9ObjectTaskRuntime,
+    order9_object_task_actor_phase_index,
 )
 from amsrr.simulation.order9_object_task_state import (
     Order9IsaacStateSnapshot,
@@ -70,6 +74,46 @@ def test_phase_schedule_covers_complete_object_task_and_is_continuous() -> None:
         assert set(end.nominal_joint_positions_rad) == set(
             runtime.canonical.joint_positions_rad
         )
+
+
+def test_runtime_phases_map_to_c0_actor_phase_contract_and_clock() -> None:
+    runtime = _runtime()
+    assert ORDER9_OBJECT_TASK_ACTOR_PHASE_COUNT == 11
+    assert ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS == (
+        "approach",
+        "establish_contact",
+        "apply_wrench",
+        "lift",
+        "transport",
+        "place",
+        "release",
+        "retreat",
+        "settle",
+        "complete",
+        "safe_hold",
+    )
+    assert ORDER9_OBJECT_TASK_ACTOR_PHASE_INDEX_BY_RUNTIME == (
+        0,
+        1,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+    )
+    assert tuple(
+        order9_object_task_actor_phase_index(index)
+        for index in range(len(ORDER9_OBJECT_TASK_PHASES))
+    ) == ORDER9_OBJECT_TASK_ACTOR_PHASE_INDEX_BY_RUNTIME
+    assert runtime.duration_s(1) == pytest.approx(90.0)
+    assert all(
+        runtime.duration_s(index) == pytest.approx(30.0)
+        for index in range(runtime.phase_count)
+        if index != 1
+    )
+    with pytest.raises(Exception, match="phase index"):
+        order9_object_task_actor_phase_index(runtime.phase_count)
 
 
 def test_randomized_grasp_phase_moves_robot_and_object_together() -> None:
