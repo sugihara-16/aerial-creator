@@ -4,6 +4,13 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-22
 
+### Order 9 C2 Exact Behavior Replay Correction
+
+- The first production C2 generation exposed an implementation mismatch before continued training: the copied-environment tensor collector encoded module poses after subtracting each Isaac environment origin and summarized non-fixed joints only, while schema reconstruction replayed absolute world poses and all present joints.  The unchanged C1 behavior checkpoint therefore produced a first-minibatch approximate KL of `3.3323` and clip fraction `0.9539`; target-KL early stopping worked, but that child checkpoint is rejected diagnostic output and contributes no accepted C2 update or training-step quota.
+- The `pi_L` behavior payload now binds both `actor_graph_frame_origin_world` and `actor_graph_joint_summary_semantics`.  Tensor-generated traces use `non_fixed_joints_only`; ordinary single-world traces use `all_present_joints`.  PPO reconstructs only the graph-encoder view in that recorded frame while retaining the original world-frame observation for centroidal actor features, QPID/QP records, reward, and evaluation.
+- Before any optimizer step, every recurrent train transition must numerically reproduce the parent checkpoint's stored log probability, value, recurrent input/output chain, and previous action within an absolute tolerance of `2e-5`.  A mismatch fails closed and produces no child checkpoint.  This fulfills the already approved exact behavior-replay contract; it does not change the policy architecture, observation information, action authority, reward, PPO objective/hyperparameters, controller, task randomization, or curriculum method.
+- A real generation-0 two-environment subset replayed after the correction with maximum log-probability error `7.6294e-6`, value error `3.3528e-8`, and recurrent-state error `3.5763e-7`.  Full-generation replay and the corrected update remain required before C2 may continue.
+
 ### Order 9 C1 Behavior-Cloning Actor Selection Correction
 
 - C1 checkpoint selection is based on the learned `pi_L` actor errors only: normalized global-action loss plus normalized joint-action loss on the natural validation split.  The critic/value loss is not part of C1 checkpoint selection, and its C1 weight is zero; critic fitting begins with the on-policy PPO stage C2.  This prevents the much larger return scale from selecting a checkpoint whose controller-facing action is worse even though the actor is the sole C1 learning target.

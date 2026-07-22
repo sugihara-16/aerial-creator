@@ -54,6 +54,9 @@ from amsrr.simulation.order9_object_task_runtime import (
     ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS,
 )
 from amsrr.training.order9_ppo import ORDER9_PI_L_ACTION_SEMANTICS
+from amsrr.training.order9_ppo import (
+    ORDER9_PI_L_GRAPH_JOINT_SUMMARY_NON_FIXED,
+)
 from amsrr.utils.hashing import hash_file
 
 
@@ -769,6 +772,12 @@ def order9_pi_l_records_from_tensor_artifact(
                         time_index, environment
                     ]
                 ),
+                "actor_graph_frame_origin_world": _actor_graph_frame_origin(
+                    task
+                ),
+                "actor_graph_joint_summary_semantics": (
+                    ORDER9_PI_L_GRAPH_JOINT_SUMMARY_NON_FIXED
+                ),
             },
             stochastic=True,
             policy_checkpoint_sha256=checkpoint,
@@ -889,6 +898,26 @@ def _runtime_observation(
     )
     observation.validate()
     return observation
+
+
+def _actor_graph_frame_origin(task: TaskSpec) -> list[float]:
+    values = task.metadata.get(
+        "isaac_environment_origin_world", [0.0, 0.0, 0.0]
+    )
+    if (
+        not isinstance(values, list)
+        or len(values) != 3
+        or any(
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(float(value))
+            for value in values
+        )
+    ):
+        raise SchemaValidationError(
+            "Order9 task actor graph-frame origin is invalid"
+        )
+    return [float(value) for value in values]
 
 
 def _active_assignments(

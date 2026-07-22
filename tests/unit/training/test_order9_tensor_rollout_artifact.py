@@ -270,6 +270,12 @@ def test_tensor_rollout_roundtrip_and_existing_record_conversion(tmp_path: Path)
     assert records[0].runtime_observation.contact_states == []
     assert records[0].behavior_trace is not None
     assert records[0].behavior_trace.policy_checkpoint_sha256 == "1" * 64
+    assert records[0].behavior_trace.action_payload[
+        "actor_graph_frame_origin_world"
+    ] == [0.0, 0.0, 0.0]
+    assert records[0].behavior_trace.action_payload[
+        "actor_graph_joint_summary_semantics"
+    ] == "non_fixed_joints_only"
     assert records[1].truncated
     assert records[1].bootstrap_value == pytest.approx(0.5)
     assert records[1].episode_id == records[0].episode_id

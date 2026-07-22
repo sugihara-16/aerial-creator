@@ -2,6 +2,15 @@
 
 ## Global Worklog
 
+### 2026-07-22 (Order 9 C2 generation 0 replay correction)
+- Active specification/work package: C2 fixed-morphology conservative `pi_L` PPO under the approved one-fresh-generation/one-update and exact behavior-replay contracts.
+- Production collection: Materialized 8 train and 2 validation conservative object buckets (manifest SHA-256 `e63cd19e4d116672a0f801dc991c63de79548ea22fddbaad69429dcc1a01c40e`). Generation 0 collected train and validation concurrently from the promoted C1 checkpoint, each at the configured `2048 x 16 = 32768` steps with no runtime override. Raw SHA-256 values are `dfee9bc2e8703c4f620f6a5bf3b619a28d429f8865e74bd4b2fc0594357b6e92` (train) and `e9e30faf78e9db0a71d17b892122bb5ad43389770c486704006d811497b37918` (validation). Both collectors exited zero, remained finite, and wrote live TensorBoard data. Concurrent rollout throughput was about `5871/5878 env-step/s`; setup was about `100.9/101.0 s`, rollout `5.58/5.57 s`, and combined GPU memory remained within the RTX 4090 limit.
+- Detected defect: The initial update-0 attempt stopped after one minibatch at approximate KL `3.3323` and clip fraction `0.9539`. Investigation proved this was not a reward/hyperparameter result: copied Isaac origins were removed in the collector graph path but not PPO reconstruction, and the collector excluded fixed joints from graph summaries while reconstruction included them. The attempted child checkpoint SHA-256 `256dd5312c291e4bf372634b8f90fa0c76ab187abaef5b55a72f1246836b622d` is rejected diagnostic output and must not count toward C2 lineage or quota.
+- Correction: Versioned the `pi_L` action semantics with actor graph-frame origin and joint-summary semantics, reconstructed the exact graph-only view, and added an all-transition pre-optimizer replay gate for stored log probability, value, previous action, and GRU chain. The original world-frame record remains unchanged for all non-graph consumers. A real 32-record subset passed with maximum errors `7.6294e-6` log probability, `3.3528e-8` value, and `3.5763e-7` recurrent state against a `2e-5` gate.
+- Tests/commands: Focused policy/tensor-artifact/online-training tests passed `26`; the full dependency-complete unit suite passed `1193` with `1` skip in `95.58 s`; compilation and `git diff --check` passed. The corrected full-generation update remains pending at this entry.
+- Method/schema impact: No method-level change and no persisted dataclass schema change. This is a fail-closed correction of the approved exact behavior replay and copied-environment actor input. Reward, PPO hyperparameters, controller authority, randomization, and stage gates are unchanged.
+- Next steps: Archive the rejected update/dataset derivation, rebuild generation 0 from the unchanged valid raw tensors, pass all-transition replay, rerun update 0 from C1, then inspect KL/clip/learning telemetry before generation 1.
+
 ### 2026-07-22 (Order 9 C2 live TensorBoard telemetry)
 - Active specification/work package: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the approved Order 9 curriculum/runtime supplements; Agent J/K C2 learned `pi_L` execution and observability.
 - Summary: Added default-on, live TensorBoard observation for C2 real-Isaac rollout and recurrent PPO updates. The implementation records the total reward and all eleven tensor reward terms at every control step, with current/running and global/per-phase views; it also records phase occupancy/success, task terminals and failure causes, QP feasibility, throughput, GPU/load telemetry, and every PPO minibatch's loss/entropy/KL/clip metrics. It does not alter reward values, gradients, actions, controller authority, stage gates, or artifacts used as learning evidence.
@@ -3922,6 +3931,13 @@
 - Open questions: None for this work package. Statistical robustness across a larger held-out morphology cohort belongs to later training/evaluation, not this deterministic smoke completion.
 
 ### Agent J/K: Order 9 learned curriculum and physical execution
+
+#### 2026-07-22 (C2 generation 0 exact-replay correction)
+- Scope: Start C2, preserve valid generation-0 Isaac collection, and stop further policy updates when the first optimizer minibatch exposed non-exact actor replay.
+- Root cause: PPO graph reconstruction omitted the copied-environment origin transform and non-fixed-joint mask used by the collector.
+- Implemented: Versioned actor graph-frame provenance; exact graph replay; all-transition pre-optimizer log-prob/value/previous-action/GRU validation; regression coverage.
+- Invalidated evidence: The pre-fix update-0 child checkpoint is diagnostic only and is not part of the accepted C2 lineage or environment-step quota.
+- Handoff: Rebuild only the derived dataset/update from the unchanged raw generation, then resume from the promoted C1 checkpoint if the full replay gate and corrected PPO metrics pass.
 
 #### 2026-07-22 (C2 live TensorBoard observability)
 - Scope: Make C2 reward, phase, safety, performance, load, and PPO optimization progress visible during execution without changing learning semantics.

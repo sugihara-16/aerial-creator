@@ -86,6 +86,8 @@ from amsrr.training.order9_offline_training import build_order9_checkpoint_metad
 from amsrr.training.order9_pipeline import order9_schedule_hash, order9_stage_by_id
 from amsrr.training.order9_ppo import (
     ORDER9_PI_L_ACTION_SEMANTICS,
+    ORDER9_PI_L_GRAPH_JOINT_SUMMARY_NON_FIXED,
+    _pi_l_actor_graph_observation,
     order9_pi_l_behavior_trace_from_inference,
     update_order9_pi_l_ppo,
 )
@@ -420,6 +422,8 @@ def test_order9_pi_l_recurrent_behavior_trace_replays_through_ppo(
             "joint_action": inference.normalized_joint_action,
             "previous_global_action": inference.previous_action,
             "privileged_disturbance_body": [0.0] * 6,
+            "actor_graph_frame_origin_world": [0.0, 0.0, 0.0],
+            "actor_graph_joint_summary_semantics": "all_present_joints",
         },
         stochastic=True,
         policy_checkpoint_sha256=checkpoint_sha,
@@ -485,6 +489,8 @@ def test_order9_pi_l_recurrent_behavior_trace_replays_through_ppo(
     assert progress[0][0] == 1
     assert progress[0][1]["optimizer_step"] == 1.0
     assert "actor_loss" in progress[0][1]
+    assert result.metadata["exact_behavior_replay_validated"] is True
+    assert result.metadata["exact_replay_record_count"] == 1
 
 
 def test_order9_tensor_hot_path_matches_schema_features_and_graph_encoding(
@@ -605,6 +611,44 @@ def test_order9_tensor_hot_path_matches_schema_features_and_graph_encoding(
     )
     assert torch.allclose(schema_step.action, tensor_step.action, atol=1.0e-6)
     assert torch.allclose(schema_step.joint_action, tensor_step.joint_action, atol=1.0e-6)
+
+
+def test_order9_ppo_replay_restores_copied_environment_graph_frame(
+    physical_model: PhysicalModel,
+    morphology_distribution: RandomConnectedMorphologyDistribution,
+) -> None:
+    graph = morphology_distribution.sample(seed=916, module_count=3)
+    local = _runtime(graph, physical_model)
+    origin = (12.0, -8.0, 0.5)
+    copied = RuntimeObservation.from_dict(local.to_dict())
+    for state in copied.module_states:
+        state.pose_world = tuple(
+            [state.pose_world[index] + origin[index] for index in range(3)]
+            + list(state.pose_world[3:])
+        )
+    trace = PolicyBehaviorTrace(
+        policy_family="pi_l",
+        policy_version=ORDER9_PI_L_POLICY_VERSION,
+        action_semantics=ORDER9_PI_L_ACTION_SEMANTICS,
+        action_payload={
+            "actor_graph_frame_origin_world": list(origin),
+            "actor_graph_joint_summary_semantics": (
+                ORDER9_PI_L_GRAPH_JOINT_SUMMARY_NON_FIXED
+            ),
+        },
+    )
+
+    replay = _pi_l_actor_graph_observation(copied, trace, physical_model)
+    active_joint_ids = {
+        joint.joint_id
+        for joint in physical_model.joints
+        if joint.joint_type != "fixed"
+    }
+
+    for expected, actual in zip(local.module_states, replay.module_states):
+        assert actual.pose_world == pytest.approx(expected.pose_world)
+        assert set(actual.joint_positions) == active_joint_ids
+        assert set(actual.joint_velocities) == active_joint_ids
 
 
 def test_deterministic_and_stochastic_actions_have_consistent_log_prob_contract(

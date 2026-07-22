@@ -29,7 +29,7 @@ from amsrr.utils.hashing import hash_file, stable_hash
 
 
 ORDER9_TENSOR_DATASET_BUILDER_VERSION = (
-    "order9_tensor_pi_l_on_policy_dataset_builder_v1"
+    "order9_tensor_pi_l_on_policy_dataset_builder_v2_exact_actor_graph_replay"
 )
 
 

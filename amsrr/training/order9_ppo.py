@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import torch
@@ -47,6 +47,7 @@ from amsrr.schemas.datasets import (
     SequentialDesignTrajectoryRecord,
 )
 from amsrr.schemas.physical_model import PhysicalModel
+from amsrr.schemas.runtime import RuntimeObservation
 from amsrr.training.order9_curriculum import Order9PPOOptimizationConfig
 from amsrr.training.order9_offline_training import (
     reconstruct_order9_pi_d_teacher_trace,
@@ -62,8 +63,10 @@ from amsrr.training.order9_pi_l_learning import (
 
 ORDER9_PPO_REPLAY_VERSION = "order9_ppo_exact_behavior_replay_v1"
 ORDER9_PI_L_ACTION_SEMANTICS = (
-    "squashed_complete_policy_command_and_module_joint_action_v2"
+    "squashed_complete_policy_command_and_module_joint_action_v3_actor_graph_frame"
 )
+ORDER9_PI_L_GRAPH_JOINT_SUMMARY_ALL = "all_present_joints"
+ORDER9_PI_L_GRAPH_JOINT_SUMMARY_NON_FIXED = "non_fixed_joints_only"
 ORDER9_PI_H_ACTION_SEMANTICS = "full_autoregressive_trajectory_tensor_action_v1"
 ORDER9_PI_D_ACTION_SEMANTICS = "masked_grammar_candidate_index_v1"
 
@@ -200,6 +203,10 @@ def order9_pi_l_behavior_trace(
     recurrent_state_in: torch.Tensor,
     previous_global_action: torch.Tensor,
     privileged_disturbance_body: torch.Tensor | None = None,
+    actor_graph_frame_origin_world: Sequence[float] = (0.0, 0.0, 0.0),
+    actor_graph_joint_summary_semantics: str = (
+        ORDER9_PI_L_GRAPH_JOINT_SUMMARY_ALL
+    ),
 ) -> PolicyBehaviorTrace:
     module_ids = [
         int(value)
@@ -214,6 +221,14 @@ def order9_pi_l_behavior_trace(
         if privileged_disturbance_body is None
         else privileged_disturbance_body[batch_index].detach().cpu().tolist()
     )
+    graph_origin = _finite_vector(
+        actor_graph_frame_origin_world,
+        width=3,
+        label="Order9 pi_L actor graph-frame origin",
+    )
+    graph_joint_summary = _graph_joint_summary_semantics(
+        actor_graph_joint_summary_semantics
+    )
     return PolicyBehaviorTrace(
         policy_family="pi_l",
         policy_version=ORDER9_PI_L_POLICY_VERSION,
@@ -227,6 +242,8 @@ def order9_pi_l_behavior_trace(
             .cpu()
             .tolist(),
             "privileged_disturbance_body": privileged,
+            "actor_graph_frame_origin_world": graph_origin,
+            "actor_graph_joint_summary_semantics": graph_joint_summary,
         },
         stochastic=True,
         policy_checkpoint_sha256=checkpoint_sha256,
@@ -242,6 +259,10 @@ def order9_pi_l_behavior_trace_from_inference(
     *,
     checkpoint_sha256: str,
     privileged_disturbance_body: Sequence[float] | None = None,
+    actor_graph_frame_origin_world: Sequence[float] = (0.0, 0.0, 0.0),
+    actor_graph_joint_summary_semantics: str = (
+        ORDER9_PI_L_GRAPH_JOINT_SUMMARY_ALL
+    ),
 ) -> PolicyBehaviorTrace:
     """Serialize the exact action returned by the stateful production wrapper."""
 
@@ -263,6 +284,14 @@ def order9_pi_l_behavior_trace_from_inference(
         raise SchemaValidationError(
             "Order9 pi_L privileged critic input must contain six finite values"
         )
+    graph_origin = _finite_vector(
+        actor_graph_frame_origin_world,
+        width=3,
+        label="Order9 pi_L actor graph-frame origin",
+    )
+    graph_joint_summary = _graph_joint_summary_semantics(
+        actor_graph_joint_summary_semantics
+    )
     return PolicyBehaviorTrace(
         policy_family="pi_l",
         policy_version=ORDER9_PI_L_POLICY_VERSION,
@@ -273,6 +302,8 @@ def order9_pi_l_behavior_trace_from_inference(
             "joint_action": [list(row) for row in inference.normalized_joint_action],
             "previous_global_action": list(inference.previous_action),
             "privileged_disturbance_body": privileged,
+            "actor_graph_frame_origin_world": graph_origin,
+            "actor_graph_joint_summary_semantics": graph_joint_summary,
         },
         stochastic=True,
         policy_checkpoint_sha256=checkpoint_sha256,
@@ -563,10 +594,15 @@ def update_order9_pi_l_ppo(
         family="pi_l",
         checkpoint_sha256=behavior_checkpoint_sha256,
     )
+    sequences = _low_level_sequences(records, sequence_length=sequence_length)
+    replay_metrics = _validate_pi_l_exact_behavior_replay(
+        policy,
+        sequences,
+        physical_model=physical_model,
+    )
     advantage_by_id, return_by_id = _pi_l_advantages(records, config)
     normalized_values = _normalize_advantages(list(advantage_by_id.values()))
     normalized = {key: value for key, value in zip(advantage_by_id, normalized_values)}
-    sequences = _low_level_sequences(records, sequence_length=sequence_length)
     sequences_per_minibatch = max(1, config.minibatch_size // sequence_length)
     metric_rows: list[dict[str, float]] = []
     completed_epochs = 0
@@ -611,7 +647,12 @@ def update_order9_pi_l_ppo(
         rows=metric_rows,
         early_stop=early_stop,
         behavior_checkpoint_sha256=behavior_checkpoint_sha256,
-        metadata={"sequence_length": sequence_length, "recurrent_replay": True},
+        metadata={
+            "sequence_length": sequence_length,
+            "recurrent_replay": True,
+            "exact_behavior_replay_validated": True,
+            **replay_metrics,
+        },
     )
 
 
@@ -657,7 +698,13 @@ def _pi_l_sequence_ppo_step(
             )
             step = policy.step(
                 [context.morphology_graph],
-                [context.runtime_observation],
+                [
+                    _pi_l_actor_graph_observation(
+                        context.runtime_observation,
+                        trace,
+                        physical_model,
+                    )
+                ],
                 actor_features,
                 previous,
                 hidden,
@@ -1203,7 +1250,261 @@ def _pi_l_trace(record: LowLevelControlRecord) -> PolicyBehaviorTrace:
         or len(trace.recurrent_state_out) == 0
     ):
         raise SchemaValidationError("Order9 recurrent pi_L trace lacks hidden states")
+    _finite_vector(
+        trace.action_payload.get("actor_graph_frame_origin_world"),
+        width=3,
+        label="Order9 pi_L actor graph-frame origin",
+    )
+    _graph_joint_summary_semantics(
+        trace.action_payload.get("actor_graph_joint_summary_semantics")
+    )
     return trace
+
+
+def _pi_l_actor_graph_observation(
+    observation: RuntimeObservation,
+    trace: PolicyBehaviorTrace,
+    physical_model: PhysicalModel,
+) -> RuntimeObservation:
+    """Recreate the graph-only actor frame used by the tensor collector."""
+
+    origin = _finite_vector(
+        trace.action_payload.get("actor_graph_frame_origin_world"),
+        width=3,
+        label="Order9 pi_L actor graph-frame origin",
+    )
+    joint_summary = _graph_joint_summary_semantics(
+        trace.action_payload.get("actor_graph_joint_summary_semantics")
+    )
+    active_joint_ids = (
+        None
+        if joint_summary == ORDER9_PI_L_GRAPH_JOINT_SUMMARY_ALL
+        else {
+            joint.joint_id
+            for joint in physical_model.joints
+            if joint.joint_type != "fixed"
+        }
+    )
+    replay = replace(
+        observation,
+        module_states=[
+            replace(
+                state,
+                pose_world=tuple(
+                    [
+                        float(state.pose_world[index]) - origin[index]
+                        for index in range(3)
+                    ]
+                    + [float(value) for value in state.pose_world[3:]]
+                ),
+                joint_positions={
+                    joint_id: value
+                    for joint_id, value in state.joint_positions.items()
+                    if active_joint_ids is None or joint_id in active_joint_ids
+                },
+                joint_velocities={
+                    joint_id: value
+                    for joint_id, value in state.joint_velocities.items()
+                    if active_joint_ids is None or joint_id in active_joint_ids
+                },
+            )
+            for state in observation.module_states
+        ],
+    )
+    replay.validate()
+    return replay
+
+
+def _validate_pi_l_exact_behavior_replay(
+    policy: Order9PhaseConditionedActorCritic,
+    sequences: Sequence[Sequence[LowLevelControlRecord]],
+    *,
+    physical_model: PhysicalModel,
+    absolute_tolerance: float = 2.0e-5,
+) -> dict[str, float | int]:
+    """Fail before optimization unless every stored actor result replays."""
+
+    if not sequences or absolute_tolerance <= 0.0:
+        raise ValueError("Order9 pi_L exact replay configuration is invalid")
+    parameter = next(policy.parameters())
+    maximum_log_prob_error = 0.0
+    maximum_value_error = 0.0
+    maximum_recurrent_error = 0.0
+    validated_count = 0
+    with torch.no_grad():
+        for sequence in sequences:
+            if not sequence:
+                raise SchemaValidationError("Order9 pi_L replay sequence is empty")
+            first = _pi_l_trace(sequence[0])
+            hidden = torch.tensor(
+                [first.recurrent_state_in],
+                device=parameter.device,
+                dtype=parameter.dtype,
+            )
+            previous = torch.tensor(
+                [first.action_payload["previous_global_action"]],
+                device=parameter.device,
+                dtype=parameter.dtype,
+            )
+            for record in sequence:
+                trace = _pi_l_trace(record)
+                expected_hidden = torch.tensor(
+                    [trace.recurrent_state_in],
+                    device=parameter.device,
+                    dtype=parameter.dtype,
+                )
+                expected_previous = torch.tensor(
+                    [trace.action_payload["previous_global_action"]],
+                    device=parameter.device,
+                    dtype=parameter.dtype,
+                )
+                _require_exact_replay_tensor(
+                    hidden,
+                    expected_hidden,
+                    tolerance=absolute_tolerance,
+                    record_id=record.record_id,
+                    field="recurrent_state_in",
+                )
+                _require_exact_replay_tensor(
+                    previous,
+                    expected_previous,
+                    tolerance=absolute_tolerance,
+                    record_id=record.record_id,
+                    field="previous_global_action",
+                )
+                context = _pi_l_context(record, physical_model)
+                actor_features, phase_features, privileged = _pi_l_features(
+                    [context], [trace], policy, physical_model
+                )
+                global_action, joint_action = _pi_l_actions(
+                    [record], [trace], policy
+                )
+                step = policy.step(
+                    [context.morphology_graph],
+                    [
+                        _pi_l_actor_graph_observation(
+                            context.runtime_observation,
+                            trace,
+                            physical_model,
+                        )
+                    ],
+                    actor_features,
+                    previous,
+                    hidden,
+                    phase_features=phase_features,
+                    privileged_disturbance_body=privileged,
+                    action=global_action,
+                    joint_action=joint_action,
+                )
+                expected_log_prob = torch.tensor(
+                    [float(trace.old_log_prob)],
+                    device=parameter.device,
+                    dtype=parameter.dtype,
+                )
+                expected_value = torch.tensor(
+                    [float(trace.old_value)],
+                    device=parameter.device,
+                    dtype=parameter.dtype,
+                )
+                expected_recurrent = torch.tensor(
+                    [trace.recurrent_state_out],
+                    device=parameter.device,
+                    dtype=parameter.dtype,
+                )
+                log_prob_error = _require_exact_replay_tensor(
+                    step.log_prob,
+                    expected_log_prob,
+                    tolerance=absolute_tolerance,
+                    record_id=record.record_id,
+                    field="old_log_prob",
+                )
+                value_error = _require_exact_replay_tensor(
+                    step.value,
+                    expected_value,
+                    tolerance=absolute_tolerance,
+                    record_id=record.record_id,
+                    field="old_value",
+                )
+                recurrent_error = _require_exact_replay_tensor(
+                    step.recurrent_state,
+                    expected_recurrent,
+                    tolerance=absolute_tolerance,
+                    record_id=record.record_id,
+                    field="recurrent_state_out",
+                )
+                maximum_log_prob_error = max(
+                    maximum_log_prob_error, log_prob_error
+                )
+                maximum_value_error = max(maximum_value_error, value_error)
+                maximum_recurrent_error = max(
+                    maximum_recurrent_error, recurrent_error
+                )
+                validated_count += 1
+                hidden = step.recurrent_state
+                previous = step.action
+    return {
+        "exact_replay_record_count": validated_count,
+        "maximum_log_prob_replay_error": maximum_log_prob_error,
+        "maximum_value_replay_error": maximum_value_error,
+        "maximum_recurrent_replay_error": maximum_recurrent_error,
+        "exact_replay_absolute_tolerance": absolute_tolerance,
+    }
+
+
+def _require_exact_replay_tensor(
+    actual: torch.Tensor,
+    expected: torch.Tensor,
+    *,
+    tolerance: float,
+    record_id: str,
+    field: str,
+) -> float:
+    if actual.shape != expected.shape:
+        raise SchemaValidationError(
+            f"Order9 pi_L exact replay {field} shape differs at {record_id}"
+        )
+    error = float((actual - expected).abs().max().detach().cpu().item())
+    if not math.isfinite(error) or error > tolerance:
+        raise SchemaValidationError(
+            "Order9 pi_L exact behavior replay mismatch at "
+            f"{record_id}:{field} (max_abs_error={error:.9g}, "
+            f"tolerance={tolerance:.9g})"
+        )
+    return error
+
+
+def _finite_vector(
+    values: object,
+    *,
+    width: int,
+    label: str,
+) -> list[float]:
+    if (
+        not isinstance(values, (list, tuple))
+        or len(values) != width
+        or any(
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(float(value))
+            for value in values
+        )
+    ):
+        raise SchemaValidationError(
+            f"{label} must contain {width} finite numeric values"
+        )
+    return [float(value) for value in values]
+
+
+def _graph_joint_summary_semantics(value: object) -> str:
+    allowed = {
+        ORDER9_PI_L_GRAPH_JOINT_SUMMARY_ALL,
+        ORDER9_PI_L_GRAPH_JOINT_SUMMARY_NON_FIXED,
+    }
+    if not isinstance(value, str) or value not in allowed:
+        raise SchemaValidationError(
+            "Order9 pi_L actor graph joint-summary semantics is invalid"
+        )
+    return value
 
 
 def _low_level_sequences(
