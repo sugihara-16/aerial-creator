@@ -60,10 +60,10 @@ def main() -> int:
         args.parent_checkpoint,
         expected_schedule_hash=order9_schedule_hash(config),
     )
-    rollout_bundle = load_order9_dataset(args.rollout_dataset)
     prior = [
         load_order9_stage_manifest(path) for path in args.prior_stage_manifest
     ]
+    rollout_bundle = load_order9_dataset(args.rollout_dataset)
     inputs = {
         "curriculum_config": args.config,
         "robot_model_config": physical_model_path,
