@@ -25,7 +25,10 @@ from amsrr.schemas.task_spec import TaskSpec
 from amsrr.utils.hashing import hash_file, stable_hash
 
 
-ORDER9_ON_POLICY_DATASET_VERSION = "order9_on_policy_rollout_generation_v1"
+ORDER9_ON_POLICY_DATASET_VERSION = (
+    "order9_on_policy_rollout_generation_v2_deterministic_fast_gzip"
+)
+ORDER9_ON_POLICY_GZIP_COMPRESSLEVEL = 1
 
 
 def write_order9_on_policy_dataset(
@@ -170,6 +173,9 @@ def write_order9_on_policy_dataset(
             "raw_contact_actor_input": False,
             "privileged_contact_role": "critic_reward_safety_only",
             "gzip_shards": True,
+            "gzip_compresslevel": ORDER9_ON_POLICY_GZIP_COMPRESSLEVEL,
+            "gzip_mtime_unix_s": 0,
+            "gzip_original_filename_stored": False,
             **metadata_values,
         },
     )
@@ -249,13 +255,21 @@ def _atomic_write_jsonl_gzip(path: Path, records: Sequence[SchemaBase]) -> None:
     descriptor, temporary_name = tempfile.mkstemp(
         dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
     )
-    os.close(descriptor)
     try:
-        with gzip.open(temporary_name, "wt", encoding="utf-8") as handle:
-            for record in records:
-                record.validate()
-                handle.write(record.to_json())
-                handle.write("\n")
+        with os.fdopen(descriptor, "wb") as raw_handle:
+            with gzip.GzipFile(
+                filename="",
+                mode="wb",
+                compresslevel=ORDER9_ON_POLICY_GZIP_COMPRESSLEVEL,
+                fileobj=raw_handle,
+                mtime=0,
+            ) as handle:
+                for record in records:
+                    record.validate()
+                    handle.write(record.to_json().encode("utf-8"))
+                    handle.write(b"\n")
+            raw_handle.flush()
+            os.fsync(raw_handle.fileno())
         os.replace(temporary_name, path)
     except BaseException:
         try:
@@ -284,6 +298,7 @@ def _atomic_write_text(path: Path, value: str) -> None:
 
 
 __all__ = [
+    "ORDER9_ON_POLICY_GZIP_COMPRESSLEVEL",
     "ORDER9_ON_POLICY_DATASET_VERSION",
     "write_order9_on_policy_dataset",
 ]

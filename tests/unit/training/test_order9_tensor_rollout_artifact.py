@@ -349,6 +349,25 @@ def test_fixed_topology_uses_task_disjoint_not_structural_disjoint_splits(
 
     assert manifest.metadata["fixed_topology_task_split"] is True
     assert manifest.metadata["structural_hash_disjoint_splits"] is False
+    repeated_manifest = write_order9_on_policy_dataset(
+        tmp_path / "fixed-repeat",
+        metadata={"topology_randomized": False},
+        **common,
+    )
+    assert manifest.metadata["gzip_compresslevel"] == 1
+    assert manifest.metadata["gzip_mtime_unix_s"] == 0
+    assert manifest.metadata["gzip_original_filename_stored"] is False
+    for shard, repeated_shard in zip(
+        manifest.shards, repeated_manifest.shards, strict=True
+    ):
+        payload = (tmp_path / "fixed" / shard.path).read_bytes()
+        repeated_payload = (
+            tmp_path / "fixed-repeat" / repeated_shard.path
+        ).read_bytes()
+        assert payload == repeated_payload
+        assert payload[:3] == b"\x1f\x8b\x08"
+        assert payload[3] & 0x08 == 0
+        assert payload[4:8] == b"\x00\x00\x00\x00"
     with pytest.raises(SchemaValidationError, match="structural hash crosses"):
         write_order9_on_policy_dataset(
             tmp_path / "randomized",
