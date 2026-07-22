@@ -34,6 +34,7 @@ from amsrr.training.order9_design_teacher_dataset import (
     _order9_base_task,
     build_order9_pi_d_teacher_record,
 )
+from amsrr.training.order9_dataset import load_order9_dataset
 from amsrr.training.order9_offline_training import (
     build_order9_checkpoint_metadata,
     reconstruct_order9_pi_d_teacher_trace,
@@ -159,6 +160,7 @@ def test_one_generation_one_pi_d_ppo_update_is_hash_bound(
         config,
         stage_id="c8_pi_d_masked_ppo",
         rollout_manifest_path=dataset_dir / "manifest.json",
+        rollout_bundle=load_order9_dataset(dataset_dir / "manifest.json"),
         parent_checkpoint_path=parent_path,
         physical_model=model_physics,
         output_dir=tmp_path / "update0",

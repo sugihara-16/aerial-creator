@@ -13,6 +13,7 @@ from amsrr.training.order9_curriculum import (
     load_order9_learning_config,
     resolve_order9_stage_runtime,
 )
+from amsrr.training.order9_dataset import load_order9_dataset
 from amsrr.training.order9_online_training import train_order9_ppo_update
 from amsrr.training.order9_pipeline import (
     load_order9_stage_manifest,
@@ -59,6 +60,7 @@ def main() -> int:
         args.parent_checkpoint,
         expected_schedule_hash=order9_schedule_hash(config),
     )
+    rollout_bundle = load_order9_dataset(args.rollout_dataset)
     prior = [
         load_order9_stage_manifest(path) for path in args.prior_stage_manifest
     ]
@@ -74,6 +76,7 @@ def main() -> int:
         input_artifact_paths=inputs,
         prior_stage_manifests=prior,
         dataset_manifest_path=args.rollout_dataset,
+        dataset_bundle=rollout_bundle,
         behavior_checkpoint_sha256=parent.sha256,
         output_path=prepared_path,
     )
@@ -113,6 +116,7 @@ def main() -> int:
             config,
             stage_id=args.stage,
             rollout_manifest_path=args.rollout_dataset,
+            rollout_bundle=rollout_bundle,
             parent_checkpoint_path=args.parent_checkpoint,
             physical_model=physical_model,
             output_dir=output,

@@ -336,7 +336,11 @@ optimization:
     rollout_steps_per_environment: 256
     epochs_per_update: 4
     minibatch_size: 4096
-    learning_rate: 0.0001
+    # Generation 0 calibration from the promoted C1 actor showed that 1e-4
+    # moved the shared actor/critic trunk to KL=0.251 after one optimizer
+    # step (target 0.02).  C1 intentionally leaves the critic untrained, so
+    # use a conservative initial C2 rate that keeps critic warm-up on-policy.
+    learning_rate: 0.00001
     gamma: 0.99
     gae_lambda: 0.95
     clip_ratio: 0.20

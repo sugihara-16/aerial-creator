@@ -26,6 +26,7 @@ from amsrr.training.order9_curriculum import (
     resolve_order9_stage_runtime,
 )
 from amsrr.training.order9_dataset import (
+    Order9DatasetBundle,
     Order9DatasetStageValidation,
     load_order9_dataset,
     load_order9_dataset_index,
@@ -91,6 +92,7 @@ def preflight_order9_stage(
     input_artifact_paths: Mapping[str, str | Path],
     prior_stage_manifests: Iterable[Order9StageRunManifest] = (),
     dataset_manifest_path: str | Path | None = None,
+    dataset_bundle: Order9DatasetBundle | None = None,
     behavior_checkpoint_sha256: str | None = None,
     behavior_checkpoint_sha256_by_family: Mapping[str, str] | None = None,
     output_path: str | Path | None = None,
@@ -113,6 +115,10 @@ def preflight_order9_stage(
         for kind, path in sorted(input_artifact_paths.items())
     ]
     dataset_validation = None
+    if dataset_bundle is not None and dataset_manifest_path is None:
+        raise SchemaValidationError(
+            "Order9 preflight dataset bundle requires its manifest path"
+        )
     if dataset_manifest_path is not None:
         if (
             behavior_checkpoint_sha256 is not None
@@ -131,7 +137,18 @@ def preflight_order9_stage(
             )
             dataset_manifest = dataset_index.manifest_path
         else:
-            dataset = load_order9_dataset(dataset_manifest_path)
+            dataset = dataset_bundle or load_order9_dataset(dataset_manifest_path)
+            expected_manifest = Path(dataset_manifest_path)
+            if expected_manifest.is_dir():
+                expected_manifest = expected_manifest / "manifest.json"
+            if (
+                Path(dataset.manifest_path).resolve()
+                != expected_manifest.resolve()
+                or hash_file(expected_manifest) != dataset.manifest_sha256
+            ):
+                raise SchemaValidationError(
+                    "Order9 preflight dataset bundle does not match its manifest"
+                )
             dataset_validation = validate_order9_dataset_for_stage(
                 dataset,
                 stage,

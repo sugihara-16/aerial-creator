@@ -61,7 +61,7 @@ from amsrr.training.order9_pi_l_learning import (
 )
 
 
-ORDER9_PPO_REPLAY_VERSION = "order9_ppo_exact_behavior_replay_v1"
+ORDER9_PPO_REPLAY_VERSION = "order9_ppo_exact_behavior_replay_v2_batched_sequence"
 ORDER9_PI_L_ACTION_SEMANTICS = (
     "squashed_complete_policy_command_and_module_joint_action_v3_actor_graph_frame"
 )
@@ -650,6 +650,7 @@ def update_order9_pi_l_ppo(
         metadata={
             "sequence_length": sequence_length,
             "recurrent_replay": True,
+            "timestep_batched_active_sequences": True,
             "exact_behavior_replay_validated": True,
             **replay_metrics,
         },
@@ -666,61 +667,75 @@ def _pi_l_sequence_ppo_step(
     advantages: Mapping[str, float],
     returns: Mapping[str, float],
 ) -> dict[str, float]:
-    # Variable tails are replayed independently, then combined into one
-    # optimizer minibatch.  Recurrence remains differentiable within each tail.
+    # Batch all active sequences at the same recurrent timestep.  This is the
+    # same independent recurrence as sequence-at-a-time replay, but lets the
+    # graph encoder and actor/critic use the GPU instead of issuing thousands
+    # of batch-size-one forward calls.
+    if not sequences or any(not sequence for sequence in sequences):
+        raise SchemaValidationError("Order9 pi_L PPO sequence batch is empty")
+    parameter = next(policy.parameters())
+    hidden_by_sequence = [
+        torch.tensor(
+            _pi_l_trace(sequence[0]).recurrent_state_in,
+            device=parameter.device,
+            dtype=parameter.dtype,
+        )
+        for sequence in sequences
+    ]
+    previous_by_sequence = [
+        torch.tensor(
+            _pi_l_trace(sequence[0]).action_payload["previous_global_action"],
+            device=parameter.device,
+            dtype=parameter.dtype,
+        )
+        for sequence in sequences
+    ]
     new_log_probs = []
     old_log_probs = []
     new_values = []
     advantage_values = []
     return_values = []
     entropies = []
-    for sequence in sequences:
-        first_trace = _pi_l_trace(sequence[0])
-        parameter = next(policy.parameters())
-        hidden = torch.tensor(
-            [first_trace.recurrent_state_in],
-            device=parameter.device,
-            dtype=parameter.dtype,
+    for timestep in range(max(len(sequence) for sequence in sequences)):
+        active_indices = [
+            index
+            for index, sequence in enumerate(sequences)
+            if timestep < len(sequence)
+        ]
+        records = [sequences[index][timestep] for index in active_indices]
+        traces = [_pi_l_trace(record) for record in records]
+        contexts = [_pi_l_context(record, physical_model) for record in records]
+        actor_features, phase_features, privileged = _pi_l_features(
+            contexts, traces, policy, physical_model
         )
-        previous = torch.tensor(
-            [first_trace.action_payload["previous_global_action"]],
-            device=parameter.device,
-            dtype=parameter.dtype,
+        global_action, joint_action = _pi_l_actions(records, traces, policy)
+        step = policy.step(
+            [context.morphology_graph for context in contexts],
+            [
+                _pi_l_actor_graph_observation(
+                    context.runtime_observation,
+                    trace,
+                    physical_model,
+                )
+                for context, trace in zip(contexts, traces)
+            ],
+            actor_features,
+            torch.stack([previous_by_sequence[index] for index in active_indices]),
+            torch.stack([hidden_by_sequence[index] for index in active_indices]),
+            phase_features=phase_features,
+            privileged_disturbance_body=privileged,
+            action=global_action,
+            joint_action=joint_action,
         )
-        for record in sequence:
-            trace = _pi_l_trace(record)
-            context = _pi_l_context(record, physical_model)
-            actor_features, phase_features, privileged = _pi_l_features(
-                [context], [trace], policy, physical_model
-            )
-            global_action, joint_action = _pi_l_actions(
-                [record], [trace], policy
-            )
-            step = policy.step(
-                [context.morphology_graph],
-                [
-                    _pi_l_actor_graph_observation(
-                        context.runtime_observation,
-                        trace,
-                        physical_model,
-                    )
-                ],
-                actor_features,
-                previous,
-                hidden,
-                phase_features=phase_features,
-                privileged_disturbance_body=privileged,
-                action=global_action,
-                joint_action=joint_action,
-            )
-            new_log_probs.append(step.log_prob.squeeze(0))
-            old_log_probs.append(float(trace.old_log_prob))
-            new_values.append(step.value.squeeze(0))
-            entropies.append(step.entropy.squeeze(0))
-            advantage_values.append(advantages[record.record_id])
-            return_values.append(returns[record.record_id])
-            hidden = step.recurrent_state
-            previous = step.action.detach()
+        new_log_probs.extend(step.log_prob.unbind(0))
+        old_log_probs.extend(float(trace.old_log_prob) for trace in traces)
+        new_values.extend(step.value.unbind(0))
+        entropies.extend(step.entropy.unbind(0))
+        advantage_values.extend(advantages[record.record_id] for record in records)
+        return_values.extend(returns[record.record_id] for record in records)
+        for row, sequence_index in enumerate(active_indices):
+            hidden_by_sequence[sequence_index] = step.recurrent_state[row]
+            previous_by_sequence[sequence_index] = step.action[row].detach()
     new_log_prob = torch.stack(new_log_probs)
     old_log_prob = torch.tensor(
         old_log_probs, device=new_log_prob.device, dtype=new_log_prob.dtype
@@ -1324,7 +1339,11 @@ def _validate_pi_l_exact_behavior_replay(
 ) -> dict[str, float | int]:
     """Fail before optimization unless every stored actor result replays."""
 
-    if not sequences or absolute_tolerance <= 0.0:
+    if (
+        not sequences
+        or any(not sequence for sequence in sequences)
+        or absolute_tolerance <= 0.0
+    ):
         raise ValueError("Order9 pi_L exact replay configuration is invalid")
     parameter = next(policy.parameters())
     maximum_log_prob_error = 0.0
@@ -1332,139 +1351,156 @@ def _validate_pi_l_exact_behavior_replay(
     maximum_recurrent_error = 0.0
     validated_count = 0
     with torch.no_grad():
-        for sequence in sequences:
-            if not sequence:
-                raise SchemaValidationError("Order9 pi_L replay sequence is empty")
-            first = _pi_l_trace(sequence[0])
-            hidden = torch.tensor(
-                [first.recurrent_state_in],
+        hidden_by_sequence = [
+            torch.tensor(
+                _pi_l_trace(sequence[0]).recurrent_state_in,
                 device=parameter.device,
                 dtype=parameter.dtype,
             )
-            previous = torch.tensor(
-                [first.action_payload["previous_global_action"]],
+            for sequence in sequences
+        ]
+        previous_by_sequence = [
+            torch.tensor(
+                _pi_l_trace(sequence[0]).action_payload["previous_global_action"],
                 device=parameter.device,
                 dtype=parameter.dtype,
             )
-            for record in sequence:
-                trace = _pi_l_trace(record)
-                expected_hidden = torch.tensor(
-                    [trace.recurrent_state_in],
-                    device=parameter.device,
-                    dtype=parameter.dtype,
-                )
-                expected_previous = torch.tensor(
-                    [trace.action_payload["previous_global_action"]],
-                    device=parameter.device,
-                    dtype=parameter.dtype,
-                )
-                _require_exact_replay_tensor(
-                    hidden,
-                    expected_hidden,
-                    tolerance=absolute_tolerance,
-                    record_id=record.record_id,
-                    field="recurrent_state_in",
-                )
-                _require_exact_replay_tensor(
-                    previous,
-                    expected_previous,
-                    tolerance=absolute_tolerance,
-                    record_id=record.record_id,
-                    field="previous_global_action",
-                )
-                context = _pi_l_context(record, physical_model)
-                actor_features, phase_features, privileged = _pi_l_features(
-                    [context], [trace], policy, physical_model
-                )
-                global_action, joint_action = _pi_l_actions(
-                    [record], [trace], policy
-                )
-                step = policy.step(
-                    [context.morphology_graph],
-                    [
-                        _pi_l_actor_graph_observation(
-                            context.runtime_observation,
-                            trace,
-                            physical_model,
-                        )
-                    ],
-                    actor_features,
-                    previous,
-                    hidden,
-                    phase_features=phase_features,
-                    privileged_disturbance_body=privileged,
-                    action=global_action,
-                    joint_action=joint_action,
-                )
-                expected_log_prob = torch.tensor(
-                    [float(trace.old_log_prob)],
-                    device=parameter.device,
-                    dtype=parameter.dtype,
-                )
-                expected_value = torch.tensor(
-                    [float(trace.old_value)],
-                    device=parameter.device,
-                    dtype=parameter.dtype,
-                )
-                expected_recurrent = torch.tensor(
-                    [trace.recurrent_state_out],
-                    device=parameter.device,
-                    dtype=parameter.dtype,
-                )
-                log_prob_error = _require_exact_replay_tensor(
-                    step.log_prob,
-                    expected_log_prob,
-                    tolerance=absolute_tolerance,
-                    record_id=record.record_id,
-                    field="old_log_prob",
-                )
-                value_error = _require_exact_replay_tensor(
-                    step.value,
-                    expected_value,
-                    tolerance=absolute_tolerance,
-                    record_id=record.record_id,
-                    field="old_value",
-                )
-                recurrent_error = _require_exact_replay_tensor(
-                    step.recurrent_state,
-                    expected_recurrent,
-                    tolerance=absolute_tolerance,
-                    record_id=record.record_id,
-                    field="recurrent_state_out",
-                )
-                maximum_log_prob_error = max(
-                    maximum_log_prob_error, log_prob_error
-                )
-                maximum_value_error = max(maximum_value_error, value_error)
-                maximum_recurrent_error = max(
-                    maximum_recurrent_error, recurrent_error
-                )
-                validated_count += 1
-                hidden = step.recurrent_state
-                previous = step.action
+            for sequence in sequences
+        ]
+        for timestep in range(max(len(sequence) for sequence in sequences)):
+            active_indices = [
+                index
+                for index, sequence in enumerate(sequences)
+                if timestep < len(sequence)
+            ]
+            records = [sequences[index][timestep] for index in active_indices]
+            traces = [_pi_l_trace(record) for record in records]
+            hidden = torch.stack(
+                [hidden_by_sequence[index] for index in active_indices]
+            )
+            previous = torch.stack(
+                [previous_by_sequence[index] for index in active_indices]
+            )
+            expected_hidden = torch.tensor(
+                [trace.recurrent_state_in for trace in traces],
+                device=parameter.device,
+                dtype=parameter.dtype,
+            )
+            expected_previous = torch.tensor(
+                [trace.action_payload["previous_global_action"] for trace in traces],
+                device=parameter.device,
+                dtype=parameter.dtype,
+            )
+            _require_exact_replay_batch(
+                hidden,
+                expected_hidden,
+                tolerance=absolute_tolerance,
+                records=records,
+                field="recurrent_state_in",
+            )
+            _require_exact_replay_batch(
+                previous,
+                expected_previous,
+                tolerance=absolute_tolerance,
+                records=records,
+                field="previous_global_action",
+            )
+            contexts = [_pi_l_context(record, physical_model) for record in records]
+            actor_features, phase_features, privileged = _pi_l_features(
+                contexts, traces, policy, physical_model
+            )
+            global_action, joint_action = _pi_l_actions(records, traces, policy)
+            step = policy.step(
+                [context.morphology_graph for context in contexts],
+                [
+                    _pi_l_actor_graph_observation(
+                        context.runtime_observation,
+                        trace,
+                        physical_model,
+                    )
+                    for context, trace in zip(contexts, traces)
+                ],
+                actor_features,
+                previous,
+                hidden,
+                phase_features=phase_features,
+                privileged_disturbance_body=privileged,
+                action=global_action,
+                joint_action=joint_action,
+            )
+            expected_log_prob = torch.tensor(
+                [float(trace.old_log_prob) for trace in traces],
+                device=parameter.device,
+                dtype=parameter.dtype,
+            )
+            expected_value = torch.tensor(
+                [float(trace.old_value) for trace in traces],
+                device=parameter.device,
+                dtype=parameter.dtype,
+            )
+            expected_recurrent = torch.tensor(
+                [trace.recurrent_state_out for trace in traces],
+                device=parameter.device,
+                dtype=parameter.dtype,
+            )
+            log_prob_error = _require_exact_replay_batch(
+                step.log_prob,
+                expected_log_prob,
+                tolerance=absolute_tolerance,
+                records=records,
+                field="old_log_prob",
+            )
+            value_error = _require_exact_replay_batch(
+                step.value,
+                expected_value,
+                tolerance=absolute_tolerance,
+                records=records,
+                field="old_value",
+            )
+            recurrent_error = _require_exact_replay_batch(
+                step.recurrent_state,
+                expected_recurrent,
+                tolerance=absolute_tolerance,
+                records=records,
+                field="recurrent_state_out",
+            )
+            maximum_log_prob_error = max(maximum_log_prob_error, log_prob_error)
+            maximum_value_error = max(maximum_value_error, value_error)
+            maximum_recurrent_error = max(
+                maximum_recurrent_error, recurrent_error
+            )
+            validated_count += len(records)
+            for row, sequence_index in enumerate(active_indices):
+                hidden_by_sequence[sequence_index] = step.recurrent_state[row]
+                previous_by_sequence[sequence_index] = step.action[row]
     return {
         "exact_replay_record_count": validated_count,
         "maximum_log_prob_replay_error": maximum_log_prob_error,
         "maximum_value_replay_error": maximum_value_error,
         "maximum_recurrent_replay_error": maximum_recurrent_error,
         "exact_replay_absolute_tolerance": absolute_tolerance,
+        "exact_replay_timestep_batched_active_sequences": True,
     }
 
 
-def _require_exact_replay_tensor(
+def _require_exact_replay_batch(
     actual: torch.Tensor,
     expected: torch.Tensor,
     *,
     tolerance: float,
-    record_id: str,
+    records: Sequence[LowLevelControlRecord],
     field: str,
 ) -> float:
-    if actual.shape != expected.shape:
+    if actual.shape != expected.shape or actual.shape[0] != len(records):
         raise SchemaValidationError(
-            f"Order9 pi_L exact replay {field} shape differs at {record_id}"
+            f"Order9 pi_L exact replay {field} batched shape differs"
         )
-    error = float((actual - expected).abs().max().detach().cpu().item())
+    difference = (actual - expected).abs()
+    per_record = difference.reshape(len(records), -1).amax(dim=1)
+    maximum, row = per_record.max(dim=0)
+    error = float(maximum.detach().cpu().item())
     if not math.isfinite(error) or error > tolerance:
+        record_id = records[int(row.detach().cpu().item())].record_id
         raise SchemaValidationError(
             "Order9 pi_L exact behavior replay mismatch at "
             f"{record_id}:{field} (max_abs_error={error:.9g}, "

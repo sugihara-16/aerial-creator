@@ -66,7 +66,7 @@ from amsrr.training.order9_ppo import (
 from amsrr.utils.hashing import hash_file
 
 
-ORDER9_ONLINE_TRAINING_VERSION = "order9_one_generation_one_ppo_update_v1"
+ORDER9_ONLINE_TRAINING_VERSION = "order9_one_generation_one_ppo_update_v2_preloaded"
 
 
 @dataclass
@@ -188,6 +188,7 @@ def train_order9_ppo_update(
     *,
     stage_id: str,
     rollout_manifest_path: str | Path,
+    rollout_bundle: Order9DatasetBundle | None = None,
     parent_checkpoint_path: str | Path,
     physical_model: PhysicalModel,
     output_dir: str | Path,
@@ -221,7 +222,7 @@ def train_order9_ppo_update(
         expected_schedule_hash=order9_schedule_hash(config),
     )
     _validate_parent(parent.metadata, stage, update_index, physical_model)
-    bundle = load_order9_dataset(rollout_manifest_path)
+    bundle = _bound_rollout_bundle(rollout_manifest_path, rollout_bundle)
     validation = validate_order9_dataset_for_stage(
         bundle,
         stage,
@@ -695,6 +696,25 @@ def _environment_step_count(bundle: Order9DatasetBundle) -> int:
             "Order9 PPO manifest must identify one fresh rollout generation"
         )
     return value
+
+
+def _bound_rollout_bundle(
+    rollout_manifest_path: str | Path,
+    supplied: Order9DatasetBundle | None,
+) -> Order9DatasetBundle:
+    if supplied is None:
+        return load_order9_dataset(rollout_manifest_path)
+    expected = Path(rollout_manifest_path)
+    if expected.is_dir():
+        expected = expected / "manifest.json"
+    if (
+        Path(supplied.manifest_path).resolve() != expected.resolve()
+        or hash_file(expected) != supplied.manifest_sha256
+    ):
+        raise SchemaValidationError(
+            "Order9 preloaded rollout bundle does not match its manifest"
+        )
+    return supplied
 
 
 def _prior_rollout_lineage(metadata: Mapping[str, Any]) -> list[str]:
