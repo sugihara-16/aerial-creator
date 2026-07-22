@@ -2,6 +2,18 @@
 
 ## Global Worklog
 
+### 2026-07-22 (Order 9 C2 update 2 and resumable stage execution)
+- Active specification/work package: v0.4 plus the approved Order 9 C2 exact-replay, conservative-randomization, provisional-2048, one-generation/one-update, and live-telemetry supplements; Agent J/K `pi_L` PPO execution.
+- Generation/update 2 evidence: Concurrent train/validation collection from update 1 completed the configured `2048 x 16` per split without runtime override or non-finite state. Raw SHA-256 values are `61decbbbb1f1b90ad0ba131d910163c6a8f3819a6f81cf2d8f3e52759f73bacd` and `e7c4695dc0ac7910ff0dd7dcdb25d14d15958708e9c855b410e16713a4ee9015`; rollout-only throughput was `5975.43/5930.40 env-step/s`, setup about `100.11/99.77 s`, rollout about `5.48/5.53 s`, and concurrent GPU utilization averaged about `69.71/68.34%` with total VRAM peaks `11526/11524 MiB`. Dataset manifest SHA-256 is `49164c0bf85508c1a046399d431b1df49429094b90db106a2d36e69c2e08150a` with `65536` records/interactions across the two splits.
+- PPO result: Update 2 consumed the immediate update-1 parent and produced checkpoint SHA-256 `d74c589dc6821b5f69abda13b2db2dc2fe5faafbb06f5c590dc0901d298686f7`. It completed `4/4` epochs and `44` optimizer minibatches without KL early stop; mean KL/clip fraction was `0.00981830/0.147969`, actor/value/total losses were `0.00303616/67.9222/33.9955`, and exact replay maxima were `1.14441e-5` log probability, `5.43892e-7` recurrent state, and `1.19209e-7` value against tolerance `2e-5`. Record-invariant caching reduced update-only wall time from update 1's `668.65 s` to `176.35 s` (`73.6%`); GPU utilization mean/peak was `15.66/41%`, VRAM peak `2412 MiB`, and RSS peak `8534.87 MiB`.
+- Execution implementation: Added a fail-closed, resumable `pi_L` PPO stage runner. It verifies the contiguous parent/checkpoint lineage; byte-validates task/graph/USD buckets; deterministically regenerates every current randomization sample so unrelated optimization-config changes do not invalidate buckets while randomization changes do; independently rotates 8 train and 2 validation buckets; runs missing collectors concurrently; verifies structured results/raw hashes/behavior checkpoint identity; builds one immutable dataset; applies one exact-replay update; validates finite losses and every replay tolerance; and atomically records per-generation collection/build/update/load telemetry. Existing partial valid artifacts may be resumed, but inconsistent artifacts stop rather than being overwritten.
+- Accounting clarification: The runtime product `32768` is per split. Existing dataset/checkpoint lineage counts the paired train+validation generation as `65536` environment interactions, while PPO gradients still use only the `32768` train records. Thus C2 requires 46 updates (`0--45`) and reaches `3,014,656` recorded interactions. Updates 0--2 are contiguous and verified, totaling `196,608`; update 3 is the resume point.
+- Files changed: `amsrr/training/order9_pi_l_stage_runner.py`; `scripts/order9_run_pi_l_ppo_stage.py`; reordered early prior-manifest validation in `scripts/order9_train_ppo.py`; runner tests; design supplement; this worklog. Generated rollout/dataset/checkpoint/TensorBoard artifacts remain ignored and hash-bound.
+- Schema/interface changes: None to learned observations/actions, persisted dataset/checkpoint schemas, reward, PPO objective/hyperparameters, QPID/QP, safety, actuator authority, or promotion gates. The runner state is an additive operational JSON summary and cannot authorize promotion.
+- Tests/commands: New runner tests `3 passed`; focused runner/bucket/online/tensor-artifact/TensorBoard/curriculum tests `19 passed`; the complete unit suite passed `1196` with `1` skip in `94.30 s`; compilation, `git diff --check`, and real update-0--2 lineage/bucket/randomization/raw/dataset/checkpoint validation passed.
+- Assumptions/blockers: No method-level blocker. A first update-2 CLI attempt supplied obsolete C0/C1 directory names and failed before preflight/training; the correct immutable dataset was reused and no child artifact from that attempt entered the lineage.
+- Next steps: Commit the runner, resume at update 3 through update 45 while retaining its state/TensorBoard telemetry, then run at least 200 deterministic validation episodes and finalize C2 only if every configured promotion gate passes.
+
 ### 2026-07-22 (Order 9 C2 initial PPO calibration and recurrent batching)
 - Active work package: C2 fixed-morphology conservative `pi_L` PPO, following the corrected exact-behavior-replay generation-0 dataset.
 - Calibration result: The exact-replay `1e-4` attempt passed all `32768` train-transition replay checks, but its first optimizer step made the next minibatch KL/clip fraction `0.25083/0.76918` against target KL `0.02`. The resulting checkpoint SHA-256 `1e789d4da6d60a0fe022fc504d4b09ea93674c9c27c3238db5d8de2cfe2ea685` is rejected calibration output and was moved recoverably under `artifacts/p4_full/order9/archive/c2_generation0_lr1e4_kl_overshoot_20260722`; it is not C2 lineage or quota evidence.
@@ -3943,6 +3955,17 @@
 - Open questions: None for this work package. Statistical robustness across a larger held-out morphology cohort belongs to later training/evaluation, not this deterministic smoke completion.
 
 ### Agent J/K: Order 9 learned curriculum and physical execution
+
+#### 2026-07-22 (C2 update 2 and resumable stage runner)
+- Scope: Validate the third accepted C2 generation/update and make the remaining fixed-morphology PPO budget safely resumable without changing learning semantics.
+- Files changed: `amsrr/training/order9_pi_l_stage_runner.py`, `scripts/order9_run_pi_l_ppo_stage.py`, early prior-manifest validation order in `scripts/order9_train_ppo.py`, focused tests, design supplement, and worklog.
+- Upstream dependencies: Promoted C1 checkpoint, accepted update 0/1 lineage, 8/2 immutable conservative bucket pool, copied real-Isaac tensor collector, exact recurrent replay, record-invariant cache, TensorBoard/load telemetry, stage pipeline and current PhysicalModel.
+- Implemented/evidence: Accepted generation/update 2 and checkpoint `d74c589d...`; verified update 0--2 contiguous lineage (`196608` paired-split interactions); added fail-closed bucket rotation, concurrent collection, immutable dataset/update orchestration, exact-replay/finite-metric checks, atomic state, and artifact-safe resume.
+- Not implemented: Updates 3--45, the 200-episode C2 promotion evaluation, C2 promotion, C3 parallelism selection, or any later policy family.
+- Schema/interface changes: None to policy, controller, persisted evidence, or method contracts; additive operational runner/state only.
+- Tests passed: Runner `3`; focused related set `19`; full unit suite `1196 passed, 1 skipped`; real artifact validation for update 0--2 passed.
+- Handoff: Resume only from checkpoint SHA-256 `d74c589dc6821b5f69abda13b2db2dc2fe5faafbb06f5c590dc0901d298686f7`; runner target is update 45, followed by a separate promotion evaluation.
+- Open questions: None at method level.
 
 #### 2026-07-22 (C2 generation 0 exact-replay correction)
 - Scope: Start C2, preserve valid generation-0 Isaac collection, and stop further policy updates when the first optimizer minibatch exposed non-exact actor replay.
