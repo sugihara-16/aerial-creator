@@ -5,6 +5,7 @@ import argparse
 import json
 import subprocess
 from pathlib import Path
+from typing import Sequence
 
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
 from amsrr.simulation.order9_object_task_runtime import ORDER9_OBJECT_TASK_PHASES
@@ -13,8 +14,11 @@ from amsrr.training.order9_curriculum import (
     load_order9_learning_config,
     resolve_order9_stage_runtime,
 )
-from amsrr.training.order9_dataset import load_order9_dataset
-from amsrr.training.order9_online_training import train_order9_ppo_update
+from amsrr.training.order9_dataset import Order9DatasetBundle, load_order9_dataset
+from amsrr.training.order9_online_training import (
+    Order9OnlineTrainingResult,
+    train_order9_ppo_update,
+)
 from amsrr.training.order9_pipeline import (
     load_order9_stage_manifest,
     order9_schedule_hash,
@@ -45,59 +49,103 @@ def main() -> int:
     parser.add_argument("--no-tensorboard", action="store_true")
     args = parser.parse_args()
 
-    config = load_order9_learning_config(args.config)
-    stage = order9_stage_by_id(config, args.stage)
+    result, running_path, tensorboard_log_dir = run_order9_ppo_training(
+        config_path=args.config,
+        stage_id=args.stage,
+        rollout_dataset_path=args.rollout_dataset,
+        parent_checkpoint_path=args.parent_checkpoint,
+        update_index=args.update_index,
+        prior_stage_manifest_paths=args.prior_stage_manifest,
+        device=args.device,
+        output_dir=args.output_dir,
+        git_revision=args.git_revision,
+        tensorboard_log_dir=args.tensorboard_log_dir,
+        tensorboard_enabled=not args.no_tensorboard,
+    )
+    print(f"stage: {result.stage_id}")
+    print(f"update_index: {result.update_index}")
+    print(f"family: {result.policy_family.value}")
+    print(f"consumed_environment_steps: {result.consumed_environment_steps}")
+    print(f"checkpoint: {result.checkpoint_path}")
+    print(f"checkpoint_sha256: {result.checkpoint_sha256}")
+    print(f"training_manifest: {running_path}")
+    print(f"tensorboard_log_dir: {tensorboard_log_dir}")
+    print("promotion_evaluation_completed: false")
+    return 0
+
+
+def run_order9_ppo_training(
+    *,
+    config_path: str | Path,
+    stage_id: str,
+    rollout_dataset_path: str | Path,
+    parent_checkpoint_path: str | Path,
+    update_index: int,
+    prior_stage_manifest_paths: Sequence[str | Path] = (),
+    device: str | None = None,
+    output_dir: str | Path | None = None,
+    git_revision: str | None = None,
+    tensorboard_log_dir: str | Path | None = None,
+    tensorboard_enabled: bool = True,
+    rollout_bundle: Order9DatasetBundle | None = None,
+) -> tuple[Order9OnlineTrainingResult, Path, Path | None]:
+    """Execute one preflighted PPO update, optionally reusing a built bundle."""
+
+    config = load_order9_learning_config(config_path)
+    stage = order9_stage_by_id(config, stage_id)
     stage_runtime = resolve_order9_stage_runtime(config, stage)
     stage_root = Path(
-        args.output_dir
-        or Path(config.production_runtime.artifact_root) / "stages" / args.stage
+        output_dir
+        or Path(config.production_runtime.artifact_root) / "stages" / stage_id
     )
-    output = stage_root / f"update_{args.update_index:06d}"
+    output = stage_root / f"update_{update_index:06d}"
     output.mkdir(parents=True, exist_ok=True)
     physical_model_path = config.production_runtime.robot_model_config_path
     physical_model = build_physical_model_from_config(physical_model_path)
     parent = load_order9_policy_checkpoint(
-        args.parent_checkpoint,
+        parent_checkpoint_path,
         expected_schedule_hash=order9_schedule_hash(config),
     )
     prior = [
-        load_order9_stage_manifest(path) for path in args.prior_stage_manifest
+        load_order9_stage_manifest(path) for path in prior_stage_manifest_paths
     ]
-    rollout_bundle = load_order9_dataset(args.rollout_dataset)
+    bundle = rollout_bundle or load_order9_dataset(rollout_dataset_path)
     inputs = {
-        "curriculum_config": args.config,
+        "curriculum_config": str(config_path),
         "robot_model_config": physical_model_path,
-        "parent_checkpoint": args.parent_checkpoint,
+        "parent_checkpoint": str(parent_checkpoint_path),
     }
     prepared_path = output / "stage_prepared.json"
     prepared, _ = preflight_order9_stage(
         config,
-        stage_id=args.stage,
+        stage_id=stage_id,
         input_artifact_paths=inputs,
         prior_stage_manifests=prior,
-        dataset_manifest_path=args.rollout_dataset,
-        dataset_bundle=rollout_bundle,
+        dataset_manifest_path=rollout_dataset_path,
+        dataset_bundle=bundle,
         behavior_checkpoint_sha256=parent.sha256,
         output_path=prepared_path,
     )
     tensorboard_logger = None
-    tensorboard_log_dir = None
-    if not args.no_tensorboard:
+    resolved_tensorboard_log_dir = None
+    if tensorboard_enabled:
         generation_environment_steps = stage_runtime.generation_environment_steps
         if generation_environment_steps is None:
             raise ValueError("Order9 TensorBoard PPO generation size is missing")
-        tensorboard_log_dir = _tensorboard_log_dir(
+        resolved_tensorboard_log_dir = _tensorboard_log_dir(
             Path.cwd(),
             artifact_root=config.production_runtime.artifact_root,
             stage_id=stage.stage_id,
-            override=args.tensorboard_log_dir,
+            override=(
+                None if tensorboard_log_dir is None else str(tensorboard_log_dir)
+            ),
         ) / "train"
         tensorboard_logger = Order9TensorBoardLogger(
-            tensorboard_log_dir,
+            resolved_tensorboard_log_dir,
             stage_id=stage.stage_id,
-            generation_id=f"{stage.stage_id}:update:{args.update_index:06d}",
+            generation_id=f"{stage.stage_id}:update:{update_index:06d}",
             split="train",
-            update_index=args.update_index,
+            update_index=update_index,
             generation_environment_steps=generation_environment_steps,
             phase_labels=tuple(phase.value for phase in ORDER9_OBJECT_TASK_PHASES),
             reward_term_names=ORDER9_TENSOR_REWARD_TERM_NAMES,
@@ -114,17 +162,17 @@ def main() -> int:
     try:
         result = train_order9_ppo_update(
             config,
-            stage_id=args.stage,
-            rollout_manifest_path=args.rollout_dataset,
-            rollout_bundle=rollout_bundle,
-            parent_checkpoint_path=args.parent_checkpoint,
+            stage_id=stage_id,
+            rollout_manifest_path=rollout_dataset_path,
+            rollout_bundle=bundle,
+            parent_checkpoint_path=parent_checkpoint_path,
             physical_model=physical_model,
             output_dir=output,
-            git_revision=args.git_revision or _git_revision(),
-            update_index=args.update_index,
-            device=args.device,
+            git_revision=git_revision or _git_revision(),
+            update_index=update_index,
+            device=device,
             additional_input_artifact_paths={
-                "curriculum_config": args.config,
+                "curriculum_config": str(config_path),
                 "robot_model_config": physical_model_path,
             },
             progress_callback=_progress if tensorboard_logger is not None else None,
@@ -144,7 +192,7 @@ def main() -> int:
             runtime_load=metrics_payload["runtime_load"],
         )
         tensorboard_logger.close()
-    result_path = output / f"training_result_update_{args.update_index:06d}.json"
+    result_path = output / f"training_result_update_{update_index:06d}.json"
     output_artifacts = {
         "policy_checkpoint": result.checkpoint_path,
         "training_metrics": result.metrics_path,
@@ -160,16 +208,7 @@ def main() -> int:
         },
         output_path=running_path,
     )
-    print(f"stage: {result.stage_id}")
-    print(f"update_index: {result.update_index}")
-    print(f"family: {result.policy_family.value}")
-    print(f"consumed_environment_steps: {result.consumed_environment_steps}")
-    print(f"checkpoint: {result.checkpoint_path}")
-    print(f"checkpoint_sha256: {result.checkpoint_sha256}")
-    print(f"training_manifest: {running_path}")
-    print(f"tensorboard_log_dir: {tensorboard_log_dir}")
-    print("promotion_evaluation_completed: false")
-    return 0
+    return result, running_path, resolved_tensorboard_log_dir
 
 
 def _git_revision() -> str:

@@ -35,6 +35,7 @@ from amsrr.training.order9_production_benchmark import (
 )
 from amsrr.training.order9_tensor_dataset_builder import (
     build_order9_pi_l_on_policy_dataset,
+    build_order9_pi_l_on_policy_dataset_with_bundle,
 )
 from amsrr.training.order9_tensor_rollout_artifact import (
     ORDER9_PRODUCTION_COLLECTOR_VERSION,
@@ -413,7 +414,7 @@ def test_tensor_artifact_merger_builds_one_namespaced_on_policy_generation(
         raw_paths.append(raw_path)
 
     output = tmp_path / "dataset"
-    manifest = build_order9_pi_l_on_policy_dataset(
+    built = build_order9_pi_l_on_policy_dataset_with_bundle(
         output,
         raw_artifact_paths=raw_paths,
         generation_id="merge-generation",
@@ -422,7 +423,9 @@ def test_tensor_artifact_merger_builds_one_namespaced_on_policy_generation(
         config=config,
         physical_model=physical,
     )
-    bundle = load_order9_dataset(output)
+    manifest = built.manifest
+    bundle = built.bundle
+    loaded_bundle = load_order9_dataset(output)
     validation = validate_order9_dataset_for_stage(
         bundle,
         stage,
@@ -441,6 +444,10 @@ def test_tensor_artifact_merger_builds_one_namespaced_on_policy_generation(
         for value in manifest.metadata["source_collection_runtime"].values()
     )
     assert validation.valid, validation.failures
+    assert bundle.manifest_sha256 == loaded_bundle.manifest_sha256
+    assert [record.to_dict() for record in bundle.low_level_records] == [
+        record.to_dict() for record in loaded_bundle.low_level_records
+    ]
     assert len({record.episode_id for record in bundle.low_level_records}) == 2
     assert all(":shard:" in record.episode_id for record in bundle.low_level_records)
     with pytest.raises(FileExistsError, match="not empty"):

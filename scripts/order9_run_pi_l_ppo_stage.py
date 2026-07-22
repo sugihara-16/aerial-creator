@@ -4,6 +4,7 @@ from __future__ import annotations
 """Run or resume a complete fail-closed Order 9 ``pi_L`` PPO stage."""
 
 import argparse
+import gc
 import json
 from pathlib import Path
 import sys
@@ -16,6 +17,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from amsrr.schemas.datasets import DatasetSplit
+from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
 from amsrr.training.order9_curriculum import load_order9_learning_config
 from amsrr.training.order9_pi_l_stage_runner import (
     ORDER9_PI_L_STAGE_RUNNER_VERSION,
@@ -31,7 +33,10 @@ from amsrr.training.order9_pi_l_stage_runner import (
     validate_order9_rollout_result,
     write_order9_stage_runner_state,
 )
-from amsrr.utils.hashing import hash_file
+from amsrr.training.order9_tensor_dataset_builder import (
+    build_order9_pi_l_on_policy_dataset_with_bundle,
+)
+from scripts.order9_train_ppo import run_order9_ppo_training
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -57,6 +62,9 @@ def main() -> int:
     repository = REPOSITORY_ROOT.resolve()
     config_path = _resolve(args.config, repository)
     config = load_order9_learning_config(config_path)
+    physical_model = build_physical_model_from_config(
+        _resolve(config.production_runtime.robot_model_config_path, repository)
+    )
     stage_root = (
         repository
         / config.production_runtime.artifact_root
@@ -202,31 +210,43 @@ def main() -> int:
             dataset_root = generation_root / "dataset"
             dataset_manifest = dataset_root / "manifest.json"
             dataset_build_wall_s = 0.0
+            preloaded_bundle = None
             if not dataset_manifest.is_file():
-                command = [
-                    sys.executable,
-                    str(repository / "scripts/order9_build_on_policy_dataset.py"),
-                    "--config",
-                    str(config_path),
-                    "--stage",
-                    args.stage,
-                    "--generation-id",
-                    generation_id,
-                    "--pi-l-checkpoint",
-                    str(parent_path),
-                    "--raw-artifact",
-                    str(raw_paths[DatasetSplit.TRAIN]),
-                    "--raw-artifact",
-                    str(raw_paths[DatasetSplit.VALIDATION]),
-                    "--output",
-                    str(dataset_root),
-                ]
-                result = run_logged_order9_command(
-                    command,
-                    repository_root=repository,
-                    log_path=log_root / "dataset_build.log",
+                build_log = log_root / "dataset_build.log"
+                _write_operation_log(
+                    build_log,
+                    operation="build_dataset_with_preloaded_bundle",
+                    status="started",
+                    payload={"generation_id": generation_id},
                 )
-                dataset_build_wall_s = result.wall_elapsed_s
+                build_started = time.perf_counter()
+                built = build_order9_pi_l_on_policy_dataset_with_bundle(
+                    dataset_root,
+                    raw_artifact_paths=(
+                        raw_paths[DatasetSplit.TRAIN],
+                        raw_paths[DatasetSplit.VALIDATION],
+                    ),
+                    generation_id=generation_id,
+                    stage_id=args.stage,
+                    pi_l_checkpoint_path=parent_path,
+                    config=config,
+                    physical_model=physical_model,
+                )
+                dataset_build_wall_s = time.perf_counter() - build_started
+                preloaded_bundle = built.bundle
+                _write_operation_log(
+                    build_log,
+                    operation="build_dataset_with_preloaded_bundle",
+                    status="completed",
+                    payload={
+                        "generation_id": generation_id,
+                        "manifest_sha256": built.bundle.manifest_sha256,
+                        "record_count": len(built.bundle.low_level_records),
+                        "wall_elapsed_s": dataset_build_wall_s,
+                    },
+                    append=True,
+                )
+                del built
             dataset_sha = validate_order9_generation_dataset(
                 dataset_manifest,
                 stage_id=args.stage,
@@ -240,33 +260,47 @@ def main() -> int:
                 / f"training_result_update_{update_index:06d}.json"
             )
             training_command_wall_s = 0.0
+            preloaded_bundle_used = False
             if not result_path.is_file():
-                command = [
-                    sys.executable,
-                    str(repository / "scripts/order9_train_ppo.py"),
-                    "--config",
-                    str(config_path),
-                    "--stage",
-                    args.stage,
-                    "--rollout-dataset",
-                    str(dataset_manifest),
-                    "--parent-checkpoint",
-                    str(parent_path),
-                    "--update-index",
-                    str(update_index),
-                    "--device",
-                    args.device or config.production_runtime.device,
-                ]
-                for prior in args.prior_stage_manifest:
-                    command.extend(
-                        ["--prior-stage-manifest", str(_resolve(prior, repository))]
-                    )
-                result = run_logged_order9_command(
-                    command,
-                    repository_root=repository,
-                    log_path=stage_root / "logs" / f"update_{update_index:06d}.log",
+                training_log = stage_root / "logs" / f"update_{update_index:06d}.log"
+                preloaded_bundle_used = preloaded_bundle is not None
+                _write_operation_log(
+                    training_log,
+                    operation="execute_ppo_update",
+                    status="started",
+                    payload={
+                        "update_index": update_index,
+                        "preloaded_bundle_used": preloaded_bundle_used,
+                    },
                 )
-                training_command_wall_s = result.wall_elapsed_s
+                training_started = time.perf_counter()
+                executed, _, _ = run_order9_ppo_training(
+                    config_path=config_path,
+                    stage_id=args.stage,
+                    rollout_dataset_path=dataset_manifest,
+                    rollout_bundle=preloaded_bundle,
+                    parent_checkpoint_path=parent_path,
+                    update_index=update_index,
+                    prior_stage_manifest_paths=tuple(
+                        _resolve(prior, repository)
+                        for prior in args.prior_stage_manifest
+                    ),
+                    device=args.device or config.production_runtime.device,
+                    output_dir=stage_root,
+                )
+                training_command_wall_s = time.perf_counter() - training_started
+                _write_operation_log(
+                    training_log,
+                    operation="execute_ppo_update",
+                    status="completed",
+                    payload={
+                        "update_index": update_index,
+                        "checkpoint_sha256": executed.checkpoint_sha256,
+                        "preloaded_bundle_used": preloaded_bundle_used,
+                        "wall_elapsed_s": training_command_wall_s,
+                    },
+                    append=True,
+                )
             training = validate_order9_completed_update(
                 result_path,
                 repository_root=repository,
@@ -292,6 +326,7 @@ def main() -> int:
                 "collection_command_wall_elapsed_s": collection_wall_s,
                 "dataset_build_command_wall_elapsed_s": dataset_build_wall_s,
                 "training_command_wall_elapsed_s": training_command_wall_s,
+                "preloaded_bundle_used": preloaded_bundle_used,
                 "ppo_update_wall_elapsed_s": metrics_payload["update_wall_elapsed_s"],
                 "generation_wall_elapsed_s": time.perf_counter() - generation_started,
                 "approximate_kl": training.ppo_update.approximate_kl,
@@ -302,7 +337,7 @@ def main() -> int:
                 "early_stopped_for_kl": training.ppo_update.early_stopped_for_kl,
                 "completed_epoch_count": training.ppo_update.completed_epoch_count,
                 "optimizer_step_count": training.ppo_update.optimizer_step_count,
-                "runtime_load": metrics_payload["runtime_load"],
+                "runtime_load": _compact_runtime_load(metrics_payload["runtime_load"]),
                 "rollout_summary": {
                     split: {
                         key: payload.get(key)
@@ -319,6 +354,15 @@ def main() -> int:
                     for split, payload in rollout_summaries.items()
                 },
             }
+            del preloaded_bundle
+            gc.collect()
+            try:
+                import torch
+
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except ImportError:
+                pass
             completed.append(summary)
             parent_path = _resolve(training.checkpoint_path, repository)
             parent_sha = training.checkpoint_sha256
@@ -381,6 +425,37 @@ def main() -> int:
 def _resolve(path: str | Path, repository: Path) -> Path:
     value = Path(path)
     return value.resolve() if value.is_absolute() else (repository / value).resolve()
+
+
+def _compact_runtime_load(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    return {name: item for name, item in value.items() if name != "samples"}
+
+
+def _write_operation_log(
+    path: Path,
+    *,
+    operation: str,
+    status: str,
+    payload: dict[str, object],
+    append: bool = False,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a" if append else "w", encoding="utf-8") as handle:
+        handle.write(
+            "ORDER9_OPERATION="
+            + json.dumps(
+                {
+                    "operation": operation,
+                    "status": status,
+                    **payload,
+                },
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        handle.flush()
 
 
 if __name__ == "__main__":

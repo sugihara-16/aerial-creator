@@ -3,6 +3,7 @@ from __future__ import annotations
 """Merge real-Isaac tensor rollout shards into one exact on-policy dataset."""
 
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
@@ -17,6 +18,10 @@ from amsrr.training.order9_curriculum import (
     Order9LearningMode,
     Order9LearningTarget,
     resolve_order9_stage_runtime,
+)
+from amsrr.training.order9_dataset import (
+    Order9DatasetBundle,
+    load_order9_dataset_index,
 )
 from amsrr.training.order9_online_dataset import write_order9_on_policy_dataset
 from amsrr.training.order9_pipeline import order9_schedule_hash, order9_stage_by_id
@@ -33,6 +38,12 @@ ORDER9_TENSOR_DATASET_BUILDER_VERSION = (
 )
 
 
+@dataclass(frozen=True)
+class Order9PiLDatasetBuildResult:
+    manifest: P4_3DatasetManifest
+    bundle: Order9DatasetBundle
+
+
 def build_order9_pi_l_on_policy_dataset(
     output_dir: str | Path,
     *,
@@ -43,6 +54,7 @@ def build_order9_pi_l_on_policy_dataset(
     config: Order9LearningConfig,
     physical_model: PhysicalModel | None = None,
     require_train_and_validation: bool = True,
+    _bundle_sink: list[Order9DatasetBundle] | None = None,
 ) -> P4_3DatasetManifest:
     """Validate and merge one fresh ``pi_L`` behavior-policy generation.
 
@@ -280,7 +292,57 @@ def build_order9_pi_l_on_policy_dataset(
             ),
         },
     )
+    if _bundle_sink is not None:
+        index = load_order9_dataset_index(target / "manifest.json")
+        _bundle_sink.append(
+            Order9DatasetBundle(
+                manifest=index.manifest,
+                manifest_path=index.manifest_path,
+                manifest_sha256=index.manifest_sha256,
+                low_level_records=tuple(records),
+                trajectory_records=(),
+                sequential_design_records=(),
+                design_outcome_records=(),
+                rollout_archives=(),
+                verified_shard_sha256=index.verified_shard_sha256,
+            )
+        )
     return manifest
+
+
+def build_order9_pi_l_on_policy_dataset_with_bundle(
+    output_dir: str | Path,
+    *,
+    raw_artifact_paths: Sequence[str | Path],
+    generation_id: str,
+    stage_id: str,
+    pi_l_checkpoint_path: str | Path,
+    config: Order9LearningConfig,
+    physical_model: PhysicalModel | None = None,
+    require_train_and_validation: bool = True,
+) -> Order9PiLDatasetBuildResult:
+    """Build canonical shards and retain the same verified records for PPO.
+
+    The bundle is an in-process handoff only.  The canonical manifest and
+    compressed JSONL shards are still written and hash-verified exactly as in
+    :func:`build_order9_pi_l_on_policy_dataset`.
+    """
+
+    bundles: list[Order9DatasetBundle] = []
+    manifest = build_order9_pi_l_on_policy_dataset(
+        output_dir,
+        raw_artifact_paths=raw_artifact_paths,
+        generation_id=generation_id,
+        stage_id=stage_id,
+        pi_l_checkpoint_path=pi_l_checkpoint_path,
+        config=config,
+        physical_model=physical_model,
+        require_train_and_validation=require_train_and_validation,
+        _bundle_sink=bundles,
+    )
+    if len(bundles) != 1:
+        raise RuntimeError("Order9 tensor dataset builder did not retain one bundle")
+    return Order9PiLDatasetBuildResult(manifest=manifest, bundle=bundles[0])
 
 
 def _positive_number(value: object) -> bool:
@@ -304,5 +366,7 @@ def _runtime_load_summary(value: object) -> dict[str, object] | None:
 
 __all__ = [
     "ORDER9_TENSOR_DATASET_BUILDER_VERSION",
+    "Order9PiLDatasetBuildResult",
     "build_order9_pi_l_on_policy_dataset",
+    "build_order9_pi_l_on_policy_dataset_with_bundle",
 ]
