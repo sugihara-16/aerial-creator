@@ -18,6 +18,7 @@ ORDER9_CONTACT_SCHEDULE_APPROACH = 1
 ORDER9_CONTACT_SCHEDULE_ATTACH = 2
 ORDER9_CONTACT_SCHEDULE_MAINTAIN = 3
 ORDER9_CONTACT_SCHEDULE_RELEASE = 4
+ORDER9_PHASE_SUCCESSOR_REFERENCE_SEMANTICS = "planned_phase_goal_v1"
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,41 @@ class Order9TensorObjectTaskTarget:
     phase_goal_object_pose_world: torch.Tensor
     phase_progress: torch.Tensor
     contact_schedule_index: torch.Tensor
+
+    def planned_successor_start(
+        self, env_ids: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the planned endpoint used to start the successor phase.
+
+        A phase may pass while the physical state is still inside a non-zero
+        success tolerance.  Re-anchoring the next phase to that observed state
+        would accumulate the tolerated error across lift, transport, and place
+        and can move the final target below the support surface.  The task plan
+        is continuous in its own endpoint sequence, so successful transitions
+        advance that plan while the controller closes the bounded physical
+        tracking error.
+        """
+
+        if env_ids.ndim != 1 or env_ids.dtype not in {
+            torch.int8,
+            torch.int16,
+            torch.int32,
+            torch.int64,
+        }:
+            raise ValueError("Order9 successor environment ids must be integral [N]")
+        batch_size = self.phase_goal_robot_root_pose_world.shape[0]
+        if self.phase_goal_robot_root_pose_world.shape != (batch_size, 7) or (
+            self.phase_goal_object_pose_world.shape != (batch_size, 7)
+        ):
+            raise ValueError("Order9 phase-goal poses must be [batch, 7]")
+        if env_ids.numel() and (
+            bool((env_ids < 0).any()) or bool((env_ids >= batch_size).any())
+        ):
+            raise ValueError("Order9 successor environment id is out of range")
+        return (
+            self.phase_goal_robot_root_pose_world.index_select(0, env_ids).clone(),
+            self.phase_goal_object_pose_world.index_select(0, env_ids).clone(),
+        )
 
 
 class Order9TensorObjectTaskRuntime:
@@ -291,6 +327,7 @@ __all__ = [
     "ORDER9_CONTACT_SCHEDULE_INACTIVE",
     "ORDER9_CONTACT_SCHEDULE_MAINTAIN",
     "ORDER9_CONTACT_SCHEDULE_RELEASE",
+    "ORDER9_PHASE_SUCCESSOR_REFERENCE_SEMANTICS",
     "Order9TensorObjectTaskRuntime",
     "Order9TensorObjectTaskTarget",
 ]

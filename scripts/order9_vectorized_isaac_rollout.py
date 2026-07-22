@@ -176,6 +176,7 @@ from amsrr.simulation.order9_tensor_object_task import (
     ORDER9_CONTACT_SCHEDULE_ATTACH,
     ORDER9_CONTACT_SCHEDULE_MAINTAIN,
     ORDER9_CONTACT_SCHEDULE_RELEASE,
+    ORDER9_PHASE_SUCCESSOR_REFERENCE_SEMANTICS,
     Order9TensorObjectTaskRuntime,
 )
 from amsrr.training.order9_checkpoints import load_order9_policy_checkpoint
@@ -1035,8 +1036,11 @@ def main() -> dict[str, object]:
             bank.capture(scene, env_ids=next_ids, phase_indices=next_indices)
             phase_index[next_ids] = next_indices
             phase_elapsed[next_ids] = 0.0
-            phase_start_body_pose[next_ids] = post_control.body_pose_world[next_ids]
-            phase_start_object_pose[next_ids] = state.object_pose_world[next_ids]
+            planned_body_start, planned_object_start = (
+                pre_target.planned_successor_start(next_ids)
+            )
+            phase_start_body_pose[next_ids] = planned_body_start
+            phase_start_object_pose[next_ids] = planned_object_start
         continuing = ~terminal & ~next_phase_mask
         phase_elapsed[continuing] += float(args_cli.dt)
         episode_time[~terminal] += float(args_cli.dt)
@@ -2038,6 +2042,9 @@ def _rollout_metadata(
                 "use_fabric": True,
                 "quaternion_layout": "xyzw",
                 "control_dt_s": float(args_cli.dt),
+                "phase_successor_reference_semantics": (
+                    ORDER9_PHASE_SUCCESSOR_REFERENCE_SEMANTICS
+                ),
             }
         ),
         "random_seed": int(args_cli.seed),
@@ -2081,6 +2088,9 @@ def _rollout_metadata(
         "contact_damping_n_s_per_m": float(args_cli.contact_damping),
         "canonical_phase_resets": bool(canonical_resets),
         "phase_reset_state_labels_reused": False,
+        "phase_successor_reference_semantics": (
+            ORDER9_PHASE_SUCCESSOR_REFERENCE_SEMANTICS
+        ),
         "runtime_phase_labels": [
             phase.value for phase in ORDER9_OBJECT_TASK_PHASES
         ],

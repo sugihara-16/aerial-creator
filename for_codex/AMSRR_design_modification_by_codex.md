@@ -2,6 +2,15 @@
 
 This file records implementation-time supplements or deviations from `A-MSRR_codex_ready_spec_v0_4_ja.md`.
 
+## 2026-07-23
+
+### Order 9 C2 Planned Phase-Reference Continuity Correction
+
+- A deterministic full-task check after accepted C2 update 24 exposed a runtime bookkeeping defect rather than a policy or PPO failure.  On every successful phase transition, the tensor rollout had initialized the successor phase from the observed physical state.  Because each phase-success gate intentionally permits a bounded non-zero tracking error, that choice accumulated the tolerated error over `lift -> transport -> place`; in the eight checked validation episodes it moved the final place target below the support surface and produced eight phase-5 timeouts.  The same C2 adapter/bucket/seeds with the promoted C1 checkpoint failed earlier at lift, excluding update-24 policy collapse as the cause.
+- A successful transition now advances the deterministic task plan from the completed phase's planned robot/object endpoint.  The physical state is not overwritten, reset, attached, projected, or hidden from the controller; the learned `pi_L` and QPID/QP continue to close the bounded physical tracking error.  The semantics are explicitly archived as `planned_phase_goal_v1` in rollout metadata and the simulator hash so artifacts using observed-state re-anchoring cannot be silently mixed with corrected evidence.
+- This is an implementation-continuity correction.  It changes no phase target, phase-success tolerance, reward term, policy observation/action, PPO sample or objective, QPID/QP authority, safety gate, randomization, curriculum quota, or promotion threshold.  Phase-specific reset-bank collection remains unchanged; only a genuine in-episode successful transition uses the completed planned endpoint as the next phase's reference.
+- An exact post-correction A/B rerun used update-24 checkpoint SHA-256 `2eb1f60b8481d5a0067f6bad33eff32ab58cc84f84c308f1775a6560232c827a`, validation bucket 8, seeds `9019--9026`, deterministic actions, and first-terminal full-mesh execution.  All `8/8` episodes reached settle successfully with zero fallback, safety failure, collision, drop, QP-infeasible terminal, or timeout.  The corrected raw artifact and evaluation JSONL SHA-256 values are `0c7efe396fcf87449d2731ddd78ff48926fc43f2f708ffdb648dcbc6812659e1` and `f123a397627b5baa4c31d0f684510e1b3eb41e45e7d6f1e90f9d7d65f7ee527b`.  This bounded check authorizes continued C2 updates but does not replace the required final minimum-200-episode promotion evaluation.
+
 ## 2026-07-22
 
 ### Order 9 C2 Exact Behavior Replay Correction

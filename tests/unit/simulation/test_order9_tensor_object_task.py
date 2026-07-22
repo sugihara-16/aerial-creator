@@ -3,7 +3,11 @@ from __future__ import annotations
 import pytest
 import torch
 
-from amsrr.simulation.order9_object_task_runtime import Order9ObjectTaskRuntime
+from amsrr.simulation.order9_object_task_runtime import (
+    ORDER9_OBJECT_TASK_PHASES,
+    Order9ObjectTaskPhase,
+    Order9ObjectTaskRuntime,
+)
 from amsrr.simulation.order9_object_task_state import load_order9_canonical_reset
 from amsrr.simulation.order9_tensor_object_task import (
     ORDER9_CONTACT_SCHEDULE_APPROACH,
@@ -106,3 +110,64 @@ def test_tensor_object_task_targets_match_scalar_phase_runtime() -> None:
         assert output.contact_schedule_index[index].item() == schedule_by_name[
             expected.contact_schedule_state
         ]
+
+
+def test_successor_phase_references_follow_planned_endpoints_without_error_drift() -> None:
+    runtime = Order9TensorObjectTaskRuntime()
+    phase = torch.tensor(
+        [ORDER9_OBJECT_TASK_PHASES.index(Order9ObjectTaskPhase.LIFT)],
+        dtype=torch.long,
+    )
+    elapsed = torch.tensor([30.0])
+    body_start = torch.tensor([[0.0, 0.0, 0.40, 0.0, 0.0, 0.0, 1.0]])
+    object_start = torch.tensor([[0.0, 0.0, 0.225, 0.0, 0.0, 0.0, 1.0]])
+    joint_start = torch.zeros((1, 1, 1))
+    joint_end = torch.zeros_like(joint_start)
+    common = {
+        "phase_elapsed_s": elapsed,
+        "reset_joint_positions_rad": joint_start,
+        "phase_end_joint_positions_rad": joint_end,
+        "lift_clearance_m": torch.tensor([0.25]),
+        "transport_distance_m": torch.tensor([0.20]),
+    }
+
+    lift = runtime.target(
+        phase_index=phase,
+        reset_robot_root_pose_world=body_start,
+        reset_object_pose_world=object_start,
+        **common,
+    )
+    body_reference, object_reference = lift.planned_successor_start(
+        torch.tensor([0])
+    )
+    # A physical lift is allowed to pass 40 mm short of its goal.  That
+    # observed error must not become part of the successor plan.
+    observed_object = object_reference.clone()
+    observed_object[:, 2] -= 0.04
+    assert object_reference[:, 2].tolist() == pytest.approx([0.475])
+    assert observed_object[:, 2].tolist() == pytest.approx([0.435])
+
+    transport = runtime.target(
+        phase_index=torch.tensor(
+            [ORDER9_OBJECT_TASK_PHASES.index(Order9ObjectTaskPhase.TRANSPORT)]
+        ),
+        reset_robot_root_pose_world=body_reference,
+        reset_object_pose_world=object_reference,
+        **common,
+    )
+    body_reference, object_reference = transport.planned_successor_start(
+        torch.tensor([0])
+    )
+    place = runtime.target(
+        phase_index=torch.tensor(
+            [ORDER9_OBJECT_TASK_PHASES.index(Order9ObjectTaskPhase.PLACE)]
+        ),
+        reset_robot_root_pose_world=body_reference,
+        reset_object_pose_world=object_reference,
+        **common,
+    )
+    _, final_object_reference = place.planned_successor_start(torch.tensor([0]))
+
+    assert final_object_reference[0, :3].tolist() == pytest.approx(
+        [0.20, 0.0, 0.225]
+    )
