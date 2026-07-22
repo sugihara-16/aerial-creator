@@ -47,6 +47,20 @@ def test_order9_config_loads_complete_pi_l_pi_h_pi_d_curriculum() -> None:
     assert config.hard_checker.max_proposal_attempts == 2
     assert config.hard_checker.projection_allowed is False
     assert config.hard_checker.require_current_pi_l_checkpoint is True
+    assert config.teacher_collection.episode_count == 20
+    assert config.teacher_collection.validation_episode_count == 3
+    assert config.teacher_collection.held_out_episode_count == 3
+    assert config.teacher_collection.low_level_stride == 5
+    assert config.teacher_collection.parallel_process_count == 2
+    assert stages[0].minimum_episodes == 20
+    assert stages[1].minimum_episodes == 100
+    assert stages[0].object_distribution == (
+        ObjectDistributionLevel.CONSERVATIVE_ORDER8_ANCHOR
+    )
+    assert stages[1].object_distribution == (
+        ObjectDistributionLevel.CONSERVATIVE_ORDER8_ANCHOR
+    )
+    assert config.optimization.pi_l_bc.phase_balanced_sampling is True
 
 
 def test_c2_uses_provisional_2048_runtime_without_changing_c3_default() -> None:

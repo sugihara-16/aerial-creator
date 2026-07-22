@@ -56,6 +56,7 @@ from amsrr.simulation.order8_isaac_runtime import (
     ORDER8_OBJECT_SUPPORT_PATH,
     ORDER8_SELECTED_GRIPPER_FRICTION_COMBINE_MODE,
     ORDER8_SELECTED_GRIPPER_MATERIAL_PATH,
+    _physx_material_readback_matches,
 )
 from amsrr.training.p2_inspection_context import default_grasp_carry_task_spec
 from amsrr.utils.hashing import hash_file, stable_hash
@@ -140,6 +141,7 @@ class Order8IsaacNaturalContactEnv:
         rollout_budget_s: float = ORDER8_DEFAULT_ROLLOUT_BUDGET_S,
         command_timeout_s: float = ORDER8_DEFAULT_COMMAND_TIMEOUT_S,
         generated_usd_dir: str | Path = ORDER8_DEFAULT_GENERATED_USD_DIR,
+        generated_usd_path: str | Path | None = None,
         viewer: str | None = None,
         realtime_playback: bool = False,
         keep_open_after_rollout_s: float = 0.0,
@@ -178,6 +180,8 @@ class Order8IsaacNaturalContactEnv:
             )
         if not str(generated_usd_dir):
             raise SchemaValidationError("Order8 generated_usd_dir must be non-empty")
+        if generated_usd_path is not None and not str(generated_usd_path):
+            raise SchemaValidationError("Order8 generated_usd_path must be non-empty")
         if not isinstance(seed, int) or isinstance(seed, bool) or seed < 0:
             raise SchemaValidationError("Order8 seed must be a non-negative integer")
         if order9_teacher_split not in {"train", "validation", "held_out"}:
@@ -214,6 +218,9 @@ class Order8IsaacNaturalContactEnv:
         self.rollout_budget_s = float(rollout_budget_s)
         self.command_timeout_s = float(command_timeout_s)
         self.generated_usd_dir = str(generated_usd_dir)
+        self.generated_usd_path = (
+            None if generated_usd_path is None else str(generated_usd_path)
+        )
         self.viewer = viewer
         self.realtime_playback = bool(realtime_playback)
         self.keep_open_after_rollout_s = float(keep_open_after_rollout_s)
@@ -266,6 +273,7 @@ class Order8IsaacNaturalContactEnv:
             convert_if_missing=not self.force_convert,
             force_convert=self.force_convert,
             generated_usd_dir=self.generated_usd_dir,
+            generated_usd_path=self.generated_usd_path,
             steps=self.requested_steps,
             viewer=self.viewer,
             realtime_playback=self.realtime_playback,
@@ -384,6 +392,9 @@ class Order8IsaacNaturalContactEnv:
             expected_seed=self.seed,
             expected_simulation_dt_s=self.simulation_dt_s,
             expected_force_usd_conversion=self.force_convert,
+            expected_order9_teacher_collection_enabled=(
+                self.order9_teacher_output is not None
+            ),
         )
         return Order8IsaacNaturalContactResult(
             **common,
@@ -473,6 +484,7 @@ def order8_natural_contact_report_failures(
     expected_seed: int | None = None,
     expected_simulation_dt_s: float | None = None,
     expected_force_usd_conversion: bool = True,
+    expected_order9_teacher_collection_enabled: bool = False,
 ) -> list[str]:
     failures: list[str] = []
 
@@ -1375,6 +1387,10 @@ def order8_natural_contact_report_failures(
             )
         true("order8_natural_contact_contact_side_closure_enabled")
         exact(
+            "order9_teacher_collection_enabled",
+            expected_order9_teacher_collection_enabled,
+        )
+        exact(
             "order8_natural_contact_contact_anchor_target_speed_limit_mps",
             config.anchor_translation_speed_limit_mps,
         )
@@ -1415,11 +1431,15 @@ def order8_natural_contact_report_failures(
             "order8_natural_contact_contact_clearance_sync_minimum_speed_scale",
             config.contact_clearance_sync_minimum_speed_scale,
         )
-        if not _positive_int(
-            report.get(
-                "order8_natural_contact_contact_clearance_sync_active_step_count"
-            )
-        ):
+        clearance_sync_active_steps = report.get(
+            "order8_natural_contact_contact_clearance_sync_active_step_count"
+        )
+        clearance_sync_count_valid = (
+            _non_negative_int(clearance_sync_active_steps)
+            if expected_order9_teacher_collection_enabled
+            else _positive_int(clearance_sync_active_steps)
+        )
+        if not clearance_sync_count_valid:
             failures.append(
                 "invalid:order8_natural_contact_contact_clearance_sync_active_step_count"
             )
@@ -1930,14 +1950,20 @@ def order8_natural_contact_report_failures(
         ORDER8_SELECTED_GRIPPER_FRICTION_COMBINE_MODE,
     )
     true("order8_natural_contact_selected_gripper_compliant_contact_enabled")
-    exact(
-        "order8_natural_contact_selected_gripper_compliant_contact_stiffness_n_per_m",
-        config.selected_gripper_compliant_contact_stiffness_n_per_m,
-    )
-    exact(
-        "order8_natural_contact_selected_gripper_compliant_contact_damping_n_s_per_m",
-        config.selected_gripper_compliant_contact_damping_n_s_per_m,
-    )
+    for key, configured_value in (
+        (
+            "order8_natural_contact_selected_gripper_compliant_contact_stiffness_n_per_m",
+            config.selected_gripper_compliant_contact_stiffness_n_per_m,
+        ),
+        (
+            "order8_natural_contact_selected_gripper_compliant_contact_damping_n_s_per_m",
+            config.selected_gripper_compliant_contact_damping_n_s_per_m,
+        ),
+    ):
+        if key not in report:
+            failures.append(f"missing:{key}")
+        elif not _physx_material_readback_matches(report[key], configured_value):
+            failures.append(f"mismatch:{key}")
     true(
         "order8_natural_contact_selected_gripper_compliant_contact_audit_passed"
     )

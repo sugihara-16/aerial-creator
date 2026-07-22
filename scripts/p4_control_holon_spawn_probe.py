@@ -1945,11 +1945,29 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
             random_initial_root_twist = (0.0,) * 6
         args.spawn_height = float(random_initial_root_pose[2])
 
+    order8_cached_urdf_path = usd_dir / "resolved_urdf" / "holon.urdf"
+    order8_cached_asset_reusable = bool(
+        order8_natural_contact_requested
+        and not args.force_convert
+        and args.generated_usd_path is not None
+        and usd_path.exists()
+        and order8_cached_urdf_path.exists()
+    )
+    if order8_cached_asset_reusable:
+        # The serialized Order 9 C0 preparation already generated and audited
+        # this fixed-topology robot asset.  Concurrent workers must treat both
+        # the resolved URDF and USD bundle as read-only; rewriting the shared
+        # URDF here can expose a truncated XML file to another process.
+        urdf_path = order8_cached_urdf_path
+
     if (
         args.force_convert
         or fixed_smoke_requested
         or dynamic_assembly_requested
-        or order8_natural_contact_requested
+        or (
+            order8_natural_contact_requested
+            and not order8_cached_asset_reusable
+        )
         or (args.convert_if_missing and not usd_path.exists())
     ):
         mesh_search_dirs = (
@@ -2030,7 +2048,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, object]:
         else:
             urdf_path = write_resolved_mesh_urdf(
                 urdf_path,
-                usd_dir / "resolved_urdf" / "holon.urdf",
+                order8_cached_urdf_path,
                 mesh_search_dirs=mesh_search_dirs,
             )
         if args.vectoring_velocity_limit_rad_s is not None:

@@ -11,7 +11,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 
-ORDER9_RUNTIME_LOAD_VERSION = "order9_runtime_load_v1"
+ORDER9_RUNTIME_LOAD_VERSION = "order9_runtime_load_v2_system"
 
 _GPU_FIELDS = (
     "gpu_index",
@@ -33,6 +33,14 @@ _NVIDIA_QUERY_FIELDS = (
     "power.draw",
     "temperature.gpu",
 )
+_SYSTEM_FIELDS = (
+    "system_load_1m",
+    "system_load_5m",
+    "system_load_15m",
+    "system_load_per_cpu_1m",
+    "system_memory_used_mib",
+    "system_memory_available_mib",
+)
 
 
 class Order9RuntimeLoadMonitor:
@@ -45,6 +53,7 @@ class Order9RuntimeLoadMonitor:
         device: str = "cuda:0",
         gpu_probe: Callable[[int], Mapping[str, Any]] | None = None,
         rss_probe: Callable[[], float] | None = None,
+        system_probe: Callable[[], Mapping[str, Any]] | None = None,
     ) -> None:
         if not math.isfinite(sample_interval_s) or sample_interval_s <= 0.0:
             raise ValueError("Order9 runtime-load sample interval must be positive")
@@ -53,6 +62,7 @@ class Order9RuntimeLoadMonitor:
         self.gpu_index = _gpu_index(self.device)
         self._gpu_probe = gpu_probe or _nvidia_smi_probe
         self._rss_probe = rss_probe or _process_rss_mib
+        self._system_probe = system_probe or _system_load
         self._started_at: float | None = None
         self._samples: list[dict[str, Any]] = []
         self._errors: list[str] = []
@@ -92,7 +102,7 @@ class Order9RuntimeLoadMonitor:
                 and not isinstance(sample.get(field), bool)
                 and math.isfinite(float(sample[field]))
             ]
-            for field in (*_GPU_FIELDS[2:], "process_rss_mib")
+            for field in (*_GPU_FIELDS[2:], "process_rss_mib", *_SYSTEM_FIELDS)
         }
         summary: dict[str, Any] = {
             "telemetry_version": ORDER9_RUNTIME_LOAD_VERSION,
@@ -129,6 +139,10 @@ class Order9RuntimeLoadMonitor:
             sample["process_rss_mib"] = float(self._rss_probe())
         except Exception as error:  # telemetry must not stop a training run
             self._record_error("rss", error)
+        try:
+            sample.update(dict(self._system_probe()))
+        except Exception as error:  # telemetry must not stop a training run
+            self._record_error("system", error)
         if self.gpu_index is not None:
             try:
                 sample.update(dict(self._gpu_probe(self.gpu_index)))
@@ -234,6 +248,28 @@ def _process_rss_mib() -> float:
                 kib = float(line.split()[1])
                 return kib / 1024.0
     raise RuntimeError("VmRSS is absent from proc status")
+
+
+def _system_load() -> dict[str, float]:
+    load_1m, load_5m, load_15m = os.getloadavg()
+    values: dict[str, float] = {}
+    with open("/proc/meminfo", encoding="utf-8") as stream:
+        for line in stream:
+            key, separator, raw = line.partition(":")
+            if not separator or key not in {"MemTotal", "MemAvailable"}:
+                continue
+            values[key] = float(raw.split()[0]) / 1024.0
+    if set(values) != {"MemTotal", "MemAvailable"}:
+        raise RuntimeError("system memory totals are absent from proc meminfo")
+    cpu_count = max(1, int(os.cpu_count() or 1))
+    return {
+        "system_load_1m": float(load_1m),
+        "system_load_5m": float(load_5m),
+        "system_load_15m": float(load_15m),
+        "system_load_per_cpu_1m": float(load_1m) / cpu_count,
+        "system_memory_used_mib": values["MemTotal"] - values["MemAvailable"],
+        "system_memory_available_mib": values["MemAvailable"],
+    }
 
 
 __all__ = ["ORDER9_RUNTIME_LOAD_VERSION", "Order9RuntimeLoadMonitor"]

@@ -25,6 +25,14 @@ def test_runtime_load_monitor_records_gpu_and_process_peaks() -> None:
         device="cuda:0",
         gpu_probe=gpu_probe,
         rss_probe=lambda: 512.0,
+        system_probe=lambda: {
+            "system_load_1m": 8.0,
+            "system_load_5m": 6.0,
+            "system_load_15m": 4.0,
+            "system_load_per_cpu_1m": 0.25,
+            "system_memory_used_mib": 12000.0,
+            "system_memory_available_mib": 52000.0,
+        },
     )
     monitor.start()
     report = monitor.stop()
@@ -34,6 +42,8 @@ def test_runtime_load_monitor_records_gpu_and_process_peaks() -> None:
     assert report["gpu_memory_used_mib_peak"] == 1002.0
     assert report["gpu_utilization_percent_mean"] == 30.0
     assert report["process_rss_mib_peak"] == 512.0
+    assert report["system_load_1m_peak"] == 8.0
+    assert report["system_memory_used_mib_peak"] == 12000.0
     assert len(report["samples"]) == 2
 
 
@@ -43,6 +53,14 @@ def test_runtime_load_monitor_is_explicitly_unavailable_on_cpu() -> None:
         device="cpu",
         gpu_probe=lambda _index: {},
         rss_probe=lambda: 128.0,
+        system_probe=lambda: {
+            "system_load_1m": 1.0,
+            "system_load_5m": 1.0,
+            "system_load_15m": 1.0,
+            "system_load_per_cpu_1m": 0.03125,
+            "system_memory_used_mib": 1024.0,
+            "system_memory_available_mib": 2048.0,
+        },
     )
     monitor.start()
     report = monitor.stop()

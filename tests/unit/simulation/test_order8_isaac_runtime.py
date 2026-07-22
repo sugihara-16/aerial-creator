@@ -101,7 +101,9 @@ from amsrr.simulation.order8_isaac_runtime import (
     _parse_qclose_checkpoint_state,
     _payload_load_transfer_scale_from_external_wrench,
     _payload_feedforward_scale_for_phase,
+    _prelift_full_relative_speed_threshold_mps,
     _prelift_relative_speed_threshold_mps,
+    _physx_material_readback_matches,
     _project_object_rotation_state,
     _per_anchor_influential_dock_loads,
     _qclose_checkpoint_state_to_dict,
@@ -133,6 +135,19 @@ from amsrr.simulation.order8_isaac_runtime import (
     _whole_structure_runtime_observation,
     _zero_joint_torque_bias,
 )
+
+
+def test_physx_material_readback_accepts_float32_randomization_round_trip() -> None:
+    assert _physx_material_readback_matches(
+        7491.41650390625,
+        7491.41654075341,
+    )
+    assert _physx_material_readback_matches(
+        74.90618896484375,
+        74.90619133289317,
+    )
+    assert not _physx_material_readback_matches(7491.40, 7491.41654075341)
+    assert not _physx_material_readback_matches(None, 7491.41654075341)
 
 
 def test_order8_physics_dock_delta_uses_only_dock_joint_indices() -> None:
@@ -1618,6 +1633,13 @@ def test_prelift_relative_speed_threshold_reserves_slip_margin() -> None:
     ) == pytest.approx(0.01)
     with pytest.raises(SchemaValidationError, match="slip limit"):
         _prelift_relative_speed_threshold_mps(
+            maintained_contact_slip_limit_mps=0.0
+        )
+    assert _prelift_full_relative_speed_threshold_mps(
+        maintained_contact_slip_limit_mps=0.02
+    ) == pytest.approx(0.03)
+    with pytest.raises(SchemaValidationError, match="slip limit"):
+        _prelift_full_relative_speed_threshold_mps(
             maintained_contact_slip_limit_mps=0.0
         )
 

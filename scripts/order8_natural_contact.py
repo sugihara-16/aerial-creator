@@ -69,6 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Reuse the hash-audited generated USD instead of forcing conversion.",
     )
+    parser.add_argument(
+        "--generated-usd-path",
+        default=None,
+        help="Exact hash-audited generated USD path for read-only reuse.",
+    )
     return parser
 
 
@@ -125,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         physical_model=physical_model,
         backend_config_path=backend_config_path,
         generated_usd_dir=ORDER8_DEFAULT_GENERATED_USD_DIR,
+        generated_usd_path=args.generated_usd_path,
         viewer=args.viewer,
         realtime_playback=bool(args.realtime_playback),
         keep_open_after_rollout_s=float(args.keep_open_after_rollout_s),
@@ -167,6 +173,11 @@ def main(argv: list[str] | None = None) -> int:
         "simulation_dt_s": env.simulation_dt_s,
         "rollout_budget_s": env.rollout_budget_s,
         "generated_usd_dir": str(Path(env.generated_usd_dir).resolve()),
+        "generated_usd_path": (
+            None
+            if env.generated_usd_path is None
+            else str(Path(env.generated_usd_path).resolve())
+        ),
         "force_convert": env.force_convert,
         "real_requested": bool(args.real),
         "order9_teacher_output": args.order9_teacher_output,

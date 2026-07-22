@@ -5,23 +5,47 @@ from pathlib import Path
 from amsrr.schemas.common import ContactMode
 from amsrr.schemas.contact_candidates import ContactCandidate, ContactCandidateSet
 from amsrr.schemas.datasets import DatasetSplit
-from amsrr.schemas.morphology import MorphologyGraph, RobotAnchor
+from amsrr.schemas.morphology import MorphologyGraph, ModuleNode, RobotAnchor
+from amsrr.schemas.physical_model import ModuleCapabilityToken
 from amsrr.schemas.policies import (
+    POLICY_COMMAND_CONTRACT_CENTROIDAL,
     ContactAssignment,
     ContactWrenchTrajectory,
+    CentroidalTarget,
     ControllerCommand,
     ControllerStatus,
     InteractionKnot,
     PolicyCommand,
 )
-from amsrr.schemas.runtime import ObjectRuntimeState, RuntimeObservation, TaskProgressState
-from amsrr.training.order9_dataset import load_order9_dataset
+from amsrr.schemas.runtime import (
+    ModuleRuntimeState,
+    ObjectRuntimeState,
+    RuntimeObservation,
+    TaskProgressState,
+)
+from amsrr.policies.order9_low_level_policy import Order9LowLevelPolicyConfig
+from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
+from amsrr.training.order9_dataset import (
+    iter_order9_low_level_records,
+    load_order9_dataset,
+    load_order9_dataset_index,
+    validate_order9_pi_l_dataset_for_stage_streaming,
+)
+from amsrr.training.order9_curriculum import load_order9_learning_config
+from amsrr.training.order9_curriculum import ORDER9_C0_COLLECTION_PROFILE_VERSION
+from amsrr.training.order9_pipeline import order9_stage_by_id
+from amsrr.training.order9_offline_training import train_order9_behavior_cloning
+from amsrr.training.order9_evaluation import (
+    order9_teacher_evaluation_episodes,
+    write_order9_evaluation_episodes_jsonl,
+)
 from amsrr.training.order9_teacher import build_order8_grasp_carry_task_spec
 from amsrr.training.order9_teacher_collection import (
     Order9TeacherCollectionConfig,
     Order9TeacherEpisodeCollector,
     build_order9_teacher_dataset,
     load_order9_teacher_episode,
+    load_order9_teacher_episode_manifest,
     write_order9_teacher_episode,
 )
 
@@ -42,8 +66,19 @@ def test_teacher_collector_keeps_privileged_metrics_out_of_actor_and_builds_gzip
             config_hash="config-hash",
             simulator_version="isaac-test",
             simulator_hash="simulator-hash",
+            metadata={
+                "c0_collection_profile_version": (
+                    ORDER9_C0_COLLECTION_PROFILE_VERSION
+                ),
+                "c0_condition_id": f"unit-condition-{index}",
+                "teacher_low_level_stride": 1,
+                "teacher_high_level_stride": 1,
+            },
         )
         manifest, low, high = load_order9_teacher_episode(path)
+        manifest_path, manifest_only = load_order9_teacher_episode_manifest(path)
+        assert manifest_path == path
+        assert manifest_only.to_dict() == manifest.to_dict()
         assert manifest.success is True
         assert all(not record.runtime_observation.contact_states for record in low)
         assert all(
@@ -56,12 +91,55 @@ def test_teacher_collector_keeps_privileged_metrics_out_of_actor_and_builds_gzip
 
     manifest = build_order9_teacher_dataset(paths, tmp_path / "dataset")
     bundle = load_order9_dataset(tmp_path / "dataset")
+    index = load_order9_dataset_index(tmp_path / "dataset")
 
     assert manifest.metadata["gzip_shards"] is True
     assert len(bundle.low_level_records) == 6
+    assert len(list(iter_order9_low_level_records(index))) == 6
     assert len(bundle.trajectory_records) == 6
     assert bundle.manifest.train_task_ids == ["task-0"]
     assert bundle.manifest.validation_task_ids == ["task-1"]
+
+    config = load_order9_learning_config()
+    stage = order9_stage_by_id(config, "c1_pi_l_bc_fixed_nominal")
+    validation = validate_order9_pi_l_dataset_for_stage_streaming(index, stage)
+    assert validation.valid is True
+    assert validation.record_count == 6
+    assert validation.metadata["streaming_validation"] is True
+
+    evaluation = order9_teacher_evaluation_episodes(paths)
+    evaluation_path = tmp_path / "evaluation" / "episodes.jsonl"
+    write_order9_evaluation_episodes_jsonl(evaluation_path, evaluation)
+    assert len(evaluation) == 2
+    assert all(episode.task_success for episode in evaluation)
+    assert all(episode.isaac_backed for episode in evaluation)
+    assert all(episode.no_fallback_success for episode in evaluation)
+    assert len(evaluation_path.read_text(encoding="utf-8").splitlines()) == 2
+
+    config.optimization.pi_l_bc.epochs = 1
+    config.optimization.pi_l_bc.batch_size = 2
+    config.optimization.pi_l_bc.sequence_length = 2
+    config.optimization.pi_l_bc.burn_in_steps = 1
+    physical_model = build_physical_model_from_config(
+        "configs/robot/robot_model.yaml"
+    )
+    trained = train_order9_behavior_cloning(
+        config,
+        stage_id=stage.stage_id,
+        dataset_manifest_path=tmp_path / "dataset" / "manifest.json",
+        physical_model=physical_model,
+        output_dir=tmp_path / "training",
+        git_revision="unit-test",
+        device="cpu",
+        model_config=Order9LowLevelPolicyConfig(
+            graph_hidden_dim=16,
+            graph_message_layers=1,
+            recurrent_hidden_dim=16,
+        ),
+    )
+    assert trained.training_record_count == 3
+    assert trained.validation_record_count == 3
+    assert Path(trained.checkpoint_path).is_file()
 
 
 def _episode(task_id: str, episode_id: str, split: DatasetSplit):
@@ -100,9 +178,29 @@ def _episode(task_id: str, episode_id: str, split: DatasetSplit):
         if index < len(phases) - 1:
             collector.record_command(
                 trajectory=_legacy_trajectory(),
+                centroidal_reference_pose_world=(
+                    0.0,
+                    0.0,
+                    0.5,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                ),
+                centroidal_reference_twist=[0.0] * 6,
                 policy_command=PolicyCommand(
+                    desired_body_pose=(
+                        0.0,
+                        0.0,
+                        0.5,
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0,
+                    ),
                     desired_body_twist=[0.0] * 6,
                     residual_wrench_body=[0.0] * 6,
+                    control_contract_version=POLICY_COMMAND_CONTRACT_CENTROIDAL,
                 ),
                 controller_command=ControllerCommand(
                     rotor_thrusts_n={"rotor": 2.0},
@@ -130,9 +228,40 @@ def _episode(task_id: str, episode_id: str, split: DatasetSplit):
 
 
 def _morphology() -> MorphologyGraph:
+    capability = ModuleCapabilityToken(
+        module_type="holon",
+        aggregate_mass_norm=1.0,
+        aggregate_inertia_features=[0.0] * 6,
+        rotor_count=4,
+        port_count=2,
+        thrust_min_features=[0.0] * 4,
+        thrust_max_features=[1.0] * 4,
+        thrust_to_weight_ratio_est=2.0,
+        dock_port_type_counts=[2, 0, 0],
+        has_vectoring=True,
+        has_dock_mechanism=True,
+    )
     return MorphologyGraph(
         graph_id="teacher-collection-morphology",
-        modules=[],
+        modules=[
+            ModuleNode(
+                module_id=index,
+                module_type="holon",
+                pose_in_design_frame=(
+                    0.0,
+                    float(index) * 0.4,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                ),
+                role_id="base" if index == 0 else "grasp",
+                is_base=index == 0,
+                capability_token=capability,
+            )
+            for index in range(3)
+        ],
         ports=[],
         dock_edges=[],
         robot_anchors=[
@@ -196,6 +325,11 @@ def _legacy_trajectory() -> ContactWrenchTrajectory:
         knots=[
             InteractionKnot(
                 t_rel_s=0.0,
+                centroidal_target=CentroidalTarget(
+                    com_pos_world=(0.0, 0.0, 0.5),
+                    com_vel_world=(0.0, 0.0, 0.0),
+                    body_orientation_world=(0.0, 0.0, 0.0, 1.0),
+                ),
                 contact_assignments=[
                     ContactAssignment(
                         slot_id=0,
@@ -224,7 +358,14 @@ def _observation(
     return RuntimeObservation(
         time_s=time_s,
         morphology_graph=morphology,
-        module_states=[],
+        module_states=[
+            ModuleRuntimeState(
+                module_id=index,
+                pose_world=(0.0, float(index) * 0.4, 0.5, 0.0, 0.0, 0.0, 1.0),
+                twist_world=[0.0] * 6,
+            )
+            for index in range(3)
+        ],
         object_states=[
             ObjectRuntimeState(
                 object_id="order8_object",

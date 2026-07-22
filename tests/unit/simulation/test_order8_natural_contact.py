@@ -106,6 +106,7 @@ def test_order8_command_force_converts_and_binds_graph_config_and_gui() -> None:
 def test_order9_teacher_command_is_explicit_and_can_reuse_generated_asset() -> None:
     env = _env(
         force_convert=False,
+        generated_usd_path="artifacts/isaac/order8-prepared/holon.usda",
         order9_teacher_output="artifacts/order9/c0/episode-1",
         order9_teacher_episode_id="episode-1",
         order9_teacher_task_id="task-1",
@@ -116,6 +117,9 @@ def test_order9_teacher_command_is_explicit_and_can_reuse_generated_asset() -> N
 
     assert "--convert-if-missing" in command
     assert "--force-convert" not in command
+    assert _argument(command, "--generated-usd-path") == (
+        "artifacts/isaac/order8-prepared/holon.usda"
+    )
     assert _argument(command, "--order9-teacher-output") == (
         "artifacts/order9/c0/episode-1"
     )
@@ -337,6 +341,44 @@ def test_optional_all_arrest_shape_hold_may_remain_inactive() -> None:
     )
 
     assert failures == []
+
+
+def test_teacher_collection_may_not_need_clearance_sync_activation() -> None:
+    env = _env()
+    graph = env.representative_morphology()
+    report = _valid_report(env, graph)
+    report["order9_teacher_collection_enabled"] = True
+    report["order8_natural_contact_contact_clearance_sync_active_step_count"] = 0
+
+    failures = order8_natural_contact_report_failures(
+        report,
+        morphology_graph=graph,
+        config=env.config,
+        physical_model=env.physical_model,
+        expected_backend_config_hash=env.backend.config.stable_hash(),
+        expected_collision_geometry_hash=env.collision_geometry_hash,
+        expected_source_urdf_hash=env.source_urdf_hash,
+        requested_steps=env.requested_steps,
+        expected_order9_teacher_collection_enabled=True,
+    )
+
+    assert failures == []
+
+    failures = order8_natural_contact_report_failures(
+        report,
+        morphology_graph=graph,
+        config=env.config,
+        physical_model=env.physical_model,
+        expected_backend_config_hash=env.backend.config.stable_hash(),
+        expected_collision_geometry_hash=env.collision_geometry_hash,
+        expected_source_urdf_hash=env.source_urdf_hash,
+        requested_steps=env.requested_steps,
+    )
+    assert "mismatch:order9_teacher_collection_enabled" in failures
+    assert (
+        "invalid:order8_natural_contact_contact_clearance_sync_active_step_count"
+        in failures
+    )
 
 
 def test_external_isaac_launcher_does_not_require_host_python_imports(
@@ -983,6 +1025,7 @@ def _valid_report(env: Order8IsaacNaturalContactEnv, graph) -> dict:
             env.config.contact_clearance_sync_minimum_speed_scale
         ),
         "order8_natural_contact_contact_clearance_sync_active_step_count": 100,
+        "order9_teacher_collection_enabled": False,
         "order8_natural_contact_post_first_arrest_creep_active_step_count": 0,
         "order8_natural_contact_post_first_arrest_centroidal_transfer_active_step_count": 0,
         "order8_natural_contact_max_contact_clearance_imbalance_m": 0.020,

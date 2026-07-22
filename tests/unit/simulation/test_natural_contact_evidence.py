@@ -36,7 +36,7 @@ def test_complete_natural_contact_lifecycle_passes_only_after_resettable_settle_
             Order8NaturalContactPhase.LIFT,
             time_s=time_s,
             contacts=_selected_contacts(),
-            object_bottom_clearance_m=0.100,
+            object_bottom_clearance_m=0.110,
             object_floor_contact=False,
         )
     )
@@ -48,7 +48,7 @@ def test_complete_natural_contact_lifecycle_passes_only_after_resettable_settle_
             Order8NaturalContactPhase.TRANSPORT,
             time_s=time_s,
             contacts=_selected_contacts(),
-            object_bottom_clearance_m=0.100,
+            object_bottom_clearance_m=0.110,
             object_floor_contact=False,
             transport_distance_m=0.200,
         )
@@ -391,7 +391,7 @@ def test_break_grace_is_inclusive_then_required_contact_loss_becomes_drop() -> N
             Order8NaturalContactPhase.LIFT,
             time_s=time_s,
             contacts=[],
-            object_bottom_clearance_m=0.100,
+            object_bottom_clearance_m=0.110,
             object_floor_contact=False,
         )
     )
@@ -909,7 +909,7 @@ def _acquire_and_lift(monitor: NaturalContactEvidenceMonitor) -> float:
             Order8NaturalContactPhase.LIFT,
             time_s=time_s,
             contacts=_selected_contacts(),
-            object_bottom_clearance_m=0.100,
+            object_bottom_clearance_m=0.110,
             object_floor_contact=False,
         )
     )

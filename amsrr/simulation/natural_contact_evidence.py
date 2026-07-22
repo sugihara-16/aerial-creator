@@ -7,6 +7,7 @@ import math
 
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.order8 import (
+    ORDER8_LIFT_ACQUISITION_CLEARANCE_MARGIN_M,
     ORDER8_NATURAL_CONTACT_CONFIG_VERSION,
     ORDER8_NATURAL_CONTACT_MODEL,
     ORDER8_NATURAL_CONTACT_RESULT_VERSION,
@@ -455,6 +456,7 @@ class NaturalContactEvidenceMonitor:
             if (
                 observation.object_bottom_clearance_m + _EPS
                 >= self.config.minimum_lift_clearance_m
+                + ORDER8_LIFT_ACQUISITION_CLEARANCE_MARGIN_M
                 and not observation.object_floor_contact
             ):
                 self._lift_acquired = True

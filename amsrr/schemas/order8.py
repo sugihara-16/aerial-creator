@@ -24,9 +24,13 @@ from amsrr.utils.config import load_config
 ORDER8_NATURAL_CONTACT_CONFIG_VERSION = "order8_natural_contact_config_v12"
 ORDER8_NATURAL_CONTACT_OBSERVATION_VERSION = "order8_natural_contact_observation_v4"
 ORDER8_NATURAL_CONTACT_STEP_EVIDENCE_VERSION = "order8_natural_contact_step_evidence_v4"
-ORDER8_NATURAL_CONTACT_RESULT_VERSION = "order8_natural_contact_result_v3"
+ORDER8_NATURAL_CONTACT_RESULT_VERSION = "order8_natural_contact_result_v4"
 ORDER8_NATURAL_CONTACT_MODEL = "natural_contact_grasp_v1"
 ORDER8_RAW_CONTACT_TRUTH_ROLE = "privileged_diagnostic_only"
+# Acquisition is deliberately stricter than the retained-clearance failure
+# floor.  The gap provides hysteresis for compliant-contact rebound when LIFT
+# hands off to TRANSPORT while preserving the 100 mm safety requirement.
+ORDER8_LIFT_ACQUISITION_CLEARANCE_MARGIN_M = 0.010
 
 
 class Order8NaturalContactPhase(StrEnum):

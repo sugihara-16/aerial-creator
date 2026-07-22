@@ -1,5 +1,5 @@
 curriculum:
-  schedule_version: order9_curriculum_v1
+  schedule_version: order9_curriculum_v2
   contact_wrench_contract_version: contact_frame_robot_on_target_v2
   pi_h_is_learned_proposal_only: true
   deterministic_checker_projects_actions: false
@@ -12,7 +12,7 @@ curriculum:
       min_modules: 3
       max_modules: 3
       topology_randomized: false
-      object_distribution: nominal
+      object_distribution: conservative_order8_anchor
       deterministic_teacher_required: true
       pi_h_output_scope: full_contact_wrench_trajectory
       phase_conditioned_actor_required: true
@@ -20,7 +20,7 @@ curriculum:
       assembly_evaluation_mode: separate
       end_to_end_episode_fraction: 0.0
       environment_steps: 0
-      minimum_episodes: 100
+      minimum_episodes: 20
       minimum_success_rate: 0.95
       minimum_no_fallback_success_rate: 0.0
       maximum_fallback_rate: 1.0
@@ -35,7 +35,9 @@ curriculum:
       min_modules: 3
       max_modules: 3
       topology_randomized: false
-      object_distribution: nominal
+      # The morphology is fixed, while C0 supervision contains only bounded
+      # perturbations around the nominal Order8 object/contact condition.
+      object_distribution: conservative_order8_anchor
       deterministic_teacher_required: true
       pi_h_output_scope: not_applicable
       phase_conditioned_actor_required: true
@@ -278,15 +280,34 @@ runtime_benchmark:
   per_step_json_logging: false
   require_tensorized_pi_l_inference: true
 
+teacher_collection:
+  profile_version: order9_c0_bounded_diversity_v1
+  episode_count: 20
+  validation_episode_count: 3
+  held_out_episode_count: 3
+  # Order8 runs at 50 Hz.  Ten-Hz labels retain controller dynamics while
+  # avoiding five adjacent near-duplicate labels per learning sample.
+  low_level_stride: 5
+  high_level_stride: 5
+  parallel_process_count: 2
+  condition_distribution: conservative_order8_anchor
+
 optimization:
   pi_l_bc:
-    epochs: 40
-    batch_size: 64
+    # C1 is actor imitation.  The critic is initialized here but first trained
+    # by PPO in C2; value regression must not move the shared BC representation.
+    # The initial 8-epoch run remained biased by roughly 0.02 normalized action
+    # in the late transport interval and timed out 4/4 closed-loop smokes.
+    # Continue to an empirically justified convergence budget while using the
+    # RTX 4090 headroom to halve the number of batches per epoch.
+    epochs: 24
+    batch_size: 128
     learning_rate: 0.0003
-    value_loss_weight: 0.5
+    value_loss_weight: 0.0
     max_grad_norm: 0.5
     sequence_length: 16
     burn_in_steps: 4
+    phase_balanced_sampling: true
   pi_h_assignment_bc:
     epochs: 30
     batch_size: 32

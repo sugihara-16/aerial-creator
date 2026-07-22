@@ -6,7 +6,7 @@ import gzip
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Iterable, Iterator, Mapping
 
 from amsrr.logging.episode_archive import EpisodeArchive
 from amsrr.schemas.common import SchemaBase, SchemaValidationError
@@ -23,6 +23,7 @@ from amsrr.schemas.datasets import (
     TrajectorySourceKind,
 )
 from amsrr.training.order9_curriculum import (
+    ORDER9_C0_COLLECTION_PROFILE_VERSION,
     Order9CurriculumStage,
     Order9LearningMode,
     Order9LearningTarget,
@@ -43,6 +44,16 @@ class Order9DatasetBundle:
     sequential_design_records: tuple[SequentialDesignTrajectoryRecord, ...]
     design_outcome_records: tuple[DesignOutcomeRecord, ...]
     rollout_archives: tuple[EpisodeArchive, ...]
+    verified_shard_sha256: dict[str, str]
+
+
+@dataclass(frozen=True)
+class Order9DatasetIndex:
+    """Hash-verified manifest and shard index without resident record objects."""
+
+    manifest: P4_3DatasetManifest
+    manifest_path: str
+    manifest_sha256: str
     verified_shard_sha256: dict[str, str]
 
 
@@ -77,34 +88,22 @@ class Order9DatasetStageValidation(SchemaBase):
 
 
 def load_order9_dataset(path: str | Path) -> Order9DatasetBundle:
-    manifest_path = _manifest_path(path)
-    manifest = P4_3DatasetManifest.from_json(
-        manifest_path.read_text(encoding="utf-8")
-    )
-    if manifest.schema_version != P4_3_DATASET_SCHEMA_VERSION:
-        raise SchemaValidationError(
-            "Order9 training rejects the legacy P4.3 dataset schema"
-        )
+    index = load_order9_dataset_index(path)
+    manifest_path = Path(index.manifest_path)
+    manifest = index.manifest
     low_level: list[LowLevelControlRecord] = []
     trajectories: list[InteractionTrajectoryRecord] = []
     designs: list[SequentialDesignTrajectoryRecord] = []
     outcomes: list[DesignOutcomeRecord] = []
     archives: list[EpisodeArchive] = []
-    verified: dict[str, str] = {}
     record_ids: set[tuple[str, str]] = set()
     for shard in manifest.shards:
         source = _resolve_shard_path(shard.path, manifest_path.parent)
-        digest = hash_file(source)
-        if digest != shard.sha256:
-            raise SchemaValidationError(
-                f"Order9 dataset shard SHA-256 mismatch: {source}"
-            )
         rows = _jsonl_rows(source)
         if len(rows) != shard.record_count:
             raise SchemaValidationError(
                 f"Order9 dataset shard count mismatch: {source}"
             )
-        verified[str(source)] = digest
         for raw in rows:
             record = _record_from_payload(shard.dataset_kind, raw)
             record_split = getattr(record, "split", None)
@@ -149,14 +148,182 @@ def load_order9_dataset(path: str | Path) -> Order9DatasetBundle:
     return Order9DatasetBundle(
         manifest=manifest,
         manifest_path=str(manifest_path),
-        manifest_sha256=hash_file(manifest_path),
+        manifest_sha256=index.manifest_sha256,
         low_level_records=tuple(low_level),
         trajectory_records=tuple(trajectories),
         sequential_design_records=tuple(designs),
         design_outcome_records=tuple(outcomes),
         rollout_archives=tuple(archives),
+        verified_shard_sha256=index.verified_shard_sha256,
+    )
+
+
+def load_order9_dataset_index(path: str | Path) -> Order9DatasetIndex:
+    """Verify a dataset manifest and shard hashes without loading JSONL rows."""
+
+    manifest_path = _manifest_path(path)
+    manifest = P4_3DatasetManifest.from_json(
+        manifest_path.read_text(encoding="utf-8")
+    )
+    if manifest.schema_version != P4_3_DATASET_SCHEMA_VERSION:
+        raise SchemaValidationError(
+            "Order9 training rejects the legacy P4.3 dataset schema"
+        )
+    verified: dict[str, str] = {}
+    for shard in manifest.shards:
+        source = _resolve_shard_path(shard.path, manifest_path.parent)
+        digest = hash_file(source)
+        if digest != shard.sha256:
+            raise SchemaValidationError(
+                f"Order9 dataset shard SHA-256 mismatch: {source}"
+            )
+        verified[str(source)] = digest
+    return Order9DatasetIndex(
+        manifest=manifest,
+        manifest_path=str(manifest_path),
+        manifest_sha256=hash_file(manifest_path),
         verified_shard_sha256=verified,
     )
+
+
+def iter_order9_low_level_records(
+    index: Order9DatasetIndex,
+    *,
+    split: DatasetSplit | None = None,
+) -> Iterator[LowLevelControlRecord]:
+    """Stream hash-verified low-level records without retaining the dataset."""
+
+    manifest_dir = Path(index.manifest_path).parent
+    for shard in index.manifest.shards:
+        if shard.dataset_kind != DatasetKind.LOW_LEVEL_CONTROL:
+            continue
+        if split is not None and shard.split != split:
+            continue
+        source = _resolve_shard_path(shard.path, manifest_dir)
+        count = 0
+        for raw in _jsonl_row_iter(source):
+            record = LowLevelControlRecord.from_dict(raw)
+            if shard.split is not None and record.split != shard.split:
+                raise SchemaValidationError(
+                    f"Order9 dataset record split mismatch in {source}"
+                )
+            count += 1
+            yield record
+        if count != shard.record_count:
+            raise SchemaValidationError(
+                f"Order9 dataset shard count mismatch: {source}"
+            )
+
+
+def validate_order9_pi_l_dataset_for_stage_streaming(
+    index: Order9DatasetIndex,
+    stage: Order9CurriculumStage,
+) -> Order9DatasetStageValidation:
+    """Validate the C1 pi_L replay contract with bounded record-object memory."""
+
+    if (
+        stage.learning_target != Order9LearningTarget.PI_L
+        or stage.learning_mode != Order9LearningMode.BEHAVIOR_CLONING
+    ):
+        raise SchemaValidationError(
+            "streaming Order9 validation currently supports pi_L BC stages only"
+        )
+    failures: set[str] = set()
+    if (
+        index.manifest.metadata.get("c0_collection_profile_version")
+        != ORDER9_C0_COLLECTION_PROFILE_VERSION
+    ):
+        failures.add("c0_collection_profile_mismatch")
+    if index.manifest.metadata.get("phase_balanced_pi_l_sampling_required") is not True:
+        failures.add("phase_balanced_pi_l_sampling_contract_missing")
+    counts = {split: 0 for split in DatasetSplit}
+    record_ids: set[str] = set()
+    episode_indices: set[tuple[str, int]] = set()
+    boundary_seen: set[str] = set()
+    episode_ids: set[str] = set()
+    task_ids: set[str] = set()
+    deterministic = 0
+    stochastic = 0
+    allowed_tasks = {
+        DatasetSplit.TRAIN: set(index.manifest.train_task_ids),
+        DatasetSplit.VALIDATION: set(index.manifest.validation_task_ids),
+        DatasetSplit.HELD_OUT: set(index.manifest.held_out_task_ids),
+    }
+    for record in iter_order9_low_level_records(index):
+        counts[record.split] += 1
+        if record.record_id in record_ids:
+            failures.add("duplicate_record_id")
+        record_ids.add(record.record_id)
+        episode_index = (record.episode_id, int(record.step_index))
+        if episode_index in episode_indices:
+            failures.add("duplicate_episode_index")
+        episode_indices.add(episode_index)
+        if record.episode_id in boundary_seen:
+            failures.add("nonfinal_episode_boundary")
+        if record.terminal or record.truncated:
+            boundary_seen.add(record.episode_id)
+        episode_ids.add(record.episode_id)
+        task_ids.add(record.task_id)
+        if record.task_id not in allowed_tasks[record.split]:
+            failures.add("task_split_membership_mismatch")
+        module_count = _record_module_count(record)
+        if module_count is not None and not (
+            stage.min_modules <= module_count <= stage.max_modules
+        ):
+            failures.add("morphology_module_count_outside_stage")
+        behavior = record.behavior_trace
+        if behavior is None:
+            failures.add("pi_l_bc_missing_teacher_behavior")
+        elif behavior.stochastic:
+            stochastic += 1
+            failures.add("bc_contains_stochastic_behavior")
+        else:
+            deterministic += 1
+        if stage.phase_conditioned_actor_required and any(
+            value is None
+            for value in (
+                record.task_type,
+                record.task_adapter_id,
+                record.phase_index,
+                record.phase_count,
+            )
+        ):
+            failures.add("pi_l_bc_missing_task_phase_context")
+        if (
+            record.task_adapter_id is not None
+            and record.task_adapter_id not in stage.task_adapter_ids
+        ):
+            failures.add("task_adapter_outside_stage")
+        if record.reward is None:
+            failures.add("pi_l_bc_missing_reward")
+
+    record_count = sum(counts.values())
+    if record_count == 0:
+        failures.add("required_record_kind_empty")
+    if counts[DatasetSplit.TRAIN] == 0:
+        failures.add("train_split_empty")
+    if counts[DatasetSplit.VALIDATION] == 0:
+        failures.add("validation_split_empty")
+    result = Order9DatasetStageValidation(
+        stage_id=stage.stage_id,
+        valid=not failures,
+        failures=sorted(failures),
+        record_count=record_count,
+        episode_count=len(episode_ids),
+        task_count=len(task_ids),
+        stochastic_record_count=stochastic,
+        deterministic_teacher_record_count=deterministic,
+        metadata={
+            "dataset_io_version": ORDER9_DATASET_IO_VERSION,
+            "manifest_sha256": index.manifest_sha256,
+            "streaming_validation": True,
+            "train_record_count": counts[DatasetSplit.TRAIN],
+            "validation_record_count": counts[DatasetSplit.VALIDATION],
+            "held_out_record_count": counts[DatasetSplit.HELD_OUT],
+        },
+    )
+    result.validate()
+    return result
 
 
 def validate_order9_dataset_for_stage(
@@ -402,7 +569,10 @@ def _resolve_shard_path(raw: str, manifest_dir: Path) -> Path:
 
 
 def _jsonl_rows(path: Path) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
+    return list(_jsonl_row_iter(path))
+
+
+def _jsonl_row_iter(path: Path) -> Iterator[dict[str, object]]:
     opener = gzip.open if path.suffix == ".gz" else open
     with opener(path, "rt", encoding="utf-8") as handle:
         for line_number, line in enumerate(handle, start=1):
@@ -413,8 +583,7 @@ def _jsonl_rows(path: Path) -> list[dict[str, object]]:
                 raise SchemaValidationError(
                     f"Order9 dataset {path}:{line_number} must contain an object"
                 )
-            rows.append(value)
-    return rows
+            yield value
 
 
 def _record_from_payload(kind: DatasetKind, raw: dict[str, object]):

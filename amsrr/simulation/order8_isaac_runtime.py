@@ -11,6 +11,7 @@ from dataclasses import asdict, dataclass, replace
 import json
 import math
 from pathlib import Path
+import struct
 import sys
 import time
 from typing import Any, Collection, Mapping, Sequence
@@ -38,7 +39,10 @@ from amsrr.geometry.pose_math import (
 from amsrr.geometry.contact_material import combine_friction
 from amsrr.schemas.common import Pose7D, SchemaValidationError
 from amsrr.schemas.morphology import MorphologyGraph
-from amsrr.schemas.order8 import Order8NaturalContactPhase
+from amsrr.schemas.order8 import (
+    ORDER8_LIFT_ACQUISITION_CLEARANCE_MARGIN_M,
+    Order8NaturalContactPhase,
+)
 from amsrr.schemas.policies import ControllerStatus
 from amsrr.schemas.runtime import (
     ModuleRuntimeState,
@@ -86,6 +90,7 @@ ORDER8_OBJECT_SUPPORT_PATH = "/World/Order8/ObjectSupport"
 ORDER8_GRASP_ADDITIONAL_FLOOR_CLEARANCE_M = 0.010
 ORDER8_NEAR_CONTACT_DIAGNOSTIC_WARMUP_S = 0.50
 ORDER8_PRELIFT_RELATIVE_SPEED_FRACTION = 0.50
+ORDER8_PRELIFT_FULL_RELATIVE_SPEED_FRACTION = 1.50
 # A positive geometric gap at this scale is well outside the penetration-noise
 # floor used by the Order-8 monitor while remaining small relative to the
 # planned 100 mm lift.  It confirms that the support can no longer carry the
@@ -128,6 +133,22 @@ def _clip(value: float, lower: float, upper: float) -> float:
     """Return ``value`` clipped to the inclusive finite scalar interval."""
 
     return max(float(lower), min(float(upper), float(value)))
+
+
+def _physx_material_readback_matches(
+    readback: float | None,
+    configured: float,
+) -> bool:
+    """Accept exactly the configured value or its USD float32 round-trip."""
+
+    if readback is None:
+        return False
+    actual = float(readback)
+    expected = float(configured)
+    if not math.isfinite(actual) or not math.isfinite(expected):
+        return False
+    expected_float32 = struct.unpack("=f", struct.pack("=f", expected))[0]
+    return actual == expected or actual == expected_float32
 
 
 def _vector_world_to_pose_local(
@@ -248,6 +269,27 @@ def _prelift_relative_speed_threshold_mps(
             "Order8 maintained-contact slip limit must be finite and positive"
         )
     return ORDER8_PRELIFT_RELATIVE_SPEED_FRACTION * limit
+
+
+def _prelift_full_relative_speed_threshold_mps(
+    *,
+    maintained_contact_slip_limit_mps: float,
+) -> float:
+    """Bound full mesh-point motion while normal settle remains stricter.
+
+    A larger box can retain a stationary physical patch while its sampled
+    authored-mesh point has bounded tangential rigid-body motion.  The normal
+    component still uses the half-slip-limit threshold above; this secondary
+    full-vector bound rejects gross motion without confusing rolling motion
+    with contact separation.
+    """
+
+    limit = float(maintained_contact_slip_limit_mps)
+    if not math.isfinite(limit) or limit <= 0.0:
+        raise SchemaValidationError(
+            "Order8 maintained-contact slip limit must be finite and positive"
+        )
+    return ORDER8_PRELIFT_FULL_RELATIVE_SPEED_FRACTION * limit
 
 
 def _advance_loaded_state_rebase_settle_dwell(
@@ -3441,19 +3483,13 @@ def run_order8_isaac_runtime(
         .Get()
     )
     selected_gripper_compliant_contact_audit_passed = bool(
-        selected_gripper_compliant_contact_stiffness is not None
-        and selected_gripper_compliant_contact_damping is not None
-        and math.isclose(
-            float(selected_gripper_compliant_contact_stiffness),
-            float(config.selected_gripper_compliant_contact_stiffness_n_per_m),
-            rel_tol=0.0,
-            abs_tol=1.0e-9,
+        _physx_material_readback_matches(
+            selected_gripper_compliant_contact_stiffness,
+            config.selected_gripper_compliant_contact_stiffness_n_per_m,
         )
-        and math.isclose(
-            float(selected_gripper_compliant_contact_damping),
-            float(config.selected_gripper_compliant_contact_damping_n_s_per_m),
-            rel_tol=0.0,
-            abs_tol=1.0e-9,
+        and _physx_material_readback_matches(
+            selected_gripper_compliant_contact_damping,
+            config.selected_gripper_compliant_contact_damping_n_s_per_m,
         )
     )
     if not selected_gripper_compliant_contact_audit_passed:
@@ -5315,6 +5351,12 @@ def run_order8_isaac_runtime(
                 )
             order9_teacher_collector.record_command(
                 trajectory=order9_teacher_trajectory,
+                centroidal_reference_pose_world=(
+                    target_centroidal_model.body_pose_world
+                ),
+                centroidal_reference_twist=(
+                    target_centroidal_model.body_twist_world
+                ),
                 policy_command=policy,
                 controller_command=command,
                 actuator_target_record=record.to_dict(),
@@ -5728,9 +5770,18 @@ def run_order8_isaac_runtime(
     nonprivileged_settle_dwell_s = 0.0
     nonprivileged_contact_command_dwell_s = 0.0
     prelift_relative_motion_settle_achieved = False
-    prelift_relative_speed_threshold_mps = _prelift_relative_speed_threshold_mps(
-        maintained_contact_slip_limit_mps=(
-            config.max_tangential_slip_speed_mps
+    prelift_normal_relative_speed_threshold_mps = (
+        _prelift_relative_speed_threshold_mps(
+            maintained_contact_slip_limit_mps=(
+                config.max_tangential_slip_speed_mps
+            )
+        )
+    )
+    prelift_relative_speed_threshold_mps = (
+        _prelift_full_relative_speed_threshold_mps(
+            maintained_contact_slip_limit_mps=(
+                config.max_tangential_slip_speed_mps
+            )
         )
     )
     nonprivileged_release_command_dwell_s = 0.0
@@ -5770,6 +5821,8 @@ def run_order8_isaac_runtime(
     )
     post_qclose_max_measured_joint_speed_radps = 0.0
     post_qclose_position_rebase_step_count = 0
+    post_qclose_surface_region_hold_step_count = 0
+    post_qclose_surface_region_recovery_active = False
     # The historical mesh-tracking IK preload remains disabled.  The active
     # v8 path below continues the one-shot fixed closure direction directly in
     # joint space and freezes each side from damping-compensated actuator load.
@@ -6949,6 +7002,10 @@ def run_order8_isaac_runtime(
             current_anchor_object_relative_speed_mps_by_anchor,
             selected_anchor_ids=selected_anchor_ids,
             speed_threshold_mps=prelift_relative_speed_threshold_mps,
+        ) and _contact_force_hold_settled(
+            current_anchor_object_normal_relative_speed_mps_by_anchor,
+            selected_anchor_ids=selected_anchor_ids,
+            speed_threshold_mps=prelift_normal_relative_speed_threshold_mps,
         )
         diagnostic_prelift_controller_restore_ready = (
             _diagnostic_prelift_controller_restore_ready(
@@ -8983,26 +9040,58 @@ def run_order8_isaac_runtime(
             # mechanism is still moving at that instant, so immediately
             # freezing the absolute positions turns the residual kinetic
             # motion into a large position-servo/contact impulse.  During this
-            # short acquisition-only settle window, continuously rebase the
-            # absolute position channel to the measured q while retaining a
-            # zero velocity target.  Centroidal P/I remains yielded and the
-            # offset-torque channel stays at zero.
-            joint_position_reference_by_id = {
-                joint_id: float(position)
-                for joint_id, position in zip(
-                    joint_vector.joint_ids,
-                    joint_vector.positions_rad,
-                    strict=True,
+            # short acquisition-only settle window, rebase the absolute
+            # position channel to measured q while the two surfaces remain in
+            # the q_close region.  If residual kinetic motion starts opening
+            # the grasp, retain the last in-region position reference instead
+            # of following that escape indefinitely.  This keeps the command
+            # actor-safe and geometry-only while giving the bounded position
+            # drive a restorative error.  Centroidal P/I remains yielded and
+            # the offset-torque channel stays at zero.
+            post_qclose_surface_region_retained = all(
+                gripper_surface_clearance_m_by_anchor[anchor_id]
+                <= float(config.contact_surface_arm_clearance_m)
+                + float(config.contact_closure_inward_overtravel_m)
+                for anchor_id in selected_anchor_ids
+            )
+            if not post_qclose_surface_region_retained:
+                post_qclose_surface_region_recovery_active = True
+            if not post_qclose_surface_region_recovery_active:
+                joint_position_reference_by_id = {
+                    joint_id: float(position)
+                    for joint_id, position in zip(
+                        joint_vector.joint_ids,
+                        joint_vector.positions_rad,
+                        strict=True,
+                    )
+                }
+                grasp_hold_anchor_poses_base = dict(current_anchor_poses_base)
+                commanded_anchor_targets_base = dict(current_anchor_poses_base)
+                post_qclose_position_rebase_step_count += 1
+            else:
+                if not qclose_joint_positions_snapshot:
+                    raise RuntimeError(
+                        "Order8 post-qclose recovery lacks a q_close snapshot"
+                    )
+                joint_position_reference_by_id = dict(
+                    qclose_joint_positions_snapshot
                 )
-            }
-            grasp_hold_anchor_poses_base = dict(current_anchor_poses_base)
-            commanded_anchor_targets_base = dict(current_anchor_poses_base)
+                grasp_hold_anchor_poses_base = dict(
+                    contact_stall_latched_anchor_poses_base
+                )
+                commanded_anchor_targets_base = dict(
+                    contact_stall_latched_anchor_poses_base
+                )
+                post_qclose_surface_region_hold_step_count += 1
+            if grasp_hold_anchor_poses_base is None:
+                raise RuntimeError(
+                    "Order8 post-qclose settle lacks a measured anchor hold"
+                )
             planner_anchor_references = {
                 anchor_id: compose_pose(base_root_pose, pose_base)
-                for anchor_id, pose_base in current_anchor_poses_base.items()
+                for anchor_id, pose_base in grasp_hold_anchor_poses_base.items()
             }
             terminal_anchor_references = dict(planner_anchor_references)
-            post_qclose_position_rebase_step_count += 1
             current_max_joint_speed_radps = max(
                 (abs(float(value)) for value in joint_vector.velocities_radps),
                 default=0.0,
@@ -9017,12 +9106,6 @@ def run_order8_isaac_runtime(
                 speed_threshold_mps=float(
                     config.contact_stall_anchor_speed_threshold_mps
                 ),
-            )
-            post_qclose_surface_region_retained = all(
-                gripper_surface_clearance_m_by_anchor[anchor_id]
-                <= float(config.contact_surface_arm_clearance_m)
-                + float(config.contact_closure_inward_overtravel_m)
-                for anchor_id in selected_anchor_ids
             )
             if (
                 current_max_joint_speed_radps
@@ -9722,7 +9805,9 @@ def run_order8_isaac_runtime(
                     contact_required_motion_safety_authorized
                 ),
                 lift_clearance_reached=(
-                    object_bottom_clearance >= float(config.minimum_lift_clearance_m)
+                    object_bottom_clearance
+                    >= float(config.minimum_lift_clearance_m)
+                    + ORDER8_LIFT_ACQUISITION_CLEARANCE_MARGIN_M
                 ),
                 transport_distance_reached=(
                     transport_distance >= float(config.required_transport_distance_m)
@@ -9959,6 +10044,8 @@ def run_order8_isaac_runtime(
             )
             + " prelift_relative_speed_threshold="
             + f"{prelift_relative_speed_threshold_mps:.4f}mps"
+            + " prelift_normal_relative_speed_threshold="
+            + f"{prelift_normal_relative_speed_threshold_mps:.4f}mps"
             + " anchor_object_normal_relative_speed_by_anchor="
             + ",".join(
                 f"{anchor_id}:{current_anchor_object_normal_relative_speed_mps_by_anchor[anchor_id]:.4f}"
@@ -11004,7 +11091,9 @@ def run_order8_isaac_runtime(
                         current_anchor_object_relative_speed_mps_by_anchor
                     ),
                     selected_anchor_ids=selected_anchor_ids,
-                    speed_threshold_mps=prelift_relative_speed_threshold_mps,
+                    speed_threshold_mps=(
+                        prelift_normal_relative_speed_threshold_mps
+                    ),
                     dt_s=sim_dt,
                 )
             )
@@ -11052,7 +11141,13 @@ def run_order8_isaac_runtime(
             external_wrench_estimate=last_external_wrench_estimate,
             base_twist_world=base_twist,
             zero_thrust=diagnostic_kinematic_base_isolation,
-            order9_teacher_trajectory=trajectory,
+            # The ordinary Order-8 acceptance path has no teacher collector.
+            # Supply the semantic trajectory only when its matching collector
+            # is active; otherwise apply_commands must remain a pure control
+            # application path.
+            order9_teacher_trajectory=(
+                trajectory if order9_teacher_collector is not None else None
+            ),
         )
         current_time_s += sim_dt
 
@@ -11119,6 +11214,10 @@ def run_order8_isaac_runtime(
     collision_info = collision_approximation_evidence
     order9_teacher_episode_manifest_path: str | None = None
     if order9_teacher_collector is not None:
+        from amsrr.training.order9_c0_curriculum import order9_c0_condition_id
+        from amsrr.training.order9_curriculum import (
+            ORDER9_C0_COLLECTION_PROFILE_VERSION,
+        )
         from amsrr.training.order9_teacher_collection import (
             write_order9_teacher_episode,
         )
@@ -11184,6 +11283,34 @@ def run_order8_isaac_runtime(
             ),
             metadata={
                 "teacher_task_id": order9_teacher_task_id,
+                "c0_collection_profile_version": (
+                    ORDER9_C0_COLLECTION_PROFILE_VERSION
+                ),
+                "c0_condition_id": order9_c0_condition_id(
+                    config,
+                    random_seed=int(args.order8_seed),
+                ),
+                "teacher_low_level_stride": int(
+                    order9_teacher_collector.config.low_level_stride
+                ),
+                "teacher_high_level_stride": int(
+                    order9_teacher_collector.config.high_level_stride
+                ),
+                "object_mass_kg": float(config.object_mass_kg),
+                "object_size_m": [float(value) for value in config.object_size_m],
+                "initial_object_standoff_m": float(
+                    config.initial_object_standoff_m
+                ),
+                "object_friction": float(config.object_friction),
+                "selected_gripper_friction": float(
+                    config.selected_gripper_friction
+                ),
+                "selected_gripper_contact_stiffness_n_per_m": float(
+                    config.selected_gripper_compliant_contact_stiffness_n_per_m
+                ),
+                "selected_gripper_contact_damping_n_s_per_m": float(
+                    config.selected_gripper_compliant_contact_damping_n_s_per_m
+                ),
                 "source_graph_hash": morphology_graph.stable_hash(),
                 "source_order8_result_hash": result.stable_hash(),
                 "raw_contact_actor_input": False,
@@ -11258,6 +11385,13 @@ def run_order8_isaac_runtime(
             object_support_pose_world
         ),
         "order8_natural_contact_object_support_covers_planned_place_pose": True,
+        "order8_natural_contact_lift_transition_clearance_margin_m": (
+            ORDER8_LIFT_ACQUISITION_CLEARANCE_MARGIN_M
+        ),
+        "order8_natural_contact_lift_transition_clearance_threshold_m": (
+            float(config.minimum_lift_clearance_m)
+            + ORDER8_LIFT_ACQUISITION_CLEARANCE_MARGIN_M
+        ),
         "order8_state_trace_recorded": state_trace_payload is not None,
         "order8_state_trace_path": (
             None
@@ -11330,7 +11464,7 @@ def run_order8_isaac_runtime(
             ORDER8_DIAGNOSTIC_LOADED_STATE_REBASE_MIN_HOLD_S
         ),
         "order8_natural_contact_diagnostic_loaded_state_rebase_speed_threshold_mps": (
-            prelift_relative_speed_threshold_mps
+            prelift_normal_relative_speed_threshold_mps
         ),
         "order8_natural_contact_diagnostic_loaded_state_rebase_required_speed_dwell_s": (
             float(config.contact_stall_dwell_s)
@@ -12478,11 +12612,15 @@ def run_order8_isaac_runtime(
             nonprivileged_contact_command_dwell_s
         ),
         "order8_natural_contact_prelift_relative_motion_settle_method": (
-            "all_selected_nonprivileged_surface_point_object_relative_speed_"
-            "below_half_slip_limit_for_contact_dwell_v2"
+            "all_selected_nonprivileged_surface_point_object_full_speed_below_"
+            "bounded_rolling_limit_and_normal_speed_below_half_slip_limit_for_"
+            "contact_dwell_v3"
         ),
         "order8_natural_contact_prelift_relative_speed_threshold_mps": (
             prelift_relative_speed_threshold_mps
+        ),
+        "order8_natural_contact_prelift_normal_relative_speed_threshold_mps": (
+            prelift_normal_relative_speed_threshold_mps
         ),
         "order8_natural_contact_prelift_relative_motion_settle_achieved": (
             prelift_relative_motion_settle_achieved
@@ -12579,6 +12717,12 @@ def run_order8_isaac_runtime(
         "order8_natural_contact_post_qclose_position_rebase_step_count": (
             post_qclose_position_rebase_step_count
         ),
+        "order8_natural_contact_post_qclose_surface_region_hold_step_count": (
+            post_qclose_surface_region_hold_step_count
+        ),
+        "order8_natural_contact_post_qclose_surface_region_recovery_used": (
+            post_qclose_surface_region_recovery_active
+        ),
         "order8_natural_contact_post_qclose_geometric_preload_complete": (
             post_qclose_geometric_preload_complete
         ),
@@ -12645,8 +12789,9 @@ def run_order8_isaac_runtime(
             "not_applicable_replaced_by_joint_space_load_limited_preload_v5"
         ),
         "order8_natural_contact_post_qclose_settle_method": (
-            "measured_absolute_joint_position_rebase_zero_velocity_target_"
-            "before_slow_previous_target_position_preload_v2"
+            "surface_region_guarded_measured_absolute_joint_position_rebase_"
+            "with_qclose_snapshot_recovery_zero_velocity_target_before_slow_"
+            "previous_target_position_preload_v4"
         ),
         "order8_natural_contact_contact_closure_reason": contact_closure_reason,
         "order8_natural_contact_contact_stall_latched": contact_stall_latched,

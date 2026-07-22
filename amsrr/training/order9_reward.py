@@ -10,6 +10,9 @@ from amsrr.schemas.common import SchemaBase, SchemaValidationError, require_non_
 from amsrr.schemas.policies import ControllerCommand
 from amsrr.schemas.runtime import RuntimeObservation
 from amsrr.schemas.task_spec import TaskSpec, TaskType
+from amsrr.simulation.order9_object_task_runtime import (
+    ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS,
+)
 from amsrr.training.p4_3_reward import (
     P4_3RewardConfig,
     compute_p4_3_step_reward,
@@ -107,19 +110,7 @@ class ObjectGraspCarryRewardAdapter:
 
     @property
     def phase_labels(self) -> tuple[str, ...]:
-        return (
-            "approach",
-            "establish_contact",
-            "apply_wrench",
-            "lift",
-            "transport",
-            "place",
-            "release",
-            "retreat",
-            "settle",
-            "complete",
-            "safe_hold",
-        )
+        return ORDER9_OBJECT_TASK_ACTOR_PHASE_LABELS
 
     def canonical_phase(self, phase_label: str) -> str:
         aliases = {

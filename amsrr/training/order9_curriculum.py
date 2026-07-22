@@ -15,7 +15,8 @@ from amsrr.training.order9_randomization import (
 from amsrr.utils.config import load_config
 
 
-ORDER9_CURRICULUM_VERSION = "order9_curriculum_v1"
+ORDER9_CURRICULUM_VERSION = "order9_curriculum_v2"
+ORDER9_C0_COLLECTION_PROFILE_VERSION = "order9_c0_bounded_diversity_v1"
 
 
 class Order9LearningMode(StrEnum):
@@ -51,6 +52,58 @@ class ObjectDistributionLevel(StrEnum):
 class AssemblyEvaluationMode(StrEnum):
     SEPARATE = "separate"
     SUBSET_END_TO_END = "subset_end_to_end"
+
+
+@dataclass
+class Order9TeacherCollectionRuntimeConfig(SchemaBase):
+    """High-fidelity C0 collection budget, split, and execution profile."""
+
+    profile_version: str = ORDER9_C0_COLLECTION_PROFILE_VERSION
+    episode_count: int = 20
+    validation_episode_count: int = 3
+    held_out_episode_count: int = 3
+    low_level_stride: int = 5
+    high_level_stride: int = 5
+    parallel_process_count: int = 2
+    condition_distribution: ObjectDistributionLevel = (
+        ObjectDistributionLevel.CONSERVATIVE_ORDER8_ANCHOR
+    )
+
+    def validate(self) -> None:
+        if self.profile_version != ORDER9_C0_COLLECTION_PROFILE_VERSION:
+            raise SchemaValidationError(
+                "Order9 C0 teacher collection profile version mismatch"
+            )
+        if self.episode_count < 5:
+            raise SchemaValidationError(
+                "Order9 C0 requires nominal plus four conservative boundary episodes"
+            )
+        if min(self.validation_episode_count, self.held_out_episode_count) < 1:
+            raise SchemaValidationError(
+                "Order9 C0 validation and held-out episode counts must be positive"
+            )
+        if (
+            self.validation_episode_count + self.held_out_episode_count
+            >= self.episode_count
+        ):
+            raise SchemaValidationError(
+                "Order9 C0 split must leave at least one training episode"
+            )
+        if min(
+            self.low_level_stride,
+            self.high_level_stride,
+            self.parallel_process_count,
+        ) < 1:
+            raise SchemaValidationError(
+                "Order9 C0 strides and parallel process count must be positive"
+            )
+        if (
+            self.condition_distribution
+            != ObjectDistributionLevel.CONSERVATIVE_ORDER8_ANCHOR
+        ):
+            raise SchemaValidationError(
+                "Order9 C0 conditions must remain in the conservative Order8 anchor"
+            )
 
 
 @dataclass
@@ -273,6 +326,7 @@ class Order9BCOptimizationConfig(SchemaBase):
     max_grad_norm: float = 0.5
     sequence_length: int = 16
     burn_in_steps: int = 4
+    phase_balanced_sampling: bool = False
 
     def validate(self) -> None:
         if self.epochs < 1 or self.batch_size < 1 or self.sequence_length < 1:
@@ -532,6 +586,9 @@ class Order9LearningConfig(SchemaBase):
     curriculum: Order9CurriculumSchedule
     runtime_benchmark: Order9RuntimeBenchmarkConfig
     randomization: Order9ConservativeRandomizationConfig
+    teacher_collection: Order9TeacherCollectionRuntimeConfig = field(
+        default_factory=Order9TeacherCollectionRuntimeConfig
+    )
     expanded_randomization: Order9ExpandedObjectRandomizationConfig = field(
         default_factory=Order9ExpandedObjectRandomizationConfig
     )
@@ -546,6 +603,20 @@ class Order9LearningConfig(SchemaBase):
     )
 
     def validate(self) -> None:
+        self.teacher_collection.validate()
+        c0 = self.curriculum.stages[0]
+        if c0.minimum_episodes != self.teacher_collection.episode_count:
+            raise SchemaValidationError(
+                "Order9 C0 stage minimum_episodes must match teacher collection count"
+            )
+        if c0.object_distribution != self.teacher_collection.condition_distribution:
+            raise SchemaValidationError(
+                "Order9 C0 stage distribution must match teacher collection conditions"
+            )
+        if not self.optimization.pi_l_bc.phase_balanced_sampling:
+            raise SchemaValidationError(
+                "Order9 C1 pi_L BC requires phase-balanced teacher sampling"
+            )
         for stage in self.curriculum.stages:
             runtime = resolve_order9_stage_runtime(self, stage)
             if runtime.generation_environment_steps is None:
