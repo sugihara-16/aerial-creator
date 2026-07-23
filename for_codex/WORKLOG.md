@@ -2,6 +2,20 @@
 
 ## Global Worklog
 
+### 2026-07-23 (Order 9 C2 bounded extension and formal promotion)
+- Spec/work package: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the user-approved Order 9 supplements; Agent J/K fixed-morphology `pi_L` PPO recovery after the configured C2 quota and checkpoint audit.
+- Scope/result: Added a fail-closed operational extension count without changing the hash-bound curriculum YAML, then resumed the exact update-45 lineage for four fresh paired train/validation generations.  Updates `46--49` added `262,144` interactions and brought the recorded total to `3,276,800`; learning rate `1e-5`, all other PPO settings, reward, phase-balanced sampling, randomization, QPID/QP/safety, and the `0.85` promotion gate remained unchanged.
+- Training evidence: All four updates completed four epochs with no KL early stop.  Approximate KL values were `0.007399/0.006970/0.006041/0.006055`, clip fractions were `0.09795/0.08911/0.06904/0.06971`, and checkpoint lineage ended at update 49 SHA-256 `85474d9da96a6eb729e7f21fae5f7628fd0d9defc39488c74fe71e10476c6274`.
+- Runtime evidence: The four generations took `2170.97 s` total.  Mean train/validation rollout-only throughput was `6241.89/5967.22 env-step/s`, mean end-to-end throughput was `326.08/326.32 env-step/s`, rollout GPU utilization averaged approximately `61.67/62.36%`, VRAM peaked at `12171 MiB`, and temperature peaked at `51 C`.  TensorBoard remained live at the existing stage log directory.
+- Evaluation/promotion: The acceptance-ineligible same-seed control improved from update 45's bucket 8/9 `8/8 + 2/8` to update 49's `8/8 + 8/8`.  The subsequent acceptance-eligible deterministic phase-zero first-terminal real-Isaac full-mesh evaluation passed bucket 8/9 at `100/100 + 100/100`, with zero fallback and safety failures.  The typed report measured success/no-fallback success `1.0/1.0` and aggregate training throughput `5854.253 env-step/s`; the unchanged pipeline formally promoted C2 with no failed gate.
+- Artifacts: Final bucket 8 raw/JSONL SHA-256 values are `049517d9.../f77c9f3d...`; bucket 9 values are `3bff55e8.../ef0ffef1...`; evaluation report/promotion manifest values are `f1e12330.../1572587d...`.  The ignored `extension_update_000049_summary.json` binds the complete evidence at SHA-256 `ca7b5779d4479bc7e0aa22f8ed539f56f84f271ac95c2fa40d412a19aa990698`.
+- Files changed: `amsrr/training/order9_pi_l_stage_runner.py`, `scripts/order9_run_pi_l_ppo_stage.py`, `tests/unit/training/test_order9_pi_l_stage_runner.py`, the design supplement, and this worklog.  Generated rollout/dataset/checkpoint/evaluation/promotion evidence remains ignored under the C2 artifact tree.
+- Schema/interface changes: No policy, observation/action, controller, reward, randomization, checkpoint, dataset, or promotion schema changed.  The stage runner version moved to `v2` with one additive operational CLI argument and additive runner-state provenance; zero retains the original quota behavior.
+- Upstream/downstream impact: Uses promoted C1, updates `0--45`, immutable rollout buckets, exact behavior replay, and existing full-mesh promotion logic.  C2 is now a promoted upstream dependency; C3 is eligible but was not started.  Its arbitrary-morphology parallelism remains subject to the existing measured-runtime selection contract rather than silently inheriting C2's `2048`.
+- Verification/commands: Extension-focused runner/online-training/curriculum tests passed `11`; Python compilation and `git diff --check` passed.  Final `isaaclab3` full unit suite passed `1199` with `1` skip in `94.79 s`.  A base-Python suite reached `1196 passed, 3 skipped` with one expected optional-`trimesh` dependency failure and is not the authoritative environment result.  Both 16-episode control evaluators, both 100-episode formal evaluators, report construction, and finalization exited zero.
+- Assumptions/limitations/blocker: The extension decision applies only to C2 and does not establish a general automatic budget-extension or checkpoint-selection rule.  Formal evidence covers the two configured conservative validation buckets, not C3's arbitrary-morphology distribution.  No current C2 blocker remains.
+- Next step: Preserve update 49 and its promoted manifest as the only accepted C2 handoff, review C2 telemetry when choosing C3 environment parallelism, and begin C3 only as a separate work package.
+
 ### 2026-07-23 (Order 9 C2 checkpoint audit)
 - Spec/work package: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus approved Order 9 supplements; Agent J/K C2 diagnostic checkpoint audit after the failed final promotion gate.
 - Scope/result: Added an acceptance-ineligible canonical single-phase diagnostic mode, then rejected it for checkpoint ranking because both transport-only and lift-to-transport runs produced the opposite bucket ordering from end-to-end execution.  Normal training remains phase-balanced, formal evaluation remains deterministic phase-zero/first-terminal, and a diagnostic phase cannot emit promotion JSONL.
@@ -4003,6 +4017,17 @@
 - Open questions: None for this work package. Statistical robustness across a larger held-out morphology cohort belongs to later training/evaluation, not this deterministic smoke completion.
 
 ### Agent J/K: Order 9 learned curriculum and physical execution
+
+#### 2026-07-23 (C2 bounded extension and promotion)
+- Scope: Execute the user-approved same-hyperparameter extension after the configured C2 quota failed, use a bounded four-update control interval, and rerun formal promotion only after a same-seed full-task improvement.
+- Upstream dependencies: Promoted C1; contiguous C2 updates `0--45`; final-checkpoint audit; fixed 8/2 rollout buckets; exact recurrent behavior replay; phase-conditioned `pi_L`; unchanged reward, QPID/QP/safety, full-mesh asset, and stage gates.
+- Implemented/evidence: Added a schedule-hash-preserving complete-generation extension to the resumable runner; completed updates `46--49`; produced update-49 checkpoint SHA-256 `85474d9d...`; improved the fixed 16-episode control from `10/16` to `16/16`; completed `200/200` formal real-Isaac successes with zero fallback/safety failure; and emitted a promoted C2 manifest with no failed gate.
+- Runtime: Added `262,144` interactions for `3,276,800` cumulative.  Four generations took `2170.97 s`; rollout VRAM peaked at `12171 MiB`; formal 100+100 evaluation completed in parallel in `1836.70 s`.  PPO KL remained `0.00604--0.00740` against target `0.02`, so no learning-parameter change was needed.
+- Files changed: Stage runner, runner CLI, runner test, design supplement, and worklog; ignored C2 training/control/formal/promotion artifacts.
+- Schema/interface changes: None to persisted learning or control contracts.  Additive runner CLI/state provenance only; the canonical curriculum YAML and schedule hash were preserved.
+- Tests passed: Focused `11`; final `isaaclab3` full unit suite `1199 passed, 1 skipped`; all real-Isaac control/formal processes and typed report/finalization commands exited zero.
+- Handoff: Use only update 49 checkpoint SHA-256 `85474d9d...` together with promotion manifest SHA-256 `1572587d...` as C3 upstream evidence.  Do not reuse the rejected update-45 manifest.  Select C3 parallelism from C2 telemetry under the existing later-stage contract; C3 has not yet started.
+- Open questions: None for C2.  Arbitrary-morphology C3 execution and its parallelism review are the next work package.
 
 #### 2026-07-23 (C2 quota completion and failed physical promotion gate)
 - Scope: Finish the approved `3,000,000`-interaction fixed-morphology `pi_L` PPO budget, perform the required 200-episode real-Isaac validation, and promote only through the unchanged stage gates.
