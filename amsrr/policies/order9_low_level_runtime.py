@@ -23,7 +23,9 @@ from amsrr.policies.morphology_conditioned_low_level_policy import (
     Order3PolicyInference,
 )
 from amsrr.policies.order9_low_level_policy import (
+    ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION,
     ORDER9_GLOBAL_ACTION_NAMES,
+    ORDER9_PI_L_POLICY_VERSION,
     Order9PhaseConditionedActorCritic,
 )
 from amsrr.policies.order9_policy_command import (
@@ -46,9 +48,12 @@ from amsrr.schemas.runtime import RuntimeObservation
 from amsrr.training.order9_checkpoints import load_order9_policy_checkpoint
 
 
-ORDER9_PI_L_RUNTIME_VERSION = "order9_complete_policy_command_pi_l_runtime_v2"
+ORDER9_PI_L_RUNTIME_VERSION = "order9_complete_policy_command_pi_l_runtime_v3"
 ORDER9_PI_L_ACTOR_OBSERVATION_CONTRACT = (
     "task_phase_morphology_centroidal_no_raw_contact_v1"
+)
+ORDER9_ACTIVE_KNOT_PI_L_ACTOR_OBSERVATION_CONTRACT = (
+    "task_phase_complete_active_knot_morphology_controller_no_raw_contact_v2"
 )
 ORDER9_PI_L_CRITIC_OBSERVATION_CONTRACT = (
     "actor_plus_privileged_disturbance_v1"
@@ -320,8 +325,18 @@ class Order9LowLevelRuntimePolicy:
 def _validate_checkpoint_contracts(
     metadata: Order9PolicyCheckpointMetadata,
 ) -> None:
+    actor_contracts = {
+        ORDER9_PI_L_POLICY_VERSION: ORDER9_PI_L_ACTOR_OBSERVATION_CONTRACT,
+        ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION: (
+            ORDER9_ACTIVE_KNOT_PI_L_ACTOR_OBSERVATION_CONTRACT
+        ),
+    }
+    if metadata.policy_version not in actor_contracts:
+        raise SchemaValidationError(
+            "Order9 pi_L checkpoint policy version is unsupported"
+        )
     expected = {
-        "actor_observation_contract": ORDER9_PI_L_ACTOR_OBSERVATION_CONTRACT,
+        "actor_observation_contract": actor_contracts[metadata.policy_version],
         "critic_observation_contract": ORDER9_PI_L_CRITIC_OBSERVATION_CONTRACT,
         "action_contract": ORDER9_PI_L_ACTION_CONTRACT,
     }
@@ -338,6 +353,7 @@ def _validate_checkpoint_contracts(
 
 
 __all__ = [
+    "ORDER9_ACTIVE_KNOT_PI_L_ACTOR_OBSERVATION_CONTRACT",
     "ORDER9_PI_L_ACTION_CONTRACT",
     "ORDER9_PI_L_ACTOR_OBSERVATION_CONTRACT",
     "ORDER9_PI_L_CRITIC_OBSERVATION_CONTRACT",

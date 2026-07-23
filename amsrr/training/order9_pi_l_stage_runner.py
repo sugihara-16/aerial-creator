@@ -23,18 +23,23 @@ from amsrr.schemas.datasets import DatasetSplit
 from amsrr.schemas.order9 import Order9PolicyFamily
 from amsrr.schemas.task_spec import TaskSpec
 from amsrr.simulation.order9_object_task_state import load_order9_canonical_reset
-from amsrr.training.order9_checkpoints import load_order9_policy_checkpoint
 from amsrr.training.order9_curriculum import (
     Order9LearningConfig,
     Order9LearningMode,
     Order9LearningTarget,
+    require_order9_stage_execution_allowed,
     resolve_order9_stage_runtime,
+)
+from amsrr.training.order9_curriculum_lineage import (
+    load_order9_stage_parent_checkpoint,
 )
 from amsrr.training.order9_dataset import load_order9_dataset_index
 from amsrr.training.order9_online_training import Order9OnlineTrainingResult
 from amsrr.training.order9_pipeline import order9_schedule_hash, order9_stage_by_id
 from amsrr.training.order9_randomization import Order9ConservativeRandomizer
 from amsrr.training.order9_rollout_buckets import (
+    ORDER9_C3_BUCKET_PRECHECK_VERSION,
+    ORDER9_C3_STAGE_ID,
     Order9PiLRolloutBucket,
     Order9PiLRolloutBucketManifest,
     load_order9_pi_l_rollout_bucket_manifest,
@@ -136,6 +141,7 @@ def resolve_order9_pi_l_stage_plan(
 ) -> Order9PiLStagePlan:
     config.validate()
     stage = order9_stage_by_id(config, stage_id)
+    require_order9_stage_execution_allowed(config, stage)
     if (
         stage.learning_mode != Order9LearningMode.PPO
         or stage.learning_target != Order9LearningTarget.PI_L
@@ -164,10 +170,12 @@ def resolve_order9_pi_l_stage_plan(
     initial = _resolve(initial_checkpoint_path, repository)
     if not initial.is_file():
         raise FileNotFoundError(initial)
-    initial_loaded = load_order9_policy_checkpoint(
+    initial_loaded = load_order9_stage_parent_checkpoint(
+        config,
+        stage,
         initial,
         expected_family=Order9PolicyFamily.PI_L,
-        expected_schedule_hash=order9_schedule_hash(config),
+        update_index=0,
     )
     expected_parent_sha = initial_loaded.sha256
     parent_path = initial
@@ -255,6 +263,29 @@ def validate_order9_pi_l_stage_runner_inputs(
             raise SchemaValidationError(
                 f"Order9 rollout bucket manifest differs at {name}"
             )
+    if stage.stage_id == ORDER9_C3_STAGE_ID:
+        if (
+            manifest.metadata.get("c3_articulated_teacher_prechecked") is not True
+            or manifest.metadata.get("c3_bucket_precheck_version")
+            != ORDER9_C3_BUCKET_PRECHECK_VERSION
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 rollout buckets lack the current articulated-teacher "
+                "precheck"
+            )
+        for bucket in manifest.buckets:
+            topology_metadata = bucket.metadata.get("topology_provider")
+            evidence = (
+                topology_metadata.get("articulated_teacher_precheck")
+                if isinstance(topology_metadata, dict)
+                else None
+            )
+            if not isinstance(evidence, dict) or not evidence.get(
+                "trajectory_hash"
+            ):
+                raise SchemaValidationError(
+                    "Order9 C3 rollout bucket lacks articulated-teacher evidence"
+                )
     _validate_current_bucket_randomization(
         config,
         manifest,
@@ -594,6 +625,14 @@ def _validate_current_bucket_randomization(
                 sample.estimated_mass_properties.center_of_mass_object
             ),
         }
+        topology_metadata = bucket.metadata.get("topology_provider")
+        precheck = (
+            topology_metadata.get("articulated_teacher_precheck")
+            if isinstance(topology_metadata, dict)
+            else None
+        )
+        if precheck is not None:
+            task.metadata["order9_c3_articulated_teacher_precheck"] = precheck
         persisted_task = TaskSpec.from_json(
             (manifest_path.parent / bucket.task_spec_path).read_text(encoding="utf-8")
         )

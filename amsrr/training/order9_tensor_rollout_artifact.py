@@ -18,8 +18,14 @@ from typing import Any, Mapping, Sequence
 import torch
 
 from amsrr.policies.order9_low_level_policy import (
+    ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION,
     ORDER9_GLOBAL_ACTION_SIZE,
     ORDER9_PI_L_POLICY_VERSION,
+)
+from amsrr.policies.order9_active_knot_features import (
+    ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES,
+    ORDER9_ACTIVE_KNOT_FEATURE_CONTRACT_VERSION,
+    ORDER9_ACTIVE_KNOT_GLOBAL_FEATURE_NAMES,
 )
 from amsrr.schemas.common import ContactMode, SchemaValidationError
 from amsrr.schemas.datasets import (
@@ -33,6 +39,7 @@ from amsrr.schemas.policies import (
     POLICY_COMMAND_CONTRACT_CENTROIDAL,
     CentroidalTarget,
     ContactAssignment,
+    ContactWrenchTrajectory,
     ControllerCommand,
     ControllerStatus,
     InteractionKnot,
@@ -60,15 +67,18 @@ from amsrr.training.order9_ppo import (
 from amsrr.utils.hashing import hash_file
 
 
-ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION = (
+ORDER9_LEGACY_TENSOR_ROLLOUT_ARTIFACT_VERSION = (
     "order9_tensor_isaac_complete_pi_l_rollout_v7_command_body_pose"
 )
+ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION = (
+    "order9_tensor_isaac_complete_pi_l_rollout_v8_active_knot_actor"
+)
 ORDER9_PRODUCTION_COLLECTOR_VERSION = (
-    "order9_vectorized_isaac_complete_pi_l_collector_v8_command_body_pose"
+    "order9_vectorized_isaac_complete_pi_l_collector_v9_active_knot_actor"
 )
 
 
-_REQUIRED_TENSORS = {
+_LEGACY_REQUIRED_TENSORS = {
     "valid",
     "time_s",
     "phase_index",
@@ -131,6 +141,10 @@ _REQUIRED_TENSORS = {
     "post_object_pose_world",
     "post_object_twist_world",
 }
+_REQUIRED_TENSORS = _LEGACY_REQUIRED_TENSORS | {
+    "actor_active_knot_features",
+    "actor_active_assignment_features",
+}
 
 
 @dataclass(frozen=True)
@@ -152,11 +166,18 @@ class Order9TensorRolloutArtifact:
         return int(self.tensors["valid"].sum().item())
 
     def validate(self) -> None:
-        if self.artifact_version != ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION:
+        if self.artifact_version == ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION:
+            required_tensors = _REQUIRED_TENSORS
+        elif (
+            self.artifact_version
+            == ORDER9_LEGACY_TENSOR_ROLLOUT_ARTIFACT_VERSION
+        ):
+            required_tensors = _LEGACY_REQUIRED_TENSORS
+        else:
             raise SchemaValidationError("Order9 tensor rollout version mismatch")
-        if set(self.tensors) != _REQUIRED_TENSORS:
-            missing = sorted(_REQUIRED_TENSORS - set(self.tensors))
-            extra = sorted(set(self.tensors) - _REQUIRED_TENSORS)
+        if set(self.tensors) != required_tensors:
+            missing = sorted(required_tensors - set(self.tensors))
+            extra = sorted(set(self.tensors) - required_tensors)
             raise SchemaValidationError(
                 f"Order9 tensor rollout fields differ: missing={missing}, extra={extra}"
             )
@@ -236,6 +257,36 @@ class Order9TensorRolloutArtifact:
             raise SchemaValidationError(
                 f"Order9 tensor rollout metadata is missing {missing_metadata}"
             )
+        if self.artifact_version == ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION:
+            active_metadata = {
+                "pi_l_policy_version",
+                "active_knot_trajectory_template",
+                "active_knot_feature_contract_version",
+                "active_knot_global_feature_names",
+                "active_assignment_feature_names",
+            }
+            missing_active = sorted(active_metadata - set(self.metadata))
+            if missing_active:
+                raise SchemaValidationError(
+                    "Order9 active-knot rollout metadata is missing "
+                    f"{missing_active}"
+                )
+            if (
+                self.metadata["pi_l_policy_version"]
+                != ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION
+                or self.metadata["active_knot_feature_contract_version"]
+                != ORDER9_ACTIVE_KNOT_FEATURE_CONTRACT_VERSION
+                or tuple(self.metadata["active_knot_global_feature_names"])
+                != ORDER9_ACTIVE_KNOT_GLOBAL_FEATURE_NAMES
+                or tuple(self.metadata["active_assignment_feature_names"])
+                != ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES
+            ):
+                raise SchemaValidationError(
+                    "Order9 active-knot rollout actor contract differs"
+                )
+            ContactWrenchTrajectory.from_dict(
+                self.metadata["active_knot_trajectory_template"]
+            ).validate()
         if self.metadata["raw_contact_actor_input"] is not False:
             raise SchemaValidationError(
                 "Order9 tensor rollout actor must exclude raw contact"
@@ -450,6 +501,22 @@ class Order9TensorRolloutArtifact:
                 3,
             ),
         }
+        if self.artifact_version == ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION:
+            expected.update(
+                {
+                    "actor_active_knot_features": (
+                        steps,
+                        environments,
+                        len(ORDER9_ACTIVE_KNOT_GLOBAL_FEATURE_NAMES),
+                    ),
+                    "actor_active_assignment_features": (
+                        steps,
+                        environments,
+                        module_count,
+                        len(ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES),
+                    ),
+                }
+            )
         for name, shape in expected.items():
             if tuple(tensors[name].shape) != shape:
                 raise SchemaValidationError(
@@ -494,10 +561,22 @@ class Order9TensorRolloutBuffer:
 
     def __init__(self, metadata: Mapping[str, Any]) -> None:
         self.metadata = dict(metadata)
+        self.artifact_version = (
+            ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION
+            if self.metadata.get("pi_l_policy_version")
+            == ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION
+            else ORDER9_LEGACY_TENSOR_ROLLOUT_ARTIFACT_VERSION
+        )
+        self._required_tensors = (
+            _REQUIRED_TENSORS
+            if self.artifact_version
+            == ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION
+            else _LEGACY_REQUIRED_TENSORS
+        )
         self._steps: list[dict[str, torch.Tensor]] = []
 
     def append(self, values: Mapping[str, torch.Tensor]) -> None:
-        if set(values) != _REQUIRED_TENSORS:
+        if set(values) != self._required_tensors:
             raise ValueError("Order9 rollout buffer step fields differ")
         widths = {int(value.shape[0]) for value in values.values()}
         if len(widths) != 1:
@@ -510,12 +589,13 @@ class Order9TensorRolloutBuffer:
         if not self._steps:
             raise ValueError("Order9 rollout buffer is empty")
         artifact = Order9TensorRolloutArtifact(
+            artifact_version=self.artifact_version,
             metadata=dict(self.metadata),
             tensors={
                 name: torch.stack(
                     [step[name] for step in self._steps], dim=0
                 ).to(device="cpu")
-                for name in sorted(_REQUIRED_TENSORS)
+                for name in sorted(self._required_tensors)
             },
         )
         artifact.validate()
@@ -659,11 +739,12 @@ def order9_pi_l_records_from_tensor_artifact(
                 tensors["actor_task_success"][time_index, environment]
             ),
         )
+        schedule_index = int(
+            tensors["contact_schedule_index"][time_index, environment]
+        )
         assignments = _active_assignments(
             templates[environment],
-            schedule_index=int(
-                tensors["contact_schedule_index"][time_index, environment]
-            ),
+            schedule_index=schedule_index,
             selected_mask=tensors["selected_assignment_mask"][
                 time_index, environment
             ],
@@ -684,10 +765,18 @@ def order9_pi_l_records_from_tensor_artifact(
                 com_pos_world=tuple(desired_pose[:3]),
                 com_vel_world=tuple(desired_twist[:3]),
                 body_orientation_world=tuple(desired_pose[3:7]),
-                centroidal_wrench_preference=_float_list(
-                    tensors["controller_desired_wrench_body"][
-                        time_index, environment
-                    ]
+                centroidal_wrench_preference=(
+                    _planned_centroidal_wrench_preference(
+                        metadata,
+                        schedule_index=schedule_index,
+                    )
+                    if artifact.artifact_version
+                    == ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION
+                    else _float_list(
+                        tensors["controller_desired_wrench_body"][
+                            time_index, environment
+                        ]
+                    )
                 ),
             ),
             posture_target=PostureTarget(
@@ -752,33 +841,56 @@ def order9_pi_l_records_from_tensor_artifact(
                 ),
             }
         )
+        policy_version = (
+            str(metadata["pi_l_policy_version"])
+            if artifact.artifact_version
+            == ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION
+            else ORDER9_PI_L_POLICY_VERSION
+        )
+        action_payload = {
+            "global_action": _float_list(
+                tensors["global_action"][time_index, environment]
+            ),
+            "module_ids": list(module_ids),
+            "joint_action": tensors["joint_action"][
+                time_index, environment
+            ].tolist(),
+            "previous_global_action": _float_list(
+                tensors["previous_global_action"][time_index, environment]
+            ),
+            "privileged_disturbance_body": _float_list(
+                tensors["privileged_disturbance_body"][
+                    time_index, environment
+                ]
+            ),
+            "actor_graph_frame_origin_world": _actor_graph_frame_origin(
+                task
+            ),
+            "actor_graph_joint_summary_semantics": (
+                ORDER9_PI_L_GRAPH_JOINT_SUMMARY_NON_FIXED
+            ),
+        }
+        if (
+            artifact.artifact_version
+            == ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION
+        ):
+            action_payload.update(
+                {
+                    "active_knot_features": _float_list(
+                        tensors["actor_active_knot_features"][
+                            time_index, environment
+                        ]
+                    ),
+                    "active_assignment_features": tensors[
+                        "actor_active_assignment_features"
+                    ][time_index, environment].tolist(),
+                }
+            )
         behavior = PolicyBehaviorTrace(
             policy_family="pi_l",
-            policy_version=ORDER9_PI_L_POLICY_VERSION,
+            policy_version=policy_version,
             action_semantics=ORDER9_PI_L_ACTION_SEMANTICS,
-            action_payload={
-                "global_action": _float_list(
-                    tensors["global_action"][time_index, environment]
-                ),
-                "module_ids": list(module_ids),
-                "joint_action": tensors["joint_action"][
-                    time_index, environment
-                ].tolist(),
-                "previous_global_action": _float_list(
-                    tensors["previous_global_action"][time_index, environment]
-                ),
-                "privileged_disturbance_body": _float_list(
-                    tensors["privileged_disturbance_body"][
-                        time_index, environment
-                    ]
-                ),
-                "actor_graph_frame_origin_world": _actor_graph_frame_origin(
-                    task
-                ),
-                "actor_graph_joint_summary_semantics": (
-                    ORDER9_PI_L_GRAPH_JOINT_SUMMARY_NON_FIXED
-                ),
-            },
+            action_payload=action_payload,
             stochastic=True,
             policy_checkpoint_sha256=checkpoint,
             old_log_prob=float(tensors["old_log_prob"][time_index, environment]),
@@ -953,6 +1065,45 @@ def _active_assignments(
         assignment.validate()
         output.append(assignment)
     return output
+
+
+def _planned_centroidal_wrench_preference(
+    metadata: Mapping[str, Any],
+    *,
+    schedule_index: int,
+) -> list[float] | None:
+    trajectory = ContactWrenchTrajectory.from_dict(
+        metadata["active_knot_trajectory_template"]
+    )
+    if schedule_index == 0:
+        knot = trajectory.knots[-1]
+    else:
+        schedule_by_index = {
+            1: "approach",
+            2: "attach",
+            3: "maintain",
+            4: "release",
+        }
+        label = schedule_by_index.get(schedule_index)
+        if label is None:
+            raise SchemaValidationError(
+                "Order9 active-knot contact schedule index is invalid"
+            )
+        knot = next(
+            (
+                candidate
+                for candidate in trajectory.knots
+                if any(
+                    assignment.schedule_state == label
+                    for assignment in candidate.contact_assignments
+                )
+            ),
+            trajectory.knots[-1],
+        )
+    centroidal = knot.centroidal_target
+    if centroidal is None or centroidal.centroidal_wrench_preference is None:
+        return None
+    return [float(value) for value in centroidal.centroidal_wrench_preference]
 
 
 def _joint_target_map(

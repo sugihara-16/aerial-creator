@@ -15,6 +15,10 @@ if str(REPOSITORY_ROOT) not in sys.path:
 
 from amsrr.schemas.order9 import Order9PolicyFamily
 from amsrr.training.order9_curriculum import load_order9_learning_config
+from amsrr.training.order9_curriculum_lineage import (
+    DEFAULT_ORDER9_CURRICULUM_LINEAGE_IMPORT_PATH,
+    validate_order9_curriculum_lineage_import,
+)
 from amsrr.training.order9_evaluation import (
     Order9EvaluationEpisode,
     build_order9_stage_evaluation_report,
@@ -40,6 +44,14 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
 
     commands.add_parser("list", help="Print the validated curriculum stages.")
+    lineage = commands.add_parser(
+        "validate-lineage",
+        help="Validate the immutable v2 C2 -> v3 C3 curriculum import.",
+    )
+    lineage.add_argument(
+        "--lineage-import",
+        default=str(DEFAULT_ORDER9_CURRICULUM_LINEAGE_IMPORT_PATH),
+    )
 
     teacher_evaluation = commands.add_parser(
         "build-teacher-evaluation-episodes",
@@ -94,6 +106,26 @@ def main() -> int:
                 f"{stage.stage_index:02d} {stage.stage_id} "
                 f"{stage.learning_mode.value} {stage.learning_target.value}"
             )
+        return 0
+    if args.command == "validate-lineage":
+        lineage = validate_order9_curriculum_lineage_import(
+            args.lineage_import,
+            successor_config=config,
+        )
+        specification = lineage.specification
+        print(f"import_version: {specification.import_version}")
+        print(f"source_schedule_hash: {specification.source_schedule_hash}")
+        print(
+            f"successor_schedule_hash: {specification.successor_schedule_hash}"
+        )
+        print(
+            "imported_through_stage: "
+            f"{specification.imported_through_stage_index} "
+            f"{specification.imported_through_stage_id}"
+        )
+        print(f"successor_first_stage: {specification.successor_first_stage_id}")
+        print(f"policy_checkpoint_sha256: {specification.policy_checkpoint_sha256}")
+        print("valid: true")
         return 0
     if args.command == "build-teacher-evaluation-episodes":
         manifests = [Path(path) for path in args.episode_manifest]

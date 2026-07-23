@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from typing import Iterable
 
 from amsrr.feasibility.checker import FeasibilityChecker
+from amsrr.geometry.pose_math import pose_from_transform, transform_from_xyz_rpy
 from amsrr.morphology.dock_geometry import (
     modules_with_dock_aligned_poses,
     relative_pose_for_dock_ports,
@@ -34,7 +35,9 @@ from amsrr.schemas.morphology import (
 from amsrr.utils.hashing import stable_hash
 
 
-ORDER9_DESIGN_GRAMMAR_VERSION = "order9_holon_sequential_design_grammar_v1"
+ORDER9_DESIGN_GRAMMAR_VERSION = (
+    "order9_holon_sequential_design_grammar_v2_mesh_anchor_frame"
+)
 
 
 @dataclass(frozen=True)
@@ -646,6 +649,37 @@ class Order9DesignGrammar:
             if port.module_id in same_slot_modules:
                 continue
             physical = physical_by_id[port.port_local_id]
+            connect_joint = next(
+                (
+                    joint
+                    for joint in self.context.physical_model.joints
+                    if joint.joint_id == physical.port_id
+                ),
+                None,
+            )
+            if (
+                connect_joint is None
+                or connect_joint.parent_link != physical.parent_link
+            ):
+                raise SchemaValidationError(
+                    f"Dock surface {physical.port_id!r} has no matching "
+                    "mechanism-link connect frame"
+                )
+            link_local_pose = pose_from_transform(
+                transform_from_xyz_rpy(
+                    connect_joint.origin_xyz,
+                    connect_joint.origin_rpy,
+                )
+            )
+            collision_primitives = [
+                primitive
+                for primitive in self.context.physical_model.collision_primitives
+                if primitive.link_id == physical.parent_link
+            ]
+            if not collision_primitives:
+                raise SchemaValidationError(
+                    f"Dock mechanism link {physical.parent_link!r} is not mesh-backed"
+                )
             capability = {
                 **dict(slot.get("required_anchor_capability", {})),
                 "max_force_n": self.context.task_spec.safety.max_contact_force_n,
@@ -653,6 +687,26 @@ class Order9DesignGrammar:
                 "target_entity_id": slot["target_entity_id"],
                 "contact_mode": str(slot["contact_mode"]),
                 "surface_port_id": port.port_global_id,
+                "mesh_backed_gripper_surface": True,
+                "dock_port_global_id": port.port_global_id,
+                "dock_port_local_id": physical.port_id,
+                "dock_port_type": physical.port_type,
+                "dock_mechanism_link_id": physical.parent_link,
+                "dock_mechanism_joint_id": physical.mechanical_limits.get(
+                    "mechanism_joint_id"
+                ),
+                "dock_collision_primitive_ids": [
+                    primitive.primitive_id
+                    for primitive in collision_primitives
+                ],
+                "dock_collision_geometry_refs": [
+                    primitive.geometry_ref
+                    for primitive in collision_primitives
+                ],
+                "dock_collision_requires_convex_decomposition": any(
+                    primitive.primitive_type == "mesh"
+                    for primitive in collision_primitives
+                ),
             }
             mode = ContactMode(str(slot["contact_mode"]))
             actions.append(
@@ -664,7 +718,7 @@ class Order9DesignGrammar:
                             "module_id": port.module_id,
                             "surface_port_id": port.port_global_id,
                             "link_id": physical.parent_link,
-                            "local_pose": list(physical.local_pose),
+                            "local_pose": list(link_local_pose),
                             "anchor_type": CONTACT_MODE_TO_ANCHOR_TYPE[mode],
                             "capability": capability,
                             "suggested_slot_id": int(slot["slot_id"]),

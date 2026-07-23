@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import pytest
 import torch
+from amsrr.geometry.pose_math import pose_from_transform, transform_from_xyz_rpy
 from amsrr.policies.order9_design_runtime import (
     Order9DesignRuntime,
     Order9DesignRuntimeConfig,
@@ -79,6 +81,27 @@ def test_order9_grammar_replays_teacher_through_real_masks_and_feasible_stop(
         frozenset((edge.src_port_id, edge.dst_port_id))
         for edge in target.target_morphology.dock_edges
     }
+    ports = {
+        port.port_global_id: port
+        for port in design.target_morphology.ports
+    }
+    physical_ports = {
+        port.port_id: port for port in context.physical_model.dock_ports
+    }
+    joints = {joint.joint_id: joint for joint in context.physical_model.joints}
+    for anchor in design.target_morphology.robot_anchors:
+        surface_id = int(anchor.capability["dock_port_global_id"])
+        physical_port = physical_ports[ports[surface_id].port_local_id]
+        connect_joint = joints[physical_port.port_id]
+        expected = pose_from_transform(
+            transform_from_xyz_rpy(
+                connect_joint.origin_xyz,
+                connect_joint.origin_rpy,
+            )
+        )
+        assert anchor.link_id == physical_port.parent_link
+        assert anchor.local_pose == pytest.approx(expected)
+        assert anchor.capability["mesh_backed_gripper_surface"] is True
 
 
 def test_stop_is_masked_before_hard_feasible_design(grasp_carry_dict: dict) -> None:

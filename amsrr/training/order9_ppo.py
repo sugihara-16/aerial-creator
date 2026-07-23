@@ -31,11 +31,17 @@ from amsrr.policies.order9_high_level_policy import (
     Order9PiHActionEvaluation,
 )
 from amsrr.policies.order9_low_level_policy import (
+    ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION,
     ORDER9_GLOBAL_ACTION_SIZE,
     ORDER9_PI_L_POLICY_VERSION,
+    Order9ActiveKnotPhaseConditionedActorCritic,
     Order9LowLevelActorCriticStep,
     Order9PhaseConditionedActorCritic,
     order9_phase_actor_feature_vector,
+)
+from amsrr.policies.order9_active_knot_features import (
+    ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES,
+    ORDER9_ACTIVE_KNOT_GLOBAL_FEATURE_NAMES,
 )
 from amsrr.policies.order9_policy_command import order9_pi_l_reference_command
 from amsrr.schemas.common import SchemaBase, SchemaValidationError
@@ -93,6 +99,8 @@ class _PiLReplayCache:
     actor_features: torch.Tensor
     phase_features: torch.Tensor
     privileged_disturbance_body: torch.Tensor
+    active_knot_features: torch.Tensor | None
+    active_assignment_features: torch.Tensor | None
 
 
 @dataclass
@@ -216,6 +224,9 @@ def order9_pi_l_behavior_trace(
     actor_graph_joint_summary_semantics: str = (
         ORDER9_PI_L_GRAPH_JOINT_SUMMARY_ALL
     ),
+    policy_version: str = ORDER9_PI_L_POLICY_VERSION,
+    active_knot_features: torch.Tensor | None = None,
+    active_assignment_features: torch.Tensor | None = None,
 ) -> PolicyBehaviorTrace:
     module_ids = [
         int(value)
@@ -238,22 +249,44 @@ def order9_pi_l_behavior_trace(
     graph_joint_summary = _graph_joint_summary_semantics(
         actor_graph_joint_summary_semantics
     )
+    payload = {
+        "global_action": step.action[batch_index].detach().cpu().tolist(),
+        "module_ids": module_ids,
+        "joint_action": joint_rows,
+        "previous_global_action": previous_global_action[batch_index]
+        .detach()
+        .cpu()
+        .tolist(),
+        "privileged_disturbance_body": privileged,
+        "actor_graph_frame_origin_world": graph_origin,
+        "actor_graph_joint_summary_semantics": graph_joint_summary,
+    }
+    if policy_version == ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION:
+        if active_knot_features is None or active_assignment_features is None:
+            raise SchemaValidationError(
+                "Order9 active-knot behavior trace lacks actor context"
+            )
+        payload["active_knot_features"] = (
+            active_knot_features[batch_index].detach().cpu().tolist()
+        )
+        payload["active_assignment_features"] = (
+            active_assignment_features[
+                batch_index, : len(module_ids)
+            ].detach().cpu().tolist()
+        )
+    elif (
+        active_knot_features is not None
+        or active_assignment_features is not None
+        or policy_version != ORDER9_PI_L_POLICY_VERSION
+    ):
+        raise SchemaValidationError(
+            "Order9 pi_L behavior trace policy/context versions differ"
+        )
     return PolicyBehaviorTrace(
         policy_family="pi_l",
-        policy_version=ORDER9_PI_L_POLICY_VERSION,
+        policy_version=policy_version,
         action_semantics=ORDER9_PI_L_ACTION_SEMANTICS,
-        action_payload={
-            "global_action": step.action[batch_index].detach().cpu().tolist(),
-            "module_ids": module_ids,
-            "joint_action": joint_rows,
-            "previous_global_action": previous_global_action[batch_index]
-            .detach()
-            .cpu()
-            .tolist(),
-            "privileged_disturbance_body": privileged,
-            "actor_graph_frame_origin_world": graph_origin,
-            "actor_graph_joint_summary_semantics": graph_joint_summary,
-        },
+        action_payload=payload,
         stochastic=True,
         policy_checkpoint_sha256=checkpoint_sha256,
         old_log_prob=float(step.log_prob[batch_index].detach().cpu().item()),
@@ -301,19 +334,53 @@ def order9_pi_l_behavior_trace_from_inference(
     graph_joint_summary = _graph_joint_summary_semantics(
         actor_graph_joint_summary_semantics
     )
+    policy_version = inference.policy_version or ORDER9_PI_L_POLICY_VERSION
+    payload = {
+        "global_action": list(inference.normalized_action),
+        "module_ids": module_ids,
+        "joint_action": [list(row) for row in inference.normalized_joint_action],
+        "previous_global_action": list(inference.previous_action),
+        "privileged_disturbance_body": privileged,
+        "actor_graph_frame_origin_world": graph_origin,
+        "actor_graph_joint_summary_semantics": graph_joint_summary,
+    }
+    if policy_version == ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION:
+        if (
+            len(inference.active_knot_features)
+            != len(ORDER9_ACTIVE_KNOT_GLOBAL_FEATURE_NAMES)
+            or len(inference.active_assignment_features) != len(module_ids)
+            or any(
+                len(row) != len(ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES)
+                for row in inference.active_assignment_features
+            )
+        ):
+            raise SchemaValidationError(
+                "Order9 active-knot inference trace context shape differs"
+            )
+        payload.update(
+            {
+                "active_knot_features": list(
+                    inference.active_knot_features
+                ),
+                "active_assignment_features": [
+                    list(row)
+                    for row in inference.active_assignment_features
+                ],
+            }
+        )
+    elif (
+        policy_version != ORDER9_PI_L_POLICY_VERSION
+        or inference.active_knot_features
+        or inference.active_assignment_features
+    ):
+        raise SchemaValidationError(
+            "Order9 inference behavior policy/context versions differ"
+        )
     return PolicyBehaviorTrace(
         policy_family="pi_l",
-        policy_version=ORDER9_PI_L_POLICY_VERSION,
+        policy_version=policy_version,
         action_semantics=ORDER9_PI_L_ACTION_SEMANTICS,
-        action_payload={
-            "global_action": list(inference.normalized_action),
-            "module_ids": module_ids,
-            "joint_action": [list(row) for row in inference.normalized_joint_action],
-            "previous_global_action": list(inference.previous_action),
-            "privileged_disturbance_body": privileged,
-            "actor_graph_frame_origin_world": graph_origin,
-            "actor_graph_joint_summary_semantics": graph_joint_summary,
-        },
+        action_payload=payload,
         stochastic=True,
         policy_checkpoint_sha256=checkpoint_sha256,
         old_log_prob=float(inference.log_prob),
@@ -733,6 +800,7 @@ def _pi_l_sequence_ppo_step(
             privileged_disturbance_body=privileged,
             action=global_action,
             joint_action=joint_action,
+            **_pi_l_active_cached_kwargs(records, replay_cache),
         )
         new_log_probs.extend(step.log_prob.unbind(0))
         old_log_probs.extend(float(trace.old_log_prob) for trace in traces)
@@ -796,6 +864,11 @@ def _build_pi_l_replay_cache(
     actor_rows = []
     phase_rows = []
     privileged_rows = []
+    active_global_rows: list[list[float]] = []
+    active_node_rows: list[list[list[float]]] = []
+    active_policy = isinstance(
+        policy, Order9ActiveKnotPhaseConditionedActorCritic
+    )
     for index, record in enumerate(records):
         if record.record_id in index_by_record_id:
             raise SchemaValidationError(
@@ -824,6 +897,38 @@ def _build_pi_l_replay_cache(
         if not isinstance(privileged, list) or len(privileged) != 6:
             raise SchemaValidationError("Order9 pi_L behavior lacks privileged critic input")
         privileged_rows.append(privileged)
+        if active_policy:
+            if trace.policy_version != ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION:
+                raise SchemaValidationError(
+                    "Order9 active-knot PPO behavior policy version differs"
+                )
+            active_global = trace.action_payload.get("active_knot_features")
+            active_nodes = trace.action_payload.get(
+                "active_assignment_features"
+            )
+            if (
+                not isinstance(active_global, list)
+                or len(active_global)
+                != len(ORDER9_ACTIVE_KNOT_GLOBAL_FEATURE_NAMES)
+                or not isinstance(active_nodes, list)
+                or len(active_nodes)
+                != len(context.morphology_graph.modules)
+                or any(
+                    not isinstance(row, list)
+                    or len(row)
+                    != len(ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES)
+                    for row in active_nodes
+                )
+            ):
+                raise SchemaValidationError(
+                    "Order9 active-knot PPO actor context shape differs"
+                )
+            active_global_rows.append(active_global)
+            active_node_rows.append(active_nodes)
+        elif trace.policy_version != ORDER9_PI_L_POLICY_VERSION:
+            raise SchemaValidationError(
+                "Order9 legacy pi_L PPO behavior policy version differs"
+            )
         actor_observations.append(
             _pi_l_actor_graph_observation(
                 context.runtime_observation,
@@ -834,6 +939,22 @@ def _build_pi_l_replay_cache(
     actor = torch.tensor(actor_rows, device=device, dtype=dtype)
     if actor.shape[1] != len(ORDER3_ACTOR_FEATURE_NAMES):
         raise RuntimeError("Order9 pi_L actor feature layout drifted")
+    active_node_tensor = None
+    if active_policy:
+        maximum_nodes = max(len(rows) for rows in active_node_rows)
+        active_node_tensor = torch.zeros(
+            (
+                len(records),
+                maximum_nodes,
+                len(ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES),
+            ),
+            device=device,
+            dtype=dtype,
+        )
+        for row_index, rows in enumerate(active_node_rows):
+            active_node_tensor[row_index, : len(rows)] = torch.tensor(
+                rows, device=device, dtype=dtype
+            )
     return _PiLReplayCache(
         index_by_record_id=index_by_record_id,
         actor_graph_observations=tuple(actor_observations),
@@ -842,6 +963,12 @@ def _build_pi_l_replay_cache(
         privileged_disturbance_body=torch.tensor(
             privileged_rows, device=device, dtype=dtype
         ),
+        active_knot_features=(
+            torch.tensor(active_global_rows, device=device, dtype=dtype)
+            if active_policy
+            else None
+        ),
+        active_assignment_features=active_node_tensor,
     )
 
 
@@ -868,6 +995,36 @@ def _pi_l_cached_batch(
         cache.privileged_disturbance_body.index_select(0, index),
         [cache.actor_graph_observations[value] for value in indices],
     )
+
+
+def _pi_l_active_cached_kwargs(
+    records: Sequence[LowLevelControlRecord],
+    cache: _PiLReplayCache,
+) -> dict[str, torch.Tensor]:
+    if cache.active_knot_features is None:
+        if cache.active_assignment_features is not None:
+            raise RuntimeError("Order9 active-knot replay cache is inconsistent")
+        return {}
+    if cache.active_assignment_features is None:
+        raise RuntimeError("Order9 active-knot replay cache is incomplete")
+    indices = [cache.index_by_record_id[record.record_id] for record in records]
+    index = torch.tensor(
+        indices,
+        device=cache.active_knot_features.device,
+        dtype=torch.long,
+    )
+    maximum_nodes = max(
+        len(record.runtime_observation.morphology_graph.modules)
+        for record in records
+    )
+    return {
+        "active_knot_features": cache.active_knot_features.index_select(
+            0, index
+        ),
+        "active_assignment_features": cache.active_assignment_features.index_select(
+            0, index
+        )[:, :maximum_nodes],
+    }
 
 
 def _pi_l_actions(
@@ -1473,6 +1630,7 @@ def _validate_pi_l_exact_behavior_replay(
                 privileged_disturbance_body=privileged,
                 action=global_action,
                 joint_action=joint_action,
+                **_pi_l_active_cached_kwargs(records, replay_cache),
             )
             expected_log_prob = torch.tensor(
                 [float(trace.old_log_prob) for trace in traces],

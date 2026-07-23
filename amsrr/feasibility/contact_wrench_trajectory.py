@@ -30,7 +30,7 @@ from amsrr.schemas.policies import (
 )
 
 
-CONTACT_WRENCH_TRAJECTORY_CHECKER_VERSION = "contact_wrench_trajectory_checker_v2"
+CONTACT_WRENCH_TRAJECTORY_CHECKER_VERSION = "contact_wrench_trajectory_checker_v3_reachability"
 TRAJECTORY_SCHEMA_INVALID_CODE = "E_TRAJECTORY_SCHEMA_INVALID"
 TRAJECTORY_TIME_INVALID_CODE = "E_TRAJECTORY_TIME_INVALID"
 TRAJECTORY_CONTRACT_INVALID_CODE = "E_TRAJECTORY_CONTRACT_INVALID"
@@ -39,6 +39,9 @@ TRAJECTORY_WRENCH_CONE_FAIL_CODE = "E_TRAJECTORY_WRENCH_CONE_FAIL"
 TRAJECTORY_QP_NOT_EVALUATED_CODE = "E_TRAJECTORY_QP_NOT_EVALUATED"
 TRAJECTORY_COLLISION_NOT_EVALUATED_CODE = "E_TRAJECTORY_COLLISION_NOT_EVALUATED"
 TRAJECTORY_WRENCH_NOT_EVALUATED_CODE = "E_TRAJECTORY_WRENCH_NOT_EVALUATED"
+TRAJECTORY_REACHABILITY_NOT_EVALUATED_CODE = (
+    "E_TRAJECTORY_REACHABILITY_NOT_EVALUATED"
+)
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,46 @@ class TrajectoryPhysicsEvaluator(Protocol):
 
 
 @dataclass(frozen=True)
+class KnotReachabilityEvaluation:
+    """Kinematic consistency evidence for one unmodified trajectory knot."""
+
+    feasible: bool
+    violation_codes: tuple[str, ...] = ()
+    margins: dict[str, float] = field(default_factory=dict)
+    evaluator_version: str = "unspecified"
+
+    def __post_init__(self) -> None:
+        if not self.evaluator_version:
+            raise ValueError(
+                "KnotReachabilityEvaluation.evaluator_version must be non-empty"
+            )
+        if any(not code for code in self.violation_codes):
+            raise ValueError(
+                "KnotReachabilityEvaluation.violation_codes must be non-empty"
+            )
+        if any(not math.isfinite(float(value)) for value in self.margins.values()):
+            raise ValueError(
+                "KnotReachabilityEvaluation.margins must contain finite values"
+            )
+        if self.feasible != (not self.violation_codes):
+            raise ValueError(
+                "KnotReachabilityEvaluation.feasible must match violation_codes"
+            )
+
+
+class TrajectoryReachabilityEvaluator(Protocol):
+    """Evaluate a proposal as written; implementations must never project it."""
+
+    def evaluate_trajectory(
+        self,
+        *,
+        context: HighLevelPolicyContext,
+        trajectory: ContactWrenchTrajectory,
+    ) -> Sequence[KnotReachabilityEvaluation]:
+        ...
+
+
+@dataclass(frozen=True)
 class ContactWrenchTrajectoryCheckerConfig:
     evaluation_mode: Literal["production", "warmup_proxy"] = "production"
     allow_legacy_contract: bool = False
@@ -105,6 +148,7 @@ class ContactWrenchTrajectoryCheckerConfig:
     require_qp_evaluation: bool = True
     require_collision_evaluation: bool = True
     require_wrench_evaluation: bool = True
+    require_reachability_evaluation: bool = False
     qp_residual_threshold: float = 1.0e-4
     wrench_residual_threshold: float = 1.0e-3
     collision_margin_threshold_m: float = 0.0
@@ -152,9 +196,11 @@ class ContactWrenchTrajectoryFeasibilityChecker:
         *,
         config: ContactWrenchTrajectoryCheckerConfig | None = None,
         physics_evaluator: KnotPhysicsEvaluator | TrajectoryPhysicsEvaluator | None = None,
+        reachability_evaluator: TrajectoryReachabilityEvaluator | None = None,
     ) -> None:
         self.config = config or ContactWrenchTrajectoryCheckerConfig()
         self.physics_evaluator = physics_evaluator
+        self.reachability_evaluator = reachability_evaluator
 
     def check(
         self,
@@ -181,7 +227,12 @@ class ContactWrenchTrajectoryFeasibilityChecker:
         knot_results: list[TrajectoryKnotFeasibilityResult] = []
         all_margins: dict[str, float] = {}
         evaluator_versions: set[str] = set()
+        reachability_versions: set[str] = set()
         trajectory_physics = self._trajectory_physics_evaluations(
+            context=context,
+            trajectory=trajectory,
+        )
+        trajectory_reachability = self._trajectory_reachability_evaluations(
             context=context,
             trajectory=trajectory,
         )
@@ -211,6 +262,20 @@ class ContactWrenchTrajectoryFeasibilityChecker:
             )
             if physics is not None:
                 evaluator_versions.add(physics.evaluator_version)
+            reachability = (
+                trajectory_reachability[knot_index]
+                if trajectory_reachability is not None
+                else None
+            )
+            if reachability is not None:
+                reachability_versions.add(reachability.evaluator_version)
+                for code in reachability.violation_codes:
+                    _append_unique(knot_codes, code)
+            elif self.config.require_reachability_evaluation:
+                _append_unique(
+                    knot_codes,
+                    TRAJECTORY_REACHABILITY_NOT_EVALUATED_CODE,
+                )
             qp_evaluated = physics is not None and physics.qp_residual is not None
             collision_evaluated = (
                 physics is not None and physics.min_collision_margin_m is not None
@@ -267,6 +332,9 @@ class ContactWrenchTrajectoryFeasibilityChecker:
                 _append_unique(knot_codes, code)
 
             margins = {} if physics is None else dict(physics.margins)
+            if reachability is not None:
+                for name, value in reachability.margins.items():
+                    margins[f"reachability.{name}"] = float(value)
             if cone_margin is not None:
                 margins["friction_cone_force_margin_n"] = cone_margin
             if qp_residual is not None:
@@ -320,9 +388,35 @@ class ContactWrenchTrajectoryFeasibilityChecker:
                 "evaluation_mode": self.config.evaluation_mode,
                 "proposal_mutated": False,
                 "physics_evaluator_versions": sorted(evaluator_versions),
+                "reachability_evaluator_versions": sorted(
+                    reachability_versions
+                ),
+                "reachability_evaluated": trajectory_reachability is not None,
                 "required_collision_margin_m": required_collision_margin_m,
             },
         )
+
+    def _trajectory_reachability_evaluations(
+        self,
+        *,
+        context: HighLevelPolicyContext,
+        trajectory: ContactWrenchTrajectory,
+    ) -> tuple[KnotReachabilityEvaluation, ...] | None:
+        evaluator = self.reachability_evaluator
+        if evaluator is None:
+            return None
+        values = tuple(
+            evaluator.evaluate_trajectory(context=context, trajectory=trajectory)
+        )
+        if len(values) != len(trajectory.knots):
+            raise ValueError(
+                "trajectory reachability evaluator must return exactly one result per knot"
+            )
+        if any(not isinstance(value, KnotReachabilityEvaluation) for value in values):
+            raise TypeError(
+                "trajectory reachability evaluator returned a non-KnotReachabilityEvaluation"
+            )
+        return values
 
     def _trajectory_physics_evaluations(
         self,

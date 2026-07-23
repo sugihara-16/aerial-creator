@@ -1,21 +1,14 @@
-# Order 9 successor curriculum.
-#
-# C0--C2 are preserved below with the same stage contents used by the historical
-# v2 schedule.  Their accepted artifacts remain v2 artifacts and enter this
-# schedule only through configs/training/order9_curriculum_lineage_v3.yaml.
-#
-# C3 execution is now prepared but is not started by loading this configuration.
-# Its production tensor pi_L path consumes the complete active-knot contract,
-# the v2 -> v3 lineage import is fail-closed, and its 1024-environment runtime
-# is bound to the measured two-process C3 capacity report below.
+# Historical executable Order 9 schedule.
+# C0--C2 were completed under this parsed schedule/hash.  Its post-C3 ordering
+# is superseded by order9_learning_curriculum.yaml (v3), but this file remains
+# immutable source evidence for the provenance-bound v2 -> v3 lineage import.
 curriculum:
-  schedule_version: order9_curriculum_v3_progressive_object_conditions
+  schedule_version: order9_curriculum_v2
   contact_wrench_contract_version: contact_frame_robot_on_target_v2
   pi_h_is_learned_proposal_only: true
   deterministic_checker_projects_actions: false
   dynamic_assembly_policy_learned: false
   stages:
-    # Preserved v2 prefix ---------------------------------------------------
     - stage_id: c0_order8_teacher_collection
       stage_index: 0
       learning_mode: collection
@@ -46,6 +39,8 @@ curriculum:
       min_modules: 3
       max_modules: 3
       topology_randomized: false
+      # The morphology is fixed, while C0 supervision contains only bounded
+      # perturbations around the nominal Order8 object/contact condition.
       object_distribution: conservative_order8_anchor
       deterministic_teacher_required: true
       pi_h_output_scope: not_applicable
@@ -77,6 +72,9 @@ curriculum:
       assembly_evaluation_mode: separate
       end_to_end_episode_fraction: 0.0
       environment_steps: 3000000
+      # Provisional RTX 4090 production setting.  Preserve the original PPO
+      # generation size (2048 * 16 = 32768) while measuring collection/update
+      # speed and load before selecting C3+ parallelism.
       parallel_environment_count: 2048
       rollout_steps_per_environment: 16
       minimum_episodes: 200
@@ -87,7 +85,6 @@ curriculum:
       held_out_only: false
       task_adapter_ids: [object_grasp_carry_v1]
 
-    # C3 remains morphology-only: no expanded object claim is made here.
     - stage_id: c3_pi_l_ppo_arbitrary_morphology
       stage_index: 3
       learning_mode: ppo
@@ -111,16 +108,37 @@ curriculum:
       held_out_only: false
       task_adapter_ids: [object_grasp_carry_v1]
 
-    # R1: canonical box/property family, expanded reachable position and yaw.
-    - &r1_teacher
-      stage_id: r1_teacher_trajectory_collection
+    - stage_id: c4_pi_h_assignment_bc_warmup
       stage_index: 4
-      learning_mode: collection
-      learning_target: dataset
+      learning_mode: behavior_cloning
+      learning_target: pi_h_assignment
       min_modules: 2
       max_modules: 8
       topology_randomized: true
-      object_distribution: reachable_pose_expansion
+      object_distribution: conservative_order8_anchor
+      deterministic_teacher_required: true
+      pi_h_output_scope: assignment_only_warmup
+      phase_conditioned_actor_required: true
+      design_action_mask_required: false
+      assembly_evaluation_mode: separate
+      end_to_end_episode_fraction: 0.0
+      environment_steps: 0
+      minimum_episodes: 200
+      minimum_success_rate: 0.85
+      minimum_no_fallback_success_rate: 0.0
+      maximum_fallback_rate: 1.0
+      maximum_safety_failure_episodes: 0
+      held_out_only: false
+      task_adapter_ids: [object_grasp_carry_v1]
+
+    - stage_id: c5_pi_h_full_trajectory_bc
+      stage_index: 5
+      learning_mode: behavior_cloning
+      learning_target: pi_h_trajectory
+      min_modules: 2
+      max_modules: 8
+      topology_randomized: true
+      object_distribution: conservative_order8_anchor
       deterministic_teacher_required: true
       pi_h_output_scope: full_contact_wrench_trajectory
       phase_conditioned_actor_required: true
@@ -128,331 +146,94 @@ curriculum:
       assembly_evaluation_mode: separate
       end_to_end_episode_fraction: 0.0
       environment_steps: 0
-      minimum_episodes: 100
-      minimum_success_rate: 0.95
+      minimum_episodes: 500
+      minimum_success_rate: 0.85
+      minimum_no_fallback_success_rate: 0.75
+      maximum_fallback_rate: 0.20
+      maximum_safety_failure_episodes: 0
+      held_out_only: false
+      task_adapter_ids: [object_grasp_carry_v1]
+
+    - stage_id: c6_pi_h_full_trajectory_ppo
+      stage_index: 6
+      learning_mode: ppo
+      learning_target: pi_h_trajectory
+      min_modules: 2
+      max_modules: 8
+      topology_randomized: true
+      object_distribution: conservative_order8_anchor
+      deterministic_teacher_required: false
+      pi_h_output_scope: full_contact_wrench_trajectory
+      phase_conditioned_actor_required: true
+      design_action_mask_required: false
+      assembly_evaluation_mode: separate
+      end_to_end_episode_fraction: 0.0
+      environment_steps: 10000000
+      minimum_episodes: 500
+      minimum_success_rate: 0.80
+      minimum_no_fallback_success_rate: 0.75
+      maximum_fallback_rate: 0.10
+      maximum_safety_failure_episodes: 0
+      held_out_only: false
+      task_adapter_ids: [object_grasp_carry_v1]
+
+    - stage_id: c7_pi_d_structured_bc
+      stage_index: 7
+      learning_mode: behavior_cloning
+      learning_target: pi_d
+      min_modules: 2
+      max_modules: 8
+      topology_randomized: true
+      object_distribution: expanded_primitives
+      deterministic_teacher_required: true
+      pi_h_output_scope: not_applicable
+      phase_conditioned_actor_required: false
+      design_action_mask_required: true
+      assembly_evaluation_mode: separate
+      end_to_end_episode_fraction: 0.0
+      environment_steps: 0
+      minimum_episodes: 500
+      minimum_success_rate: 0.80
       minimum_no_fallback_success_rate: 0.0
       maximum_fallback_rate: 1.0
       maximum_safety_failure_episodes: 0
       held_out_only: false
       task_adapter_ids: [object_grasp_carry_v1]
 
-    - <<: *r1_teacher
-      stage_id: r1_pi_l_bc_teacher_trajectory
-      stage_index: 5
-      learning_mode: behavior_cloning
-      learning_target: pi_l
-      pi_h_output_scope: not_applicable
-      minimum_episodes: 200
-      minimum_success_rate: 0.85
-
-    - <<: *r1_teacher
-      stage_id: r1_pi_l_ppo_teacher_trajectory
-      stage_index: 6
-      learning_mode: ppo
-      learning_target: pi_l
-      pi_h_output_scope: not_applicable
-      environment_steps: 3000000
-      minimum_episodes: 400
-      minimum_success_rate: 0.80
-
-    - <<: *r1_teacher
-      stage_id: r1_pi_h_assignment_bc
-      stage_index: 7
-      learning_mode: behavior_cloning
-      learning_target: pi_h_assignment
-      pi_h_output_scope: assignment_only_warmup
-      minimum_episodes: 200
-      minimum_success_rate: 0.85
-
-    - <<: *r1_teacher
-      stage_id: r1_pi_h_full_trajectory_bc
+    - stage_id: c8_pi_d_masked_ppo
       stage_index: 8
-      learning_mode: behavior_cloning
-      learning_target: pi_h_trajectory
-      minimum_episodes: 300
-      minimum_success_rate: 0.85
-      minimum_no_fallback_success_rate: 0.70
-      maximum_fallback_rate: 0.20
-
-    # pi_L is frozen while learned pi_H is optimized through production C_H.
-    - <<: *r1_teacher
-      stage_id: r1_pi_h_ppo_frozen_pi_l
-      stage_index: 9
       learning_mode: ppo
-      learning_target: pi_h_trajectory
-      deterministic_teacher_required: false
-      environment_steps: 5000000
-      minimum_episodes: 500
-      minimum_success_rate: 0.80
-      minimum_no_fallback_success_rate: 0.75
-      maximum_fallback_rate: 0.10
-
-    # pi_H is frozen; promotion is evaluated cumulatively over R0 and R1.
-    - <<: *r1_teacher
-      stage_id: r1_pi_l_readaptation_frozen_pi_h
-      stage_index: 10
-      learning_mode: ppo
-      learning_target: pi_l
-      deterministic_teacher_required: false
-      pi_h_output_scope: not_applicable
-      environment_steps: 2000000
-      minimum_episodes: 500
-      minimum_success_rate: 0.80
-      minimum_no_fallback_success_rate: 0.75
-      maximum_fallback_rate: 0.10
-
-    # R2: boxes with size/aspect/density/mass/CoM/inertia diversity.
-    - &r2_teacher
-      <<: *r1_teacher
-      stage_id: r2_teacher_trajectory_collection
-      stage_index: 11
-      object_distribution: box_property_expansion
-      minimum_episodes: 150
-
-    - <<: *r2_teacher
-      stage_id: r2_pi_l_bc_teacher_trajectory
-      stage_index: 12
-      learning_mode: behavior_cloning
-      learning_target: pi_l
-      pi_h_output_scope: not_applicable
-      minimum_episodes: 300
-      minimum_success_rate: 0.85
-
-    - <<: *r2_teacher
-      stage_id: r2_pi_l_ppo_teacher_trajectory
-      stage_index: 13
-      learning_mode: ppo
-      learning_target: pi_l
-      pi_h_output_scope: not_applicable
-      environment_steps: 3000000
-      minimum_episodes: 400
-      minimum_success_rate: 0.80
-
-    - <<: *r2_teacher
-      stage_id: r2_pi_h_assignment_bc
-      stage_index: 14
-      learning_mode: behavior_cloning
-      learning_target: pi_h_assignment
-      pi_h_output_scope: assignment_only_warmup
-      minimum_episodes: 300
-      minimum_success_rate: 0.85
-
-    - <<: *r2_teacher
-      stage_id: r2_pi_h_full_trajectory_bc
-      stage_index: 15
-      learning_mode: behavior_cloning
-      learning_target: pi_h_trajectory
-      minimum_episodes: 400
-      minimum_success_rate: 0.85
-      minimum_no_fallback_success_rate: 0.70
-      maximum_fallback_rate: 0.20
-
-    - <<: *r2_teacher
-      stage_id: r2_pi_h_ppo_frozen_pi_l
-      stage_index: 16
-      learning_mode: ppo
-      learning_target: pi_h_trajectory
-      deterministic_teacher_required: false
-      environment_steps: 5000000
-      minimum_episodes: 500
-      minimum_success_rate: 0.80
-      minimum_no_fallback_success_rate: 0.75
-      maximum_fallback_rate: 0.10
-
-    # Cumulative gate: R0--R2 must all retain their independent thresholds.
-    - <<: *r2_teacher
-      stage_id: r2_pi_l_readaptation_frozen_pi_h
-      stage_index: 17
-      learning_mode: ppo
-      learning_target: pi_l
-      deterministic_teacher_required: false
-      pi_h_output_scope: not_applicable
-      environment_steps: 2000000
-      minimum_episodes: 500
-      minimum_success_rate: 0.80
-      minimum_no_fallback_success_rate: 0.75
-      maximum_fallback_rate: 0.10
-
-    # R3: box/sphere/cylinder training primitives.
-    - &r3_teacher
-      <<: *r1_teacher
-      stage_id: r3_teacher_trajectory_collection
-      stage_index: 18
+      learning_target: pi_d
+      min_modules: 2
+      max_modules: 8
+      topology_randomized: true
       object_distribution: expanded_primitives
-      minimum_episodes: 250
-
-    - <<: *r3_teacher
-      stage_id: r3_pi_l_bc_teacher_trajectory
-      stage_index: 19
-      learning_mode: behavior_cloning
-      learning_target: pi_l
-      pi_h_output_scope: not_applicable
-      minimum_episodes: 400
-      minimum_success_rate: 0.85
-
-    - <<: *r3_teacher
-      stage_id: r3_pi_l_ppo_teacher_trajectory
-      stage_index: 20
-      learning_mode: ppo
-      learning_target: pi_l
-      pi_h_output_scope: not_applicable
-      environment_steps: 3000000
-      minimum_episodes: 500
-      minimum_success_rate: 0.80
-
-    - <<: *r3_teacher
-      stage_id: r3_pi_h_assignment_bc
-      stage_index: 21
-      learning_mode: behavior_cloning
-      learning_target: pi_h_assignment
-      pi_h_output_scope: assignment_only_warmup
-      minimum_episodes: 400
-      minimum_success_rate: 0.85
-
-    - <<: *r3_teacher
-      stage_id: r3_pi_h_full_trajectory_bc
-      stage_index: 22
-      learning_mode: behavior_cloning
-      learning_target: pi_h_trajectory
-      minimum_episodes: 600
-      minimum_success_rate: 0.85
-      minimum_no_fallback_success_rate: 0.70
-      maximum_fallback_rate: 0.20
-
-    - <<: *r3_teacher
-      stage_id: r3_pi_h_ppo_frozen_pi_l
-      stage_index: 23
-      learning_mode: ppo
-      learning_target: pi_h_trajectory
-      deterministic_teacher_required: false
-      environment_steps: 5000000
-      minimum_episodes: 600
-      minimum_success_rate: 0.80
-      minimum_no_fallback_success_rate: 0.75
-      maximum_fallback_rate: 0.10
-
-    # Cumulative gate: R0--R3 remain separately visible and passing.
-    - <<: *r3_teacher
-      stage_id: r3_pi_l_readaptation_frozen_pi_h
-      stage_index: 24
-      learning_mode: ppo
-      learning_target: pi_l
-      deterministic_teacher_required: false
-      pi_h_output_scope: not_applicable
-      environment_steps: 2000000
-      minimum_episodes: 600
-      minimum_success_rate: 0.80
-      minimum_no_fallback_success_rate: 0.75
-      maximum_fallback_rate: 0.10
-
-    # R4: full train cross-product of morphology and object conditions.
-    - &r4_teacher
-      <<: *r1_teacher
-      stage_id: r4_teacher_trajectory_collection
-      stage_index: 25
-      object_distribution: expanded_cross_product
-      minimum_episodes: 400
-
-    - <<: *r4_teacher
-      stage_id: r4_pi_l_bc_teacher_trajectory
-      stage_index: 26
-      learning_mode: behavior_cloning
-      learning_target: pi_l
-      pi_h_output_scope: not_applicable
-      minimum_episodes: 500
-      minimum_success_rate: 0.85
-
-    - <<: *r4_teacher
-      stage_id: r4_pi_l_ppo_teacher_trajectory
-      stage_index: 27
-      learning_mode: ppo
-      learning_target: pi_l
-      pi_h_output_scope: not_applicable
-      environment_steps: 3000000
-      minimum_episodes: 800
-      minimum_success_rate: 0.80
-
-    - <<: *r4_teacher
-      stage_id: r4_pi_h_assignment_bc
-      stage_index: 28
-      learning_mode: behavior_cloning
-      learning_target: pi_h_assignment
-      pi_h_output_scope: assignment_only_warmup
-      minimum_episodes: 500
-      minimum_success_rate: 0.85
-
-    - <<: *r4_teacher
-      stage_id: r4_pi_h_full_trajectory_bc
-      stage_index: 29
-      learning_mode: behavior_cloning
-      learning_target: pi_h_trajectory
-      minimum_episodes: 800
-      minimum_success_rate: 0.85
-      minimum_no_fallback_success_rate: 0.70
-      maximum_fallback_rate: 0.20
-
-    - <<: *r4_teacher
-      stage_id: r4_pi_h_ppo_frozen_pi_l
-      stage_index: 30
-      learning_mode: ppo
-      learning_target: pi_h_trajectory
-      deterministic_teacher_required: false
-      environment_steps: 5000000
-      minimum_episodes: 800
-      minimum_success_rate: 0.80
-      minimum_no_fallback_success_rate: 0.75
-      maximum_fallback_rate: 0.10
-
-    # Final pi_L/pi_H cumulative gate over R0--R4.
-    - <<: *r4_teacher
-      stage_id: r4_pi_l_readaptation_frozen_pi_h
-      stage_index: 31
-      learning_mode: ppo
-      learning_target: pi_l
-      deterministic_teacher_required: false
-      pi_h_output_scope: not_applicable
-      environment_steps: 2000000
-      minimum_episodes: 800
-      minimum_success_rate: 0.80
-      minimum_no_fallback_success_rate: 0.75
-      maximum_fallback_rate: 0.10
-
-    # pi_D starts only after the broad R4 pi_L/pi_H stack is promoted.
-    - <<: *r4_teacher
-      stage_id: post_r4_pi_d_structured_bc
-      stage_index: 32
-      learning_mode: behavior_cloning
-      learning_target: pi_d
-      pi_h_output_scope: not_applicable
-      design_action_mask_required: true
-      environment_steps: 0
-      minimum_episodes: 500
-      minimum_success_rate: 0.80
-      minimum_no_fallback_success_rate: 0.0
-      maximum_fallback_rate: 1.0
-
-    - <<: *r4_teacher
-      stage_id: post_r4_pi_d_masked_ppo
-      stage_index: 33
-      learning_mode: ppo
-      learning_target: pi_d
       deterministic_teacher_required: false
       pi_h_output_scope: not_applicable
       phase_conditioned_actor_required: false
       design_action_mask_required: true
+      assembly_evaluation_mode: separate
+      end_to_end_episode_fraction: 0.0
       environment_steps: 5000000
       minimum_episodes: 500
       minimum_success_rate: 0.75
       minimum_no_fallback_success_rate: 0.0
       maximum_fallback_rate: 1.0
+      maximum_safety_failure_episodes: 0
+      held_out_only: false
+      task_adapter_ids: [object_grasp_carry_v1]
 
-    - <<: *r4_teacher
-      stage_id: joint_object_task_ppo
-      stage_index: 34
+    - stage_id: c9_joint_object_task_ppo
+      stage_index: 9
       learning_mode: ppo
       learning_target: joint_object_task
+      min_modules: 2
+      max_modules: 8
+      topology_randomized: true
+      object_distribution: expanded_primitives
       deterministic_teacher_required: false
       pi_h_output_scope: full_contact_wrench_trajectory
+      phase_conditioned_actor_required: true
       design_action_mask_required: true
       assembly_evaluation_mode: subset_end_to_end
       end_to_end_episode_fraction: 0.10
@@ -461,15 +242,21 @@ curriculum:
       minimum_success_rate: 0.75
       minimum_no_fallback_success_rate: 0.70
       maximum_fallback_rate: 0.05
+      maximum_safety_failure_episodes: 0
+      held_out_only: false
+      task_adapter_ids: [object_grasp_carry_v1]
 
-    - <<: *r4_teacher
-      stage_id: held_out_full_system_evaluation
-      stage_index: 35
+    - stage_id: c10_held_out_full_system_evaluation
+      stage_index: 10
       learning_mode: evaluation
       learning_target: full_system
+      min_modules: 2
+      max_modules: 8
+      topology_randomized: true
       object_distribution: held_out_shapes_and_inertia
       deterministic_teacher_required: false
       pi_h_output_scope: full_contact_wrench_trajectory
+      phase_conditioned_actor_required: true
       design_action_mask_required: true
       assembly_evaluation_mode: subset_end_to_end
       end_to_end_episode_fraction: 0.10
@@ -478,13 +265,17 @@ curriculum:
       minimum_success_rate: 0.70
       minimum_no_fallback_success_rate: 0.65
       maximum_fallback_rate: 0.05
+      maximum_safety_failure_episodes: 0
       held_out_only: true
+      task_adapter_ids: [object_grasp_carry_v1]
 
 runtime_benchmark:
-  environment_count_candidates: [512, 1024]
-  initial_environment_count: 1024
+  environment_count_candidates: [32, 64, 128]
+  initial_environment_count: 64
   control_dt_s: 0.02
   minimum_aggregate_env_steps_per_s: 500.0
+  # Production collector measurements deliberately include the cold first
+  # control step; this is a conservative end-to-end throughput gate.
   warmup_steps: 0
   measurement_steps: 64
   maximum_wall_time_s: 900.0
@@ -498,6 +289,8 @@ teacher_collection:
   episode_count: 20
   validation_episode_count: 3
   held_out_episode_count: 3
+  # Order8 runs at 50 Hz.  Ten-Hz labels retain controller dynamics while
+  # avoiding five adjacent near-duplicate labels per learning sample.
   low_level_stride: 5
   high_level_stride: 5
   parallel_process_count: 2
@@ -505,6 +298,12 @@ teacher_collection:
 
 optimization:
   pi_l_bc:
+    # C1 is actor imitation.  The critic is initialized here but first trained
+    # by PPO in C2; value regression must not move the shared BC representation.
+    # The initial 8-epoch run remained biased by roughly 0.02 normalized action
+    # in the late transport interval and timed out 4/4 closed-loop smokes.
+    # Continue to an empirically justified convergence budget while using the
+    # RTX 4090 headroom to halve the number of batches per epoch.
     epochs: 24
     batch_size: 128
     learning_rate: 0.0003
@@ -541,6 +340,10 @@ optimization:
     rollout_steps_per_environment: 256
     epochs_per_update: 4
     minibatch_size: 4096
+    # Generation 0 calibration from the promoted C1 actor showed that 1e-4
+    # moved the shared actor/critic trunk to KL=0.251 after one optimizer
+    # step (target 0.02).  C1 intentionally leaves the critic untrained, so
+    # use a conservative initial C2 rate that keeps critic warm-up on-policy.
     learning_rate: 0.00001
     gamma: 0.99
     gae_lambda: 0.95
@@ -593,10 +396,10 @@ production_runtime:
   seed: 9009
   device: cuda:0
   artifact_root: artifacts/p4_full/order9
-  selected_environment_count: 1024
+  selected_environment_count: 128
   runtime_load_sample_interval_s: 1.0
-  runtime_benchmark_report_path: artifacts/p4_full/order9/c3_runtime_benchmark/runtime_benchmark.json
-  runtime_benchmark_report_sha256: 1d0592c4d623a6fd70efb537b1b4f87e3c9a95713cd0abde88d8299d28ed1bef
+  runtime_benchmark_report_path: artifacts/p4_full/order9/runtime_benchmark.json
+  runtime_benchmark_report_sha256: a70e6264aa10464177a25157c5ce5d303130c33e4bb5f94355369430658b3d9a
   checkpoint_interval_updates: 10
   metrics_flush_interval_updates: 1
   full_mesh_evaluation_interval_updates: 25
@@ -641,9 +444,6 @@ randomization:
   nominal_contact_damping_n_s_per_m: 75.0
   support_top_z_m: 0.15
 
-# This remains the currently implemented primitive sampler envelope.  R1/R2/R4
-# require their separately gated distribution adapters before their stages can
-# execute; no later ring is silently approximated with this sampler.
 expanded_randomization:
   equivalent_volume_scale: [0.80, 1.20]
   mass_scale: [0.80, 1.20]

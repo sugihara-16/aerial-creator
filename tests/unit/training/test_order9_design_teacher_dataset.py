@@ -132,7 +132,7 @@ def test_pi_d_teacher_dataset_is_task_and_structure_split_safe(
     )
     bundle = load_order9_dataset(tmp_path / "manifest.json")
     stage = order9_stage_by_id(
-        load_order9_learning_config(), "c7_pi_d_structured_bc"
+        load_order9_learning_config(), "post_r4_pi_d_structured_bc"
     )
     validation = validate_order9_dataset_for_stage(bundle, stage)
 

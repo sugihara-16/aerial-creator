@@ -20,8 +20,12 @@ from amsrr.feasibility.contact_wrench_trajectory import (
     ContactWrenchTrajectoryFeasibilityChecker,
 )
 from amsrr.morphology.random_connected import morphology_structural_hash
+from amsrr.robot_model.physical_model_builder import (
+    build_physical_model_from_config,
+)
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.morphology import MorphologyGraph
+from amsrr.schemas.physical_model import PhysicalModel
 from amsrr.schemas.task_spec import GeometrySpec, GeometryType, ObjectSpec, TaskSpec
 from amsrr.simulation.order9_shadow_runtime import ImmutableMainStateShadowBackend
 from amsrr.simulation.order9_shadow_worker import (
@@ -305,6 +309,7 @@ def bind_order9_production_hard_checker(
     transport: Order9ShadowWorkerTransport,
     pi_l_checkpoint_sha256: str,
     bucket: Order9ShadowBucketIdentity,
+    physical_model: PhysicalModel | None = None,
 ) -> Order9ProductionHardCheckerRuntime:
     """Authenticate an already-created transport, then expose production ``C_H``."""
 
@@ -335,6 +340,12 @@ def bind_order9_production_hard_checker(
     checker = build_order9_production_hard_checker(
         backend,
         config=config.hard_checker,
+        physical_model=(
+            physical_model
+            or build_physical_model_from_config(
+                config.production_runtime.robot_model_config_path
+            )
+        ),
     )
     return Order9ProductionHardCheckerRuntime(
         checker=checker,
@@ -418,6 +429,12 @@ def launch_order9_production_hard_checker(
             transport=transport,
             pi_l_checkpoint_sha256=pi_l_checkpoint_sha256,
             bucket=bucket,
+            physical_model=build_physical_model_from_config(
+                _resolved_file(
+                    config.production_runtime.robot_model_config_path,
+                    repository,
+                )
+            ),
         )
     except BaseException:
         transport.close()

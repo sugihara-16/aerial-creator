@@ -17,13 +17,20 @@ from amsrr.schemas.order9 import (
     Order9StageRunStatus,
 )
 from amsrr.training.order9_curriculum import (
+    ORDER9_CURRICULUM_VERSION,
     Order9CurriculumStage,
     Order9LearningConfig,
     Order9LearningMode,
     Order9LearningTarget,
     Order9StageMetrics,
     evaluate_stage_promotion,
+    require_order9_stage_execution_allowed,
     resolve_order9_stage_runtime,
+)
+from amsrr.training.order9_curriculum_lineage import (
+    DEFAULT_ORDER9_CURRICULUM_LINEAGE_IMPORT_PATH,
+    ValidatedOrder9CurriculumLineage,
+    validate_order9_curriculum_lineage_import,
 )
 from amsrr.training.order9_dataset import (
     Order9DatasetBundle,
@@ -95,6 +102,9 @@ def preflight_order9_stage(
     dataset_bundle: Order9DatasetBundle | None = None,
     behavior_checkpoint_sha256: str | None = None,
     behavior_checkpoint_sha256_by_family: Mapping[str, str] | None = None,
+    lineage_import_path: str | Path = (
+        DEFAULT_ORDER9_CURRICULUM_LINEAGE_IMPORT_PATH
+    ),
     output_path: str | Path | None = None,
 ) -> tuple[Order9StageRunManifest, Order9DatasetStageValidation | None]:
     """Verify every immutable input before a stage may start."""
@@ -104,16 +114,37 @@ def preflight_order9_stage(
     stage_runtime = resolve_order9_stage_runtime(config, stage)
     schedule_hash = order9_schedule_hash(config)
     _validate_runtime_binding(config)
+    lineage = _validated_lineage_for_stage(
+        config,
+        stage,
+        lineage_import_path=lineage_import_path,
+    )
     _validate_prior_stage_chain(
         config,
         stage,
         list(prior_stage_manifests),
         schedule_hash=schedule_hash,
+        imported_through_stage_index=(
+            -1
+            if lineage is None
+            else lineage.specification.imported_through_stage_index
+        ),
     )
     bindings = [
         _artifact_binding(kind, path)
         for kind, path in sorted(input_artifact_paths.items())
     ]
+    if lineage is not None:
+        for kind, path in (
+            ("curriculum_lineage_import", lineage.specification_path),
+            ("legacy_curriculum_config", lineage.source_config_path),
+            (
+                "legacy_promoted_stage_manifest",
+                lineage.promoted_stage_manifest_path,
+            ),
+            ("imported_pi_l_checkpoint", lineage.policy_checkpoint_path),
+        ):
+            _append_artifact_binding(bindings, kind, path)
     dataset_validation = None
     if dataset_bundle is not None and dataset_manifest_path is None:
         raise SchemaValidationError(
@@ -214,6 +245,28 @@ def preflight_order9_stage(
                 None if dataset_validation is None else dataset_validation.to_dict()
             ),
             "full_mesh_acceptance_replaced": False,
+            "curriculum_lineage_import": (
+                None
+                if lineage is None
+                else {
+                    "import_version": lineage.specification.import_version,
+                    "source_schedule_hash": (
+                        lineage.specification.source_schedule_hash
+                    ),
+                    "successor_schedule_hash": (
+                        lineage.specification.successor_schedule_hash
+                    ),
+                    "imported_through_stage_id": (
+                        lineage.specification.imported_through_stage_id
+                    ),
+                    "imported_through_stage_index": (
+                        lineage.specification.imported_through_stage_index
+                    ),
+                    "policy_checkpoint_sha256": (
+                        lineage.specification.policy_checkpoint_sha256
+                    ),
+                }
+            ),
         },
     )
     if output_path is not None:
@@ -542,11 +595,12 @@ def _validate_prior_stage_chain(
     manifests: list[Order9StageRunManifest],
     *,
     schedule_hash: str,
+    imported_through_stage_index: int = -1,
 ) -> None:
     required_ids = {
         item.stage_id
         for item in config.curriculum.stages
-        if item.stage_index < stage.stage_index
+        if imported_through_stage_index < item.stage_index < stage.stage_index
     }
     by_id = {manifest.stage_id: manifest for manifest in manifests}
     if len(by_id) != len(manifests):
@@ -566,6 +620,37 @@ def _validate_prior_stage_chain(
             raise SchemaValidationError(
                 f"Order9 prerequisite stage {stage_id!r} uses a different schedule"
             )
+
+
+def _validated_lineage_for_stage(
+    config: Order9LearningConfig,
+    stage: Order9CurriculumStage,
+    *,
+    lineage_import_path: str | Path,
+) -> ValidatedOrder9CurriculumLineage | None:
+    if config.curriculum.schedule_version != ORDER9_CURRICULUM_VERSION:
+        return None
+    require_order9_stage_execution_allowed(config, stage)
+    lineage = validate_order9_curriculum_lineage_import(
+        lineage_import_path,
+        successor_config=config,
+    )
+    if stage.stage_index <= lineage.specification.imported_through_stage_index:
+        raise SchemaValidationError(
+            "Order9 v3 cannot execute a stage covered by its legacy import"
+        )
+    return lineage
+
+
+def _append_artifact_binding(
+    bindings: list[Order9ArtifactBinding],
+    kind: str,
+    path: str | Path,
+) -> None:
+    resolved = Path(path).resolve()
+    if any(Path(item.path).resolve() == resolved for item in bindings):
+        return
+    bindings.append(_artifact_binding(kind, path))
 
 
 def _artifact_binding(kind: str, path: str | Path) -> Order9ArtifactBinding:

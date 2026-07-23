@@ -8,6 +8,8 @@ import torch
 from amsrr.policies.order9_design_policy import Order9AutoregressiveDesignPolicy
 from amsrr.policies.order9_high_level_policy import Order9AutoregressiveHighLevelPolicy
 from amsrr.policies.order9_low_level_policy import (
+    Order9ActiveKnotLowLevelPolicyConfig,
+    Order9ActiveKnotPhaseConditionedActorCritic,
     Order9LowLevelPolicyConfig,
     Order9PhaseConditionedActorCritic,
 )
@@ -35,6 +37,14 @@ from amsrr.utils.hashing import hash_file, stable_hash
     [
         Order9PhaseConditionedActorCritic(
             Order9LowLevelPolicyConfig(
+                graph_hidden_dim=16,
+                graph_message_layers=1,
+                recurrent_hidden_dim=24,
+                max_local_joint_slots=4,
+            )
+        ),
+        Order9ActiveKnotPhaseConditionedActorCritic(
+            Order9ActiveKnotLowLevelPolicyConfig(
                 graph_hidden_dim=16,
                 graph_message_layers=1,
                 recurrent_hidden_dim=24,

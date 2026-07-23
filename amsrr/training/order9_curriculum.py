@@ -15,7 +15,8 @@ from amsrr.training.order9_randomization import (
 from amsrr.utils.config import load_config
 
 
-ORDER9_CURRICULUM_VERSION = "order9_curriculum_v2"
+ORDER9_CURRICULUM_VERSION = "order9_curriculum_v3_progressive_object_conditions"
+ORDER9_LEGACY_CURRICULUM_VERSION = "order9_curriculum_v2"
 ORDER9_C0_COLLECTION_PROFILE_VERSION = "order9_c0_bounded_diversity_v1"
 
 
@@ -45,7 +46,10 @@ class PiHOutputScope(StrEnum):
 class ObjectDistributionLevel(StrEnum):
     NOMINAL = "nominal"
     CONSERVATIVE_ORDER8_ANCHOR = "conservative_order8_anchor"
+    REACHABLE_POSE_EXPANSION = "reachable_pose_expansion"
+    BOX_PROPERTY_EXPANSION = "box_property_expansion"
     EXPANDED_PRIMITIVES = "expanded_primitives"
+    EXPANDED_CROSS_PRODUCT = "expanded_cross_product"
     HELD_OUT_SHAPES_AND_INERTIA = "held_out_shapes_and_inertia"
 
 
@@ -223,6 +227,13 @@ class Order9CurriculumSchedule(SchemaBase):
 
     def validate(self) -> None:
         require_non_empty(self.schedule_version, "Order9CurriculumSchedule.schedule_version")
+        if self.schedule_version not in {
+            ORDER9_LEGACY_CURRICULUM_VERSION,
+            ORDER9_CURRICULUM_VERSION,
+        }:
+            raise SchemaValidationError(
+                "Order9 curriculum schedule version is unsupported"
+            )
         if self.contact_wrench_contract_version != CONTACT_WRENCH_CONTRACT_CONTACT_FRAME:
             raise SchemaValidationError("Order9 requires the v2 contact-frame wrench contract")
         if not self.pi_h_is_learned_proposal_only:
@@ -263,6 +274,8 @@ class Order9CurriculumSchedule(SchemaBase):
         ]
         if not arbitrary_morphology:
             raise SchemaValidationError("Order9 must include 2--8 module topology-randomized training")
+        if self.schedule_version == ORDER9_CURRICULUM_VERSION:
+            _validate_progressive_object_condition_schedule(self.stages)
 
 
 @dataclass
@@ -727,6 +740,20 @@ def resolve_order9_stage_runtime(
     )
 
 
+def require_order9_stage_execution_allowed(
+    config: Order9LearningConfig,
+    stage: Order9CurriculumStage,
+) -> None:
+    if (
+        config.curriculum.schedule_version == ORDER9_CURRICULUM_VERSION
+        and stage.stage_index <= 2
+    ):
+        raise SchemaValidationError(
+            "Order9 v3 C0--C2 are immutable imported history; use the v2 "
+            "schedule only to validate their original artifacts"
+        )
+
+
 @dataclass
 class Order9StageMetrics(SchemaBase):
     episode_count: int
@@ -830,6 +857,211 @@ def load_order9_learning_config(
     path: str | Path = "configs/training/order9_learning_curriculum.yaml",
 ) -> Order9LearningConfig:
     return Order9LearningConfig.from_dict(load_config(path))
+
+
+_PROGRESSIVE_RING_STAGE_SPECS = (
+    (
+        "teacher_trajectory_collection",
+        Order9LearningMode.COLLECTION,
+        Order9LearningTarget.DATASET,
+        PiHOutputScope.FULL_CONTACT_WRENCH_TRAJECTORY,
+        True,
+        False,
+    ),
+    (
+        "pi_l_bc_teacher_trajectory",
+        Order9LearningMode.BEHAVIOR_CLONING,
+        Order9LearningTarget.PI_L,
+        PiHOutputScope.NOT_APPLICABLE,
+        True,
+        False,
+    ),
+    (
+        "pi_l_ppo_teacher_trajectory",
+        Order9LearningMode.PPO,
+        Order9LearningTarget.PI_L,
+        PiHOutputScope.NOT_APPLICABLE,
+        True,
+        False,
+    ),
+    (
+        "pi_h_assignment_bc",
+        Order9LearningMode.BEHAVIOR_CLONING,
+        Order9LearningTarget.PI_H_ASSIGNMENT,
+        PiHOutputScope.ASSIGNMENT_ONLY_WARMUP,
+        True,
+        False,
+    ),
+    (
+        "pi_h_full_trajectory_bc",
+        Order9LearningMode.BEHAVIOR_CLONING,
+        Order9LearningTarget.PI_H_TRAJECTORY,
+        PiHOutputScope.FULL_CONTACT_WRENCH_TRAJECTORY,
+        True,
+        False,
+    ),
+    (
+        "pi_h_ppo_frozen_pi_l",
+        Order9LearningMode.PPO,
+        Order9LearningTarget.PI_H_TRAJECTORY,
+        PiHOutputScope.FULL_CONTACT_WRENCH_TRAJECTORY,
+        False,
+        False,
+    ),
+    (
+        "pi_l_readaptation_frozen_pi_h",
+        Order9LearningMode.PPO,
+        Order9LearningTarget.PI_L,
+        PiHOutputScope.NOT_APPLICABLE,
+        False,
+        False,
+    ),
+)
+
+
+def _validate_progressive_object_condition_schedule(
+    stages: list[Order9CurriculumStage],
+) -> None:
+    prefix_ids = (
+        "c0_order8_teacher_collection",
+        "c1_pi_l_bc_fixed_nominal",
+        "c2_pi_l_ppo_fixed_conservative",
+        "c3_pi_l_ppo_arbitrary_morphology",
+    )
+    if tuple(stage.stage_id for stage in stages[:4]) != prefix_ids:
+        raise SchemaValidationError(
+            "Order9 v3 must preserve C0--C3 as the curriculum prefix"
+        )
+    if any(
+        stage.object_distribution
+        != ObjectDistributionLevel.CONSERVATIVE_ORDER8_ANCHOR
+        for stage in stages[:4]
+    ):
+        raise SchemaValidationError(
+            "Order9 v3 C0--C3 must retain the conservative Order8 anchor"
+        )
+
+    ring_specs = (
+        ("r1", ObjectDistributionLevel.REACHABLE_POSE_EXPANSION),
+        ("r2", ObjectDistributionLevel.BOX_PROPERTY_EXPANSION),
+        ("r3", ObjectDistributionLevel.EXPANDED_PRIMITIVES),
+        ("r4", ObjectDistributionLevel.EXPANDED_CROSS_PRODUCT),
+    )
+    cursor = 4
+    for ring_id, distribution in ring_specs:
+        for (
+            suffix,
+            mode,
+            target,
+            output_scope,
+            teacher_required,
+            design_mask_required,
+        ) in _PROGRESSIVE_RING_STAGE_SPECS:
+            if cursor >= len(stages):
+                raise SchemaValidationError(
+                    f"Order9 v3 is missing the {ring_id} progressive cycle"
+                )
+            stage = stages[cursor]
+            expected_id = f"{ring_id}_{suffix}"
+            if (
+                stage.stage_id != expected_id
+                or stage.learning_mode != mode
+                or stage.learning_target != target
+                or stage.pi_h_output_scope != output_scope
+                or stage.deterministic_teacher_required != teacher_required
+                or stage.design_action_mask_required != design_mask_required
+                or stage.object_distribution != distribution
+            ):
+                raise SchemaValidationError(
+                    f"Order9 v3 stage {cursor} does not match {expected_id!r}"
+                )
+            if (
+                not stage.topology_randomized
+                or stage.min_modules != 2
+                or stage.max_modules != 8
+                or stage.held_out_only
+            ):
+                raise SchemaValidationError(
+                    f"Order9 v3 stage {expected_id!r} must train 2--8-module "
+                    "topology-randomized non-held-out tasks"
+                )
+            cursor += 1
+        cumulative_gate = stages[cursor - 1]
+        if (
+            cumulative_gate.minimum_no_fallback_success_rate <= 0.0
+            or cumulative_gate.maximum_fallback_rate > 0.10
+        ):
+            raise SchemaValidationError(
+                f"Order9 v3 {ring_id} readaptation must retain a cumulative "
+                "no-fallback physical gate"
+            )
+
+    tail_specs = (
+        (
+            "post_r4_pi_d_structured_bc",
+            Order9LearningMode.BEHAVIOR_CLONING,
+            Order9LearningTarget.PI_D,
+            ObjectDistributionLevel.EXPANDED_CROSS_PRODUCT,
+            PiHOutputScope.NOT_APPLICABLE,
+            True,
+            True,
+        ),
+        (
+            "post_r4_pi_d_masked_ppo",
+            Order9LearningMode.PPO,
+            Order9LearningTarget.PI_D,
+            ObjectDistributionLevel.EXPANDED_CROSS_PRODUCT,
+            PiHOutputScope.NOT_APPLICABLE,
+            False,
+            True,
+        ),
+        (
+            "joint_object_task_ppo",
+            Order9LearningMode.PPO,
+            Order9LearningTarget.JOINT_OBJECT_TASK,
+            ObjectDistributionLevel.EXPANDED_CROSS_PRODUCT,
+            PiHOutputScope.FULL_CONTACT_WRENCH_TRAJECTORY,
+            False,
+            True,
+        ),
+        (
+            "held_out_full_system_evaluation",
+            Order9LearningMode.EVALUATION,
+            Order9LearningTarget.FULL_SYSTEM,
+            ObjectDistributionLevel.HELD_OUT_SHAPES_AND_INERTIA,
+            PiHOutputScope.FULL_CONTACT_WRENCH_TRAJECTORY,
+            False,
+            True,
+        ),
+    )
+    if len(stages) != cursor + len(tail_specs):
+        raise SchemaValidationError(
+            "Order9 v3 contains an unexpected stage outside the approved "
+            "progressive rings and post-R4 tail"
+        )
+    for (
+        expected_id,
+        mode,
+        target,
+        distribution,
+        output_scope,
+        teacher_required,
+        design_mask_required,
+    ) in tail_specs:
+        stage = stages[cursor]
+        if (
+            stage.stage_id != expected_id
+            or stage.learning_mode != mode
+            or stage.learning_target != target
+            or stage.object_distribution != distribution
+            or stage.pi_h_output_scope != output_scope
+            or stage.deterministic_teacher_required != teacher_required
+            or stage.design_action_mask_required != design_mask_required
+        ):
+            raise SchemaValidationError(
+                f"Order9 v3 stage {cursor} does not match {expected_id!r}"
+            )
+        cursor += 1
 
 
 def _require_bc_before_ppo(

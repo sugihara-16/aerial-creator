@@ -4,11 +4,24 @@ from pathlib import Path
 import pytest
 import torch
 
-from amsrr.policies.order9_low_level_policy import ORDER9_GLOBAL_ACTION_SIZE
+from amsrr.policies.order9_low_level_policy import (
+    ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION,
+    ORDER9_GLOBAL_ACTION_SIZE,
+)
+from amsrr.policies.order9_active_knot_features import (
+    ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES,
+    ORDER9_ACTIVE_KNOT_FEATURE_CONTRACT_VERSION,
+    ORDER9_ACTIVE_KNOT_GLOBAL_FEATURE_NAMES,
+)
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
 from amsrr.schemas.common import ContactMode, SchemaValidationError
 from amsrr.schemas.datasets import DatasetSplit
-from amsrr.schemas.policies import ContactAssignment
+from amsrr.schemas.policies import (
+    CentroidalTarget,
+    ContactAssignment,
+    ContactWrenchTrajectory,
+    InteractionKnot,
+)
 from amsrr.schemas.task_spec import TaskSpec
 from amsrr.simulation.order8_natural_contact import (
     build_representative_order8_morphology,
@@ -48,7 +61,7 @@ from amsrr.training.order9_tensor_rollout_artifact import (
 from amsrr.utils.hashing import hash_file, stable_hash
 
 
-def _artifact() -> Order9TensorRolloutArtifact:
+def _artifact(*, active_knot: bool = False) -> Order9TensorRolloutArtifact:
     physical = build_physical_model_from_config("configs/robot/robot_model.yaml")
     morphology = build_representative_order8_morphology(physical)
     modules = tuple(sorted(module.module_id for module in morphology.modules))
@@ -141,6 +154,48 @@ def _artifact() -> Order9TensorRolloutArtifact:
             Order9ObjectTaskRuntimeConfig().phase_duration_s
         ),
     }
+    if active_knot:
+        trajectory = ContactWrenchTrajectory(
+            horizon_s=1.0,
+            dt_s=0.1,
+            contract_version="contact_frame_robot_on_target_v2",
+            knots=[
+                InteractionKnot(
+                    t_rel_s=0.0,
+                    contact_assignments=[
+                        ContactAssignment.from_dict(value)
+                        for value in assignments
+                    ],
+                    centroidal_target=CentroidalTarget(
+                        centroidal_wrench_preference=[
+                            1.0,
+                            2.0,
+                            3.0,
+                            4.0,
+                            5.0,
+                            6.0,
+                        ]
+                    ),
+                )
+            ],
+        )
+        metadata.update(
+            {
+                "pi_l_policy_version": (
+                    ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION
+                ),
+                "active_knot_trajectory_template": trajectory.to_dict(),
+                "active_knot_feature_contract_version": (
+                    ORDER9_ACTIVE_KNOT_FEATURE_CONTRACT_VERSION
+                ),
+                "active_knot_global_feature_names": list(
+                    ORDER9_ACTIVE_KNOT_GLOBAL_FEATURE_NAMES
+                ),
+                "active_assignment_feature_names": list(
+                    ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES
+                ),
+            }
+        )
     batch = 1
     module_count = len(modules)
     local_count = len(local_joints)
@@ -254,6 +309,24 @@ def _artifact() -> Order9TensorRolloutArtifact:
             "post_object_pose_world": pose((batch, 7)),
             "post_object_twist_world": torch.zeros((batch, 6)),
         }
+        if active_knot:
+            values.update(
+                {
+                    "actor_active_knot_features": torch.zeros(
+                        (
+                            batch,
+                            len(ORDER9_ACTIVE_KNOT_GLOBAL_FEATURE_NAMES),
+                        )
+                    ),
+                    "actor_active_assignment_features": torch.zeros(
+                        (
+                            batch,
+                            module_count,
+                            len(ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES),
+                        )
+                    ),
+                }
+            )
         buffer.append(values)
     return buffer.finalize()
 
@@ -279,6 +352,26 @@ def test_tensor_rollout_roundtrip_and_existing_record_conversion(tmp_path: Path)
     ] == "non_fixed_joints_only"
     assert records[1].truncated
     assert records[1].bootstrap_value == pytest.approx(0.5)
+
+
+def test_active_knot_tensor_rollout_archives_exact_actor_context() -> None:
+    artifact = _artifact(active_knot=True)
+    records = order9_pi_l_records_from_tensor_artifact(artifact)
+    trace = records[0].behavior_trace
+    assert trace is not None
+    assert trace.policy_version == ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION
+    assert len(trace.action_payload["active_knot_features"]) == len(
+        ORDER9_ACTIVE_KNOT_GLOBAL_FEATURE_NAMES
+    )
+    assert len(trace.action_payload["active_assignment_features"]) == len(
+        artifact.metadata["module_ids"]
+    )
+    assert records[0].active_knot.centroidal_target is not None
+    assert (
+        records[0]
+        .active_knot.centroidal_target.centroidal_wrench_preference
+        == [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+    )
     assert records[1].episode_id == records[0].episode_id
     assert records[1].step_index == 1
 
@@ -287,7 +380,11 @@ def test_tensor_rollout_rejects_nonfinal_episode_boundary() -> None:
     artifact = _artifact()
     tensors = {name: value.clone() for name, value in artifact.tensors.items()}
     tensors["terminal"][0, 0] = True
-    invalid = Order9TensorRolloutArtifact(metadata=artifact.metadata, tensors=tensors)
+    invalid = Order9TensorRolloutArtifact(
+        metadata=artifact.metadata,
+        tensors=tensors,
+        artifact_version=artifact.artifact_version,
+    )
 
     with pytest.raises(SchemaValidationError, match="boundary is not final"):
         invalid.validate()
@@ -427,6 +524,7 @@ def test_tensor_artifact_merger_builds_one_namespaced_on_policy_generation(
         artifact = Order9TensorRolloutArtifact(
             metadata=metadata,
             tensors={name: value.clone() for name, value in source.tensors.items()},
+            artifact_version=source.artifact_version,
         )
         raw_path = tmp_path / f"raw-{split.value}.pt"
         write_order9_tensor_rollout_artifact(raw_path, artifact)
@@ -502,6 +600,7 @@ def test_production_benchmark_is_derived_from_raw_artifact_timing(
     artifact = Order9TensorRolloutArtifact(
         metadata=metadata,
         tensors={name: value.clone() for name, value in source.tensors.items()},
+        artifact_version=source.artifact_version,
     )
     raw = tmp_path / "benchmark.pt"
     write_order9_tensor_rollout_artifact(raw, artifact)

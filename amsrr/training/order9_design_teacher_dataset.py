@@ -205,18 +205,25 @@ def build_order9_task_conditioned_design_teacher(
     structural_target: MorphologyGraph,
     *,
     checker: FeasibilityChecker | None = None,
+    preferred_anchor_surface_ids: Sequence[int] | None = None,
 ) -> tuple[list[Order9DesignTeacherStep], DesignOutput, FeasibilityResult]:
     """Add task-owned anchors/bindings to a split-owned structural topology.
 
-    C3--C6 precede a deployable learned ``pi_D``.  They therefore draw a
+    The progressive ``pi_L``/``pi_H`` rings precede a deployable learned
+    ``pi_D``.  They therefore draw a
     structural graph from the immutable morphology pool and replay that graph
-    through the same grammar used by C7/C8.  This is the one deterministic
+    through the same grammar used by the post-R4 ``pi_D`` stages.  This is the
+    one deterministic
     topology-to-task adapter; callers must not invent phase-specific anchor
     heuristics outside the grammar.
     """
 
     grammar = Order9DesignGrammar(context, checker=checker)
-    trace, design = _structural_teacher_trace(grammar, structural_target)
+    trace, design = _structural_teacher_trace(
+        grammar,
+        structural_target,
+        preferred_anchor_surface_ids=preferred_anchor_surface_ids,
+    )
     feasibility = grammar.checker.check_design(
         design,
         task_spec=context.task_spec,
@@ -248,7 +255,7 @@ def build_order9_pi_d_teacher_dataset(
     physical_model: PhysicalModel | None = None,
     robot_model_config_path: str = "configs/robot/robot_model.yaml",
 ) -> P4_3DatasetManifest:
-    """Build the 500-record C7 dataset with task and structural split isolation."""
+    """Build the post-R4 pi_D dataset with task/structural split isolation."""
 
     cfg = config or Order9PiDTeacherDatasetConfig()
     cfg.validate()
@@ -422,6 +429,7 @@ def _structural_teacher_trace(
     structural_target: MorphologyGraph,
     *,
     maximum_steps: int = 256,
+    preferred_anchor_surface_ids: Sequence[int] | None = None,
 ) -> tuple[list[Order9DesignTeacherStep], DesignOutput]:
     structural_target.validate()
     target_module_ids = sorted(module.module_id for module in structural_target.modules)
@@ -452,6 +460,7 @@ def _structural_teacher_trace(
             target_pairs=target_pairs,
             target_roles=target_roles,
             target_graph=structural_target,
+            preferred_anchor_surface_ids=preferred_anchor_surface_ids,
         )
         from amsrr.policies.design_candidate_generator import DesignCandidateStep
 
@@ -478,6 +487,7 @@ def _select_structural_candidate(
     target_pairs: set[frozenset[int]],
     target_roles: dict[int, str],
     target_graph: MorphologyGraph,
+    preferred_anchor_surface_ids: Sequence[int] | None = None,
 ) -> DesignActionCandidate:
     valid = [candidate for candidate in candidates if candidate.valid]
     by_type = {
@@ -530,6 +540,29 @@ def _select_structural_candidate(
     if by_type[DesignActionType.BIND_ANCHOR_TO_SLOT]:
         return by_type[DesignActionType.BIND_ANCHOR_TO_SLOT][0]
     if by_type[DesignActionType.CREATE_ANCHOR]:
+        if preferred_anchor_surface_ids is not None:
+            used = {anchor.surface_port_id for anchor in state.anchors}
+            next_surface_id = next(
+                (
+                    int(surface_id)
+                    for surface_id in preferred_anchor_surface_ids
+                    if int(surface_id) not in used
+                ),
+                None,
+            )
+            if next_surface_id is not None:
+                matches = [
+                    candidate
+                    for candidate in by_type[DesignActionType.CREATE_ANCHOR]
+                    if int(candidate.action.params["surface_port_id"])
+                    == next_surface_id
+                ]
+                if len(matches) != 1:
+                    raise SchemaValidationError(
+                        "Order9 pi_D grammar cannot create the IK-selected "
+                        f"surface anchor {next_surface_id}"
+                    )
+                return matches[0]
         return max(
             by_type[DesignActionType.CREATE_ANCHOR],
             key=lambda candidate: _anchor_candidate_score(

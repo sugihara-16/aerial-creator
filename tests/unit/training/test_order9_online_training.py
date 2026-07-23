@@ -59,7 +59,7 @@ def test_one_generation_one_pi_d_ppo_update_is_hash_bound(
     policy = Order9AutoregressiveDesignPolicy(
         Order9DesignPolicyConfig(d_model=16, maximum_design_steps=64)
     )
-    parent_stage = order9_stage_by_id(config, "c7_pi_d_structured_bc")
+    parent_stage = order9_stage_by_id(config, "post_r4_pi_d_structured_bc")
     parent_metadata = build_order9_checkpoint_metadata(
         policy,
         stage=parent_stage,
@@ -158,7 +158,7 @@ def test_one_generation_one_pi_d_ppo_update_is_hash_bound(
 
     result = train_order9_ppo_update(
         config,
-        stage_id="c8_pi_d_masked_ppo",
+        stage_id="post_r4_pi_d_masked_ppo",
         rollout_manifest_path=dataset_dir / "manifest.json",
         rollout_bundle=load_order9_dataset(dataset_dir / "manifest.json"),
         parent_checkpoint_path=parent_path,
@@ -182,7 +182,7 @@ def test_one_generation_one_pi_d_ppo_update_is_hash_bound(
     assert metrics["consumed_environment_steps_per_s"] > 0.0
     assert metrics["runtime_load"]["device"] == "cpu"
     assert metrics["runtime_load"]["process_rss_mib_peak"] > 0.0
-    assert child.metadata.curriculum_stage_id == "c8_pi_d_masked_ppo"
+    assert child.metadata.curriculum_stage_id == "post_r4_pi_d_masked_ppo"
     assert child.metadata.parent_checkpoint_sha256 == parent_sha
     assert child.metadata.metadata["ppo_update_index"] == 0
     with pytest.raises(
@@ -190,7 +190,7 @@ def test_one_generation_one_pi_d_ppo_update_is_hash_bound(
     ):
         train_order9_ppo_update(
             config,
-            stage_id="c8_pi_d_masked_ppo",
+            stage_id="post_r4_pi_d_masked_ppo",
             rollout_manifest_path=dataset_dir / "manifest.json",
             parent_checkpoint_path=result.checkpoint_path,
             physical_model=model_physics,

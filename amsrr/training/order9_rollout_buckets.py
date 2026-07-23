@@ -29,6 +29,11 @@ from amsrr.training.order9_curriculum import (
     Order9LearningMode,
     Order9LearningTarget,
 )
+from amsrr.training.order9_c3_teacher import (
+    ORDER9_C3_ARTICULATED_TEACHER_VERSION,
+    build_order9_c3_articulated_teacher,
+    order9_c3_teacher_evidence,
+)
 from amsrr.training.order9_pipeline import order9_schedule_hash, order9_stage_by_id
 from amsrr.training.order9_randomization import Order9ConservativeRandomizer
 from amsrr.training.order9_topology_provider import Order9CurriculumTopologyProvider
@@ -36,6 +41,8 @@ from amsrr.utils.hashing import hash_file, stable_hash
 
 
 ORDER9_ROLLOUT_BUCKET_MANIFEST_VERSION = "order9_pi_l_rollout_buckets_v1"
+ORDER9_C3_STAGE_ID = "c3_pi_l_ppo_arbitrary_morphology"
+ORDER9_C3_BUCKET_PRECHECK_VERSION = "order9_c3_bucket_articulated_precheck_v1"
 
 
 @dataclass
@@ -281,6 +288,10 @@ def prepare_order9_pi_l_rollout_buckets(
         if base_seed < 0:
             raise ValueError("Order9 rollout bucket seed must be non-negative")
         buckets: list[Order9PiLRolloutBucket] = []
+        used_structural_hashes: dict[DatasetSplit, set[str]] = {
+            DatasetSplit.TRAIN: set(),
+            DatasetSplit.VALIDATION: set(),
+        }
         global_index = 0
         for split, count in requested:
             for split_index in range(count):
@@ -293,23 +304,46 @@ def prepare_order9_pi_l_rollout_buckets(
                 task = TaskSpec.from_dict(randomization.task_spec.to_dict())
                 if stage.topology_randomized:
                     assert provider is not None and asset_manifest is not None
-                    topology = provider.sample(
-                        task,
-                        split=split,
-                        seed=sample_seed,
-                        sample_index=global_index,
-                        min_modules=stage.min_modules,
-                        max_modules=stage.max_modules,
-                    )
-                    graph = topology.morphology_graph
+                    if stage.stage_id == ORDER9_C3_STAGE_ID:
+                        graph, topology_metadata = _select_prechecked_c3_graph(
+                            task=task,
+                            split=split,
+                            split_index=split_index,
+                            pool=pool,
+                            physical_model=physical_model,
+                            min_modules=stage.min_modules,
+                            max_modules=stage.max_modules,
+                            used_structural_hashes=used_structural_hashes[split],
+                        )
+                        topology_source = (
+                            "split_safe_pool_articulated_teacher_prechecked_v1"
+                        )
+                        task.metadata = {
+                            **task.metadata,
+                            "order9_c3_articulated_teacher_precheck": (
+                                topology_metadata["articulated_teacher_precheck"]
+                            ),
+                        }
+                    else:
+                        topology = provider.sample(
+                            task,
+                            split=split,
+                            seed=sample_seed,
+                            sample_index=global_index,
+                            min_modules=stage.min_modules,
+                            max_modules=stage.max_modules,
+                        )
+                        graph = topology.morphology_graph
+                        topology_source = (
+                            "split_safe_pool_task_conditioned_teacher"
+                        )
+                        topology_metadata = topology.metadata
                     asset_entry = asset_manifest.entry_for(graph)
                     if asset_entry.split != split:
                         raise SchemaValidationError(
                             "Order9 topology asset split differs from provider"
                         )
                     robot_usd = _resolve(asset_entry.usd_path, repository)
-                    topology_source = "split_safe_pool_task_conditioned_teacher"
-                    topology_metadata = topology.metadata
                 else:
                     graph = fixed_graph
                     assert fixed_usd is not None
@@ -377,7 +411,7 @@ def prepare_order9_pi_l_rollout_buckets(
                         ),
                         randomization_version=randomization.randomization_version,
                         topology_source=topology_source,
-                        metadata={
+                metadata={
                             "split_bucket_index": split_index,
                             "sampled_values": randomization.sampled_values,
                             "true_mass_properties": (
@@ -414,6 +448,35 @@ def prepare_order9_pi_l_rollout_buckets(
                 "validation_bucket_count": validation_bucket_count,
                 "one_object_and_topology_per_simulator_bucket": True,
                 "learned_pi_d_used": False,
+                "module_count_stratified": (
+                    stage.stage_id == ORDER9_C3_STAGE_ID
+                ),
+                "c3_articulated_teacher_prechecked": (
+                    stage.stage_id == ORDER9_C3_STAGE_ID
+                ),
+                "c3_bucket_precheck_version": (
+                    ORDER9_C3_BUCKET_PRECHECK_VERSION
+                    if stage.stage_id == ORDER9_C3_STAGE_ID
+                    else None
+                ),
+                "c3_articulated_teacher_version": (
+                    ORDER9_C3_ARTICULATED_TEACHER_VERSION
+                    if stage.stage_id == ORDER9_C3_STAGE_ID
+                    else None
+                ),
+                "module_count_histogram_by_split": {
+                    split.value: {
+                        str(module_count): sum(
+                            bucket.split == split
+                            and bucket.module_count == module_count
+                            for bucket in buckets
+                        )
+                        for module_count in range(
+                            stage.min_modules, stage.max_modules + 1
+                        )
+                    }
+                    for split, _count in requested
+                },
             },
         )
         manifest.validate()
@@ -423,6 +486,91 @@ def prepare_order9_pi_l_rollout_buckets(
     except BaseException:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
+
+
+def _select_prechecked_c3_graph(
+    *,
+    task: TaskSpec,
+    split: DatasetSplit,
+    split_index: int,
+    pool: Order3MorphologyPoolManifest,
+    physical_model: PhysicalModel,
+    min_modules: int,
+    max_modules: int,
+    used_structural_hashes: set[str],
+) -> tuple[MorphologyGraph, dict[str, object]]:
+    """Select one module-stratified structural graph that passes the C3 teacher."""
+
+    count_width = max_modules - min_modules + 1
+    module_count = min_modules + split_index % count_width
+    cycle_index = split_index // count_width
+    candidates = sorted(
+        (
+            entry
+            for entry in pool.entries
+            if entry.split == split and entry.module_count == module_count
+        ),
+        key=lambda entry: entry.structural_hash,
+    )
+    if not candidates:
+        raise SchemaValidationError(
+            "Order9 C3 pool has no structural entry for "
+            f"split={split.value}, module_count={module_count}"
+        )
+    offset = cycle_index % len(candidates)
+    rotated = candidates[offset:] + candidates[:offset]
+    ordered = [
+        entry
+        for entry in rotated
+        if entry.structural_hash not in used_structural_hashes
+    ] + [
+        entry
+        for entry in rotated
+        if entry.structural_hash in used_structural_hashes
+    ]
+    failures: list[str] = []
+    for entry in ordered:
+        graph = MorphologyGraph.from_dict(entry.morphology_graph.to_dict())
+        try:
+            evidence = _precheck_c3_structural_graph(
+                task=task,
+                graph=graph,
+                physical_model=physical_model,
+            )
+        except (SchemaValidationError, ValueError, KeyError) as error:
+            failures.append(f"{entry.structural_hash[:12]}:{error}")
+            continue
+        used_structural_hashes.add(entry.structural_hash)
+        return graph, {
+            "provider_version": ORDER9_C3_BUCKET_PRECHECK_VERSION,
+            "source_pool_version": pool.pool_version,
+            "source_requested_seed": entry.requested_seed,
+            "source_accepted_proposal_seed": entry.accepted_proposal_seed,
+            "structural_split_owner": split.value,
+            "module_count_stratum": module_count,
+            "module_count_cycle_index": cycle_index,
+            "learned_pi_d_used": False,
+            "articulated_teacher_precheck": evidence,
+        }
+    raise SchemaValidationError(
+        "Order9 C3 has no articulated-teacher-feasible structural graph for "
+        f"split={split.value}, module_count={module_count}; "
+        + "; ".join(failures[:8])
+    )
+
+
+def _precheck_c3_structural_graph(
+    *,
+    task: TaskSpec,
+    graph: MorphologyGraph,
+    physical_model: PhysicalModel,
+) -> dict[str, object]:
+    bundle = build_order9_c3_articulated_teacher(
+        task_spec=task,
+        structural_target=graph,
+        physical_model=physical_model,
+    )
+    return order9_c3_teacher_evidence(bundle)
 
 
 def load_order9_pi_l_rollout_bucket_manifest(
@@ -535,6 +683,8 @@ def _require_sha256(value: str, name: str) -> None:
 
 
 __all__ = [
+    "ORDER9_C3_BUCKET_PRECHECK_VERSION",
+    "ORDER9_C3_STAGE_ID",
     "ORDER9_ROLLOUT_BUCKET_MANIFEST_VERSION",
     "Order9PiLRolloutBucket",
     "Order9PiLRolloutBucketManifest",

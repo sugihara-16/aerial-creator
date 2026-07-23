@@ -100,7 +100,9 @@ def test_teacher_collector_keeps_privileged_metrics_out_of_actor_and_builds_gzip
     assert bundle.manifest.train_task_ids == ["task-0"]
     assert bundle.manifest.validation_task_ids == ["task-1"]
 
-    config = load_order9_learning_config()
+    config = load_order9_learning_config(
+        "configs/training/order9_learning_curriculum_v2.yaml"
+    )
     stage = order9_stage_by_id(config, "c1_pi_l_bc_fixed_nominal")
     validation = validate_order9_pi_l_dataset_for_stage_streaming(index, stage)
     assert validation.valid is True

@@ -19,9 +19,13 @@ from amsrr.controllers.batched_rigid_body_model import (
 )
 from amsrr.policies.order9_low_level_policy import (
     ORDER9_GLOBAL_ACTION_SIZE,
+    Order9ActiveKnotPhaseConditionedActorCritic,
     Order9LowLevelActorCriticStep,
     Order9LowLevelPolicyConfig,
     Order9PhaseConditionedActorCritic,
+)
+from amsrr.policies.order9_active_knot_features import (
+    Order9ActiveKnotTensorTemplate,
 )
 from amsrr.policies.order9_tensor_command_decoder import (
     Order9TensorPolicyCommand,
@@ -29,6 +33,7 @@ from amsrr.policies.order9_tensor_command_decoder import (
 )
 from amsrr.schemas.morphology import MorphologyGraph
 from amsrr.schemas.physical_model import PhysicalModel
+from amsrr.schemas.policies import ContactWrenchTrajectory
 from amsrr.schemas.task_spec import TaskType
 from amsrr.simulation.order9_object_task_runtime import (
     ORDER9_OBJECT_TASK_ADAPTER_ID,
@@ -43,7 +48,7 @@ from amsrr.training.order9_tensor_runtime import (
 )
 
 
-ORDER9_TENSOR_PI_L_RUNTIME_VERSION = "order9_tensor_complete_pi_l_qpid_runtime_v3"
+ORDER9_TENSOR_PI_L_RUNTIME_VERSION = "order9_tensor_complete_pi_l_qpid_runtime_v4"
 
 
 @dataclass(frozen=True)
@@ -51,6 +56,8 @@ class Order9TensorPiLStep:
     control_model: BatchedRigidBodyControlModel
     actor_features: torch.Tensor
     phase_features: torch.Tensor
+    active_knot_features: torch.Tensor | None
+    active_assignment_features: torch.Tensor | None
     previous_global_action: torch.Tensor
     recurrent_state_in: torch.Tensor
     actor_controller_qp_feasible: torch.Tensor
@@ -79,6 +86,7 @@ class Order9TensorPiLRuntime:
         dtype: torch.dtype = torch.float32,
         controller: BatchedQPIDController | None = None,
         policy_frame_origins_world: torch.Tensor | None = None,
+        active_knot_trajectory: ContactWrenchTrajectory | None = None,
     ) -> None:
         if batch_size < 1:
             raise ValueError("Order9 tensor pi_L batch size must be positive")
@@ -180,7 +188,29 @@ class Order9TensorPiLRuntime:
             self.builder.local_joint_ids.index(joint_id)
             for joint_id in self.decoder.local_joint_ids
         )
+        self._command_joint_index_tensor = torch.tensor(
+            self._command_joint_indices,
+            device=self.device,
+            dtype=torch.long,
+        )
         self._phase_feature_template = self._build_phase_feature_template()
+        self._active_knot_template = None
+        if isinstance(
+            self.policy, Order9ActiveKnotPhaseConditionedActorCritic
+        ):
+            if active_knot_trajectory is None:
+                raise ValueError(
+                    "Order9 active-knot tensor policy requires its trajectory"
+                )
+            self._active_knot_template = Order9ActiveKnotTensorTemplate(
+                trajectory=active_knot_trajectory,
+                morphology_graph=self.morphology_graph,
+                physical_model=self.physical_model,
+                module_ids=self.builder.module_ids,
+                batch_size=self.batch_size,
+                device=self.device,
+                dtype=self.dtype,
+            )
 
     @torch.no_grad()
     def compute(
@@ -270,6 +300,55 @@ class Order9TensorPiLRuntime:
             if privileged_disturbance_body is None
             else privileged_disturbance_body
         )
+        active_knot_features = None
+        active_assignment_features = None
+        if self._active_knot_template is not None:
+            (
+                active_knot_features,
+                active_assignment_features,
+            ) = self._active_knot_template.features(
+                time_s=time_s,
+                phase_progress=task_target.phase_progress,
+                contact_schedule_index=task_target.contact_schedule_index,
+                body_pose_world=control_model.body_pose_world,
+                body_twist_world=control_model.body_twist_world,
+                object_pose_world=state.object_pose_world,
+                object_twist_world=state.object_twist_world,
+                desired_body_pose_world=(
+                    task_target.desired_robot_root_pose_world
+                ),
+                desired_body_twist_world=(
+                    task_target.desired_robot_root_twist_world
+                ),
+                desired_object_pose_world=task_target.desired_object_pose_world,
+                current_joint_positions_rad=(
+                    state.local_joint_positions_rad.index_select(
+                        -1, self._command_joint_index_tensor
+                    )
+                ),
+                current_joint_velocities_radps=(
+                    state.local_joint_velocities_radps.index_select(
+                        -1, self._command_joint_index_tensor
+                    )
+                ),
+                desired_joint_positions_rad=(
+                    task_target.nominal_joint_positions_rad
+                ),
+                desired_joint_velocities_radps=(
+                    task_target.nominal_joint_velocities_radps
+                ),
+                controller_qp_feasible=actor_qp,
+                controller_status_one_hot=actor_status,
+                allocation_residual_norm=actor_residual,
+            )
+        active_kwargs = (
+            {}
+            if active_knot_features is None
+            else {
+                "active_knot_features": active_knot_features,
+                "active_assignment_features": active_assignment_features,
+            }
+        )
         policy_step = self.policy.step(
             graph_batch,
             None,
@@ -279,6 +358,7 @@ class Order9TensorPiLRuntime:
             phase_features=phase_features,
             privileged_disturbance_body=privileged,
             deterministic=deterministic,
+            **active_kwargs,
         )
         command_reference_q = task_target.nominal_joint_positions_rad
         command_reference_qdot = task_target.nominal_joint_velocities_radps
@@ -338,6 +418,8 @@ class Order9TensorPiLRuntime:
             control_model=control_model,
             actor_features=actor_features,
             phase_features=phase_features,
+            active_knot_features=active_knot_features,
+            active_assignment_features=active_assignment_features,
             previous_global_action=previous,
             recurrent_state_in=recurrent_in,
             actor_controller_qp_feasible=actor_qp,

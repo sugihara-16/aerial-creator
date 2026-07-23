@@ -20,9 +20,9 @@ from amsrr.training.order9_pipeline import (
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Apply one factorized C9 PPO update to pi_L, pi_H, and pi_D."
+        description="Apply one factorized joint PPO update to pi_L, pi_H, and pi_D."
     )
-    parser.add_argument("--stage", default="c9_joint_object_task_ppo")
+    parser.add_argument("--stage", default="joint_object_task_ppo")
     parser.add_argument("--rollout-dataset", required=True)
     parser.add_argument("--pi-l-parent", required=True)
     parser.add_argument("--pi-h-parent", required=True)

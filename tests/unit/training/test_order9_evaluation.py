@@ -21,7 +21,7 @@ def test_stage_metrics_are_derived_from_hash_bound_episode_rows(
     tmp_path: Path,
 ) -> None:
     config = load_order9_learning_config()
-    stage = order9_stage_by_id(config, "c6_pi_h_full_trajectory_ppo")
+    stage = order9_stage_by_id(config, "r1_pi_h_ppo_frozen_pi_l")
     raw = tmp_path / "isaac-rollout.json"
     raw.write_text("{}\n", encoding="utf-8")
     digest = hash_file(raw)
@@ -62,7 +62,7 @@ def test_stage_metrics_are_derived_from_hash_bound_episode_rows(
 
 def test_stage_evaluation_rejects_tampered_raw_artifact(tmp_path: Path) -> None:
     config = load_order9_learning_config()
-    stage = order9_stage_by_id(config, "c6_pi_h_full_trajectory_ppo")
+    stage = order9_stage_by_id(config, "r1_pi_h_ppo_frozen_pi_l")
     raw = tmp_path / "isaac-rollout.json"
     raw.write_text("{}\n", encoding="utf-8")
     digest = hash_file(raw)

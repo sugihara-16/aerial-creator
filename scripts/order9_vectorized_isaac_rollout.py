@@ -172,6 +172,11 @@ from amsrr.irg.irg_builder import IRGBuilder
 from amsrr.policies.contact_candidate_sampler import ContactCandidateSampler
 from amsrr.policies.contact_wrench_trajectory import GraspCarryBaselinePlanner
 from amsrr.policies.high_level_policy_base import HighLevelPolicyContext
+from amsrr.policies.order9_active_knot_features import (
+    ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES,
+    ORDER9_ACTIVE_KNOT_FEATURE_CONTRACT_VERSION,
+    ORDER9_ACTIVE_KNOT_GLOBAL_FEATURE_NAMES,
+)
 from amsrr.robot_model.fixed_morphology_urdf import (
     articulated_morphology_graph_connections,
 )
@@ -210,10 +215,16 @@ from amsrr.simulation.order9_tensor_object_task import (
     ORDER9_PHASE_SUCCESSOR_REFERENCE_SEMANTICS,
     Order9TensorObjectTaskRuntime,
 )
-from amsrr.training.order9_checkpoints import load_order9_policy_checkpoint
 from amsrr.training.order9_curriculum import (
     load_order9_learning_config,
     resolve_order9_stage_runtime,
+)
+from amsrr.training.order9_curriculum_lineage import (
+    load_order9_stage_parent_checkpoint,
+)
+from amsrr.training.order9_c3_teacher import (
+    build_order9_c3_articulated_teacher,
+    order9_c3_teacher_evidence,
 )
 from amsrr.training.order9_evaluation import (
     Order9EvaluationEpisode,
@@ -498,7 +509,29 @@ def main() -> dict[str, object]:
         if args_cli.selected_gripper_friction is not None
         else float(friction_resolution.robot_surface_friction or 4.5)
     )
-    assignments, candidates = _teacher_assignments(task, morphology)
+    if bool(stage.topology_randomized):
+        c3_teacher = build_order9_c3_articulated_teacher(
+            task_spec=task,
+            structural_target=morphology,
+            physical_model=physical,
+        )
+        expected_teacher_evidence = task.metadata.get(
+            "order9_c3_articulated_teacher_precheck"
+        )
+        if expected_teacher_evidence is not None:
+            actual_teacher_evidence = order9_c3_teacher_evidence(c3_teacher)
+            if actual_teacher_evidence != expected_teacher_evidence:
+                raise RuntimeError(
+                    "Order9 C3 runtime teacher differs from its bucket precheck"
+                )
+        morphology = c3_teacher.design_output.target_morphology
+        teacher_trajectory = c3_teacher.trajectory
+        candidates = c3_teacher.contact_candidate_set
+        assignments = _maintain_assignments(teacher_trajectory)
+    else:
+        teacher_trajectory, assignments, candidates = _teacher_assignments(
+            task, morphology
+        )
     selected_anchor_ids = tuple(assignment.anchor_id for assignment in assignments)
     if len(selected_anchor_ids) < 2 or len(set(selected_anchor_ids)) != len(
         selected_anchor_ids
@@ -514,19 +547,22 @@ def main() -> dict[str, object]:
         if link.link_id in articulated_link_ids
     )
     internal_robot_body_names: tuple[str, ...] = ()
-    if robot_asset_manifest is not None:
-        source_urdf = Path(robot_asset_manifest.source_urdf_path)
-        if not source_urdf.is_absolute():
-            source_urdf = repository / source_urdf
-        internal_robot_body_names = tuple(
-            f"module_{connection.child_module_id}__"
-            f"{connection.child_mechanism_joint_id}__reroot_offset_link"
-            for connection in articulated_morphology_graph_connections(
-                source_urdf,
-                morphology_graph=morphology,
-            )
-            if connection.child_mechanism_joint_id is not None
+    source_urdf = (
+        Path(robot_asset_manifest.source_urdf_path)
+        if robot_asset_manifest is not None
+        else Path(physical.urdf_path)
+    )
+    if not source_urdf.is_absolute():
+        source_urdf = repository / source_urdf
+    internal_robot_body_names = tuple(
+        f"module_{connection.child_module_id}__"
+        f"{connection.child_mechanism_joint_id}__reroot_offset_link"
+        for connection in articulated_morphology_graph_connections(
+            source_urdf,
+            morphology_graph=morphology,
         )
+        if connection.child_mechanism_joint_id is not None
+    )
     robot_body_names_expected = (
         *physical_robot_body_names,
         *internal_robot_body_names,
@@ -624,13 +660,15 @@ def main() -> dict[str, object]:
         object_filter_body_names=robot_body_names_expected,
         selected_anchor_ids=selected_anchor_ids,
     )
-    checkpoint = load_order9_policy_checkpoint(
+    checkpoint = load_order9_stage_parent_checkpoint(
+        config,
+        stage,
         args_cli.pi_l_checkpoint,
         device=scene.device,
-        expected_sha256=args_cli.pi_l_checkpoint_sha256,
         expected_family=Order9PolicyFamily.PI_L,
-        expected_schedule_hash=order9_schedule_hash(config),
     )
+    if checkpoint.sha256 != args_cli.pi_l_checkpoint_sha256:
+        raise RuntimeError("Order9 pi_L checkpoint SHA-256 mismatch")
     controller = BatchedQPIDController(
         config=QPIDControllerConfig(
             allocation_mode="rigid_body_qp", control_dt_s=float(args_cli.dt)
@@ -644,6 +682,7 @@ def main() -> dict[str, object]:
         device=scene.device,
         controller=controller,
         policy_frame_origins_world=scene.env_origins,
+        active_knot_trajectory=teacher_trajectory,
     )
     task_runtime = Order9TensorObjectTaskRuntime()
     teacher_reference = None
@@ -667,6 +706,9 @@ def main() -> dict[str, object]:
             != morphology.stable_hash()
         ):
             raise ValueError("C1 teacher reference morphology hash differs")
+    canonical_resets = _canonical_resets_enabled(
+        morphology, canonical.metadata["source_graph_hash"]
+    )
     scalar_task_runtime = Order9ObjectTaskRuntime(canonical, config=task_runtime.config)
     joint_reference_start, joint_reference_end = _canonical_joint_reference_banks(
         scalar_task_runtime,
@@ -674,14 +716,14 @@ def main() -> dict[str, object]:
         joint_ids=policy_runtime.decoder.local_joint_ids,
         device=torch.device(scene.device),
         dtype=torch.float32,
+        articulated_trajectory=(
+            teacher_trajectory if not canonical_resets else None
+        ),
     )
     reward_engine = Order9TensorRewardEngine(control_dt_s=float(args_cli.dt))
     phase_count = len(ORDER9_OBJECT_TASK_PHASES)
     bank = _PhaseStateBank(scene, phase_count)
     teacher_phase_zero_expected = None
-    canonical_resets = _canonical_resets_enabled(
-        morphology, canonical.metadata["source_graph_hash"]
-    )
     if canonical_resets:
         _seed_canonical_bank(
             bank,
@@ -842,9 +884,11 @@ def main() -> dict[str, object]:
             morphology=morphology,
             physical=physical,
             checkpoint_sha256=checkpoint.sha256,
+            policy_version=checkpoint.metadata.policy_version,
             tasks=translated_tasks,
             split=split,
             assignments=assignments,
+            teacher_trajectory=teacher_trajectory,
             io=io,
             reward_names=reward_names,
             selected_friction=selected_friction,
@@ -1670,7 +1714,26 @@ def _teacher_assignments(task: TaskSpec, morphology: MorphologyGraph):
         ),
         key=lambda value: value.anchor_id,
     )
-    return assignments, candidates
+    return trajectory, assignments, candidates
+
+
+def _maintain_assignments(trajectory):
+    maintain = next(
+        knot
+        for knot in trajectory.knots
+        if any(
+            assignment.schedule_state == "maintain"
+            for assignment in knot.contact_assignments
+        )
+    )
+    return sorted(
+        (
+            assignment
+            for assignment in maintain.contact_assignments
+            if assignment.schedule_state == "maintain"
+        ),
+        key=lambda value: value.anchor_id,
+    )
 
 
 def _bind_selected_material(
@@ -2050,9 +2113,11 @@ def _rollout_metadata(
     morphology,
     physical,
     checkpoint_sha256,
+    policy_version,
     tasks,
     split,
     assignments,
+    teacher_trajectory,
     io,
     reward_names,
     selected_friction,
@@ -2075,6 +2140,7 @@ def _rollout_metadata(
     return {
         "generation_id": args_cli.generation_id,
         "pi_l_checkpoint_sha256": checkpoint_sha256,
+        "pi_l_policy_version": policy_version,
         "stage_id": stage.stage_id,
         "stage_config_hash": stable_hash(stage.to_dict()),
         "curriculum_schedule_hash": order9_schedule_hash(config),
@@ -2119,6 +2185,16 @@ def _rollout_metadata(
         "assignment_templates_by_environment": [
             [assignment.to_dict() for assignment in assignments] for _ in tasks
         ],
+        "active_knot_trajectory_template": teacher_trajectory.to_dict(),
+        "active_knot_feature_contract_version": (
+            ORDER9_ACTIVE_KNOT_FEATURE_CONTRACT_VERSION
+        ),
+        "active_knot_global_feature_names": list(
+            ORDER9_ACTIVE_KNOT_GLOBAL_FEATURE_NAMES
+        ),
+        "active_assignment_feature_names": list(
+            ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES
+        ),
         "object_id": _target_object_and_geometry(tasks[0])[0].object_id,
         "module_ids": list(io.module_ids),
         "local_joint_ids": list(io.local_joint_ids),
@@ -2209,9 +2285,19 @@ def _canonical_joint_reference_banks(
     joint_ids,
     device: torch.device,
     dtype: torch.dtype,
+    articulated_trajectory=None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Materialize the deterministic active-knot posture reference."""
 
+    if articulated_trajectory is not None:
+        return _articulated_joint_reference_banks(
+            articulated_trajectory,
+            phase_count=runtime.phase_count,
+            module_ids=module_ids,
+            joint_ids=joint_ids,
+            device=device,
+            dtype=dtype,
+        )
     starts = []
     ends = []
     for phase_index in range(runtime.phase_count):
@@ -2249,6 +2335,76 @@ def _canonical_joint_reference_banks(
     )
 
 
+def _articulated_joint_reference_banks(
+    trajectory,
+    *,
+    phase_count: int,
+    module_ids,
+    joint_ids,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Map the complete articulated teacher posture into task-phase banks."""
+
+    if not trajectory.knots:
+        raise RuntimeError("Order9 articulated teacher trajectory is empty")
+    initial_target = trajectory.knots[0].posture_target
+    active_target = next(
+        (
+            knot.posture_target
+            for knot in trajectory.knots
+            if any(
+                assignment.schedule_state
+                in {"attach", "maintain", "slide"}
+                for assignment in knot.contact_assignments
+            )
+        ),
+        None,
+    )
+    if (
+        initial_target is None
+        or initial_target.joint_pos_target is None
+        or active_target is None
+        or active_target.joint_pos_target is None
+    ):
+        raise RuntimeError(
+            "Order9 articulated teacher lacks complete posture references"
+        )
+    initial = initial_target.joint_pos_target
+    active = active_target.joint_pos_target
+
+    def bank_row(values):
+        rows = []
+        for module_id in module_ids:
+            row = []
+            for joint_id in joint_ids:
+                global_id = f"module_{module_id}:{joint_id}"
+                if global_id not in values:
+                    raise RuntimeError(
+                        "Order9 articulated posture reference does not cover "
+                        f"{global_id}"
+                    )
+                row.append(float(values[global_id]))
+            rows.append(row)
+        return rows
+
+    initial_row = bank_row(initial)
+    active_row = bank_row(active)
+    starts = []
+    ends = []
+    for phase_index in range(phase_count):
+        if phase_index == 0:
+            starts.append(initial_row)
+            ends.append(active_row)
+        else:
+            starts.append(active_row)
+            ends.append(active_row)
+    return (
+        torch.tensor(starts, device=device, dtype=dtype),
+        torch.tensor(ends, device=device, dtype=dtype),
+    )
+
+
 def policy_command_joint_ids(physical) -> tuple[str, ...]:
     return tuple(
         sorted(
@@ -2268,6 +2424,13 @@ def _artifact_step(**values):
     allocation = step.controller_result.allocation
     reward = values["reward"]
     post = values["post_state"]
+    if (
+        step.active_knot_features is None
+        or step.active_assignment_features is None
+    ):
+        raise RuntimeError(
+            "Order9 production rollout requires active-knot actor features"
+        )
     return {
         "valid": values["valid"],
         "time_s": values["pre_time"],
@@ -2302,6 +2465,10 @@ def _artifact_step(**values):
         "actor_controller_status_one_hot": step.actor_controller_status_one_hot,
         "actor_allocation_residual_norm": step.actor_allocation_residual_norm,
         "actor_task_success": step.actor_task_success,
+        "actor_active_knot_features": step.active_knot_features,
+        "actor_active_assignment_features": (
+            step.active_assignment_features
+        ),
         "global_action": step.policy_step.action,
         "joint_action": step.policy_step.joint_action,
         "previous_global_action": step.previous_global_action,

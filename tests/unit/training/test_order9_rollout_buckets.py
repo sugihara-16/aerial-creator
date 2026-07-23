@@ -4,8 +4,10 @@ import pytest
 
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
 from amsrr.schemas.datasets import DatasetSplit
+from amsrr.schemas.order3 import Order3MorphologyPoolManifest
 from amsrr.schemas.task_spec import TaskSpec
 from amsrr.training.order9_curriculum import load_order9_learning_config
+import amsrr.training.order9_rollout_buckets as rollout_buckets
 from amsrr.training.order9_rollout_buckets import (
     load_order9_pi_l_rollout_bucket_manifest,
     order9_pi_l_collector_arguments,
@@ -99,3 +101,61 @@ def test_fixed_pi_l_rollout_buckets_bind_randomization_and_collector_args(
                 "holon_p4_2_graph.usda"
             ),
         )
+
+
+def test_c3_structural_selection_is_module_stratified_and_split_unique(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pool = Order3MorphologyPoolManifest.from_json(
+        Path("artifacts/p4_full/order9/morphology_pool.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    physical = build_physical_model_from_config(
+        "configs/robot/robot_model.yaml"
+    )
+    monkeypatch.setattr(
+        rollout_buckets,
+        "_precheck_c3_structural_graph",
+        lambda **_kwargs: {
+            "teacher_version": "unit",
+            "trajectory_hash": "a" * 64,
+        },
+    )
+    used: set[str] = set()
+    selected = [
+        rollout_buckets._select_prechecked_c3_graph(
+            task=_base_task(),
+            split=DatasetSplit.VALIDATION,
+            split_index=index,
+            pool=pool,
+            physical_model=physical,
+            min_modules=2,
+            max_modules=8,
+            used_structural_hashes=used,
+        )
+        for index in range(14)
+    ]
+
+    assert [len(graph.modules) for graph, _metadata in selected] == [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+    ]
+    assert len(used) == 14
+    assert all(
+        metadata["articulated_teacher_precheck"]["trajectory_hash"]
+        == "a" * 64
+        for _graph, metadata in selected
+    )

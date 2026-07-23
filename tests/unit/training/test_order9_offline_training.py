@@ -111,7 +111,7 @@ def test_order9_pi_d_offline_bc_replays_masks_and_writes_strict_checkpoint(
 
     result = train_order9_behavior_cloning(
         config,
-        stage_id="c7_pi_d_structured_bc",
+        stage_id="post_r4_pi_d_structured_bc",
         dataset_manifest_path=manifest_path,
         physical_model=physical_model,
         output_dir=tmp_path / "training",

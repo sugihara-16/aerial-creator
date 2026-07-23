@@ -45,6 +45,10 @@ from amsrr.training.order9_curriculum import (
     Order9LearningTarget,
     Order9PPOOptimizationConfig,
     order9_ppo_optimization,
+    require_order9_stage_execution_allowed,
+)
+from amsrr.training.order9_curriculum_lineage import (
+    load_order9_stage_parent_checkpoint,
 )
 from amsrr.training.order9_runtime_load import Order9RuntimeLoadMonitor
 from amsrr.training.order9_dataset import (
@@ -204,22 +208,26 @@ def train_order9_ppo_update(
 
     config.validate()
     stage = order9_stage_by_id(config, stage_id)
+    require_order9_stage_execution_allowed(config, stage)
     if stage.learning_mode != Order9LearningMode.PPO:
         raise SchemaValidationError("Order9 online trainer accepts PPO stages only")
     if stage.learning_target == Order9LearningTarget.JOINT_OBJECT_TASK:
         raise SchemaValidationError(
-            "C9 has three behavior checkpoints; use train_order9_joint_ppo_update"
+            "joint training has three behavior checkpoints; use "
+            "train_order9_joint_ppo_update"
         )
     if update_index < 0:
         raise SchemaValidationError("Order9 PPO update_index must be non-negative")
     require_non_empty(git_revision, "git_revision")
     family = _stage_family(stage)
     resolved_device = _resolve_device(device or config.production_runtime.device)
-    parent = load_order9_policy_checkpoint(
+    parent = load_order9_stage_parent_checkpoint(
+        config,
+        stage,
         parent_checkpoint_path,
         device=resolved_device,
         expected_family=family,
-        expected_schedule_hash=order9_schedule_hash(config),
+        update_index=update_index,
     )
     _validate_parent(parent.metadata, stage, update_index, physical_model)
     bundle = _bound_rollout_bundle(rollout_manifest_path, rollout_bundle)
@@ -381,15 +389,18 @@ def train_order9_joint_ppo_update(
     device: str | torch.device | None = None,
     additional_input_artifact_paths: Mapping[str, str | Path] | None = None,
 ) -> Order9JointOnlineTrainingResult:
-    """Apply one factorized PPO update to pi_L, pi_H, and pi_D from C9 data."""
+    """Apply one configured factorized PPO update to pi_L, pi_H, and pi_D."""
 
     config.validate()
     stage = order9_stage_by_id(config, stage_id)
+    require_order9_stage_execution_allowed(config, stage)
     if (
         stage.learning_mode != Order9LearningMode.PPO
         or stage.learning_target != Order9LearningTarget.JOINT_OBJECT_TASK
     ):
-        raise SchemaValidationError("Order9 joint trainer is restricted to C9")
+        raise SchemaValidationError(
+            "Order9 joint trainer is restricted to the joint-object-task stage"
+        )
     if update_index < 0:
         raise SchemaValidationError("Order9 joint update_index must be non-negative")
     require_non_empty(git_revision, "git_revision")
@@ -399,7 +410,9 @@ def train_order9_joint_ppo_update(
     }
     expected_families = set(Order9PolicyFamily)
     if set(paths) != expected_families:
-        raise SchemaValidationError("Order9 C9 requires pi_L, pi_H, and pi_D parents")
+        raise SchemaValidationError(
+            "Order9 joint training requires pi_L, pi_H, and pi_D parents"
+        )
     resolved_device = _resolve_device(device or config.production_runtime.device)
     schedule_hash = order9_schedule_hash(config)
     parents = {

@@ -16,11 +16,20 @@ from amsrr.policies.morphology_conditioned_low_level_policy import (
     MorphologyConditionedActorCritic,
     Order3MorphologyConditionedPolicyConfig,
 )
+from amsrr.policies.order9_active_knot_features import (
+    ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES,
+    ORDER9_ACTIVE_KNOT_FEATURE_CONTRACT_VERSION,
+    ORDER9_ACTIVE_KNOT_GLOBAL_FEATURE_NAMES,
+    order9_active_knot_feature_vectors,
+)
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.task_spec import TaskType
 
 
 ORDER9_PI_L_POLICY_VERSION = "order9_phase_conditioned_policy_command_pi_l_v2"
+ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION = (
+    "order9_active_knot_policy_command_pi_l_v3"
+)
 ORDER9_MAX_PHASE_COUNT = 16
 ORDER9_GLOBAL_ACTION_NAMES: tuple[str, ...] = (
     "centroidal_position_correction_world.x",
@@ -95,6 +104,41 @@ class Order9LowLevelPolicyConfig(Order3MorphologyConditionedPolicyConfig):
         return len(TaskType) + self.max_phase_count + 3
 
 
+@dataclass
+class Order9ActiveKnotLowLevelPolicyConfig(Order9LowLevelPolicyConfig):
+    active_knot_feature_contract_version: str = (
+        ORDER9_ACTIVE_KNOT_FEATURE_CONTRACT_VERSION
+    )
+    active_knot_global_feature_dim: int = len(
+        ORDER9_ACTIVE_KNOT_GLOBAL_FEATURE_NAMES
+    )
+    active_assignment_feature_dim: int = len(
+        ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES
+    )
+
+    def validate(self) -> None:
+        super().validate()
+        if (
+            self.active_knot_feature_contract_version
+            != ORDER9_ACTIVE_KNOT_FEATURE_CONTRACT_VERSION
+        ):
+            raise SchemaValidationError(
+                "Order9 active-knot feature contract version mismatch"
+            )
+        if self.active_knot_global_feature_dim != len(
+            ORDER9_ACTIVE_KNOT_GLOBAL_FEATURE_NAMES
+        ):
+            raise SchemaValidationError(
+                "Order9 active-knot global feature width mismatch"
+            )
+        if self.active_assignment_feature_dim != len(
+            ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES
+        ):
+            raise SchemaValidationError(
+                "Order9 active-assignment feature width mismatch"
+            )
+
+
 @dataclass(frozen=True)
 class Order9LowLevelActorCriticStep:
     action: torch.Tensor
@@ -116,6 +160,8 @@ class Order9LowLevelActorCriticStep:
 
 class Order9PhaseConditionedActorCritic(MorphologyConditionedActorCritic):
     """Morphology trunk with a complete phase-conditioned PolicyCommand head."""
+
+    policy_version = ORDER9_PI_L_POLICY_VERSION
 
     def __init__(self, config: Order9LowLevelPolicyConfig | None = None) -> None:
         resolved = config or Order9LowLevelPolicyConfig()
@@ -193,6 +239,8 @@ class Order9PhaseConditionedActorCritic(MorphologyConditionedActorCritic):
         recurrent_state: torch.Tensor,
         *,
         phase_features: torch.Tensor,
+        active_knot_features: torch.Tensor | None = None,
+        active_assignment_features: torch.Tensor | None = None,
         privileged_disturbance_body: torch.Tensor | None = None,
         action: torch.Tensor | None = None,
         joint_action: torch.Tensor | None = None,
@@ -235,6 +283,13 @@ class Order9PhaseConditionedActorCritic(MorphologyConditionedActorCritic):
         )
         feature_embedding = self.actor_feature_encoder(actor_features)
         feature_embedding = feature_embedding + self.phase_encoder(phase_features)
+        feature_embedding, node_embeddings = self._augment_active_knot_context(
+            feature_embedding=feature_embedding,
+            node_embeddings=graph_encoding.node_embeddings,
+            node_mask=graph_encoding.mask,
+            active_knot_features=active_knot_features,
+            active_assignment_features=active_assignment_features,
+        )
         fused = self.fusion(
             torch.cat(
                 (graph_encoding.global_embedding, feature_embedding, previous_action),
@@ -261,10 +316,10 @@ class Order9PhaseConditionedActorCritic(MorphologyConditionedActorCritic):
         global_entropy = distribution.entropy().sum(dim=-1)
 
         recurrent_tokens = next_state.unsqueeze(1).expand(
-            -1, graph_encoding.node_embeddings.shape[1], -1
+            -1, node_embeddings.shape[1], -1
         )
         joint_raw_mean = self.joint_decoder(
-            torch.cat((graph_encoding.node_embeddings, recurrent_tokens), dim=-1)
+            torch.cat((node_embeddings, recurrent_tokens), dim=-1)
         )
         joint_std = torch.exp(
             torch.clamp(self.joint_actor_log_std, min=-6.0, max=1.0)
@@ -305,6 +360,148 @@ class Order9PhaseConditionedActorCritic(MorphologyConditionedActorCritic):
             graph_encoding=graph_encoding,
         )
 
+    def _augment_active_knot_context(
+        self,
+        *,
+        feature_embedding: torch.Tensor,
+        node_embeddings: torch.Tensor,
+        node_mask: torch.Tensor,
+        active_knot_features: torch.Tensor | None,
+        active_assignment_features: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        del node_mask
+        if (
+            active_knot_features is not None
+            or active_assignment_features is not None
+        ):
+            raise ValueError(
+                "legacy Order9 pi_L does not accept active-knot feature tensors"
+            )
+        return feature_embedding, node_embeddings
+
+
+class Order9ActiveKnotPhaseConditionedActorCritic(
+    Order9PhaseConditionedActorCritic
+):
+    """C3 successor actor with an explicit deployable active-knot branch."""
+
+    policy_version = ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION
+
+    def __init__(
+        self, config: Order9ActiveKnotLowLevelPolicyConfig | None = None
+    ) -> None:
+        resolved = config or Order9ActiveKnotLowLevelPolicyConfig()
+        resolved.validate()
+        super().__init__(resolved)
+        self.config = resolved
+        self.active_knot_encoder = _zero_residual_encoder(
+            resolved.active_knot_global_feature_dim,
+            resolved.graph_hidden_dim,
+        )
+        self.active_assignment_encoder = _zero_residual_encoder(
+            resolved.active_assignment_feature_dim,
+            resolved.graph_hidden_dim,
+        )
+
+    def initialize_from_legacy_order9(
+        self, source: Order9PhaseConditionedActorCritic
+    ) -> tuple[list[str], list[str]]:
+        if isinstance(source, Order9ActiveKnotPhaseConditionedActorCritic):
+            raise SchemaValidationError(
+                "Order9 active-knot migration source must be the legacy v2 actor"
+            )
+        source_state = source.state_dict()
+        target_state = self.state_dict()
+        for key, value in source_state.items():
+            if key not in target_state or target_state[key].shape != value.shape:
+                raise SchemaValidationError(
+                    f"Order9 active-knot migration cannot copy {key!r}"
+                )
+        incompatible = self.load_state_dict(source_state, strict=False)
+        unexpected = list(incompatible.unexpected_keys)
+        missing = sorted(incompatible.missing_keys)
+        if unexpected or any(
+            not key.startswith(
+                ("active_knot_encoder.", "active_assignment_encoder.")
+            )
+            for key in missing
+        ):
+            raise SchemaValidationError(
+                "Order9 active-knot migration parameter boundary differs: "
+                f"missing={missing}, unexpected={unexpected}"
+            )
+        return missing, unexpected
+
+    def active_knot_feature_tensors(
+        self,
+        context: LowLevelPolicyContext,
+        *,
+        device: torch.device,
+        dtype: torch.dtype,
+        control_model: object | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        body_pose = getattr(control_model, "body_pose_world", None)
+        body_twist = getattr(control_model, "body_twist_world", None)
+        features = order9_active_knot_feature_vectors(
+            context,
+            body_pose_world=body_pose,
+            body_twist_world=body_twist,
+        )
+        return (
+            torch.tensor(
+                [features.global_features], device=device, dtype=dtype
+            ),
+            torch.tensor(
+                [features.assignment_features], device=device, dtype=dtype
+            ),
+        )
+
+    def _augment_active_knot_context(
+        self,
+        *,
+        feature_embedding: torch.Tensor,
+        node_embeddings: torch.Tensor,
+        node_mask: torch.Tensor,
+        active_knot_features: torch.Tensor | None,
+        active_assignment_features: torch.Tensor | None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if (
+            active_knot_features is None
+            or active_assignment_features is None
+        ):
+            raise ValueError(
+                "Order9 active-knot pi_L requires both active feature tensors"
+            )
+        batch_size, node_count, _ = node_embeddings.shape
+        device, dtype = node_embeddings.device, node_embeddings.dtype
+        active_global = active_knot_features.to(device=device, dtype=dtype)
+        active_nodes = active_assignment_features.to(
+            device=device, dtype=dtype
+        )
+        _require_shape(
+            active_global,
+            (batch_size, self.config.active_knot_global_feature_dim),
+            "active_knot_features",
+        )
+        _require_shape(
+            active_nodes,
+            (
+                batch_size,
+                node_count,
+                self.config.active_assignment_feature_dim,
+            ),
+            "active_assignment_features",
+        )
+        encoded_global = self.active_knot_encoder(active_global)
+        encoded_nodes = self.active_assignment_encoder(active_nodes)
+        mask = node_mask.unsqueeze(-1).to(dtype)
+        encoded_nodes = encoded_nodes * mask
+        pooled = encoded_nodes.sum(dim=1) / mask.sum(dim=1).clamp_min(1.0)
+        return (
+            feature_embedding + encoded_global + pooled,
+            node_embeddings + encoded_nodes,
+        )
+
 
 def order9_phase_actor_feature_vector(
     context: LowLevelPolicyContext,
@@ -338,6 +535,22 @@ def order9_phase_actor_feature_vector(
         math.sin(2.0 * math.pi * adapter),
         math.cos(2.0 * math.pi * adapter),
     ]
+
+
+def _zero_residual_encoder(
+    input_dim: int, hidden_dim: int
+) -> torch.nn.Sequential:
+    encoder = torch.nn.Sequential(
+        torch.nn.Linear(input_dim, hidden_dim),
+        torch.nn.SiLU(),
+        torch.nn.Linear(hidden_dim, hidden_dim),
+    )
+    final = encoder[-1]
+    if not isinstance(final, torch.nn.Linear):  # pragma: no cover
+        raise RuntimeError("Order9 residual encoder final layer is not linear")
+    torch.nn.init.zeros_(final.weight)
+    torch.nn.init.zeros_(final.bias)
+    return encoder
 
 
 def _sample_or_evaluate_squashed(

@@ -9,10 +9,12 @@ from typing import Sequence
 
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
 from amsrr.simulation.order9_object_task_runtime import ORDER9_OBJECT_TASK_PHASES
-from amsrr.training.order9_checkpoints import load_order9_policy_checkpoint
 from amsrr.training.order9_curriculum import (
     load_order9_learning_config,
     resolve_order9_stage_runtime,
+)
+from amsrr.training.order9_curriculum_lineage import (
+    load_order9_stage_parent_checkpoint,
 )
 from amsrr.training.order9_dataset import Order9DatasetBundle, load_order9_dataset
 from amsrr.training.order9_online_training import (
@@ -21,7 +23,6 @@ from amsrr.training.order9_online_training import (
 )
 from amsrr.training.order9_pipeline import (
     load_order9_stage_manifest,
-    order9_schedule_hash,
     order9_stage_by_id,
     preflight_order9_stage,
     record_order9_stage_training_outputs,
@@ -102,9 +103,11 @@ def run_order9_ppo_training(
     output.mkdir(parents=True, exist_ok=True)
     physical_model_path = config.production_runtime.robot_model_config_path
     physical_model = build_physical_model_from_config(physical_model_path)
-    parent = load_order9_policy_checkpoint(
+    parent = load_order9_stage_parent_checkpoint(
+        config,
+        stage,
         parent_checkpoint_path,
-        expected_schedule_hash=order9_schedule_hash(config),
+        update_index=update_index,
     )
     prior = [
         load_order9_stage_manifest(path) for path in prior_stage_manifest_paths

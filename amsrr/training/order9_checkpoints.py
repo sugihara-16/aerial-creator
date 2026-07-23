@@ -23,7 +23,10 @@ from amsrr.policies.order9_high_level_policy import (
     Order9HighLevelPolicyConfig,
 )
 from amsrr.policies.order9_low_level_policy import (
+    ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION,
     ORDER9_PI_L_POLICY_VERSION,
+    Order9ActiveKnotLowLevelPolicyConfig,
+    Order9ActiveKnotPhaseConditionedActorCritic,
     Order9LowLevelPolicyConfig,
     Order9PhaseConditionedActorCritic,
 )
@@ -59,6 +62,11 @@ def order9_model_config_dict(model: nn.Module) -> dict[str, Any]:
 
 
 def order9_policy_identity(model: nn.Module) -> tuple[Order9PolicyFamily, str]:
+    if isinstance(model, Order9ActiveKnotPhaseConditionedActorCritic):
+        return (
+            Order9PolicyFamily.PI_L,
+            ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION,
+        )
     if isinstance(model, Order9PhaseConditionedActorCritic):
         return Order9PolicyFamily.PI_L, ORDER9_PI_L_POLICY_VERSION
     if isinstance(model, Order9AutoregressiveHighLevelPolicy):
@@ -159,7 +167,12 @@ def load_order9_policy_checkpoint(
         and metadata.curriculum_schedule_hash != expected_schedule_hash
     ):
         raise SchemaValidationError("Order9 policy checkpoint curriculum hash mismatch")
-    model, config = _construct_model(family, payload["model_config"], device)
+    model, config = _construct_model(
+        family,
+        metadata.policy_version,
+        payload["model_config"],
+        device,
+    )
     expected_identity = order9_policy_identity(model)
     _validate_runtime_contract(
         family=expected_identity[0],
@@ -186,6 +199,7 @@ def load_order9_policy_checkpoint(
 
 def _construct_model(
     family: Order9PolicyFamily,
+    policy_version: str,
     raw_config: object,
     device: torch.device | str,
 ) -> tuple[nn.Module, object]:
@@ -193,12 +207,30 @@ def _construct_model(
         raise SchemaValidationError("Order9 checkpoint model_config must be a mapping")
     try:
         if family == Order9PolicyFamily.PI_L:
-            config = Order9LowLevelPolicyConfig.from_dict(raw_config)
-            model: nn.Module = Order9PhaseConditionedActorCritic(config)
+            if policy_version == ORDER9_PI_L_POLICY_VERSION:
+                config = Order9LowLevelPolicyConfig.from_dict(raw_config)
+                model: nn.Module = Order9PhaseConditionedActorCritic(config)
+            elif policy_version == ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION:
+                config = Order9ActiveKnotLowLevelPolicyConfig.from_dict(
+                    raw_config
+                )
+                model = Order9ActiveKnotPhaseConditionedActorCritic(config)
+            else:
+                raise SchemaValidationError(
+                    f"unsupported Order9 pi_L policy version {policy_version!r}"
+                )
         elif family == Order9PolicyFamily.PI_H:
+            if policy_version != ORDER9_FULL_PI_H_VERSION:
+                raise SchemaValidationError(
+                    f"unsupported Order9 pi_H policy version {policy_version!r}"
+                )
             config = Order9HighLevelPolicyConfig(**raw_config)
             model = Order9AutoregressiveHighLevelPolicy(config)
         elif family == Order9PolicyFamily.PI_D:
+            if policy_version != ORDER9_AUTOREGRESSIVE_PI_D_VERSION:
+                raise SchemaValidationError(
+                    f"unsupported Order9 pi_D policy version {policy_version!r}"
+                )
             config = Order9DesignPolicyConfig(**raw_config)
             model = Order9AutoregressiveDesignPolicy(config)
         else:  # pragma: no cover - enum construction prevents this.

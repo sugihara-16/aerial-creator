@@ -6,6 +6,7 @@ import pytest
 
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.training.order9_curriculum import (
+    ORDER9_CURRICULUM_VERSION,
     ObjectDistributionLevel,
     Order9LearningMode,
     Order9LearningTarget,
@@ -21,11 +22,15 @@ def test_order9_config_loads_complete_pi_l_pi_h_pi_d_curriculum() -> None:
     config = load_order9_learning_config()
     stages = config.curriculum.stages
 
+    assert config.curriculum.schedule_version == ORDER9_CURRICULUM_VERSION
+    assert len(stages) == 36
     assert stages[0].learning_mode == Order9LearningMode.COLLECTION
     assert stages[-1].learning_mode == Order9LearningMode.EVALUATION
     assert stages[3].stage_id == "c3_pi_l_ppo_arbitrary_morphology"
     assert (stages[3].min_modules, stages[3].max_modules) == (2, 8)
-    assignment_warmup = stages[4]
+    assignment_warmup = next(
+        stage for stage in stages if stage.stage_id == "r1_pi_h_assignment_bc"
+    )
     assert assignment_warmup.pi_h_output_scope == PiHOutputScope.ASSIGNMENT_ONLY_WARMUP
     assert assignment_warmup.learning_target == Order9LearningTarget.PI_H_ASSIGNMENT
     assert any(
@@ -41,6 +46,31 @@ def test_order9_config_loads_complete_pi_l_pi_h_pi_d_curriculum() -> None:
         for stage in stages
     )
     assert stages[-1].object_distribution == ObjectDistributionLevel.HELD_OUT_SHAPES_AND_INERTIA
+    assert [
+        next(
+            stage
+            for stage in stages
+            if stage.stage_id == f"{ring}_teacher_trajectory_collection"
+        ).object_distribution
+        for ring in ("r1", "r2", "r3", "r4")
+    ] == [
+        ObjectDistributionLevel.REACHABLE_POSE_EXPANSION,
+        ObjectDistributionLevel.BOX_PROPERTY_EXPANSION,
+        ObjectDistributionLevel.EXPANDED_PRIMITIVES,
+        ObjectDistributionLevel.EXPANDED_CROSS_PRODUCT,
+    ]
+    assert (
+        next(
+            stage
+            for stage in stages
+            if stage.stage_id == "post_r4_pi_d_structured_bc"
+        ).stage_index
+        > next(
+            stage
+            for stage in stages
+            if stage.stage_id == "r4_pi_l_readaptation_frozen_pi_h"
+        ).stage_index
+    )
     assert config.hard_checker.backend == (
         "hybrid_lightweight_qp_persistent_isaac_shadow"
     )
@@ -63,7 +93,7 @@ def test_order9_config_loads_complete_pi_l_pi_h_pi_d_curriculum() -> None:
     assert config.optimization.pi_l_bc.phase_balanced_sampling is True
 
 
-def test_c2_uses_provisional_2048_runtime_without_changing_c3_default() -> None:
+def test_c2_override_and_measured_c3_production_runtime() -> None:
     config = load_order9_learning_config()
     c2 = next(stage for stage in config.curriculum.stages if stage.stage_index == 2)
     c3 = next(stage for stage in config.curriculum.stages if stage.stage_index == 3)
@@ -75,9 +105,9 @@ def test_c2_uses_provisional_2048_runtime_without_changing_c3_default() -> None:
     assert c2_runtime.rollout_steps_per_environment == 16
     assert c2_runtime.generation_environment_steps == 32768
     assert c2_runtime.environment_count_source == "curriculum_stage_override"
-    assert c3_runtime.environment_count == 128
+    assert c3_runtime.environment_count == 1024
     assert c3_runtime.rollout_steps_per_environment == 256
-    assert c3_runtime.generation_environment_steps == 32768
+    assert c3_runtime.generation_environment_steps == 262144
     assert c3_runtime.environment_count_source == "production_runtime_default"
 
 
@@ -94,7 +124,7 @@ def test_fallback_rate_is_decision_fraction_and_blocks_promotion() -> None:
     stage = next(
         value
         for value in config.curriculum.stages
-        if value.stage_id == "c6_pi_h_full_trajectory_ppo"
+        if value.stage_id == "r1_pi_h_ppo_frozen_pi_l"
     )
     metrics = Order9StageMetrics(
         episode_count=500,
@@ -118,7 +148,7 @@ def test_promotion_requires_throughput_and_no_fallback_success() -> None:
     stage = next(
         value
         for value in config.curriculum.stages
-        if value.stage_id == "c6_pi_h_full_trajectory_ppo"
+        if value.stage_id == "r1_pi_h_ppo_frozen_pi_l"
     )
     passing = Order9StageMetrics(
         episode_count=500,
@@ -146,7 +176,7 @@ def test_final_pi_h_stage_cannot_be_relabelled_assignment_only() -> None:
     stage = next(
         value
         for value in config.curriculum.stages
-        if value.stage_id == "c6_pi_h_full_trajectory_ppo"
+        if value.stage_id == "r1_pi_h_ppo_frozen_pi_l"
     )
 
     with pytest.raises(SchemaValidationError, match="pi_H"):

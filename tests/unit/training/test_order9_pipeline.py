@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+from amsrr.schemas.common import SchemaValidationError
 from amsrr.training.order9_curriculum import (
     Order9StageMetrics,
     load_order9_learning_config,
@@ -95,8 +98,28 @@ def test_order9_pipeline_records_failed_gates_without_promoting(tmp_path: Path) 
     assert "minimum_episodes" in final.promotion_failed_gates
 
 
-def _config_with_bound_runtime(tmp_path: Path):
-    config = load_order9_learning_config()
+def test_v3_refuses_to_reexecute_imported_c0_c2_history(tmp_path: Path) -> None:
+    config = _config_with_bound_runtime(
+        tmp_path,
+        config_path="configs/training/order9_learning_curriculum.yaml",
+    )
+    source = tmp_path / "source-v3.json"
+    source.write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(SchemaValidationError, match="immutable imported history"):
+        preflight_order9_stage(
+            config,
+            stage_id="c0_order8_teacher_collection",
+            input_artifact_paths={"order8_teacher_source": source},
+        )
+
+
+def _config_with_bound_runtime(
+    tmp_path: Path,
+    *,
+    config_path: str = "configs/training/order9_learning_curriculum_v2.yaml",
+):
+    config = load_order9_learning_config(config_path)
     benchmark_path = tmp_path / "benchmark.json"
     raw_path = tmp_path / "benchmark-raw.pt"
     raw_path.write_bytes(b"unit production benchmark raw artifact")

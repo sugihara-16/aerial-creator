@@ -372,6 +372,9 @@ class Order3PolicyInference:
     normalized_joint_action: list[list[float]] = field(default_factory=list)
     joint_action_mean: list[list[float]] = field(default_factory=list)
     module_ids: list[int] = field(default_factory=list)
+    policy_version: str | None = None
+    active_knot_features: list[float] = field(default_factory=list)
+    active_assignment_features: list[list[float]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -602,6 +605,7 @@ class MorphologyConditionedLowLevelPolicy:
                     context,
                     device=self.device,
                     dtype=self._hidden.dtype,
+                    control_model=control_model,
                 ),
             )
         value = float(step.value[0].detach().cpu().item())
@@ -680,6 +684,13 @@ class MorphologyConditionedLowLevelPolicy:
             float(value) for value in self._previous_action[0].detach().cpu().tolist()
         ]
         try:
+            context_kwargs = _optional_phase_step_kwargs(
+                self.model,
+                context,
+                device=self.device,
+                dtype=self._hidden.dtype,
+                control_model=control_model,
+            )
             with torch.no_grad():
                 step = self.model.step(
                     [context.morphology_graph],
@@ -691,12 +702,7 @@ class MorphologyConditionedLowLevelPolicy:
                         [privileged], dtype=self._hidden.dtype, device=self.device
                     ),
                     deterministic=self.deterministic,
-                    **_optional_phase_step_kwargs(
-                        self.model,
-                        context,
-                        device=self.device,
-                        dtype=self._hidden.dtype,
-                    ),
+                    **context_kwargs,
                 )
         except (RuntimeError, SchemaValidationError, TypeError, ValueError):
             return self._fallback(baseline, "model_inference_error", context.morphology_graph.graph_id)
@@ -763,6 +769,29 @@ class MorphologyConditionedLowLevelPolicy:
                 .tolist()
                 if int(value) >= 0
             ],
+            policy_version=getattr(self.model, "policy_version", None),
+            active_knot_features=(
+                [
+                    float(value)
+                    for value in context_kwargs["active_knot_features"][0]
+                    .detach()
+                    .cpu()
+                    .tolist()
+                ]
+                if "active_knot_features" in context_kwargs
+                else []
+            ),
+            active_assignment_features=(
+                [
+                    [float(value) for value in row]
+                    for row in context_kwargs["active_assignment_features"][0]
+                    .detach()
+                    .cpu()
+                    .tolist()
+                ]
+                if "active_assignment_features" in context_kwargs
+                else []
+            ),
         )
 
     def _decode_command(
@@ -1225,15 +1254,31 @@ def _optional_phase_step_kwargs(
     *,
     device: torch.device,
     dtype: torch.dtype,
+    control_model: object | None = None,
 ) -> dict[str, torch.Tensor]:
-    """Supply the additive Order-9 phase contract without changing Order-3 calls."""
+    """Supply versioned Order-9 context without changing Order-3 calls."""
 
     builder = getattr(model, "phase_feature_tensor", None)
     if builder is None:
         return {}
-    return {
+    output = {
         "phase_features": builder(context, device=device, dtype=dtype),
     }
+    active_builder = getattr(model, "active_knot_feature_tensors", None)
+    if active_builder is not None:
+        active_knot, active_assignments = active_builder(
+            context,
+            device=device,
+            dtype=dtype,
+            control_model=control_model,
+        )
+        output.update(
+            {
+                "active_knot_features": active_knot,
+                "active_assignment_features": active_assignments,
+            }
+        )
+    return output
 
 
 def _orientation_error_body(current_pose: Pose7D, target_pose: Pose7D) -> list[float]:

@@ -43,6 +43,7 @@ from amsrr.policies.order9_high_level_policy import (
     Order9HighLevelPolicyConfig,
 )
 from amsrr.policies.order9_low_level_policy import (
+    ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION,
     Order9LowLevelPolicyConfig,
     Order9PhaseConditionedActorCritic,
 )
@@ -78,6 +79,7 @@ from amsrr.training.order9_curriculum import (
     Order9LearningConfig,
     Order9LearningMode,
     Order9LearningTarget,
+    require_order9_stage_execution_allowed,
 )
 from amsrr.training.order9_dataset import (
     Order9DatasetBundle,
@@ -195,10 +197,11 @@ def train_order9_behavior_cloning(
     model_config: object | None = None,
     additional_input_artifact_paths: Mapping[str, str | Path] | None = None,
 ) -> Order9OfflineTrainingResult:
-    """Train one C1/C4/C5/C7 stage and emit a strict policy checkpoint."""
+    """Train one configured Order 9 BC stage and emit a strict checkpoint."""
 
     config.validate()
     stage = order9_stage_by_id(config, stage_id)
+    require_order9_stage_execution_allowed(config, stage)
     if stage.learning_mode != Order9LearningMode.BEHAVIOR_CLONING:
         raise SchemaValidationError("Order9 offline trainer accepts BC stages only")
     require_non_empty(git_revision, "git_revision")
@@ -508,7 +511,9 @@ def _build_bc_model(
             "Order9 BC initialization cannot combine Order9 parent and Order3 source"
         )
     if stage.learning_target == Order9LearningTarget.PI_H_TRAJECTORY and parent_checkpoint_path is None:
-        raise SchemaValidationError("C5 full pi_H BC requires the promoted C4 parent checkpoint")
+        raise SchemaValidationError(
+            "full pi_H BC requires a promoted earlier pi_H checkpoint"
+        )
     parent_sha = None
     order3_sha = None
     if parent_checkpoint_path is not None:
@@ -1264,9 +1269,14 @@ def build_order9_checkpoint_metadata(
     extra_metadata: Mapping[str, Any] | None = None,
 ) -> Order9PolicyCheckpointMetadata:
     family, policy_version = order9_policy_identity(model)
+    pi_l_actor_contract = (
+        "task_phase_complete_active_knot_morphology_controller_no_raw_contact_v2"
+        if policy_version == ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION
+        else "task_phase_morphology_centroidal_no_raw_contact_v1"
+    )
     contracts = {
         Order9PolicyFamily.PI_L: (
-            "task_phase_morphology_centroidal_no_raw_contact_v1",
+            pi_l_actor_contract,
             "actor_plus_privileged_disturbance_v1",
             "bounded_complete_centroidal_and_absolute_local_joint_command_v2",
         ),

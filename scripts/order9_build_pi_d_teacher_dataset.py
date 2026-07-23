@@ -18,7 +18,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description=(
             "Build the split-safe deterministic grammar teacher dataset for "
-            "Order 9 C7 pi_D behavior cloning."
+            "Order 9 post-R4 pi_D behavior cloning."
         )
     )
     parser.add_argument("--morphology-pool", required=True)

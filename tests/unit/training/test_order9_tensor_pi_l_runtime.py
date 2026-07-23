@@ -8,8 +8,14 @@ import torch
 from amsrr.encoders.morphology_graph_encoder import MORPHOLOGY_NODE_FEATURE_NAMES
 from amsrr.policies.order9_low_level_policy import (
     ORDER9_GLOBAL_ACTION_SIZE,
+    Order9ActiveKnotLowLevelPolicyConfig,
+    Order9ActiveKnotPhaseConditionedActorCritic,
     Order9LowLevelPolicyConfig,
     Order9PhaseConditionedActorCritic,
+)
+from amsrr.policies.order9_active_knot_features import (
+    ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES,
+    ORDER9_ACTIVE_KNOT_GLOBAL_FEATURE_NAMES,
 )
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
 from amsrr.simulation.order8_natural_contact import (
@@ -17,6 +23,11 @@ from amsrr.simulation.order8_natural_contact import (
 )
 from amsrr.simulation.order9_tensor_isaac_io import Order9TensorIsaacState
 from amsrr.simulation.order9_tensor_object_task import Order9TensorObjectTaskTarget
+from amsrr.schemas.policies import (
+    CentroidalTarget,
+    ContactWrenchTrajectory,
+    InteractionKnot,
+)
 from amsrr.training.order9_tensor_pi_l_runtime import Order9TensorPiLRuntime
 
 
@@ -24,10 +35,32 @@ def _runtime_fixture(
     batch_size: int = 2,
     *,
     policy_frame_origins_world: torch.Tensor | None = None,
+    active_knot: bool = False,
 ):
     physical = build_physical_model_from_config("configs/robot/robot_model.yaml")
     morphology = build_representative_order8_morphology(physical)
-    policy = Order9PhaseConditionedActorCritic(Order9LowLevelPolicyConfig())
+    trajectory = None
+    if active_knot:
+        policy = Order9ActiveKnotPhaseConditionedActorCritic(
+            Order9ActiveKnotLowLevelPolicyConfig()
+        )
+        trajectory = ContactWrenchTrajectory(
+            horizon_s=1.0,
+            dt_s=0.1,
+            knots=[
+                InteractionKnot(
+                    t_rel_s=0.0,
+                    contact_assignments=[],
+                    centroidal_target=CentroidalTarget(
+                        centroidal_wrench_preference=[0.0] * 6
+                    ),
+                )
+            ],
+        )
+    else:
+        policy = Order9PhaseConditionedActorCritic(
+            Order9LowLevelPolicyConfig()
+        )
     runtime = Order9TensorPiLRuntime(
         morphology_graph=morphology,
         physical_model=physical,
@@ -35,6 +68,7 @@ def _runtime_fixture(
         batch_size=batch_size,
         device="cpu",
         policy_frame_origins_world=policy_frame_origins_world,
+        active_knot_trajectory=trajectory,
     )
     module_count = runtime.builder.module_count
     joint_count = runtime.builder.local_joint_count
@@ -85,6 +119,33 @@ def _runtime_fixture(
         contact_schedule_index=torch.tensor([1, 3]),
     )
     return runtime, state, target
+
+
+def test_tensor_pi_l_runtime_supplies_complete_active_knot_actor_context() -> None:
+    runtime, state, target = _runtime_fixture(active_knot=True)
+    result = runtime.compute(
+        time_s=torch.tensor([0.0, 0.2]),
+        phase_index=torch.tensor([0, 3], dtype=torch.long),
+        task_target=target,
+        state=state,
+        estimated_payload_mass_kg=torch.tensor([0.1, 0.2]),
+        estimated_payload_inertia_body=torch.zeros((2, 6)),
+        payload_active=torch.tensor([False, True]),
+        deterministic=True,
+    )
+    assert result.active_knot_features is not None
+    assert result.active_assignment_features is not None
+    assert result.active_knot_features.shape == (
+        2,
+        len(ORDER9_ACTIVE_KNOT_GLOBAL_FEATURE_NAMES),
+    )
+    assert result.active_assignment_features.shape == (
+        2,
+        runtime.builder.module_count,
+        len(ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES),
+    )
+    assert torch.isfinite(result.active_knot_features).all()
+    assert torch.isfinite(result.active_assignment_features).all()
 
 
 def test_tensor_pi_l_runtime_matches_c0_graph_observation_contract() -> None:

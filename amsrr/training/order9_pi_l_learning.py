@@ -26,9 +26,14 @@ from amsrr.policies.morphology_conditioned_low_level_policy import (
 )
 from amsrr.policies.order9_low_level_policy import (
     ORDER9_GLOBAL_ACTION_SIZE,
+    Order9ActiveKnotPhaseConditionedActorCritic,
     Order9LowLevelPolicyConfig,
     Order9PhaseConditionedActorCritic,
     order9_phase_actor_feature_vector,
+)
+from amsrr.policies.order9_active_knot_features import (
+    ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES,
+    order9_active_knot_feature_vectors,
 )
 from amsrr.policies.order9_policy_command import (
     encode_order9_centroidal_pose_action,
@@ -274,6 +279,38 @@ def compute_order9_pi_l_behavior_cloning_loss(
         if recurrent_state is None
         else recurrent_state.to(device=device, dtype=dtype)
     )
+    active_kwargs: dict[str, torch.Tensor] = {}
+    if isinstance(policy, Order9ActiveKnotPhaseConditionedActorCritic):
+        active_rows = [
+            order9_active_knot_feature_vectors(
+                context,
+                body_pose_world=control_model.body_pose_world,
+                body_twist_world=control_model.body_twist_world,
+            )
+            for context, control_model in zip(contexts, control_models)
+        ]
+        maximum_nodes = max(len(row.module_ids) for row in active_rows)
+        assignment_features = torch.zeros(
+            (
+                batch_size,
+                maximum_nodes,
+                len(ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES),
+            ),
+            dtype=dtype,
+            device=device,
+        )
+        for batch_index, row in enumerate(active_rows):
+            assignment_features[batch_index, : len(row.module_ids)] = torch.tensor(
+                row.assignment_features, dtype=dtype, device=device
+            )
+        active_kwargs = {
+            "active_knot_features": torch.tensor(
+                [row.global_features for row in active_rows],
+                dtype=dtype,
+                device=device,
+            ),
+            "active_assignment_features": assignment_features,
+        }
     output = policy.step(
         [context.morphology_graph for context in contexts],
         [context.runtime_observation for context in contexts],
@@ -283,6 +320,7 @@ def compute_order9_pi_l_behavior_cloning_loss(
         phase_features=phase_features,
         privileged_disturbance_body=privileged_disturbance_body,
         deterministic=True,
+        **active_kwargs,
     )
     global_target = torch.tensor(
         [item.global_action for item in encoded], dtype=dtype, device=device
