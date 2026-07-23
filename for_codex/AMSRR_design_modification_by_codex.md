@@ -4,6 +4,12 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 
 ## 2026-07-23
 
+### Order 9 C2 User-Approved Bounded On-Policy Extension
+
+- After the configured `3,000,000`-interaction C2 quota failed promotion and the checkpoint audit found continued improvement rather than checkpoint regression, the user approved additional C2 on-policy training with the current learning rate, PPO objective/hyperparameters, phase-balanced collection, randomization, controller, safety, reward, and promotion gate unchanged.  The first bounded control interval is four complete paired generations, updates `46--49`, adding `4 x 65,536 = 262,144` fresh recorded train-plus-validation interactions and ending at `3,276,800` cumulative recorded interactions before another bucket evaluation.
+- The canonical curriculum YAML remains unchanged because `environment_steps` participates in the schedule and stage hashes already bound into the C1/C2 checkpoints and rollout-bucket manifest.  The resumable C2 runner instead accepts an explicit non-negative complete-generation extension count, records the configured target, base/added/total update counts, and actual generation-aligned target, and continues the existing contiguous checkpoint lineage.  A negative extension fails closed; an omitted or zero extension retains the original update count.
+- This authorization adds training budget only.  It does not promote C2, authorize C3, lower the `0.85` success threshold, alter checkpoint selection, reuse an old rollout, or permit partial generations.  Every added update still requires a fresh hash-bound train/validation rollout pair, exact behavior replay, one PPO update, runtime telemetry, and an immutable child checkpoint.
+
 ### Order 9 C2 Diagnostic Checkpoint-Audit Boundary
 
 - Checkpoint diagnostics may initialize every copied environment from one existing hash-bound canonical phase only when explicitly requested.  The diagnostic records the chosen runtime phase, deterministic-policy flag, and whether all environments began at phase zero.  It is forbidden to combine a nonzero diagnostic phase with promotion JSONL output, and normal C2 collection retains its phase-balanced reset distribution while every promotion evaluation remains deterministic, first-terminal, and phase-zero.  This is an additive diagnostic interface; it changes no policy input/action, recurrent state, task plan, reward/gate, PPO update, QPID/QP, safety, randomization, or promotion rule.

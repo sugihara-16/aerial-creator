@@ -48,15 +48,18 @@ from amsrr.training.order9_teacher import build_order8_grasp_carry_task_spec
 from amsrr.utils.hashing import hash_file, stable_hash
 
 
-ORDER9_PI_L_STAGE_RUNNER_VERSION = "order9_pi_l_ppo_stage_runner_v1"
+ORDER9_PI_L_STAGE_RUNNER_VERSION = "order9_pi_l_ppo_stage_runner_v2"
 ORDER9_ROLLOUT_RESULT_PREFIX = "ORDER9_ROLLOUT_JSON="
 
 
 @dataclass(frozen=True)
 class Order9PiLStagePlan:
     stage_id: str
+    configured_target_environment_steps: int
     target_environment_steps: int
     generation_environment_steps: int
+    base_target_update_count: int
+    additional_update_count: int
     target_update_count: int
     next_update_index: int
     completed_environment_steps: int
@@ -77,6 +80,24 @@ def required_order9_update_count(
     if target_environment_steps < 1 or generation_environment_steps < 1:
         raise ValueError("Order9 PPO stage/generation step counts must be positive")
     return math.ceil(target_environment_steps / generation_environment_steps)
+
+
+def resolve_order9_extended_update_budget(
+    configured_target_environment_steps: int,
+    generation_environment_steps: int,
+    additional_update_count: int,
+) -> tuple[int, int, int]:
+    """Resolve a post-quota extension without changing the schedule hash."""
+
+    if additional_update_count < 0:
+        raise ValueError("Order9 additional update count must be non-negative")
+    base_update_count = required_order9_update_count(
+        configured_target_environment_steps,
+        generation_environment_steps,
+    )
+    target_update_count = base_update_count + additional_update_count
+    target_environment_steps = target_update_count * generation_environment_steps
+    return base_update_count, target_update_count, target_environment_steps
 
 
 def select_order9_pi_l_rollout_buckets(
@@ -111,6 +132,7 @@ def resolve_order9_pi_l_stage_plan(
     stage_root: str | Path,
     initial_checkpoint_path: str | Path,
     repository_root: str | Path,
+    additional_update_count: int = 0,
 ) -> Order9PiLStagePlan:
     config.validate()
     stage = order9_stage_by_id(config, stage_id)
@@ -128,8 +150,14 @@ def resolve_order9_pi_l_stage_plan(
     # the existing dataset/checkpoint lineage counts both shards as consumed
     # environment steps.
     generation_steps = 2 * split_generation_steps
-    target_updates = required_order9_update_count(
-        stage.environment_steps, generation_steps
+    (
+        base_target_updates,
+        target_updates,
+        target_environment_steps,
+    ) = resolve_order9_extended_update_budget(
+        stage.environment_steps,
+        generation_steps,
+        additional_update_count,
     )
     repository = Path(repository_root).resolve()
     root = _resolve(stage_root, repository)
@@ -184,8 +212,11 @@ def resolve_order9_pi_l_stage_plan(
         next_index = update_index + 1
     return Order9PiLStagePlan(
         stage_id=stage_id,
-        target_environment_steps=stage.environment_steps,
+        configured_target_environment_steps=stage.environment_steps,
+        target_environment_steps=target_environment_steps,
         generation_environment_steps=generation_steps,
+        base_target_update_count=base_target_updates,
+        additional_update_count=additional_update_count,
         target_update_count=target_updates,
         next_update_index=next_index,
         completed_environment_steps=completed_steps,
@@ -485,8 +516,13 @@ def write_order9_stage_runner_state(
         "runner_version": ORDER9_PI_L_STAGE_RUNNER_VERSION,
         "stage_id": stage_id,
         "status": status,
+        "configured_target_environment_steps": (
+            plan.configured_target_environment_steps
+        ),
         "target_environment_steps": plan.target_environment_steps,
         "generation_environment_steps": plan.generation_environment_steps,
+        "base_target_update_count": plan.base_target_update_count,
+        "additional_update_count": plan.additional_update_count,
         "target_update_count": plan.target_update_count,
         "initial_next_update_index": plan.next_update_index,
         "initial_completed_environment_steps": plan.completed_environment_steps,
@@ -618,6 +654,7 @@ __all__ = [
     "load_order9_rollout_result",
     "order9_pi_l_collector_command",
     "required_order9_update_count",
+    "resolve_order9_extended_update_budget",
     "resolve_order9_pi_l_stage_plan",
     "run_logged_order9_command",
     "run_parallel_order9_collectors",

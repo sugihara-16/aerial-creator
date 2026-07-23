@@ -54,6 +54,15 @@ def _parser() -> argparse.ArgumentParser:
         type=int,
         help="Inclusive operational stop for a bounded run; stage target is unchanged.",
     )
+    parser.add_argument(
+        "--additional-update-count",
+        type=int,
+        default=0,
+        help=(
+            "Complete-generation extension beyond the hash-bound stage quota; "
+            "optimization settings and curriculum hashes remain unchanged."
+        ),
+    )
     return parser
 
 
@@ -79,6 +88,7 @@ def main() -> int:
         stage_root=stage_root,
         initial_checkpoint_path=args.initial_checkpoint,
         repository_root=repository,
+        additional_update_count=args.additional_update_count,
     )
     buckets = validate_order9_pi_l_stage_runner_inputs(
         config,
@@ -113,7 +123,12 @@ def main() -> int:
                 "stage_id": args.stage,
                 "resume_update_index": plan.next_update_index,
                 "final_update_index_this_run": final_update_index,
+                "configured_target_environment_steps": (
+                    plan.configured_target_environment_steps
+                ),
                 "target_update_count": plan.target_update_count,
+                "base_target_update_count": plan.base_target_update_count,
+                "additional_update_count": plan.additional_update_count,
                 "completed_environment_steps": plan.completed_environment_steps,
                 "target_environment_steps": plan.target_environment_steps,
                 "parent_checkpoint_sha256": plan.parent_checkpoint_sha256,
@@ -394,6 +409,7 @@ def main() -> int:
                 {
                     "stage_id": args.stage,
                     "target_reached": fully_complete,
+                    "additional_update_count": plan.additional_update_count,
                     "last_update_index": (
                         final_update_index
                         if final_update_index >= plan.next_update_index

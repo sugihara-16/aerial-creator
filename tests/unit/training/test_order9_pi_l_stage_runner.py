@@ -12,6 +12,7 @@ from amsrr.training.order9_pi_l_stage_runner import (
     ORDER9_ROLLOUT_RESULT_PREFIX,
     load_order9_rollout_result,
     required_order9_update_count,
+    resolve_order9_extended_update_budget,
     select_order9_pi_l_rollout_buckets,
 )
 from amsrr.training.order9_rollout_buckets import (
@@ -72,6 +73,21 @@ def test_required_update_count_covers_c2_target() -> None:
     assert 45 * 65_536 < 3_000_000 <= 46 * 65_536
     with pytest.raises(ValueError, match="positive"):
         required_order9_update_count(0, 65_536)
+
+
+def test_extended_update_budget_preserves_configured_stage_target() -> None:
+    assert resolve_order9_extended_update_budget(
+        3_000_000,
+        65_536,
+        0,
+    ) == (46, 46, 3_014_656)
+    assert resolve_order9_extended_update_budget(
+        3_000_000,
+        65_536,
+        4,
+    ) == (46, 50, 3_276_800)
+    with pytest.raises(ValueError, match="non-negative"):
+        resolve_order9_extended_update_budget(3_000_000, 65_536, -1)
 
 
 def test_bucket_selection_rotates_each_split_independently() -> None:
