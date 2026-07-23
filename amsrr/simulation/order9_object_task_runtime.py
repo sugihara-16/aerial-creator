@@ -83,6 +83,45 @@ def order9_object_task_actor_phase_index(runtime_phase_index: int) -> int:
     ]
 
 
+def order9_rollout_initial_phase_indices(
+    *,
+    environment_count: int,
+    evaluation_mode: bool,
+    canonical_resets: bool,
+    diagnostic_initial_phase_index: int | None = None,
+) -> tuple[int, ...]:
+    """Resolve initial phases without weakening phase-zero promotion evidence.
+
+    A diagnostic may isolate one already available canonical phase, but formal
+    evaluation remains phase-zero only.  Production training retains the
+    existing round-robin phase-reset distribution.
+    """
+
+    if environment_count < 1:
+        raise SchemaValidationError(
+            "Order9 rollout environment count must be positive"
+        )
+    if diagnostic_initial_phase_index is not None:
+        phase_index = int(diagnostic_initial_phase_index)
+        if not 0 <= phase_index < len(ORDER9_OBJECT_TASK_PHASES):
+            raise SchemaValidationError(
+                "Order9 diagnostic initial phase index is invalid"
+            )
+        if evaluation_mode:
+            raise SchemaValidationError(
+                "Order9 promotion evaluation must begin at phase zero"
+            )
+        if not canonical_resets:
+            raise SchemaValidationError(
+                "Order9 phase-isolated diagnostic requires canonical resets"
+            )
+        return (phase_index,) * environment_count
+    if evaluation_mode or not canonical_resets:
+        return (0,) * environment_count
+    phase_count = len(ORDER9_OBJECT_TASK_PHASES)
+    return tuple(index % phase_count for index in range(environment_count))
+
+
 @dataclass
 class Order9ObjectTaskRuntimeConfig(SchemaBase):
     phase_duration_s: dict[str, float] = field(

@@ -13,6 +13,7 @@ from amsrr.simulation.order9_object_task_runtime import (
     Order9ObjectTaskPhase,
     Order9ObjectTaskRuntime,
     order9_object_task_actor_phase_index,
+    order9_rollout_initial_phase_indices,
 )
 from amsrr.simulation.order9_object_task_state import (
     Order9IsaacStateSnapshot,
@@ -114,6 +115,39 @@ def test_runtime_phases_map_to_c0_actor_phase_contract_and_clock() -> None:
     )
     with pytest.raises(Exception, match="phase index"):
         order9_object_task_actor_phase_index(runtime.phase_count)
+
+
+def test_rollout_initial_phase_selection_keeps_promotion_at_phase_zero() -> None:
+    assert order9_rollout_initial_phase_indices(
+        environment_count=4,
+        evaluation_mode=True,
+        canonical_resets=True,
+    ) == (0, 0, 0, 0)
+    assert order9_rollout_initial_phase_indices(
+        environment_count=10,
+        evaluation_mode=False,
+        canonical_resets=True,
+    ) == (0, 1, 2, 3, 4, 5, 6, 7, 0, 1)
+    assert order9_rollout_initial_phase_indices(
+        environment_count=3,
+        evaluation_mode=False,
+        canonical_resets=True,
+        diagnostic_initial_phase_index=3,
+    ) == (3, 3, 3)
+    with pytest.raises(Exception, match="phase zero"):
+        order9_rollout_initial_phase_indices(
+            environment_count=1,
+            evaluation_mode=True,
+            canonical_resets=True,
+            diagnostic_initial_phase_index=3,
+        )
+    with pytest.raises(Exception, match="canonical resets"):
+        order9_rollout_initial_phase_indices(
+            environment_count=1,
+            evaluation_mode=False,
+            canonical_resets=False,
+            diagnostic_initial_phase_index=3,
+        )
 
 
 def test_randomized_grasp_phase_moves_robot_and_object_together() -> None:

@@ -96,6 +96,23 @@ def _parser() -> argparse.ArgumentParser:
         default="auto",
         help="Use hash-bound Order 8 physical phase starts for its fixed topology.",
     )
+    parser.add_argument(
+        "--diagnostic-initial-phase-index",
+        type=int,
+        choices=range(8),
+        help=(
+            "Acceptance-ineligible diagnostic override that initializes every "
+            "environment from one canonical phase."
+        ),
+    )
+    parser.add_argument(
+        "--diagnostic-deterministic-policy",
+        action="store_true",
+        help=(
+            "Use the policy mean in a phase-isolated diagnostic; this cannot "
+            "write promotion episode evidence."
+        ),
+    )
     AppLauncher.add_app_launcher_args(parser)
     return parser
 
@@ -111,6 +128,19 @@ if args_cli.evaluation_episode_count < 1:
     raise ValueError("Order9 evaluation episode count must be positive")
 if args_cli.evaluation_jsonl is not None and args_cli.split != "validation":
     raise ValueError("Order9 BC promotion evidence must use the validation split")
+if (
+    args_cli.evaluation_jsonl is not None
+    and args_cli.diagnostic_initial_phase_index is not None
+):
+    raise ValueError("Order9 promotion evaluation must begin at phase zero")
+if (
+    args_cli.diagnostic_deterministic_policy
+    and args_cli.diagnostic_initial_phase_index is None
+):
+    raise ValueError(
+        "--diagnostic-deterministic-policy requires "
+        "--diagnostic-initial-phase-index"
+    )
 for name in ("contact_stiffness", "contact_damping"):
     if not math.isfinite(float(getattr(args_cli, name))) or float(
         getattr(args_cli, name)
@@ -169,6 +199,7 @@ from amsrr.simulation.order9_object_task_runtime import (
     ORDER9_OBJECT_TASK_PHASES,
     Order9ObjectTaskRuntime,
     Order9ObjectTaskRuntimeConfig,
+    order9_rollout_initial_phase_indices,
 )
 from amsrr.simulation.order9_object_task_state import load_order9_canonical_reset
 from amsrr.simulation.order9_tensor_isaac_io import Order9TensorIsaacIO
@@ -372,6 +403,9 @@ def main() -> dict[str, object]:
     config = load_order9_learning_config(config_path)
     stage = order9_stage_by_id(config, args_cli.stage)
     evaluation_mode = args_cli.evaluation_jsonl is not None
+    deterministic_policy = evaluation_mode or bool(
+        args_cli.diagnostic_deterministic_policy
+    )
     if stage.learning_target.value != "pi_l" or (
         stage.learning_mode.value != "ppo" and not evaluation_mode
     ):
@@ -688,12 +722,20 @@ def main() -> dict[str, object]:
         )
     all_ids = torch.arange(scene.num_envs, device=scene.device, dtype=torch.long)
     phase_index = (
-        torch.zeros_like(all_ids)
-        if evaluation_mode
-        else all_ids.remainder(phase_count)
-        if canonical_resets
-        else torch.zeros_like(all_ids)
+        torch.tensor(
+            order9_rollout_initial_phase_indices(
+                environment_count=scene.num_envs,
+                evaluation_mode=evaluation_mode,
+                canonical_resets=canonical_resets,
+                diagnostic_initial_phase_index=(
+                    args_cli.diagnostic_initial_phase_index
+                ),
+            ),
+            device=scene.device,
+            dtype=torch.long,
+        )
     )
+    initial_phase_zero = bool((phase_index == 0).all())
     bank.restore(scene, env_ids=all_ids, phase_indices=phase_index)
     sim.forward()
     scene.update(0.0)
@@ -819,6 +861,11 @@ def main() -> dict[str, object]:
             object_mass_properties_readback=object_mass_properties_readback,
             actuator_readback=actuator_readback,
             teacher_reference=teacher_reference,
+            deterministic_policy=deterministic_policy,
+            initial_phase_zero=initial_phase_zero,
+            diagnostic_initial_phase_index=(
+                args_cli.diagnostic_initial_phase_index
+            ),
         )
     )
     tensorboard_logger = None
@@ -880,7 +927,7 @@ def main() -> dict[str, object]:
             estimated_payload_inertia_body=estimated_inertia,
             payload_active=payload_active,
             estimated_payload_com_object=estimated_com,
-            deterministic=evaluation_mode,
+            deterministic=deterministic_policy,
         )
         io.apply(
             robot=robot,
@@ -1206,8 +1253,11 @@ def main() -> dict[str, object]:
             "terminal_count": int(terminal_count),
             "successful_terminal_count": int(success_count),
             "evaluation_mode": bool(evaluation_mode),
-            "deterministic_policy": bool(evaluation_mode),
-            "initial_phase_zero": bool(evaluation_mode),
+            "deterministic_policy": bool(deterministic_policy),
+            "initial_phase_zero": bool(initial_phase_zero),
+            "diagnostic_initial_phase_index": (
+                args_cli.diagnostic_initial_phase_index
+            ),
             "tensorboard_enabled": tensorboard_logger is not None,
             "tensorboard_log_dir": (
                 None if tensorboard_log_dir is None else str(tensorboard_log_dir)
@@ -1333,8 +1383,11 @@ def main() -> dict[str, object]:
             if args_cli.evaluation_jsonl is None
             else str(Path(args_cli.evaluation_jsonl).resolve())
         ),
-        "deterministic_policy": evaluation_mode,
-        "initial_phase_zero": evaluation_mode,
+        "deterministic_policy": deterministic_policy,
+        "initial_phase_zero": initial_phase_zero,
+        "diagnostic_initial_phase_index": (
+            args_cli.diagnostic_initial_phase_index
+        ),
         "tensorboard_enabled": tensorboard_logger is not None,
         "tensorboard_log_dir": (
             None if tensorboard_log_dir is None else str(tensorboard_log_dir)
@@ -2012,6 +2065,9 @@ def _rollout_metadata(
     object_mass_properties_readback,
     actuator_readback,
     teacher_reference,
+    deterministic_policy,
+    initial_phase_zero,
+    diagnostic_initial_phase_index,
 ):
     thrust_model_hash = str(physical.metadata.get("thrust_model_hash", ""))
     if not thrust_model_hash:
@@ -2102,8 +2158,9 @@ def _rollout_metadata(
             Order9ObjectTaskRuntimeConfig().phase_duration_s
         ),
         "evaluation_mode": bool(args_cli.evaluation_jsonl is not None),
-        "deterministic_policy": bool(args_cli.evaluation_jsonl is not None),
-        "initial_phase_zero": bool(args_cli.evaluation_jsonl is not None),
+        "deterministic_policy": bool(deterministic_policy),
+        "initial_phase_zero": bool(initial_phase_zero),
+        "diagnostic_initial_phase_index": diagnostic_initial_phase_index,
     }
 
 
