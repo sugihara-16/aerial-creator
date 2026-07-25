@@ -2,6 +2,385 @@
 
 ## Global Worklog
 
+### 2026-07-25 (Order 9 implementation checkpoint commits)
+- Active spec / work package: A-MSRR v0.4 plus the approved design
+  amendments; Agent J/K Order 9 learned curriculum and physical execution.
+- Summary: Audited the complete uncommitted Order 9 posture-resolution,
+  rolling-execution, and C3-curation changes and split them into three
+  functional commits: `ac83c1b` (native collision-aware posture resolver),
+  `11bf771` (rolling grasp/transport execution), and `5326eae` (C3 mesh
+  curation tools).
+- Compatibility correction during verification: The C3 offline builder now
+  supplies an explicit neutral `contact_acquisition` runtime phase to the
+  phase-local teacher.  The interactive final-pose curation path continues to
+  render the independent terminal IK solution, while the animation treats one
+  three-second result as a rolling window and verifies decreasing contact
+  error rather than falsely requiring terminal contact in one window.
+- Files changed: Commit scopes listed above, C3 teacher/viewer compatibility
+  tests, `.gitignore`, design amendments, VIM4 compute log, and this worklog.
+  Local `/build`, `/artifacts`, and `/tmp` products remain excluded.
+- Schema/interface changes: None beyond the already approved internal
+  raw-`pi_H`/resolved-trajectory boundary and additive diagnostic interfaces;
+  no persisted policy, controller, reward, bucket, or checkpoint schema was
+  changed during commit preparation.
+- Tests / commands: `git diff --check` passed for each staged group.  Focused
+  suites passed `21`, `33`, and `14` tests respectively.  The first plain
+  `pytest` invocation failed before collection on the unrelated stale ROS
+  `launch_testing` plugin; the authoritative commands used
+  `PYTHONPATH=.` and `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`.
+- Assumptions / blockers / next steps: No method-level blocker.  The commits
+  preserve the existing validated through-release Isaac evidence; C3 bucket
+  admission and learning remain future work.
+
+### 2026-07-25 (Order 9 y-face transport/place/release physical replay)
+- Active spec / work package: A-MSRR v0.4 plus the approved design
+  amendments; Agent J/K Order 9 learned curriculum and physical execution.
+- Summary: Extended the repaired measured-state rolling C2 y-face replay from
+  lift through transport, place, and release, then completed both headless and
+  real-time GUI runs with learned `pi_L` active.  This uses the existing
+  tensor-training release contract rather than defining a new gate:
+  object pose within `0.05 m / 0.20 rad` and no selected contact for at least
+  `0.10 s`.
+- Implementation: The scalar CLI now permits `--c2-stop-after-phase release`
+  and reports contact-free dwell/release validity.  The deterministic teacher
+  converts the authenticated phase-zero open Dock reference into
+  policy-owned free-anchor separation poses; raw `pi_H` remains joint-free,
+  trajectory IK resolves the continuous opening path, learned `pi_L` supplies
+  bounded corrections, and QPID/QP retains actuator authority.  The posture
+  collision gate now treats only the assigned anchor/object pairs as
+  task-allowed while a release trajectory moves them out of contact.
+  Natural-contact wrench residuals in place/release are delegated to their
+  measured phase gates, matching the existing contact/lift/transport path.
+- Files changed: `amsrr/training/order9_articulated_teacher.py`,
+  `amsrr/training/order9_posture_resolver.py`,
+  `scripts/order9_isaac_shadow_smoke.py`,
+  `tests/unit/training/test_order9_articulated_teacher.py`, and this worklog.
+- Schema/interface changes: None to persisted trajectory, learned-policy,
+  controller, reward, checkpoint, bucket, or safety schemas.  One
+  backward-compatible teacher argument supplies the deterministic open-posture
+  reference; producer identity advanced to v8.
+- Verification: The current GUI run completed `20` rolling windows / `620`
+  observations and passed approach, contact/preload, lift, transport, place,
+  and release.  Transport and place retained two measured contacts.  Release
+  ended with zero active contacts, `3.1 s` contact-free dwell, release-target
+  object position/orientation errors `2.361 mm / 0.01188 rad`, and TaskSpec
+  final-goal errors `32.138 mm / 0.01107 rad` inside `50 mm / 0.20 rad`.
+  Every runtime/physics gate passed with zero `pi_L` fallback, clipping,
+  unresolved target, or prohibited overlap.  The independently completed
+  headless report SHA-256 is `bea13fa5...4f2f`; final GUI report SHA-256 is
+  `051fe164...8640`.
+- Tests / commands: Python compilation and whitespace checks passed; final
+  focused articulated-teacher, collision-gate, payload-phase, and preload
+  suite passed (`12 passed`).  Ran two diagnostic failure-isolation replays,
+  one accepted headless through-release replay, and one accepted GUI
+  through-release replay with a 30-second final-pose hold.
+- Assumptions / blockers / next steps: No method-level change or blocker.
+  This establishes the requested through-release path only.  Retreat and
+  settle were deliberately not executed, so `full_task_success_claimed`
+  remains false and no complete-task claim is made.
+
+### 2026-07-25 (Order 9 rolling motion-generation discontinuity repair)
+- Active spec / work package: A-MSRR v0.4 plus the approved design
+  amendments; Agent J/K Order 9 learned curriculum and physical execution.
+- Summary: Diagnosed the user-observed approach/contact motion in the current
+  C2 y-face real-Isaac replay.  Two independent integration defects, rather
+  than contact force control or a failed learned `pi_L`, caused the qualitative
+  behavior.  First, planned `attach` assignments enabled the complete payload
+  gravity/lever-arm coupling while the object was still supported by the
+  table.  Second, every rolling replan reset the nominal Dock reference to the
+  measured posture, which already contained `pi_L`'s reference-relative
+  correction, and then applied the same correction again.
+- Implementation: Payload coupling is now admitted only in the load-bearing
+  `lift`/`transport`/`place` phases after the upstream physical phase gate has
+  established contact/preload.  The articulated teacher accepts the preceding
+  nominal Dock endpoint independently of the measured runtime observation, and
+  the rolling executor carries that reference across both same-phase replans
+  and phase transitions.  The first knot is realized at the measured
+  centroidal pose, preventing a body-target jump.  Added an explicit
+  diagnostic-only `--bypass-pi-l` mode and truthful command-source metadata;
+  learned `pi_L` remains enabled in the production-path validation.
+- Files changed: `amsrr/simulation/order9_isaac_scene_adapter.py`,
+  `amsrr/training/order9_articulated_teacher.py`,
+  `scripts/order9_isaac_shadow_smoke.py`,
+  `tests/unit/simulation/test_order9_isaac_scene_adapter.py`,
+  `tests/unit/training/test_order9_articulated_teacher.py`, and this worklog.
+- Schema/interface changes: None to persisted schemas, learned observations or
+  actions, controller/QPID authority, checkpoint, bucket, reward, or safety
+  gates.  The teacher gained one backward-compatible internal optional nominal
+  reference argument; diagnostic CLI and producer versions advanced.
+- Upstream dependencies / assumptions: Current C2 bucket 8, the C2-derived
+  active-knot `pi_L`, native trajectory IK, measured-state rolling executor,
+  QPID/QP, Order-8 load-limited preload, and sequential physical phase gates.
+  Load-bearing coupling assumes `lift` cannot be entered until the measured
+  contact/preload gate passes, as enforced by this executor.
+- Verification: With `pi_L` bypassed but every other layer retained, the first
+  contact window changed from `z=0.411189 m`, orientation error
+  `0.320291 rad` to `z=0.219296 m`, `0.002787 rad` after payload gating; this
+  isolates the rise from `pi_L`.  With learned `pi_L`, pre-fix rolling-boundary
+  Dock changes of `0.0102--0.0150 rad` per first `0.1 s` became
+  `0.000038--0.000529 rad` (apart from initial policy engagement and planned
+  lift).  The current v5 GUI run executed `17` windows / `527` observations,
+  passed approach, two-contact/preload acquisition, and lift with zero
+  fallback, clipping, unresolved target, or physics-gate failure.  Final GUI
+  report SHA-256 is `3259f27d...ddaa4`.
+- Tests / commands: Python compilation passed; focused payload, articulated
+  teacher, collision-gate, and preload tests passed (`11 passed`).  Ran causal
+  `pi_L`-bypass pre/post checks, learned-policy three-window checks, a headless
+  through-lift replay, and the tested real-time GUI launcher through lift.
+- Assumptions / blockers / next steps: No method-level change or blocker was
+  introduced.  The first-ever `pi_L` engagement still produces a bounded
+  `0.013804 rad` response during its first `0.1 s`; repeated rolling-window
+  discontinuities are removed.  Visual confirmation may be repeated with
+  `scripts/run_order9_c2_yface_gui.sh`; full transport/release remains a
+  separate later validation and is not claimed here.
+
+### 2026-07-25 (Order 9 C2 y-face interactive real-time playback)
+- Scope/result: Added and then repaired an opt-in interactive path for the
+  current C2 y-face scalar real-Isaac diagnostic.  The first version opened
+  Kit but could appear frozen: GUI scene/policy/reset initialization exceeded
+  the unchanged 60-second RPC timeout on a cold launch, all worker progress
+  was silently discarded by the prefixed transport, and completion printed a
+  very large JSON document to the terminal.  It had not been validated through
+  a real GUI run before handoff.
+- Implementation: `--gui-realtime` now enforces a 300-second minimum RPC
+  timeout without changing the headless default, forwards explicit
+  `kit_app_launched -> policy_loaded -> scene_created ->
+  scene_reset_complete -> READY` status records, prints per-window progress,
+  emits a compact GUI result, renders every physics step, and can keep the
+  final viewer responsive for `--gui-keep-open-s`.  Worker shutdown allows the
+  display hold to finish cleanly.  Added
+  `scripts/run_order9_c2_yface_gui.sh` as the tested user entry point with all
+  immutable bucket/checkpoint/URDF inputs bound.  The launcher retains actual
+  Isaac physics, contact sensing, learned `pi_L`, preload, and QPID, but
+  explicitly skips the expensive diagnostic mesh-collision evidence reducer
+  so it is an observation tool rather than production acceptance evidence.
+- Verification: Python compilation, shell syntax, and the related shadow
+  worker/production-binding suite passed (`9 passed`).  A cold one-window GUI
+  run completed `31` observations and `150` controller steps with zero
+  fallback, proving that Kit launch, render stepping, RPC, report writing,
+  viewer hold, and cleanup work with the original CLI default timeout.  The
+  final launcher then completed approach in two rolling windows (`62`
+  observations / `300` controller steps) with runtime, physics, and phase
+  gates passing and exit code zero.  A subsequent full contact-acquisition
+  viewing run progressed visibly through window `24`; all completed windows
+  passed their physics gate and contact dwell had been acquired.  The user
+  confirmed that the motion was visible and requested stopping, so that run
+  was interrupted before its final RPC response and is not completion
+  evidence.  All Isaac/Kit processes exited.
+- Files changed: `amsrr/simulation/order9_shadow_worker.py`,
+  `scripts/order9_isaac_shadow_worker.py`,
+  `scripts/order9_isaac_shadow_smoke.py`,
+  `scripts/run_order9_c2_yface_gui.sh`, and this worklog.  Persisted schemas,
+  learned-policy/controller interfaces, teacher/IK semantics, checkpoints,
+  buckets, rewards, and acceptance gates are unchanged.
+
+### 2026-07-25 (Order 9 Order-8 load-limited preload port passes contact but not lift)
+- Approved scope/implementation: Ported the Order 8 deterministic
+  per-anchor load-limited position preload below learned `pi_L` and above
+  QPID.  Raw `pi_H` remains joint-free and native trajectory IK still owns
+  the nominal joint path.  After both assigned contacts remain above `0.5 N`
+  for `0.10 s`, the controller retains the fixed IK closure ratio, advances
+  the previous absolute Dock target at at most `0.002 rad/s`, subtracts the
+  implicit velocity-drive damping term from Isaac applied torque, and freezes
+  each moving Jacobian branch after `1.2 Nm` for `0.10 s`; shared joints stop
+  with the first completed owner.  The final absolute targets are held through
+  lift/transport/place with zero Dock torque bias.  Release restores the
+  normal resolver/`pi_L`/QPID path.  No persisted schema, learned action,
+  checkpoint, bucket, reward, or actuator authority changed.
+- Gate correction: The earlier ad-hoc contact-acquisition gate requiring
+  `5 N` on both sides was incompatible with the approved `1.2 Nm` Order 8
+  preload and is superseded.  Contact acquisition now requires both preload
+  completion and the existing maintained-contact floor `0.5 N` for `0.25 s`.
+  Raw contact remains excluded from the learned actor and is used only by the
+  deterministic controller/physical gate.
+- Real-Isaac result on the unchanged C2 y-face condition: validation bucket
+  `validation-000008-138352e449ab`, candidate group
+  `slot_0:grasp_pair:2` (`4/7`), the unchanged C2-derived `pi_L` initializer,
+  native IK, and QPID passed approach in two windows and passed contact
+  acquisition at window `24`.  Both preload branches froze with endpoint
+  damping-compensated loads `1.21684/1.39319 Nm`, dwell
+  `0.10/0.10 s`, and measured contact-force norms `5.87369/3.00208 N`.
+  This is valid two-contact/preload evidence, not transport success.
+- Lift failure: In lift windows `25--26`, both measured contacts and the
+  frozen preload remained active (`4.237/2.136 N` then
+  `4.048/2.129 N`), but the object remained on the support at
+  `z=0.2235535 m` with only `1.30 micrometres` bottom clearance.  Robot CoM
+  moved from `z=0.268396 m` at contact completion to `0.259770 m`, while the
+  requested lift target was `0.310611 m`; therefore neither lift nor
+  transport occurred.  The next rolling replan then failed closed on
+  `0.502886 mm` anchor-position error against the strict `0.5 mm` diagnostic
+  tolerance.  Relaxing that numerical excess would not change the already
+  observed physical lift failure.
+- Evidence/iterations: The final 27-window incremental journal is
+  `artifacts/p4_full/order9/posture_resolver/c2_yface_order8_load_preload_grasp_transport_real_isaac_v3.json.windows.jsonl`,
+  SHA-256
+  `581154ec4f34b6a82ded4e9cd83ed95ea05963cf2bc78387dc75b69bfda68975`.
+  Two excluded setup diagnostics are retained: the first armed from a
+  one-cycle contact sample too early (26 rows, SHA-256
+  `25c58f7d...f0f4c`), while v2 proved preload completion but was still
+  blocked by the obsolete `5 N` gate (30 rows, SHA-256
+  `6b12191f...0fe7`).  None produced a completed report or a success claim.
+- Verification/stop: The new controller unit tests plus related shadow,
+  worker, and production-runtime tests pass `14`; touched modules compile and
+  `git diff --check` passes.  All Isaac/Kit workers exited.  The isolated
+  load-limited stage alone is insufficient on this path.  Continuing now
+  requires a method-level choice between porting the preceding Order 8
+  simultaneous q-close settle/geometric preload state machine, redefining
+  post-preload force/branch-load holding, or revisiting the C2 root/CoM and
+  phase-timing compatibility.  Work stops here under the user's instruction
+  not to choose such a revision silently.
+
+### 2026-07-25 (Order 9 C2 y-face CoM-first regression reaches grasp but not lift)
+- Scope: Implemented the user's requested regression on immutable C2 validation bucket `validation-000008-138352e449ab`: fixed y-face candidate pair `slot_0:grasp_pair:2` (candidates `4/7`), deterministic final-grasp CoM computation, CoM approach with no Dock-joint motion, then articulated motion through the new native trajectory IK, unchanged C2-derived `pi_L` checkpoint `8dc6157f...f2da3`, and QPID/QP.  No candidate reselection, training, checkpoint/bucket mutation, or per-knot real-mesh oracle was used; Isaac contact sensing remained active.
+- C2 regression reference: The scalar harness now identifies the promoted Order 8/C2 `q_close` posture explicitly as a regression-only terminal teacher reference, derives its CoM/anchor poses from the generated articulated URDF and whole-structure model, and passes the raw joint-free CoM/anchor trajectory back through native trajectory IK.  This avoids falsely presenting the exact-normal y-face IK's unrelated `~0.77 rad` folded branch as C2 behavior.  Evidence labels the source `c2_promoted_contact_posture_then_native_trajectory_ik`.
+- Timing/gate corrections: Approach knots retain the measured open joints exactly.  C2 contact closure is limited to `0.005 rad/s`; the C2-only native anchor tolerance is `0.5 mm` so its `~0.01425 rad` rolling increments are not discarded by the normal `5 mm` gate.  Contact acquisition uses the physical contact gate rather than requiring exact detached-target joint convergence, fixes a duplicated metric-key prefix that previously reported zero contacts, and requires `5 N` per anchor for preload before lift.  Transitional contact/wrench residuals are recorded but deferred to the phase gate.  After contact, lift/transport preserve the measured grasp posture and translate the coupled anchor/CoM/object target rather than returning to the detached canonical IK branch.
+- Real-Isaac outcome: Approach passed after two three-second windows.  In the strongest preload run, contact acquisition passed at window `19` with `2.8 s` continuous dwell and endpoint force norms `6.473/5.079 N`.  Lift then failed through windows `20--31`: both contacts remained present, but the object z position stayed at `0.223553 m` on the support while robot CoM z rose from `0.269122` to `0.422972 m`; endpoint forces decayed to `4.051/2.919 N`.  Replanning finally stopped on a `0.6606 mm` measured/FK boundary inconsistency against the intentionally strict `0.5 mm` C2 tolerance.  Transport was never entered and no grasp-transport success is claimed.
+- Evidence: The completed pre-preload report is `artifacts/p4_full/order9/posture_resolver/c2_yface_canonical_slow_com_then_articulation_grasp_transport_real_isaac_v4.json`, SHA-256 `3072e04b01a26f95ed0df913ab8dd54115e92afd99ebf3da7f1e6646213532b8`.  The stronger 5 N preload run is preserved as the 32-window journal `artifacts/p4_full/order9/posture_resolver/c2_yface_canonical_slow_preload_com_then_articulation_grasp_transport_real_isaac.json.windows.jsonl`, SHA-256 `a3dfdfb1fb987bea24de77fa35287cab924254ef59140e9a6f963f968d97618e`.
+- Verification: Relevant Python compilation passed; the final articulated-teacher/posture-collision/production-checker/shadow executor/worker set passed `16`; the narrowed teacher set passed `4`; `git diff --check` passed.  No Isaac/Kit worker remains.
+- Method-level stop: The requested ordering and y-face contact now reproduce approach and a physically measured two-point grasp, but C2 lift is not reproduced because the current `pi_H -> IK -> pi_L -> QPID` path lacks the successful Order 8 controller's per-anchor load-limited position-preload/force-hold behavior (the canonical report used about `9--10 N` normal force per link).  Choosing whether to port that deterministic contact-load controller below `pi_L`, teach it through `pi_L`, or change the `pi_H` wrench/anchor execution contract is a method-level decision.  Per the user's instruction, implementation stops here rather than silently selecting one.
+
+### 2026-07-25 (Order 9 exact-C2 new-IK replay preflight rejected)
+- Scope: Per the user's correction, restricted the check to exact behavior preservation of promoted C2 bucket `validation-000008-138352e449ab`: same fixed morphology, task/object, phase-zero centroidal goal, serialized contact assignment, accepted C2 `pi_L` lineage, and QPID/QP.  No contact candidate generation/ranking, alternate staging, real-mesh per-knot oracle, Isaac launch, training, or C3 work was performed.
+- Exact input audit: The promoted C2 artifact records anchor/candidate assignments `(0, 0)` and `(1, 3)`, i.e. the sampled `+x/-x` object-face targets.  C2's successful nominal joint reference was not generated from those targets; the vectorized runtime independently injected the accepted Order 8 canonical `q_open/q_close` bank.  The accepted Order 8 physical contacts were instead on the opposing `+y/-y` sides.  Thus the stored high-level contact targets and the nominal posture that physically produced C2 success are not one IK-consistent reference.
+- New-IK result: Supplied the exact bucket targets and the exact archived phase-zero approach goal `[0.883990288, -0.010007858, 0.219919488, ...]` to the native fixed-centroidal solver, seeded by the unchanged canonical `q_open`.  It correctly rejected after `100` iterations with maximum anchor-position error `0.181367260 m` and attitude error `0.253994110 rad`.  Since the exact high-level C2 command is infeasible, `pi_L` and QPID were not executed and no grasp/transport success is claimed.
+- Stop reason / next decision: Replacing candidates with the physically observed `+y/-y` pair or deriving anchor targets from canonical `q_close` can make an IK reference, but either action changes the exact serialized C2 teacher input and was explicitly outside this replay.  The blocker is therefore the pre-existing C2 teacher-target versus canonical-joint-reference inconsistency, not Isaac throughput or native-IK runtime.  Resolve which C2 representation is authoritative before another integration run.
+
+### 2026-07-24 (Order 9 new-teacher/IK grasp-transport integration check stopped at approach collision)
+- Scope: Checked whether the approved `pi_H` teacher -> collision-aware posture/trajectory IK -> promoted C2-derived `pi_L` -> QPID/QP chain can preserve the earlier C2 grasp-and-transport capability on immutable validation bucket `validation-000008-138352e449ab`.  The user requested a stop after the active important validation; no training, checkpoint/bucket mutation, reward/gain/safety-threshold relaxation, or follow-up rerun was performed.
+- Preparation/diagnosis: Extended the persistent scalar Isaac harness to execute phase-local rolling windows and measured phase gates sequentially, archive each window incrementally, and expose measured contacts/object pose.  The teacher now resolves an outward pregrasp before contact, stages vertical/lateral/articulation/descent/final-horizontal motion, calls the native convex collision-aware resolver with the task object, and ranks deterministic feasible contact groups by current-state approach cost.  This rejected the far lateral x-face candidate used by the preceding diagnostic and consistently selected `slot_0:grasp_pair:2`, the near y-face pair aligned with the prior Order 8 contact orientation.  Object collision is allowed only for anchors whose current schedule is `attach`, `maintain`, or `slide`.
+- Final real-Isaac result: The single persistent run executed `21` three-second approach windows.  Windows `0--19` passed runtime and physical gates with zero prohibited overlap, `pi_L` fallback, actuator clipping, or unresolved actuator target.  The maximum QP residual over all windows was `2.46061e-6` against `1e-4`.  The approach teacher target became reached at window `20`, but its physical gate failed: the first prohibited overlap was `module_1:yaw_dock_mech2` against `order8_object` at knot `1`, time `0.1 s`, with four overlap observations and zero signed clearance.  The centroidal-speed gate was also not yet settled.
+- Outcome semantics: No phase transition occurred; contact acquisition, grasp, lift, and transport were never executed.  The object remained at its initial pose and finished `0.200356 m` from the transport goal.  Therefore `grasp_transport_success_claimed=false` and this check is a failed behavior-preservation test, not evidence that the promoted C2 policy itself lost its previously proven fixed-task capability.  Work stopped without weakening collision admission or attempting another correction.
+- Evidence: `artifacts/p4_full/order9/posture_resolver/c2_native_collision_aware_grasp_transport_bucket8_real_isaac_v3.json`, SHA-256 `a6ccbab12a8ef3cc071a78536b03fd3129d07183015b6270d84303a5a7f0fe38`; its incremental `.windows.jsonl` journal preserves the same 21-window execution.  Focused teacher/collision/shadow regression passed `16` tests before the run; the final source tree passes Python compilation and `git diff --check`.
+- Why this took long / resume point: This was not GPU training.  Real-mesh persistent Isaac evaluation costs roughly `35--40 s` wall time per `3 s` simulated window, and earlier fail-closed attempts independently exposed candidate ordering, unsafe direct pregrasp interpolation, and rolling-stage reopening before this final run.  The remaining concrete blocker is the mismatch between the native knot-level collision admission and the real-mesh collision observed immediately after the final approach target.  Resume by reproducing that exact window-20 pair and reconciling convex/native versus real-mesh geometry/allowed-contact semantics; do not start contact/grasp/transport evaluation until the approach gate passes physically.
+
+### 2026-07-24 (Order 9 native posture-IK production promotion)
+- Spec/work package: v0.4 plus the approved joint-free `pi_H -> deterministic fixed-centroidal posture resolver -> pi_L -> QPID/QP` and interim convex-only `5 mm` posture-collision amendments; Agent J/K production promotion.  The user requested replacement of the current Python posture IK with the VIM4-tested fast implementation.  No solver tolerance/iteration budget, regularization, CoM/anchor/timing authority, learned-policy action, reward, checkpoint/bucket, or final controller authority changed.
+- Implementation: Promoted the complete C++17/Eigen IK loop and convex/FCL collision path under `amsrr/feasibility`, with one host-native build script and an ABI/architecture-specific ignored output directory.  The loader binds each extension to current native-source/build-script SHA-256 and refuses stale or unbound binaries; runtime never invokes the compiler.  The normal resolver prefers the native solver but can retain the readable Python solver when collision checking is not requested.  Production `C_H` injects the authenticated bucket's box ID/size, obtains current/object-target pose per knot, requires native collision support, and fails closed on missing/mismatched binary, scene, URDF/mesh-bound allowed-pair manifest, IK result, or separate post-solve convex admission.
+- Collision contract: The online path uses the approved mesh-convex-hull model, `5 mm` hard margin, conservative world-AABB pruning, FCL signed distance near the threshold, intended dock/adjacent/authored-overlap exclusions, and only explicitly assigned anchor/object contact-link allowances.  Original STL remains an offline oracle.  Proxy-only code cannot infer exclusions, cannot serve an exact query, and accepts only the SHA-bound Holon manifest.  The current production scene input remains the approved task-declared box object; generic obstacles/support and non-box objects are not silently approximated.
+- Numerical/performance evidence: C++ versus independent NumPy FK/anchor/CoM passed `384` configurations over all `12` morphologies with maximum difference `8.882e-16` (`1e-12` gate).  The complete production resolver passed every immutable case with maximum trajectory difference `1.585e-10` (`1e-8` gate); three repetitions measured PC mean/max cold `0.09355/0.10998 s` and warm `0.08779/0.09482 s`.  The eight-module convex benchmark admitted `9/9` knots; mean scene/IK/admission times were `0.00487/0.00610/0.00149 s`, with `10,711/10,747` candidate pairs pruned.  Exact-capable/proxy-only output was identical across `12` cases and `36` knots, and the allowed-contact negative control rejected exactly two prohibited object pairs.
+- Evidence/provenance: Resolver report SHA-256 `d36db57...8132`; convex report SHA-256 `a81a88fd...568a`; x86-64 native extension SHA-256 `a4705e35...df4`.  Source, build, manifest, report paths and full hashes are recorded in `for_codex/VIM4_COMPUTE_TEST_LOG.md`.  The production resolver/hard-gate identities advance to native/convex v2 values, and resolution evidence now archives collision-gate status/version/minimum clearance/violating-pair count without changing any persisted schema.
+- Files changed: Added native source/loader/batched-reference/native-adapter/collision modules, native README, build script, hash-bound collision manifest, loader/collision integration tests, and archived-workspace compatibility imports; updated the posture resolver, resolving hard gate, production checker factory/runtime binding, posture benchmark, `.gitignore`, design amendment, compute log, and this worklog.
+- Verification: Focused native/resolver/production-gate tests passed `13` across the final focused runs; compilation and `git diff --check` passed; direct kernel, allowed-contact, exact/proxy equivalence, 12-case resolver, and convex benchmarks passed.  Full unit execution completed `1225 passed, 3 skipped`; its two failures are outside this change: `trimesh` is absent for one expanded-object test, and one pre-existing visualization test omits the runtime observation required by the current phase-local teacher.
+- Limitations/next step: The same algorithm was previously measured on VIM4, but the final production module name/build-identity wrapper and safer non-`fast-math` build have not been rebenchmarked there.  Build natively with `scripts/build_order9_posture_native.sh` before VIM4 inference.  No new method-level blocker was found.  The PC path is ready for the requested next grasp-and-transport integration check.
+
+### 2026-07-24 (Order 9 frame-corrected rolling-teacher real-Isaac transition regression)
+- Spec/work package: v0.4 joint-free `pi_H -> deterministic posture/trajectory IK -> pi_L -> QPID/QP` execution boundary; Agent J/K implementation correction and minimum real-Isaac regression.  This follows the simulator-free proof that the fixed-USD articulation root had been misused as module `fc`.  No training, checkpoint/bucket mutation, reward/gain/safety-threshold change, or learned-policy/schema contract change occurred.
+- Runtime correction: The first C2 rolling observation now evaluates the exact generated articulated URDF at the canonical Isaac articulation-root/joint reset and supplies each `module_N__fc` pose to the teacher/control model.  Every subsequent rolling endpoint now exports the actual Isaac module-body pose/twist and replans from those measured module states; generated-URDF FK remains a fail-closed fallback for endpoint evidence lacking direct module telemetry.  The C2 diagnostic CLI requires the configurable/hash-recorded generated URDF path rather than hard-coding a robot path.  Per-window evidence records the observation source and requested centroidal translation vector.
+- Minimum real-Isaac result: Validation bucket `validation-000008-138352e449ab` executed four persistent three-second windows (`600` controller steps, `124` knot observations) through the C2-derived active-knot `pi_L`, QPID/QP, actuator bridge, actual articulated USD, object/support, and real-mesh collision/contact evidence.  Window 0/1 requested predominantly vertical motion (`dz=299.50/130.25 mm`); window 2/3 switched to predominantly lateral motion (`dy=301.80/302.62 mm`, `dz=3.00/3.19 mm`).  Thus real Isaac confirms that the frame correction removes the prior all-window vertical-stage stall.
+- Physical/runtime evidence: All `4/4` windows passed their runtime and physical gates.  Learned `pi_L` ran on `600/600` steps with zero fallback, clipping, unresolved actuator targets, prohibited overlap, QP infeasibility, or non-finite state.  Maximum QP residual was `2.00426e-6` against `1e-4`; minimum prohibited-collision clearance was `55.683 mm`.  Endpoint telemetry measured the root-to-base-module-`fc` z offset as approximately `60.91--60.93 mm`, consistent with the offline finding.
+- Result semantics: The top-level report intentionally remains `passed=false` because execution was bounded to four approach windows and neither the approach phase target nor the final object-transport goal was requested to complete.  This is not `0/4` failure: `runtime_passed=true`, `physical_gate_passed=true`, and all four window physics summaries pass.  No contact, grasp, lift, transport, release, retreat, or full-task success is claimed.
+- Evidence/provenance: Report `artifacts/p4_full/order9/posture_resolver/c2_rolling_approach_v6_frame_corrected_4window_real_isaac.json`, SHA-256 `51448cf5ec1169807649f142f990327e11f39eff624ae22b16214b8b9844d969`.  The authenticated generated URDF SHA-256 is `5891f690...01cea`; the unchanged C2-derived `pi_L` initializer SHA-256 is `8dc6157f...f2da3`.  Wall time was approximately `2.2 min`; the worker reset and exited, with no residual Isaac/Kit process.
+- Files changed: `amsrr/robot_model/urdf_transforms.py`, `amsrr/simulation/order9_isaac_shadow_runtime.py`, `scripts/order9_isaac_shadow_smoke.py`, `scripts/order9_audit_rolling_teacher_frames.py`, `tests/unit/robot_model/test_urdf_transforms.py`, and this worklog.  Schema/interface changes: None to persisted data or policy/controller contracts; additive module-state telemetry, configurable C2 diagnostic URDF input, and internal URDF-FK utility only.
+- Tests/commands: Python compilation passed; focused robot-model/teacher/shadow executor/worker tests passed `19` in `isaaclab3`; the 18-window offline frame audit reran unchanged and exited zero; `git diff --check`, GPU preflight, artifact hashes, and post-run process checks passed.
+- Assumptions/limitations/blockers: The regression proves the intended vertical-to-lateral transition and physical health only over the first 12 simulated seconds of one promoted C2 validation bucket.  No method-level blocker was found.  A longer approach/articulation/pregrasp run should be requested only when evidence beyond this frame-transition regression is needed.
+
+### 2026-07-24 (Order 9 rolling-teacher articulation-root/frame offline audit)
+- Spec/work package: v0.4 joint-free `pi_H -> deterministic posture/trajectory IK -> pi_L -> QPID/QP` execution boundary; Agent J/K diagnostic.  The user requested verification, without another simulator rollout, of whether the earlier rolling-teacher path retained the fixed-USD articulation-root versus module-`fc` frame error.  No training, checkpoint/bucket mutation, reward/gain/safety-threshold change, or learned-policy/schema contract change occurred.
+- Implementation: Added joint-position-aware tree-URDF FK for fixed/revolute/continuous/prismatic joints and a simulator-free audit CLI.  The audit authenticates the fixed nominal asset, evaluates its exact generated URDF at saved root/joint states, validates predicted `module_N__fc` poses against the promoted C2 batched rollout's measured module-body poses, then evaluates the legacy `WholeStructureKinematics` reconstruction and corrected URDF-FK reconstruction under the same current rolling-teacher implementation at all 18 archived measured window states.
+- FK validation: Against the real C2 tensor rollout at phase zero, generated-URDF FK matched all measured module poses with maximum position error `1.03238 mm` and maximum attitude error `0.00142013 rad`; the resulting centroidal position differed by only `0.316815 mm`.  This independently anchors the root-to-`fc` transform without starting Isaac or PhysX.
+- Confirmed finding: The legacy path treated the Isaac articulation root as the base module's `fc` frame and therefore biased the reconstructed centroidal position by a constant `60.9351 mm` across all 18 archived states.  With legacy reconstruction the current teacher classified every state as vertical staging.  With URDF-FK-correct module poses, states 0--2 remain vertical, while state 3 and later classify as lateral: at state 3 the legacy/correct vertical errors are `70.5066/9.57785 mm` against the unchanged `20 mm` staging gate.  Thus the same frame defect materially caused the earlier failure to leave vertical staging.  Counterfactual task completion is not claimed because the archived later states were produced by the defective vertical commands.
+- Evidence/provenance: Report `artifacts/p4_full/order9/posture_resolver/c2_rolling_approach_v5_offline_frame_audit.json`, SHA-256 `6afc723692e3b722ae129a78f872537276bc3f594d7b2e851e0f5a05ac8dc63b`, reports `passed=true` and `isaac_or_physx_started=false`.  Current source does not reproduce the archived proposal hashes (`0/18`), so the report records this explicitly and compares both frame paths under one identical current teacher implementation at the archived measured states; it does not relabel current proposals as archived bytes.
+- Files changed: `amsrr/robot_model/urdf_transforms.py`, `scripts/order9_audit_rolling_teacher_frames.py`, `tests/unit/robot_model/test_urdf_transforms.py`, and this worklog.  Schema/interface changes: None; one additive internal robot-model FK utility and one diagnostic CLI were added.  Upstream dependencies: hash-bound fixed nominal URDF/USD manifest, promoted C2 tensor rollout, archived v5 rolling report, PhysicalModel, current rolling teacher, and immutable C2 bucket.
+- Tests/commands: Python compilation passed; joint-FK/fixed-morphology/articulated-teacher focused tests passed `12`; the complete 18-window offline audit exited zero; `git diff --check` passed.  No Isaac/Kit process was started.
+- Assumptions/limitations/blockers: Module twist is conservatively copied from the articulation root because stage selection uses module pose and Dock joint position.  Dynamics, controller tracking, contact, collision, and eventual lateral/articulation/pregrasp success remain untested by this audit.  No method-level blocker was found; the next implementation step is to replace the two legacy root-based runtime-observation reconstructions with exact module-body/URDF-FK state, then rerun the minimum short real-Isaac rolling regression.
+
+### 2026-07-24 (Order 9 QPID-only true-centroidal tracking isolation)
+- Spec/work package: v0.4 `PolicyCommand -> QPID/QP -> actuator bridge` boundary; Agent I/J controller isolation.  The user requested a contact-free QPID-only tracking test to separate controller capability from learned `pi_L` effects.  No training, checkpoint mutation, gain change, reward change, safety-threshold change, or persisted policy/schema interface change occurred.
+- Diagnostic implementation: Added an explicitly diagnostic runtime mode that bypasses `pi_L`, sends the upstream C2 centroidal pose/twist and nominal joint references directly to QPID, and disables contact/collision evidence collection.  The real fixed-three-module USD, current rigid-body QP, actuator bridge, true Isaac module-body centroidal state, and `20 ms` control step remain active.  Endpoint evidence now records true centroidal pose/twist directly from the actual Isaac module bodies, avoiding the earlier fixed-USD root-frame reconstruction ambiguity.
+- Horizontal result: The exact C2 `+0.30 m x / 30 s` smoothstep reference was run for the first `9 s` (`450` controller steps).  At `3/6/9 s`, target displacement was `8.4/31.2/64.8 mm`; QPID-only position error was `0.470/0.335/0.185 mm`, with final component error `[-0.179, 0.012, 0.044] mm`.  Maximum attitude error at those endpoints was `0.002652 rad`; maximum normalized controller/QP residual was `2.38115e-6`.
+- Three-axis result: A same-rate `+0.30/+0.10/+0.10 m xyz / 30 s` smoothstep was run for `9 s`.  The final target displacement was `[64.8, 21.6, 21.6] mm`; final component error was `[-0.178, -0.064, 0.059] mm`, norm `0.198 mm`.  Endpoint error norms at `3/6/9 s` were `0.496/0.350/0.198 mm`; maximum controller/QP residual was `2.25239e-6`.  Both cases used direct QPID reference on `450/450` steps with no fallback, clipping, unresolved actuator target, QP infeasibility, or non-finite state.
+- Interpretation: QPID alone tracks the tested C2-rate CoM references to sub-millimetre accuracy on all translation axes.  Therefore the approximately `30--36 mm` upstream-reference error observed with the C2-derived learned `pi_L` is not a QPID tracking limitation.  `pi_L`'s pose/twist correction and additive residual wrench change the closed-loop equilibrium/reference seen by QPID; the earlier statement assigning most of that error downstream to QPID is superseded by this isolation result.
+- Evidence/tests: Horizontal report `artifacts/p4_full/order9/posture_resolver/c2_qpid_only_tracking_9s_bucket8_real_isaac.json`, SHA-256 `d86de6ae...b6a0b`; three-axis report `.../qpid_only_3d_tracking_9s_bucket8_real_isaac.json`, SHA-256 `c37a4394...3040`.  Python compilation, focused tests `7 passed`, `git diff --check`, NVIDIA/kernel/process checks, and both successful real-Isaac runs passed.  One intermediate three-axis worker launch exited with code `139` before `describe`; GPU state, kernel log, and process checks were clean, and an unchanged immediate retry completed successfully.  The failed launch produced no control evidence and is excluded.
+- Files changed: `amsrr/simulation/order9_isaac_shadow_runtime.py`, `amsrr/simulation/order9_shadow_executor.py`, `scripts/order9_isaac_shadow_worker.py`, `scripts/order9_isaac_shadow_smoke.py`, and this worklog.  Schema/interface changes: None; all additions are internal diagnostic options/telemetry.
+- Limitations/next step: These are free-flight, nine-second, one-bucket controller-isolation tests, not contact, grasp, transport, disturbance, saturation, or full-distribution acceptance.  Before changing QPID, inspect the learned `pi_L` pose/twist and residual-wrench contributions against the upstream trajectory; QPID retuning is not supported by the present evidence.
+
+### 2026-07-24 (Order 9 C2 batched-to-scalar execution-path parity diagnostic)
+- Spec/work package: v0.4 `pi_L -> PolicyCommand -> QPID/QP -> actuator bridge` boundary plus the approved C2-to-C3 behavior-preserving initializer lineage; Agent I/J/K runtime regression only.  No training, checkpoint mutation, curriculum change, reward change, controller-gain change, safety relaxation, or policy/schema interface change occurred.
+- Diagnostic implementation: Added an explicit `--c2-exact-runtime-reference` mode to the persistent real-Isaac shadow harness.  It authenticates one immutable promoted-C2 bucket, restores its canonical phase-zero state, reconstructs the original 30-second C2 approach target in three-second production-shadow segments, and executes the C2-derived active-knot initializer through scalar `pi_L`, scalar QPID/QP, and the actual fixed-morphology USD.  The promoted batched C2 rollout is required to recover the fixed-USD phase-zero centroidal frame, and each scalar endpoint records reconstructed CoM tracking, runtime, collision, fallback, clipping, and QP evidence.
+- Invalid first diagnostic excluded: The first attempt used `WholeStructureKinematics` directly on the fixed-USD articulation root and omitted the USD root-to-module helper-body translation, lowering both the reference/reconstructed CoM by approximately `60.85 mm`.  That was a diagnostic-frame error, not controller behavior.  The accepted v2 diagnostic binds the promoted batched rollout and applies its measured fixed-USD phase-zero frame; the invalid v1 artifact is not acceptance evidence.
+- Accepted real-Isaac result: Validation bucket `validation-000008-138352e449ab` ran three continuous three-second windows (`450` scalar controller steps, `453` knot observations) and passed runtime/physics checks.  Learned `pi_L` was used on `450/450` steps with zero fallback, clipping, unresolved actuator targets, prohibited overlaps, or non-finite state.  Maximum QP residual was `1.39062e-6` against `1e-4`; minimum prohibited-collision clearance was `44.059 mm`.
+- Batched/scalar comparison: At C2 approach progress `0.1/0.2/0.3`, scalar-versus-promoted-batched three-axis tracking-error-vector differences were `0.391/0.485/0.505 mm`.  Scalar instantaneous CoM error norms were `35.580/32.358/30.581 mm`, compared with batched `35.918/32.743/30.961 mm`.  The scalar and batched execution paths are therefore equivalent for the tested C2 phase-zero approach prefix to sub-millimetre error; the earlier `~64 mm` apparent vertical deficit was entirely the invalid diagnostic frame.
+- Evidence/tests: Accepted report `artifacts/p4_full/order9/posture_resolver/c2_exact_scalar_regression_9s_bucket8_real_isaac_v2.json`, SHA-256 `44a29dcc...19867`; compared promoted batched artifact SHA-256 `049517d9...f1da5d`.  `python -m py_compile scripts/order9_isaac_shadow_smoke.py`, focused unit tests `7 passed`, fixed-frame extraction check, batched/scalar numerical comparison, `git diff --check`, and process-exit checks passed.
+- Files changed: `scripts/order9_isaac_shadow_smoke.py` and this worklog.  Schema/interface changes: None.  Upstream dependencies: immutable C2 bucket manifest, promoted update-49 batched evaluation, C2-derived behavior-preserving C3 initializer, PhysicalModel, scalar policy/controller/bridge, and persistent real-Isaac worker.
+- Limitation/next step: This is a nine-second approach-prefix parity regression, not a complete C2 episode, new promotion, grasp, transport, or new-distribution result.  It is sufficient to rule out a scalar-versus-batched runtime mismatch as the source of the current articulated-teacher failure.  The remaining discrepancy is the new teacher's tighter phase target/envelope, not a loss of C2 execution semantics.
+
+### 2026-07-24 (Order 9 phase-local rolling teacher implementation and paused C2-path validation)
+- Approved correction implemented: the articulated teacher now emits measured-state-anchored, phase-local `3 s` rolling proposals at `10 Hz`; raw `pi_H` output remains joint-free, while the detached posture resolver supplies nominal q/qdot for the unchanged C2-derived active-knot `pi_L` and QPID/QP.  The approach teacher separates vertical clearance, lateral clearance, articulation, and final pregrasp motion.  Endpoint root/object/joint telemetry and persistent multi-window execution were added to the exact promoted-C2 bucket shadow harness.  Reachability checking now validates assigned pre-contact anchor targets while retaining fail-closed assignment rules.  No training, optimizer/checkpoint mutation, bucket mutation, or full-task-success claim occurred.
+- Implementation checks before the final diagnostic passed: focused teacher/reachability tests passed `5`; the affected shadow/runtime/worker plus teacher/reachability set passed `16`; a later teacher/reachability/runtime set passed `9`; touched Python modules compiled.  Model/FK rolling simulation after the final deterministic IK-seed change predicted phase-target arrival in `13` windows, but this was only a kinematic diagnostic.
+- Real-Isaac v5 result on exact promoted-C2 bucket `validation-000008-138352e449ab`: all `18/18` rolling windows were runtime- and physics-valid, with zero prohibited overlaps, zero `pi_L` fallbacks, no unresolved/clipped actuator targets, minimum collision margin `46.9 mm`, and maximum QP residual `2.2291e-6` against the unchanged `1e-4` threshold.  Nevertheless the approach phase target was never reached, so the overall result is fail-closed.  The robot root rose safely, then advanced only about `10--24 mm` laterally per three-second window while the teacher/model assumption expected substantially faster phase progress; after `54 s` simulated time it remained in lateral staging.  The object stayed essentially stationary, as expected before contact.
+- Evidence/stopping point: report `artifacts/p4_full/order9/posture_resolver/c2_rolling_approach_v5_bucket8_real_isaac.json` records `runtime_passed=true`, `physical_gate_passed=true`, `phase_target_reached=false`, and `passed=false`.  The run took approximately `11.5 min` wall time because one real-mesh Isaac worker executed `18 x 150` controller steps and collision/contact sampling sequentially.  Bucket 9, contact acquisition, the remaining task phases, further fixes, and reruns were not started.  All Isaac/Kit processes exited.  Work is paused here at the user's request.
+- Diagnosis at pause: the original two-second full-task compression and initial target jump were invalid; subsequent real-mesh iterations exposed step-accounting, swept collision, measured-state re-anchoring drift, stage-transition oscillation, and free-base IK branch-switching defects.  The latest deterministic-seed/staged path removed collisions and controller failures, but the open issue is now tracking/progress consistency between teacher-requested centroidal motion, the C2-derived `pi_L` correction behavior, and QPID/physics.  This is why the work required repeated costly Isaac evaluations and why C2 capability has not yet been reproduced through the new `pi_H -> IK -> pi_L -> QPID` path.
+
+### 2026-07-24 (Order 9 new-IK path regression on the exact promoted-C2 validation conditions)
+- Spec/work package: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the approved joint-free `pi_H -> deterministic posture resolver -> C2-derived pi_L -> QPID` amendment; Agent J/K fixed-morphology integration regression.  No training, optimizer/checkpoint mutation, bucket mutation, proposal projection, or timing repair was performed.
+- Corrected scope: The preceding five-module C3a shadow run did not answer whether the new high-level/IK path preserves the already-promoted C2 capability.  Added a fail-closed C2-bucket mode to the persistent-shadow harness and tested the two exact immutable promoted-C2 validation conditions (`validation-000008-138352e449ab` and `validation-000009-138352e449ab`).  Each run authenticated the manifest/task/graph/USD bytes, restored the bucket-offset canonical C2 phase-zero root/joint/object state, generated a joint-free articulated-teacher proposal from that measured joint state, resolved it at `20 Hz`, and executed the unchanged C2-derived active-knot `pi_L` initializer plus QPID/QP in real Isaac.  Endpoint root/object pose telemetry and an explicitly limited final-object-goal check were added; no learned or persisted policy/schema interface changed.
+- Generation/runtime result: Both raw teachers contained `5` joint-free knots and both resolvers produced `41` knots over the unchanged `2.0 s` horizon.  Worker describe/synchronize/execute/reset and all `41/41` finite observations passed for both buckets; actuator readback matched the PhysicalModel.  Thus the new software chain is executable on the exact C2 topology/object conditions.
+- Regression result: Capability was not reproduced (`0/2`).  The first teacher CoM target was `1.13940/1.15460 m` from the actual C2 phase-zero root target.  Both executions immediately produced QP residual `1.0`, used learned `pi_L` on `114/120` controller steps with `6` controller-infeasible fallback steps, and first entered the same prohibited `module_1:rotor_arm3`--object overlap at knot `8`, `t=0.4 s`; each accumulated `3` prohibited overlap samples and fail-closed contact-wrench residual `1.0`.  Final object position error was `0.112145/0.109767 m` against the unchanged `0.05 m` goal tolerance, so neither reached the object goal.  Release/retreat success is explicitly not inferred from the endpoint-only goal metric.
+- Evidence/tests: Bucket 8/9 reports are `artifacts/p4_full/order9/posture_resolver/c2_regression_bucket8_real_isaac.json` and `.../c2_regression_bucket9_real_isaac.json`, SHA-256 `867336b3...c80d7` / `c84ec7e4...42726`.  Python compilation passed; affected shadow/resolver/teacher tests passed `17`; `git diff --check` passed; both Isaac workers exited and no Isaac/Kit process remained.
+- Method-level blocker: The current articulated teacher installs the free-base IK grasp centroidal pose already at `t=0` instead of connecting the measured current centroidal/anchor state to that pose with dynamically feasible approach targets and timing.  Its five-knot two-second plan also does not separately establish the promoted C2 eight-phase release/retreat/settle semantics.  Correcting either point changes teacher/trajectory construction semantics, so work stops here under the user instruction not to make unapproved method-level revisions.  C3 learning and any claim that the new path preserves C2 remain blocked pending an approved trajectory-construction revision.
+
+### 2026-07-24 (Order 9 raw-pi_H -> posture resolver -> C2-derived pi_L -> QPID real-Isaac integration)
+- Scope/path: Tested the exact user-approved execution chain using the `c3a-05-chain` five-module condition: joint-free deterministic `pi_H` teacher proposal -> `Order9PostureTrajectoryResolver` -> behavior-preserving active-knot initializer derived from promoted C2 `pi_L` -> production scalar `QPIDController`/rigid-body QP -> actual articulated USD and object/support mesh in the isolated persistent Isaac shadow.  The fixture raw/resolved trajectory hashes reproduced exactly as `0cce72af...b84ba3` / `00750da2...a893f5`; the C3 initializer SHA-256 was `8dc6157f...51f2da3`.  No optimizer or checkpoint mutation occurred.
+- Harness/config corrections: Extended `order9_isaac_shadow_smoke.py` with a fail-closed posture-fixture mode that regenerates the resolved trajectory, authenticates the task-conditioned morphology against the source structural hash, restores the assembled root/joint/object state, binds exact randomized object/material values, executes every resolved knot, and writes separate runtime-versus-physical outcomes.  Shadow evidence now retains controller-step `pi_L` application/fallback and actuator-resolution counts.  The first attempt correctly exposed that the `2.0 s` copied-rollout cap rejected a valid `2.226287780678328 s` proposal before physics; because the design already permits `1--3 s` `pi_H` horizons, the current hard-checker default/config cap is now `3.0 s`.  The curriculum schedule hash remains `47e7fb...f81bd`, so checkpoint lineage is unchanged.
+- Runtime integration result: Worker describe/synchronize/execute/reset all passed.  All `49/49` resolved knots and `137/137` controller steps were finite; the main state digest was unchanged; learned `pi_L` was applied on `137/137` steps with zero fallback, unresolved actuator targets, or actuator clipping.  PhysicalModel actuator readback matched all `20` Dock and `20` gimbal joints.  Maximum controller QP residual was `9.834224e-7`, below the unchanged `1e-4` threshold.
+- Physical result: The candidate failed production physics.  The first prohibited overlap occurred at knot `8`, `t=0.4 s`, between `module_3:yaw_dock_mech1` and the object; `62` prohibited overlap samples were observed in total and the minimum prohibited margin was `-1e-6 m`.  The selected contact-wrench residual remained fail-closed at `1.0` versus the `0.001` threshold because intended active-contact measurements were not established.  Thus the chain is wired and executable, but this pending-curation teacher pose is not a valid C3 bucket and no grasp/transport success is claimed.
+- Related diagnostic: A separate C3 training-environment evaluation of the same five-module candidate survived `688` steps (`13.76 s`) with QPID feasible throughout, then terminated in approach on hard collision before contact acquisition.  Three- and four-module screening candidates collided on their first step.  These phase-runtime diagnostics agree with the production-shadow rejection but are not substitutes for the shadow/C_H evidence.
+- Evidence/tests: The real-Isaac report is `artifacts/p4_full/order9/posture_resolver/real_isaac_shadow_c3a_05_chain.json` (SHA-256 `3516b1ba...a20110`).  The separate full-task diagnostic raw/JSONL hashes are `5e6daa0c...d65a75` / `f0120cf3...3727f`.  The combined affected shadow/production-runtime/curriculum/active-knot runtime-artifact suite passed `41`; Python compilation and `git diff --check` passed.  C3 learning remains blocked on real-Isaac-passing curated buckets, not on `pi_L`/QPID runtime wiring.
+
+### 2026-07-24 (Order 9 promoted-C2 post-reboot full-task regression)
+- Scope/provenance: Replayed the promoted C2 update-49 `pi_L` checkpoint (SHA-256 `85474d9d...c6274`) against the same two immutable conservative validation buckets used for promotion.  Because this is historical C2 evidence, execution used the preserved v2 curriculum schedule hash `c88d6816...cf9d` rather than relabelling the checkpoint under the current v3 schedule.  Each bucket ran eight deterministic, phase-zero, first-terminal, full-mesh real-Isaac environments; the two processes ran concurrently.  This was evaluation only: no optimizer update, checkpoint mutation, promotion rewrite, or C3 run occurred.
+- Compatibility correction: The first current-config invocation correctly rejected the v2 checkpoint/v3 curriculum hash mismatch.  The subsequent historical-v2 invocation exposed an implementation regression introduced by C3 preparation: `_artifact_step()` required active-knot actor tensors even for the legacy C2 actor although `Order9TensorRolloutBuffer` still explicitly supports the v7 legacy artifact.  The collector now emits active-knot fields only when both are provided, rejects a partial pair, and retains the strict v8 contract for C3 successors.  Legacy/active-knot tensor artifact/runtime tests passed `15`; Python compilation and `git diff --check` passed.  The two rejected preflight attempts emitted logs only and are not accepted evaluation evidence.
+- Physical result: Validation bucket 8 passed `8/8` and bucket 9 passed `8/8`, for `16/16` complete tasks.  Every episode progressed from phase index `0` through the phase-8 completion boundary and had `task_success=true`, `no_fallback_success=true`, no failure reason, and zero fallback decisions, safety failures, hard collisions, object drops, QP-infeasible terminals, and timeouts.  Bucket 8 episode lengths were `8339--8353` control steps with mean return `12806.5063`; bucket 9 lengths were `8526--8529` with mean return `13017.3593`.
+- Runtime/artifacts: Bucket 8 produced `66,824` environment steps in `1781.06 s` at `37.55 env-step/s`; bucket 9 produced `68,232` in `1802.77 s` at `37.88 env-step/s`.  Their concurrent monitors measured mean GPU utilization `98.56%/98.01%`, peak `99%`, peak global device memory `7337/7374 MiB`, peak temperature `57 C`, and peak process RSS `4895.70/4882.79 MiB`; neither process, Isaac/Kit child, nor kernel driver error remained.  Raw artifact SHA-256 values are `85d6ec06...a2ac56` and `8b533b0d...974e04`; episode JSONL SHA-256 values are `2baaddc9...47158` and `194351b5...692e7`.  Both raw v7 artifacts were hash-verified and passed schema validation.
+- Interpretation/next boundary: This establishes that the already-promoted C2 policy still completes the full `approach -> contact acquisition -> lift -> transport -> place -> release -> retreat -> settle` task after the NVIDIA repair and current collector changes.  It repeats the first eight seeds of each known C2 validation condition, so it is a regression check rather than new statistical or distribution coverage.  It does not exercise the new learned-`pi_H`/posture-resolver/IK path; that integration remains the next distinct test.
+
+### 2026-07-24 (Order 9 raw-pi_H posture resolver and learned-pi_L integration)
+- Spec/work package: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the user-approved `learned pi_H -> deterministic IK -> learned pi_L -> QPID` responsibility amendment.  No optimizer update, C3 production-bucket admission, user curation decision, or learning run was started.
+- Contract/result: Learned `pi_H` remains the owner of contact assignment/schedule and wrench bounds, assembled-CoM pose/twist, free-anchor poses, object targets, priorities, guards, and sparse timing, but raw proposals now fail closed if they contain Dock `joint_pos_target` or `joint_vel_target`.  A detached deterministic resolver holds the proposed CoM, anchor targets, and timing fixed, warm-starts from measured/previous Dock state, solves bounded q-only centroidal IK, rejects joint-limit/rate or exact-target failure, and writes nominal absolute q/qdot at `20 Hz`.  The existing active-knot learned `pi_L` remains a bounded correction around that nominal, followed by the unchanged QPID/QP and local-servo boundary.
+- Implementation: Added `Order9PostureTrajectoryResolver`, its typed evidence/validation hook, and `Order9PostureResolvingHardChecker`.  The latter checks raw schema/assignment semantics, resolves without mutating the policy action, runs the existing production QP/wrench/reachability/persistent-shadow checker on the resolved copy, returns a raw-knot-aligned feasibility result for learned-policy credit, and exposes the already-checked resolved copy only for execution.  Generic high-level runtime and stochastic `pi_H` rollout now retain raw samples/rejections while installing the resolved execution trajectory.  The articulated teacher exports a joint-free raw trajectory and obtains its `pi_L` trajectory through the same resolver.  Runtime interpolation now covers nominal q/qdot, free-anchor poses, and object targets.
+- Determinism/provenance: Raw/resolved hashes and a cache-state-independent resolver identity are separate.  Exact-q cache hits preserve the original deterministic iteration evidence; cache-hit and wall-time data are telemetry only and do not alter the hard-result identity.  Resolver failure never retimes, repairs, ranks, or projects the learned action.  Collision avoidance is not inferred from IK: full-mesh/persistent-Isaac checking remains a separate production authority.
+- PC kinematic benchmark: Prepared a hash-bound `12`-case fixture spanning chain/branched `2--8`-module curation morphologies and reproduced every expected raw/resolved trajectory hash.  The `585` resolved knots had maximum anchor position/attitude error `2.81295e-5 m / 1.10653e-4 rad`, maximum Dock rate `2.57214 rad/s`, and minimum rate headroom `0.127864 rad/s`.  On the i9-14900KF PC, cold resolution was mean/median/max `2.04354/2.00769/4.38648 s`; exact cache-hit resolution was mean/median/max `0.130921/0.131674/0.159109 s`; peak process RSS was `135.219 MiB`.  Fixture/report SHA-256 values are `90d4fbd...7a441` and `80bd89c1...ccc83`.
+- Learned-policy/controller integration: The CPU model/FK diagnostic evaluated all `585` dense knots across the same 12 cases using the promoted C2 checkpoint and its behavior-preserving C3 active-knot initializer.  Shared/actor outputs and complete commands matched exactly (`0.0` maximum error), zero residual reconstructed resolver nominal q/qdot within `5.96046e-8`, the learned joint correction relation had `0.0` error, and QPID/QP returned finite feasible allocations for `585/585`.  Report SHA-256 is `59c3d208...41b8`.  This is not mesh collision, contact dynamics, tracking, grasp, or transport-success evidence.
+- Verification: Python compilation and `git diff --check` passed.  Focused resolver/teacher/runtime/production-checker/policy tests passed, including repeated cold/cache hard-result equality and raw-versus-resolved policy-credit separation.  The dependency-complete non-Isaac `isaaclab3` unit suite passed `1222` with `1` skip in `98.09 s`; its sole warning was the host CUDA enumeration failure described below.
+- Host GPU blocker/remediation: The initial real-Isaac `1 env x 4 step` smoke could not reach simulation reset.  Investigation identified a `2026-07-24 07:00` unattended NVIDIA upgrade: user-space libraries advanced from `580.159.03` to `580.173.02`, but DKMS failed because kernel `6.8.0-124` was built with GCC 12 while only GCC 11 was installed.  GPU launch stopped with CUDA error `804`; a CPU-device attempt created the scene/articulation but Warp pinned allocation failed for the same driver reason.  Remediation installed Ubuntu GCC `12.3.0`, rebuilt and installed all `580.173.02` DKMS modules under `/lib/modules/6.8.0-124-generic/updates/dkms/`, completed the previously broken `nvidia-dkms-580`/`nvidia-driver-580` package configuration, regenerated initramfs, and passed `apt-get check`.  After reboot, loaded kernel module, DKMS module, NVML/libcuda, and PyTorch all report `580.173.02`/one available RTX 4090.  The repeated real-Isaac C3 smoke passed `4/4` finite environment steps on `cuda:0`, wrote artifact SHA-256 `251c9426...1cfd`, and left no Isaac process running; peak global GPU memory was `3580 MiB`, peak GPU utilization `50%`, and peak RSS `4528.68 MiB`.  This establishes runtime compatibility only, not collision-free grasp or transport success.
+- Production persistent-shadow smoke: The canonical Order 8 morphology/USD fixture and the current C3 active-knot initializer passed the production worker handshake, state synchronization, two-knot real-PhysX execution, reset, finite-state check, and main-state non-mutation check.  Both observations retained positive collision clearance (minimum approximately `31.1 mm`), and the reported Dock/gimbal actuator limits read back consistently with the PhysicalModel across the `36`-joint articulation.  The worker exited cleanly and left no Isaac/Kit process; the log SHA-256 is `75f26686...aae70`.  An earlier attempt using a raw two-module curation source graph stopped before Isaac launch because that structural graph intentionally lacked task-conditioned grasp anchors; this was a fixture mismatch rather than a GPU/runtime failure.  This smoke establishes persistent-worker/runtime compatibility only: its nonzero contact-wrench/controller residual telemetry is not production `C_H` acceptance, grasp, or transport-success evidence.
+- VIM4 handoff/limitations: The benchmark imports PC-only curation/PyYAML dependencies only when `--prepare-fixture` is requested, so the copied fixture can be measured on the SBC with `python3 scripts/order9_benchmark_posture_resolver.py --repeats 4 --output artifacts/p4_full/order9/posture_resolver/vim4_benchmark.json`.  Current PC cold latency already exceeds a `1--2 Hz` deadline for larger cases; cache-hit latency fits on this PC, but no VIM4 real-time claim is made before measurement.  If VIM4 cold latency is unacceptable, solver/Jacobian or receding-horizon warm-start optimization is an implementation-performance follow-up, not permission to change the approved policy authority.
+
+### 2026-07-24 (Order 9 C3a twelve-case actual-mesh curation pilot)
+- Spec/work package: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the approved C3 articulated-teacher/reachability and pitch-posture supplements; Agent J/K C3a teacher-data curation and visualization.  No Isaac process, production-bucket mutation, rollout collection, or optimizer update was started.
+- Scope/result: Prepared the approved `12` two-contact review cases: one chain each for `2/3` modules and chain/branched pairs for `4--8` modules.  The first sampled two-module graph had no feasible two-surface IK assignment and was replaced within the train stratum; the first three-module graph could not provide the preferred yaw--yaw assignment and was similarly replaced.  The train pool had no eight-module chain, so that one case was generated deterministically from the same random-connected distribution, passed morphology-flight feasibility, and remains isolated from the source pool and production buckets.
+- Curation implementation: Added an actual-URDF-mesh WebGL2 viewer, a shared exact binary-STL browser library, labelled neutral top views, interactive final grasp views, static final ISO previews, and a fail-closed pilot preparation script/config/manifest/index.  The selected surface-port pair and contact-candidate group are pinned in the config and passed through new optional exact-selection teacher fields, so reruns cannot silently substitute another grasp.  Viewer controls include orbit, zoom, standard camera views, module labels, full visual detail, collision meshes, and object visibility.
+- Numerical evidence: All `12/12` exact selections passed articulated IK and the independent hard reachability recheck.  Maximum contact position error was `0.537818 mm`, maximum contact-normal error was `1.068262e-5 rad`, and maximum absolute pitch target was `0.000577191 deg`.  Headless Chrome rendered all `12` neutral top PNGs and all `12` final ISO PNGs from the interactive viewers.  Every record remains `pending_user_accept_or_reject`; Isaac admission status is `not_run`.
+- Files changed: Added `amsrr/visualization/order9_c3_curation.py`, `amsrr/visualization/static/order9_c3_mesh_viewer.js`, `configs/training/order9_c3a_curation_pilot.yaml`, `scripts/order9_prepare_c3a_curation_pilot.py`, `tests/unit/training/test_order9_c3_teacher_config.py`, and `tests/unit/visualization/test_order9_c3_curation_visualization.py`; updated the two articulated-teacher configuration paths and their tests, the design supplement, and this worklog.  Previously uncommitted pitch-posture and schematic-animation changes remain preserved.
+- Schema/interface changes: No persisted schema changed.  `Order9C3TeacherConfig` and `Order9ArticulatedTeacherConfig` gained backward-compatible optional selectors for an exact surface pair and candidate group; absent selectors retain the prior exhaustive automatic search.
+- Upstream/downstream impact: Uses the v0.4 contracts, current PhysicalModel, split-owned train morphology pool, v2 articulated morphology URDFs, mesh-backed free-surface resolver, current pitch-regularized articulated teacher, hard reachability evaluator, and the conservative Order 8 task anchor.  It changes neither learned `pi_L`/`pi_H`, QPID/QP, reward, safety, nor production `C_H`.  Rejected cases will be replaced within their stratum; accepted cases still require real-Isaac collision/path replay before production admission.
+- Tests/commands: Ran the pilot generator over all `12` cases and headless browser rendering over all `24` PNG views; Python compilation and `git diff --check` passed.  The focused new/affected visualization and teacher tests passed `11` in `4.20 s` with `PYTHONPATH=.` and unrelated pytest plugin autoload disabled.  The complete `isaaclab3` unit suite passed `1295` with `1` skip in `333.15 s`; its only warning was a non-fatal CUDA device-enumeration warning in a CPU-side acceptance test, and no Isaac process was launched.  The initial base-environment invocations exposed a stale ROS `launch_testing` plugin and then a missing repository import path; those runs were invocation errors, not test failures in the implementation.  The final manifest has SHA-256 `81167f582516550d7d32572ae39ef6fd442e5445922e084a625bc39e9f692bb7`.
+- Assumptions/limitations: The viewer uses exact URDF STL instances but is not a collision detector.  Static PNGs can hide depth, so the interactive final view is the human review authority.  The pilot is restricted to two contacts; three-or-more-contact curation remains the already agreed follow-on activity during C3a learning.
+- Blockers/next step: No method-level blocker was introduced.  The user must inspect and accept/reject the `12` final poses.  Then run real-Isaac mesh collision/path validation only for accepted cases, replace rejected cases, and admit only the Isaac-passing subset into regenerated production C3 buckets.
+
+### 2026-07-24 (Order 9 articulated-IK pitch-posture regularization)
+- Spec/work package: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the user-approved C3 articulated-teacher supplement; Agent J/K deterministic teacher posture correction and inspection.  No Isaac process or optimizer update was started.
+- Scope/result: Added a PhysicalModel-resolved pitch-Dock posture term to the articulated IK objective.  The default objective adds `1e-2 * sum(q_pitch^2)` to the existing `1e-6 * sum(q_all^2)` regularizer while retaining the weighted contact-position/contact-normal residual.  The solver now searches through its bounded 60 iterations, retains only contact-feasible iterates, and returns the feasible iterate with the smallest full regularized objective instead of returning the first tolerance crossing.
+- Version/provenance: Advanced the IK solver, articulated trajectory teacher, C3 teacher, and C3 bucket precheck identities to v2, including the split-safe prechecked topology-source label.  No persisted policy/trajectory/feasibility/controller/dataset/checkpoint schema changed.  Existing v1 C3 bucket bytes were not overwritten; current runtime therefore fails closed on their stale teacher/precheck evidence until they are deliberately regenerated after visual approval.
+- Quantitative verification: Recomputed the current teacher over all `28` train plus `14` validation task/structural conditions with six CPU workers.  All `42/42` remained feasible; maximum position/normal error was `4.562864 mm / 0.0100474 rad`, maximum absolute pitch was `1.882095 deg`, maximum pitch-vector L2 was `2.701888 deg`, and the returned best-iterate index was at most `60`.  Weight A/B diagnostics exposed local-solution discontinuities at `1e-4`, `3e-4`, and `1e-3`; `1e-2` was the tested value that removed the large-pitch solutions across all 42 conditions without losing feasibility.
+- Representative animation: Recomputed all four eight-module train buckets and generated explicitly production-ineligible previews under `artifacts/p4_full/order9/teacher_visualization_preview/`; their maximum absolute pitch targets are at most `0.001056 deg`.  Bucket `train-000006-05afa5d407ec` uses surfaces `16/30`, has approximately zero pitch (`1.06e-7 deg` maximum), yaw-vector L2 `117.331 deg`, and contact position/normal error `0.001379 mm / 4.26e-6 rad`.  Its preview has `49` frames over `2.21153 s`; headless Chrome loaded and rendered it successfully.  These remain kinematic command evidence only, not collision, controller-tracking, grasp, or transport success.
+- Files changed: Updated `amsrr/feasibility/articulated_reachability.py`, the dependent Order 9 teacher/precheck version constants and topology-source metadata, `for_codex/AMSRR_design_modification_by_codex.md`, and this worklog; added `tests/unit/feasibility/test_articulated_reachability.py`.  The previously uncommitted animation module/script/test remain preserved.
+- Tests/commands: New pitch-mapping/config tests plus articulated-teacher tests passed `4`; the related feasibility/teacher/bucket/stage-runner/visualization set passed `11`; the ROS-path-clean dependency-complete `isaaclab3` unit suite passed `1212` with `1` skip in `96.44 s`.  All 42 current C3 conditions passed the model-level teacher scan; representative HTML rendering and headless-browser load passed; compilation and `git diff --check` passed.
+- Assumptions/limitations: Pitch minimization is a soft preference rather than a hard zero-pitch constraint, so future morphology/task conditions may use pitch when needed.  Full-body self-collision is still outside offline IK and remains owned by real-Isaac replay/persistent-shadow geometry.  Intermediate animation motion remains interpolated rather than collision-aware trajectory optimization.
+- Blockers/next step: No new method-level choice is required for this requested correction.  The user should inspect the new preview; after approval, regenerate the v2 C3 bucket archive and downstream bound evidence before C3 learning.
+
+### 2026-07-23 (Order 9 offline articulated-teacher animation)
+- Spec/work package: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the approved C3 articulated-teacher/reachability supplement; Agent J/K C3 pre-training inspection tooling.  No optimizer or Isaac process was started.
+- Scope/result: Added a dependency-free, self-contained HTML animation generator for the deterministic articulated trajectory teacher.  It selects an immutable C3 bucket, validates every bucket byte and the PhysicalModel hash, recomputes the task-conditioned teacher, requires exact equality with the archived precheck evidence, interpolates the teacher knot commands, and evaluates the same whole-structure FK at every displayed frame.
+- Visualization contract: The viewer shows the module tree and IDs, schematic oriented Holon module frames, the TaskSpec object primitive and dimensions, selected mesh-backed surface ports, contact targets/normals, actual anchor axes, phase/time/contact error, and current versus grasp-knot Dock angles in degrees.  Mouse orbit, wheel zoom, timeline scrubbing, and variable-speed playback are implemented in embedded JavaScript; no network or plotting package is required.  A companion JSON preserves all grasp angles in radians/degrees and source/evidence provenance.
+- Representative evidence: The default eight-module train bucket `train-000006-05afa5d407ec` regenerated the exact stored teacher evidence and produced `51` frames over `2.3317778 s`.  Its box is `0.302799 x 0.408628 x 0.146322 m`, mass is `1.018745 kg`, selected surfaces are `16/28`, and the IK result is `48` iterations with `3.683216 mm / 0.00574506 rad` maximum position/normal error.  The ignored outputs are under `artifacts/p4_full/order9/teacher_visualization/train-000006-05afa5d407ec/`; a headless Chrome load/screenshot completed without page error.
+- Files changed: Added `amsrr/visualization/order9_articulated_teacher.py`, `scripts/order9_visualize_articulated_teacher.py`, and `tests/unit/visualization/test_order9_articulated_teacher_visualization.py`; updated this worklog.
+- Schema/interface changes: None to policy, trajectory, feasibility, controller, training, or persisted learning schemas.  The new inspection artifact is explicitly versioned `order9_articulated_teacher_animation_v1`.
+- Upstream/downstream: Uses the immutable C3 rollout-bucket manifest, current PhysicalModel, `Order9C3TeacherBundle`, complete `ContactWrenchTrajectory`, selected contact candidates, centroidal-to-base reconstruction, and `WholeStructureKinematics`.  It is inspection-only and does not alter teacher output, bucket admission, `C_H`, `pi_H`, `pi_L`, QPID/QP, or learning.
+- Verification/commands: Compilation passed; the new visualization test passed; the focused visualization/teacher/whole-structure/bucket set passed `13`; the ROS-path-clean dependency-complete `isaaclab3` unit suite passed `1210` with `1` skip in `95.10 s`; the real default script exited zero; `git diff --check` passed.  The first broad pytest collection attempt was invalid because inherited ROS Python paths resolved `/opt/ros/.../scripts` instead of the repository namespace, so the authoritative run removed only `PYTHONPATH` and disabled unrelated pytest plugin autoload.
+- Assumptions/limitations: The object primitive is rendered from exact TaskSpec dimensions, while each Holon is a schematic oriented root-frame cross rather than its visual/collision mesh.  Inter-knot targets are visualization interpolation through exact FK.  This proves which command the deterministic teacher issued; it does not simulate dynamics, contact force, collision, tracking, capture, lift, or grasp success.
+- Blockers/next step: No method-level blocker was introduced.  Use this animation to inspect the teacher command before a separate full teacher-following Isaac closed-loop validation.
+
 ### 2026-07-23 (Order 9 C3 split-safe teacher buckets and measured runtime selection)
 - Spec/work package: `A-MSRR_codex_ready_spec_v0_4_ja.md` v0.4 plus the approved articulated-teacher/production-reachability and active-knot C3 supplements; Agent J/K C3 pre-training data/runtime preparation.  No C3 optimizer update was started.
 - Bucket implementation: C3 bucket preparation now selects the split-owned structural pool graph directly, stratifies independently by module count `2--8`, admits it only after the articulated trajectory teacher and independent hard reachability recheck, and embeds compact hash evidence in both the task and bucket.  Runtime recomputes and requires exact evidence equality.  The production stage runner rejects C3 manifests without the current precheck version.  Non-C3 bucket semantics are unchanged.
@@ -4057,6 +4436,173 @@
 - Open questions: None for this work package. Statistical robustness across a larger held-out morphology cohort belongs to later training/evaluation, not this deterministic smoke completion.
 
 ### Agent J/K: Order 9 learned curriculum and physical execution
+
+#### 2026-07-25 (implementation checkpoint and C3 offline compatibility)
+- Scope: Split the accumulated native posture resolver, rolling physical
+  execution, and C3 mesh curation work into reviewable implementation commits.
+- Files changed: The three implementation commit scopes, C3 phase-local
+  teacher/viewer compatibility, design amendments, compute log, and worklog.
+- Upstream dependencies: Approved joint-free raw `pi_H` boundary, native
+  collision-aware trajectory IK, learned `pi_L`, QPID/QP, sequential physical
+  gates, and phase-local rolling teacher semantics.
+- Implemented: Deterministic commit separation and focused regression
+  verification; explicit `contact_acquisition` context for offline C3 grasp
+  generation; rolling-window-aware animation checks.
+- Not implemented: No new learning, bucket admission, retraining, checkpoint
+  mutation, or additional Isaac acceptance run.
+- Schema/interface changes: None during checkpoint preparation.
+- Tests added/passed: Focused staged groups passed `21`, `33`, and `14`
+  tests; staged whitespace checks passed.
+- Handoff notes: Implementation commits are `ac83c1b`, `11bf771`, and
+  `5326eae`; documentation is committed separately.
+- Open questions: None at method level.
+
+#### 2026-07-25 (transport/place/release scalar and GUI completion)
+- Scope: Continue the repaired C2 y-face rolling execution through physical
+  transport, placement, and contact release, with observable real-time GUI
+  playback.
+- Files changed: Articulated teacher, posture resolver release-collision
+  allowance, scalar shadow smoke/gates, focused release regression, worklog.
+- Upstream dependencies: Current C2 bucket 8 and initializer, joint-free
+  `pi_H` contract, phase-zero open posture, native trajectory IK, learned
+  `pi_L`, QPID/QP, measured contact/preload, and tensor reward gate semantics.
+- Implemented: Explicit free-anchor release trajectory; assigned-contact
+  allowance while separating; place/release natural-contact gate delegation;
+  release CLI/gate/telemetry; headless and GUI execution.
+- Not implemented: Retreat, settle, full-task completion, policy retraining,
+  reward/gate tuning, bucket/checkpoint mutation, or promotion.
+- Schema/interface changes: No persisted interface change; optional internal
+  teacher reference and CLI capability only.
+- Downstream impact: The same rolling execution path can now be inspected and
+  physically validated through object release instead of stopping at lift or
+  place.
+- Tests added/passed: Added collision-backed explicit-open release-teacher
+  regression; final affected suite `12 passed`.
+- Handoff notes: GUI report SHA-256 `051fe164...8640` passed all six requested
+  phases over `620` observations; release had zero contacts for `3.1 s`.
+- Open questions: None at method level.  Retreat/settle remain the next
+  separate scope if complete-task evidence is requested.
+
+#### 2026-07-25 (rolling payload/reference continuity repair)
+- Scope: Diagnose and repair the C2 y-face approach/contact motion that rose,
+  descended, and re-closed at every receding-horizon boundary.
+- Files changed: Order 9 Isaac scene adapter, articulated trajectory teacher,
+  scalar shadow-smoke diagnostic/executor plumbing, focused unit tests, and
+  worklog.
+- Upstream dependencies: Current promoted C2 inputs, joint-free raw `pi_H`
+  teacher contract, native trajectory IK, learned `pi_L`, QPID/QP, measured
+  physical phase gates, and load-limited preload.
+- Implemented: Load-bearing phase gating for payload coupling; separate
+  measured state and continuous nominal Dock reference; first-knot
+  centroidal continuity; diagnostic `pi_L` bypass; regression tests.
+- Not implemented: No policy retraining, startup blending, controller tuning,
+  reward/gate relaxation, bucket change, or full transport/release claim.
+- Schema/interface changes: No persisted or controller-facing change;
+  backward-compatible teacher and diagnostic arguments only.
+- Downstream impact: Rolling execution no longer invents payload load before
+  contact or accumulates the same learned joint correction on every replan.
+- Tests added/passed: Two payload-phase tests and one nominal-reference
+  continuity regression; affected focused set `11 passed`.
+- Handoff notes: Current v5 real-time replay passed approach,
+  contact/preload, and lift in `17` windows with learned `pi_L` active.  Report
+  SHA-256 `3259f27d...ddaa4`; treat it as phase-through-lift evidence, not
+  grasp-and-transport completion.
+- Open questions: None at method level.
+
+#### 2026-07-24 (native posture-IK and convex-gate production promotion)
+- Scope: Promote the VIM4-tested complete C++/Eigen fixed-centroidal posture IK and approved proxy-only convex collision gate from `tmp/order9_posture_fastpath` into the production `pi_H -> posture resolver -> pi_L -> QPID/QP` path.
+- Files changed: Native source/loader/build/reference/collision modules and README; Holon hash-bound collision manifest; posture resolver/evidence and resolving hard gate; production hard-checker factory/runtime binding; posture benchmarks and archived validation compatibility imports; focused tests; design amendment, VIM4 compute log, and worklog.
+- Upstream dependencies: v0.4 raw joint-free `pi_H` contract, PhysicalModel/URDF/mesh hashes, current fixed-centroidal IK configuration, authenticated production bucket/object state, resolved-path reachability and persistent Isaac shadow, and the approved `5 mm` convex-only online amendment.
+- Implemented: Complete native IK loop; host/ABI build and stale-binary rejection; automatic non-collision native preference with readable fallback; production-required convex/FCL scene; per-knot object pose and explicit allowed-contact binding; independent post-solve admission; collision evidence propagation; original-STL offline-oracle compatibility.
+- Not implemented: No generic obstacle/support/non-box collision scene, no changed failed-search iteration budget, no VIM4 rebuild of the final production wrapper, no learning, and no grasp/transport execution in this task.
+- Schema/interface changes: None to persisted trajectory/task/feasibility/policy/controller schemas.  Additive internal resolver construction/evidence fields and version advances only.
+- Result: `12/12` numerical trajectory cases passed at maximum `1.585e-10`; `384/384` native FK comparisons passed at maximum `8.882e-16`; exact/proxy equivalence passed `36/36` knots; eight-module convex admission passed `9/9`; explicit contact allowances passed and the prohibited negative control rejected two pairs.
+- Tests/evidence: Final focused set contains `13` passing tests.  Full unit run reached `1225 passed, 3 skipped`, with two unrelated known failures (missing `trimesh`; stale visualization test input contract).  Resolver/convex report SHA-256 prefixes are `d36db57e` and `a81a88fd`.
+- Handoff notes: On VIM4, run `scripts/build_order9_posture_native.sh` inside the deployed source tree before starting inference.  On this PC the production build is present and the next task can proceed to the full grasp-and-transport chain.
+- Open questions: None at method level.
+
+#### 2026-07-24 (frame-corrected rolling-teacher real-Isaac transition regression)
+- Scope: Apply the proven articulation-root/`fc` correction to the rolling runtime and verify the vertical-to-lateral stage transition in the shortest useful real-Isaac run.
+- Files changed: `amsrr/robot_model/urdf_transforms.py`, `amsrr/simulation/order9_isaac_shadow_runtime.py`, `scripts/order9_isaac_shadow_smoke.py`, `scripts/order9_audit_rolling_teacher_frames.py`, `tests/unit/robot_model/test_urdf_transforms.py`, and `for_codex/WORKLOG.md`.
+- Upstream dependencies: Fixed nominal generated URDF/USD, promoted C2 bucket 8, C2-derived active-knot `pi_L`, PhysicalModel, articulated teacher/posture resolver, QPID/QP, actuator bridge, and real-mesh evidence collector.
+- Implemented: Generated-URDF phase-zero module-FK; direct endpoint Isaac module pose/twist telemetry and replan input; URDF fallback; configurable/hash-recorded C2 URDF path; per-window requested translation evidence.
+- Not implemented: No phase completion, contact, grasp/carry, training, checkpoint/bucket mutation, controller/reward/safety change, or promotion.
+- Schema/interface changes: None to persisted or learned contracts; additive diagnostic CLI/telemetry only.
+- Result: Four three-second windows and `600/600` learned-policy controller steps were runtime/physics valid.  Requested motion changed from vertical (`dz=299.50/130.25 mm`) in windows 0/1 to lateral (`dy=301.80/302.62 mm`) in windows 2/3.  Collision/fallback/clipping/unresolved/QP-infeasible counts were zero; maximum QP residual `2.00426e-6`, minimum clearance `55.683 mm`.
+- Tests/evidence: Focused `isaaclab3` tests passed `19`; compilation, offline audit, whitespace, GPU/process, and hash checks passed.  Real-Isaac report SHA-256 `51448cf5...d969`.
+- Handoff notes: The report's top-level `passed=false` means the deliberately four-window approach did not finish the phase/full task; all four requested window physical gates passed.  Use a longer run only to test later articulation/pregrasp behavior.
+- Open questions: None at method level.
+
+#### 2026-07-24 (rolling-teacher articulation-root/frame offline audit)
+- Scope: Verify the archived 18-window rolling-teacher state reconstruction without Isaac/PhysX and determine whether the fixed-USD articulation-root/`fc` mismatch affected the 20 mm staging gate.
+- Files changed: `amsrr/robot_model/urdf_transforms.py`, `scripts/order9_audit_rolling_teacher_frames.py`, `tests/unit/robot_model/test_urdf_transforms.py`, and `for_codex/WORKLOG.md`.
+- Upstream dependencies: Hash-bound fixed nominal generated URDF, promoted C2 tensor rollout, archived rolling v5 endpoint states, PhysicalModel, C2 bucket context, and current articulated teacher.
+- Implemented: Dynamic tree-URDF FK; phase-zero comparison against actual Isaac module-body poses; legacy-versus-corrected centroidal reconstruction; identical-current-teacher staging comparison at every archived state; hash/provenance and simulator-free JSON evidence.
+- Not implemented: No runtime-path replacement, real-Isaac rerun, contact/collision/dynamics evaluation, training, checkpoint/bucket change, or promotion claim.
+- Schema/interface changes: None.
+- Result: URDF FK matched measured modules within `1.03238 mm`/`0.00142013 rad` and centroidal position within `0.316815 mm`.  The legacy path is biased by `60.9351 mm`; it remains vertical for all 18 states, whereas the corrected path becomes lateral at state 3 (`70.5066 mm` legacy versus `9.57785 mm` corrected vertical error, gate `20 mm`).  The frame defect therefore materially caused the archived vertical-stage stall.
+- Tests/evidence: Focused tests passed `12`; compilation and `git diff --check` passed; offline audit exited zero with no Isaac/Kit process.  Report SHA-256 `6afc7236...c63b`.  Archived proposal hashes are not reproduced by current source (`0/18`), and this limitation is explicit in the report.
+- Handoff notes: Replace initial phase-zero and rolling-endpoint legacy root reconstruction with generated-URDF FK or direct measured module-body poses, then run the shortest real-Isaac rolling regression.  The audit alone does not predict full counterfactual phase completion.
+- Open questions: None at method level.
+
+#### 2026-07-24 (QPID-only true-centroidal tracking isolation)
+- Scope: Bypass learned `pi_L` and contact evidence, then measure current QPID/QP/bridge tracking on the real fixed-three-module USD.
+- Files changed: `amsrr/simulation/order9_isaac_shadow_runtime.py`, `amsrr/simulation/order9_shadow_executor.py`, `scripts/order9_isaac_shadow_worker.py`, `scripts/order9_isaac_shadow_smoke.py`, and `for_codex/WORKLOG.md`.
+- Upstream dependencies: Promoted C2 bucket/reset/centroidal frame, PhysicalModel, fixed USD, scalar QPID/QP, and actuator bridge.
+- Implemented: Direct-reference QPID diagnostic mode, contact-evidence skip, true Isaac centroidal endpoint telemetry, exact C2 horizontal reference, and same-rate xyz reference.
+- Not implemented: No learned-policy inference, contact, grasp/carry phase, gain tuning, training, or promotion.
+- Schema/interface changes: None.
+- Result: Both `9 s x 450 step` cases passed.  Horizontal endpoint errors were `0.470/0.335/0.185 mm`; xyz errors were `0.496/0.350/0.198 mm`.  QPID-only tracking is sub-millimetre and does not explain the earlier learned-path `30--36 mm` upstream-reference error.
+- Tests/evidence: Focused tests `7 passed`; compilation/whitespace/process checks passed; accepted reports hash to `d86de6ae...b6a0b` and `c37a4394...3040`.
+- Handoff notes: Analyze learned `pi_L` command corrections/residual wrench before considering any QPID change.
+- Open questions: No method-level question was introduced.
+
+#### 2026-07-24 (C2 batched-to-scalar execution-path parity diagnostic)
+- Scope: Reproduce the promoted C2 phase-zero approach reference through the production scalar `pi_L -> QPID/QP -> Isaac` path and compare it numerically with the archived batched C2 evaluation.
+- Files changed: `scripts/order9_isaac_shadow_smoke.py` and `for_codex/WORKLOG.md`.
+- Upstream dependencies: Promoted C2 bucket 8/evaluation artifact, behavior-preserving C2-to-C3 initializer, fixed-morphology USD, PhysicalModel, scalar shadow worker, QPID/QP, and actuator bridge.
+- Implemented: Exact C2 reference segmentation; fixed-USD centroidal-frame recovery from authenticated batched evidence; endpoint CoM tracking summaries; separate runtime/physics/tracking result.
+- Not implemented: No full episode, contact/lift/transport phase, training, checkpoint/promotion update, controller retuning, reward change, or safety relaxation.
+- Schema/interface changes: None.
+- Result: Three three-second real-Isaac windows passed with `450/450` learned-policy steps, zero fallback/collision/clipping/unresolved target, maximum QP residual `1.39062e-6`, and scalar-versus-batched tracking-error-vector differences no larger than `0.505 mm` at C2 progress `0.1--0.3`.
+- Tests/evidence: Focused tests `7 passed`; Python compilation, fixed-frame extraction, numerical comparison, whitespace/process checks passed.  Accepted report SHA-256 `44a29dcc...19867`.
+- Handoff notes: Scalar and batched C2 paths are equivalent over the tested prefix.  Do not attribute the articulated teacher's `20 mm` target-reach failure to scalar QPID integration without new contrary evidence.
+- Open questions: No method-level question was introduced by this diagnostic.
+
+#### 2026-07-24 (C3a twelve-case actual-mesh curation pilot)
+- Scope: Materialize the user-approved manual two-contact curation pilot before C3a production-bucket regeneration.
+- Files changed: Added the actual-mesh visualization module/browser runtime, twelve-case config, preparation script, exact-selection tests, and curation-viewer tests; updated the articulated teacher selection path, design supplement, and worklog.
+- Upstream dependencies: v0.4 morphology/task/trajectory contracts, split-owned random-connected train pool, PhysicalModel and v2 articulated URDF assets, mesh-backed free surfaces, pitch-regularized articulated IK teacher, and independent hard reachability recheck.
+- Implemented: Exact `12`-stratum selection; isolated same-distribution eight-module chain generation; shared exact-STL WebGL viewer; neutral top and final interactive/ISO views; exact surface/group pinning; fail-closed manifest generation; human/Isaac status separation.
+- Not implemented: No geometric collision verdict, collision-aware interpolation, Isaac replay, controller tracking, grasp/transport success, production bucket admission, three-or-more-contact case set, rollout, or learning.
+- Schema/interface changes: No persisted schema.  Added optional backward-compatible exact-selection fields to the deterministic teacher configuration API.
+- Downstream impact: Human-approved cases can advance to the existing real-Isaac admission boundary without risking automatic contact reassignment.  No case is currently production-authoritative, and existing learned-policy/controller/safety behavior is unchanged.
+- Tests added/passed: Added final-pair/group pinning and exact-mesh scene/library tests.  The focused affected set passed `11`; the full `isaaclab3` unit suite passed `1295` with `1` skip; all `24` requested static views rendered through the same browser runtime used by the interactive pages.
+- Handoff notes: Open the pilot `index.html`, inspect each `final_grasp_mesh.html` interactively, and return accept/reject decisions by case ID.  Use collision-layer display as a visual aid only; Isaac remains the collision/path authority.
+- Open questions: User accept/reject decisions are pending.  There is no method-level ambiguity in generating replacements or advancing accepted cases to Isaac.
+
+#### 2026-07-24 (articulated-IK pitch-posture regularization)
+- Scope: Correct the user-observed avoidable pitch articulation in the deterministic C3 teacher before physical replay or learning.
+- Upstream dependencies: PhysicalModel Dock-port/mechanism semantics, full-column whole-structure IK, hard contact tolerances, independent reachability recheck, immutable v1 C3 bucket inputs, and the offline teacher animation.
+- Implemented: Added a pitch-only `1e-2` quadratic posture cost beside the existing all-joint `1e-6` cost; resolved pitch joints semantically; searched all bounded iterations; selected the minimum-objective feasible iterate; advanced dependent teacher/precheck identities to v2.
+- Not implemented: No collision-aware trajectory optimization, Isaac tracking/grasp replay, production-bucket regeneration, policy training, reward change, or checker relaxation.
+- Schema/interface changes: None to persisted schemas.  Deterministic producer/evidence versions and additive metadata labels changed.
+- Downstream impact: Existing v1 C3 bucket evidence now fails closed and must be regenerated only after the user approves the new posture animation.  Learned `pi_H`, learned `pi_L`, QPID/QP, actuator limits, and hard reachability semantics are unchanged.
+- Tests/evidence: New focused tests passed `4`; the related set passed `11`; the full unit suite passed `1212` with `1` skip.  All `42/42` existing task/structural conditions remained teacher-feasible, with maximum pitch `1.882 deg` and maximum contact position/normal errors `4.563 mm / 0.01005 rad`; the representative eight-module preview and headless Chrome load passed.
+- Handoff notes: Inspect the four eight-module HTML files under `artifacts/p4_full/order9/teacher_visualization_preview/`.  They are deliberately marked production-ineligible because their v2 evidence differs from the archived v1 buckets.
+- Open questions: None at method level for this requested soft posture preference.  Visual approval precedes archive regeneration and real-Isaac teacher following.
+
+#### 2026-07-23 (offline articulated-teacher animation)
+- Scope: Make the exact C3 deterministic-teacher morphology, object, selected surfaces, kinematic motion, and grasp-knot Dock angles inspectable without starting Isaac.
+- Files changed: `amsrr/visualization/order9_articulated_teacher.py`, `scripts/order9_visualize_articulated_teacher.py`, `tests/unit/visualization/test_order9_articulated_teacher_visualization.py`, and this worklog.
+- Upstream dependencies: Immutable split-safe C3 buckets and hashes, current PhysicalModel, task-conditioned articulated teacher, selected contact candidates, complete teacher trajectory, and whole-structure FK.
+- Implemented: Fail-closed bucket/evidence replay; uniformly sampled plus exact-knot command interpolation; per-frame centroidal-to-base reconstruction and FK; dependency-free interactive HTML; numeric JSON with all grasp angles and provenance; default eight-module execution.
+- Not implemented: URDF mesh rendering, Isaac dynamics/contact, controller tracking, physical grasp/lift validation, video encoding, or any learning update.
+- Schema/interface changes: None.  New inspection-only artifact version `order9_articulated_teacher_animation_v1`.
+- Downstream impact: C3 preparation can now be visually audited before physical replay without changing any training or safety authority.
+- Tests added/passed: Added one end-to-end model-level visualization test; focused set `13 passed`; full `isaaclab3` unit suite `1210 passed, 1 skipped`; default eight-module script and headless Chrome page load passed.
+- Handoff notes: Run `python scripts/order9_visualize_articulated_teacher.py`; open the reported HTML directly in a browser.  Treat it as teacher-command evidence only, not grasp-success evidence.
+- Open questions: None.
 
 #### 2026-07-23 (progressive object-condition curriculum amendment)
 - Scope: Materialize the user-approved post-C3 ordering and preserve the promoted v2 C0--C2 lineage without relabelling it.
