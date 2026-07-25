@@ -538,7 +538,7 @@ class Order9HardCheckerConfig(SchemaBase):
     qp_solver_absolute_tolerance: float = 1.0e-5
     qp_solver_relative_tolerance: float = 1.0e-5
     qp_solver_max_iterations: int = 4000
-    shadow_rollout_horizon_s: float = 2.0
+    shadow_rollout_horizon_s: float = 3.0
     shadow_control_dt_s: float = 0.02
     require_isolated_persistent_worker: bool = True
     require_current_pi_l_checkpoint: bool = True

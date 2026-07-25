@@ -10,6 +10,7 @@ in production.
 """
 
 import math
+import time
 from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
@@ -41,12 +42,16 @@ from amsrr.schemas.runtime import (
 )
 from amsrr.simulation.order9_object_task_runtime import (
     ORDER9_OBJECT_TASK_PHASES,
+    Order9ObjectTaskPhase,
     Order9ObjectTaskRuntimeConfig,
+)
+from amsrr.simulation.order9_actuator_runtime import (
+    order9_actuator_runtime_values,
 )
 from amsrr.simulation.order9_object_task_state import Order9IsaacStateSnapshot
 
 
-ORDER9_ISAAC_SCENE_ADAPTER_VERSION = "order9_isaaclab_scene_adapter_v3"
+ORDER9_ISAAC_SCENE_ADAPTER_VERSION = "order9_isaaclab_scene_adapter_v5"
 _ACTIVE_CONTACT_STATES = frozenset({"attach", "maintain", "slide"})
 
 
@@ -112,6 +117,8 @@ class IsaacLabOrder9SceneAdapter:
         phase_config: Order9ObjectTaskRuntimeConfig | None = None,
         robot_on_target_force_sign: float = -1.0,
         contact_force_threshold_n: float = 1.0e-4,
+        render: bool = False,
+        real_time_playback: bool = False,
     ) -> None:
         morphology_graph.validate()
         physical_model.validate()
@@ -156,6 +163,12 @@ class IsaacLabOrder9SceneAdapter:
         self.phase_config.validate()
         self.robot_on_target_force_sign = float(robot_on_target_force_sign)
         self.contact_force_threshold_n = float(contact_force_threshold_n)
+        self.render = bool(render)
+        self.real_time_playback = bool(real_time_playback)
+        self._dock_drive_damping_nm_s_per_rad = float(
+            order9_actuator_runtime_values(physical_model).dock_damping
+        )
+        self._last_joint_velocity_target_rad_s: dict[str, float] = {}
         self._simulation_time_s = 0.0
         self._phase_index = 0
         self._phase_elapsed_s = 0.0
@@ -225,6 +238,9 @@ class IsaacLabOrder9SceneAdapter:
         self.robot.set_joint_effort_target_index(
             target=torch.zeros_like(joint_velocity)
         )
+        self._last_joint_velocity_target_rad_s = {
+            str(name): 0.0 for name in self.robot.joint_names
+        }
         self.object_asset.write_root_pose_to_sim_index(root_pose=object_pose)
         self.object_asset.write_root_velocity_to_sim_index(root_velocity=object_twist)
         self.sim.forward()
@@ -351,6 +367,19 @@ class IsaacLabOrder9SceneAdapter:
         observation.validate()
         return observation
 
+    def set_task_phase(self, phase_index: int) -> None:
+        """Change actor-visible phase without teleporting the live scene."""
+
+        self._require_restored()
+        if not 0 <= int(phase_index) < len(ORDER9_OBJECT_TASK_PHASES):
+            raise SchemaValidationError(
+                "Order9 Isaac task phase index is invalid"
+            )
+        phase_index = int(phase_index)
+        if phase_index != self._phase_index:
+            self._phase_index = phase_index
+            self._phase_elapsed_s = 0.0
+
     def apply_actuator_targets(self, record: IsaacActuatorTargetRecord) -> int:
         self._require_restored()
         torch = self.torch
@@ -398,6 +427,9 @@ class IsaacLabOrder9SceneAdapter:
                 position[index] = float(target.target_value)
             elif target.actuator_type == "joint_velocity":
                 velocity[index] = float(target.target_value)
+                self._last_joint_velocity_target_rad_s[name] = float(
+                    target.target_value
+                )
             elif target.actuator_type in {"joint_effort", "joint_effort_bias"}:
                 effort[index] = effort.get(index, 0.0) + float(target.target_value)
             else:
@@ -443,14 +475,51 @@ class IsaacLabOrder9SceneAdapter:
         self._command_index = int(record.command_index) + 1
         return unresolved
 
+    def damping_compensated_dock_load_nm(self) -> dict[str, float]:
+        """Return the Order 8 load observation for every global Dock joint."""
+
+        self._require_restored()
+        applied = getattr(self.robot.data, "applied_torque", None)
+        if applied is None:
+            raise RuntimeError(
+                "Order9 Isaac articulation exposes no applied-torque tensor"
+            )
+        result: dict[str, float] = {}
+        for index, isaac_name in enumerate(self.robot.joint_names):
+            if "dock_mech_joint" not in isaac_name:
+                continue
+            measured_velocity = _tensor_scalar(self.robot.data.joint_vel, index)
+            velocity_target = self._last_joint_velocity_target_rad_s.get(
+                str(isaac_name),
+                0.0,
+            )
+            estimated_damping_drive_nm = (
+                self._dock_drive_damping_nm_s_per_rad
+                * (velocity_target - measured_velocity)
+            )
+            applied_torque_nm = _tensor_scalar(applied, index)
+            result[str(isaac_name).replace("__", ":", 1)] = abs(
+                applied_torque_nm - estimated_damping_drive_nm
+            )
+        if not result:
+            raise RuntimeError("Order9 Isaac articulation has no Dock joints")
+        if any(not math.isfinite(value) for value in result.values()):
+            raise RuntimeError("Order9 Isaac Dock load observation is non-finite")
+        return result
+
     def step(self, dt_s: float) -> None:
         self._require_restored()
+        wall_step_started_s = time.monotonic()
         self.robot.write_data_to_sim()
-        self.sim.step(render=False)
+        self.sim.step(render=self.render)
         self.robot.update(float(dt_s))
         self.object_asset.update(float(dt_s))
         self._simulation_time_s += float(dt_s)
         self._phase_elapsed_s += float(dt_s)
+        if self.real_time_playback:
+            remaining_s = float(dt_s) - (time.monotonic() - wall_step_started_s)
+            if remaining_s > 0.0:
+                time.sleep(remaining_s)
 
     def measured_candidate_wrenches(
         self,
@@ -597,9 +666,13 @@ class IsaacLabOrder9SceneAdapter:
         *,
         active_knot: InteractionKnot,
     ) -> PayloadCoupling | None:
-        if not any(
-            assignment.schedule_state in _ACTIVE_CONTACT_STATES
-            for assignment in active_knot.contact_assignments
+        phase = ORDER9_OBJECT_TASK_PHASES[self._phase_index]
+        if not _payload_coupling_is_load_bearing(
+            phase.value,
+            tuple(
+                assignment.schedule_state
+                for assignment in active_knot.contact_assignments
+            ),
         ):
             return None
         body_pose = _centroidal_pose(self.robot, self.physical_model, self.morphology_graph)
@@ -641,6 +714,7 @@ class IsaacLabOrder9SceneAdapter:
         self._simulation_time_s = 0.0
         self._phase_elapsed_s = 0.0
         self._command_index = 0
+        self._last_joint_velocity_target_rad_s = {}
 
     def close(self) -> None:
         if self._closed:
@@ -1042,6 +1116,29 @@ def _primitive_object_box_clearance(
             body_box,
         )
     raise ValueError(f"unsupported Order9 object geometry {geometry_type!r}")
+
+
+def _payload_coupling_is_load_bearing(
+    phase_label: str,
+    schedule_states: Sequence[str],
+) -> bool:
+    """Distinguish planned contact from an actually load-bearing phase.
+
+    ``attach`` means that the anchors should acquire contact; it is not
+    evidence that the free object already applies its weight and moment to the
+    robot.  Injecting the complete payload model during contact acquisition
+    commands gravity compensation for a load that is still supported by the
+    table.  The resulting fictitious force and lever-arm torque move the robot
+    away from the object before contact can be established.
+    """
+
+    if phase_label not in {
+        Order9ObjectTaskPhase.LIFT.value,
+        Order9ObjectTaskPhase.TRANSPORT.value,
+        Order9ObjectTaskPhase.PLACE.value,
+    }:
+        return False
+    return any(state in _ACTIVE_CONTACT_STATES for state in schedule_states)
 
 
 def _centroidal_pose(

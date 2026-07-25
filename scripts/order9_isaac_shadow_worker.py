@@ -13,6 +13,7 @@ import json
 import math
 from pathlib import Path
 import sys
+import time
 
 from isaaclab.app import AppLauncher
 
@@ -55,6 +56,38 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--contact-damping", type=float, default=75.0)
     parser.add_argument("--support-top-z", type=float, default=0.15)
     parser.add_argument("--dt", type=float, default=0.02)
+    parser.add_argument(
+        "--qpid-only",
+        action="store_true",
+        help="Diagnostic only: apply the upstream reference directly to QPID.",
+    )
+    parser.add_argument(
+        "--skip-contact-evidence",
+        action="store_true",
+        help="Diagnostic only: skip contact/collision evidence reduction.",
+    )
+    parser.add_argument(
+        "--skip-collision-evidence",
+        action="store_true",
+        help="Diagnostic only: retain contacts but skip mesh collision reduction.",
+    )
+    parser.add_argument(
+        "--real-time-playback",
+        action="store_true",
+        help=(
+            "Render every physics step and throttle stepping to no faster than "
+            "simulation time. Intended only for interactive diagnostics."
+        ),
+    )
+    parser.add_argument(
+        "--keep-open-after-run-s",
+        type=float,
+        default=0.0,
+        help=(
+            "Keep the Kit viewer responsive at the final state for this many "
+            "seconds after the RPC service shuts down."
+        ),
+    )
     AppLauncher.add_app_launcher_args(parser)
     return parser
 
@@ -75,9 +108,19 @@ for name in (
     value = float(getattr(args_cli, name))
     if not math.isfinite(value) or value <= 0.0:
         raise ValueError(f"--{name.replace('_', '-')} must be positive")
+if (
+    not math.isfinite(float(args_cli.keep_open_after_run_s))
+    or args_cli.keep_open_after_run_s < 0.0
+):
+    raise ValueError("--keep-open-after-run-s must be finite and non-negative")
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
+print(
+    "ORDER9_SHADOW_STATUS="
+    + json.dumps({"stage": "kit_app_launched"}, sort_keys=True),
+    flush=True,
+)
 
 import torch
 import warp as wp
@@ -464,6 +507,11 @@ def main() -> int:
         deterministic=True,
         device=str(args_cli.device),
     )
+    print(
+        "ORDER9_SHADOW_STATUS="
+        + json.dumps({"stage": "policy_loaded"}, sort_keys=True),
+        flush=True,
+    )
     sim_utils.create_new_stage()
     sim = sim_utils.SimulationContext(
         sim_utils.SimulationCfg(
@@ -475,6 +523,16 @@ def main() -> int:
     scene = InteractiveScene(
         Order9ShadowSceneCfg(num_envs=1, env_spacing=3.0, replicate_physics=False)
     )
+    print(
+        "ORDER9_SHADOW_STATUS="
+        + json.dumps({"stage": "scene_created"}, sort_keys=True),
+        flush=True,
+    )
+    if args_cli.real_time_playback:
+        sim.set_camera_view(
+            eye=(2.2, 2.0, 1.4),
+            target=(0.75, 0.0, 0.35),
+        )
     robot = scene["robot"]
     object_asset = scene["object"]
     robot_root = "/World/envs/env_0/Robot"
@@ -489,8 +547,18 @@ def main() -> int:
     selected_paths = [paths_by_name[name] for name in selected_names]
     _bind_selected_material(sim.stage, selected_paths)
     _activate_nested_contact_reports(sim.stage, root_prim_path=robot_root)
+    print(
+        "ORDER9_SHADOW_STATUS="
+        + json.dumps({"stage": "scene_reset_started"}, sort_keys=True),
+        flush=True,
+    )
     sim.reset()
     scene.reset()
+    print(
+        "ORDER9_SHADOW_STATUS="
+        + json.dumps({"stage": "scene_reset_complete"}, sort_keys=True),
+        flush=True,
+    )
     effort_limits = robot.data.joint_effort_limits
     velocity_limits = robot.data.joint_velocity_limits
     if hasattr(effort_limits, "torch"):
@@ -567,6 +635,8 @@ def main() -> int:
         support_half_extents_m=tuple(0.5 * value for value in SUPPORT_SIZE),
         body_local_aabb_m=_body_local_aabbs(sim.stage, paths_by_name),
         actuator_readback=actuator_readback,
+        render=bool(args_cli.real_time_playback),
+        real_time_playback=bool(args_cli.real_time_playback),
     )
     runtime = Order9IsaacCopiedRuntime(
         scene_adapter=adapter,
@@ -582,6 +652,12 @@ def main() -> int:
         actuator_mapping=build_actuator_mapping(morphology, physical_model),
         force_scale_n=config.hard_checker.qp_force_scale_n,
         torque_scale_nm=config.hard_checker.qp_torque_scale_nm,
+        bypass_pi_l=bool(args_cli.qpid_only),
+        collect_contact_evidence=not bool(args_cli.skip_contact_evidence),
+        collect_collision_evidence=not bool(
+            args_cli.skip_contact_evidence
+            or args_cli.skip_collision_evidence
+        ),
     )
     executor = Order9IsaacShadowExecutor(
         runtime,
@@ -591,11 +667,17 @@ def main() -> int:
             force_scale_n=config.hard_checker.qp_force_scale_n,
             torque_scale_nm=config.hard_checker.qp_torque_scale_nm,
             maximum_control_steps=(
-                math.ceil(
+                # The executor lands exactly on every posture knot.  A
+                # controller interval that straddles a knot is therefore
+                # split into two positive substeps; reserve one additional
+                # substep per nominal control interval instead of assuming
+                # horizon/dt alone is a sufficient upper bound.
+                2
+                * math.ceil(
                     config.hard_checker.shadow_rollout_horizon_s
                     / config.hard_checker.shadow_control_dt_s
                 )
-                + 1
+                + 2
             ),
         ),
     )
@@ -615,6 +697,13 @@ def main() -> int:
     try:
         return run_order9_shadow_worker_rpc(executor)
     finally:
+        hold_deadline = time.monotonic() + float(args_cli.keep_open_after_run_s)
+        while (
+            time.monotonic() < hold_deadline
+            and simulation_app.is_running()
+        ):
+            simulation_app.update()
+            time.sleep(1.0 / 60.0)
         sim.stop()
         sim.clear_instance()
 

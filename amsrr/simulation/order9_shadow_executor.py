@@ -318,13 +318,71 @@ class Order9IsaacShadowExecutor:
         controller_residual = max(
             float(item.controller_qp_residual) for item in evidence
         )
+        control_rows = [
+            item
+            for item in evidence
+            if "learned_pi_l_applied" in item.metrics
+        ]
         metrics = {
             "knot_index": float(knot_index),
             "knot_time_s": float(elapsed_s),
             "interval_evidence_count": float(len(evidence)),
+            "controller_step_count": float(len(control_rows)),
+            "learned_pi_l_applied_count": float(
+                sum(
+                    item.metrics.get("learned_pi_l_applied", 0.0)
+                    for item in control_rows
+                )
+            ),
+            "qpid_reference_applied_count": float(
+                sum(
+                    item.metrics.get("qpid_reference_applied", 0.0)
+                    for item in control_rows
+                )
+            ),
+            "pi_l_fallback_count": float(
+                sum(
+                    item.metrics.get("pi_l_fallback", 0.0)
+                    for item in control_rows
+                )
+            ),
+            "unresolved_actuator_target_count": float(
+                sum(
+                    item.metrics.get(
+                        "unresolved_actuator_target_count", 0.0
+                    )
+                    for item in control_rows
+                )
+            ),
+            "clipped_actuator_count": float(
+                sum(
+                    item.metrics.get("clipped_actuator_count", 0.0)
+                    for item in control_rows
+                )
+            ),
             "endpoint_measured_contact_count": float(
                 len(endpoint.measured_candidate_wrenches)
             ),
+            "endpoint_valid_contact_count": float(
+                sum(
+                    bool(value.evidence_valid)
+                    for value in endpoint.measured_candidate_wrenches
+                )
+            ),
+            **{
+                (
+                    "endpoint_contact_force_norm_n."
+                    f"{value.candidate_id}"
+                ): float(
+                    math.sqrt(
+                        sum(
+                            float(component) ** 2
+                            for component in value.wrench_contact[:3]
+                        )
+                    )
+                )
+                for value in endpoint.measured_candidate_wrenches
+            },
             **{
                 f"wrench.{key}": float(value)
                 for key, value in metric.margins.items()

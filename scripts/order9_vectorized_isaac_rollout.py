@@ -2424,14 +2424,13 @@ def _artifact_step(**values):
     allocation = step.controller_result.allocation
     reward = values["reward"]
     post = values["post_state"]
-    if (
-        step.active_knot_features is None
-        or step.active_assignment_features is None
+    if (step.active_knot_features is None) != (
+        step.active_assignment_features is None
     ):
         raise RuntimeError(
-            "Order9 production rollout requires active-knot actor features"
+            "Order9 rollout has an incomplete active-knot actor context"
         )
-    return {
+    payload = {
         "valid": values["valid"],
         "time_s": values["pre_time"],
         "phase_index": values["pre_phase"],
@@ -2465,10 +2464,6 @@ def _artifact_step(**values):
         "actor_controller_status_one_hot": step.actor_controller_status_one_hot,
         "actor_allocation_residual_norm": step.actor_allocation_residual_norm,
         "actor_task_success": step.actor_task_success,
-        "actor_active_knot_features": step.active_knot_features,
-        "actor_active_assignment_features": (
-            step.active_assignment_features
-        ),
         "global_action": step.policy_step.action,
         "joint_action": step.policy_step.joint_action,
         "previous_global_action": step.previous_global_action,
@@ -2508,6 +2503,16 @@ def _artifact_step(**values):
         "post_object_pose_world": post.object_pose_world,
         "post_object_twist_world": post.object_twist_world,
     }
+    if step.active_knot_features is not None:
+        payload.update(
+            {
+                "actor_active_knot_features": step.active_knot_features,
+                "actor_active_assignment_features": (
+                    step.active_assignment_features
+                ),
+            }
+        )
+    return payload
 
 
 def _reset_goal_distance_for_phase_transition(

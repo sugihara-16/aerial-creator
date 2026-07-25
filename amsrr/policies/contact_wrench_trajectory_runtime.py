@@ -11,6 +11,8 @@ from amsrr.schemas.policies import (
     CentroidalTarget,
     ContactWrenchTrajectory,
     InteractionKnot,
+    ObjectTarget,
+    PostureTarget,
 )
 
 
@@ -215,17 +217,18 @@ def _interpolate_interaction_knot(
             right.centroidal_target,
             ratio,
         ),
-        posture_target=(
-            None
-            if discrete.posture_target is None
-            else type(discrete.posture_target).from_dict(
-                discrete.posture_target.to_dict()
-            )
+        posture_target=_interpolate_posture_target(
+            left.posture_target,
+            right.posture_target,
+            ratio,
+            discrete=discrete.posture_target,
         ),
-        object_targets=[
-            type(target).from_dict(target.to_dict())
-            for target in discrete.object_targets
-        ],
+        object_targets=_interpolate_object_targets(
+            left.object_targets,
+            right.object_targets,
+            ratio,
+            discrete=discrete.object_targets,
+        ),
         priority_weights=priorities,
         guard_conditions=[dict(condition) for condition in discrete.guard_conditions],
     )
@@ -263,6 +266,184 @@ def _interpolate_centroidal_target(
             right.centroidal_wrench_preference,
             ratio,
         ),
+    )
+
+
+def _interpolate_posture_target(
+    left: PostureTarget | None,
+    right: PostureTarget | None,
+    ratio: float,
+    *,
+    discrete: PostureTarget | None,
+) -> PostureTarget | None:
+    if left is None or right is None:
+        return (
+            None
+            if discrete is None
+            else PostureTarget.from_dict(discrete.to_dict())
+        )
+    return PostureTarget(
+        joint_pos_target=_interpolate_optional_float_mapping(
+            left.joint_pos_target,
+            right.joint_pos_target,
+            ratio,
+            discrete=(
+                None
+                if discrete is None
+                else discrete.joint_pos_target
+            ),
+        ),
+        joint_vel_target=_interpolate_optional_float_mapping(
+            left.joint_vel_target,
+            right.joint_vel_target,
+            ratio,
+            discrete=(
+                None
+                if discrete is None
+                else discrete.joint_vel_target
+            ),
+        ),
+        free_anchor_pose_targets=_interpolate_optional_pose_mapping(
+            left.free_anchor_pose_targets,
+            right.free_anchor_pose_targets,
+            ratio,
+            discrete=(
+                None
+                if discrete is None
+                else discrete.free_anchor_pose_targets
+            ),
+        ),
+    )
+
+
+def _interpolate_object_targets(
+    left: Sequence[ObjectTarget],
+    right: Sequence[ObjectTarget],
+    ratio: float,
+    *,
+    discrete: Sequence[ObjectTarget],
+) -> list[ObjectTarget]:
+    left_by_id = {target.object_id: target for target in left}
+    right_by_id = {target.object_id: target for target in right}
+    if (
+        len(left_by_id) != len(left)
+        or len(right_by_id) != len(right)
+        or set(left_by_id) != set(right_by_id)
+    ):
+        return [
+            ObjectTarget.from_dict(target.to_dict())
+            for target in discrete
+        ]
+    output = []
+    for object_id in sorted(left_by_id):
+        start = left_by_id[object_id]
+        end = right_by_id[object_id]
+        output.append(
+            ObjectTarget(
+                object_id=object_id,
+                pose_target_world=_interpolate_optional_pose(
+                    start.pose_target_world,
+                    end.pose_target_world,
+                    ratio,
+                ),
+                twist_target_world=_interpolate_optional_list(
+                    start.twist_target_world,
+                    end.twist_target_world,
+                    ratio,
+                ),
+                generalized_q_target=_interpolate_optional_list(
+                    start.generalized_q_target,
+                    end.generalized_q_target,
+                    ratio,
+                ),
+                generalized_qdot_target=_interpolate_optional_list(
+                    start.generalized_qdot_target,
+                    end.generalized_qdot_target,
+                    ratio,
+                ),
+            )
+        )
+    return output
+
+
+def _interpolate_optional_float_mapping(
+    left: dict[str, float] | None,
+    right: dict[str, float] | None,
+    ratio: float,
+    *,
+    discrete: dict[str, float] | None,
+) -> dict[str, float] | None:
+    if (
+        left is None
+        or right is None
+        or set(left) != set(right)
+    ):
+        return (
+            None
+            if discrete is None
+            else {str(key): float(value) for key, value in discrete.items()}
+        )
+    return {
+        key: _lerp(float(left[key]), float(right[key]), ratio)
+        for key in sorted(left)
+    }
+
+
+def _interpolate_optional_pose_mapping(
+    left: dict[int, tuple[float, ...]] | None,
+    right: dict[int, tuple[float, ...]] | None,
+    ratio: float,
+    *,
+    discrete: dict[int, tuple[float, ...]] | None,
+) -> dict[int, tuple[float, ...]] | None:
+    if (
+        left is None
+        or right is None
+        or set(left) != set(right)
+    ):
+        return (
+            None
+            if discrete is None
+            else {
+                int(key): tuple(float(value) for value in pose)
+                for key, pose in discrete.items()
+            }
+        )
+    return {
+        int(key): _interpolate_pose(left[key], right[key], ratio)
+        for key in sorted(left)
+    }
+
+
+def _interpolate_optional_pose(
+    left: Sequence[float] | None,
+    right: Sequence[float] | None,
+    ratio: float,
+) -> tuple[float, ...] | None:
+    if left is None and right is None:
+        return None
+    if left is None:
+        return tuple(float(value) for value in right or ())
+    if right is None:
+        return tuple(float(value) for value in left)
+    return _interpolate_pose(left, right, ratio)
+
+
+def _interpolate_pose(
+    left: Sequence[float],
+    right: Sequence[float],
+    ratio: float,
+) -> tuple[float, ...]:
+    if len(left) != 7 or len(right) != 7:
+        raise ContactWrenchTrajectoryRuntimeError(
+            "pose interpolation requires Pose7D inputs"
+        )
+    return (
+        *(
+            _lerp(float(left[index]), float(right[index]), ratio)
+            for index in range(3)
+        ),
+        *_quaternion_slerp(left[3:7], right[3:7], ratio),
     )
 
 

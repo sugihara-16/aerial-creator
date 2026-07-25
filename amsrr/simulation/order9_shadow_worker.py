@@ -498,6 +498,7 @@ class JsonLineSubprocessShadowTransport:
         cwd: str | Path,
         timeout_s: float = 30.0,
         environment: Mapping[str, str] | None = None,
+        status_stream: TextIO | None = None,
     ) -> None:
         if not command or not all(str(value) for value in command):
             raise ValueError("Order9 shadow worker command must be non-empty")
@@ -511,6 +512,7 @@ class JsonLineSubprocessShadowTransport:
             if environment is None
             else {**os.environ, **{str(key): str(value) for key, value in environment.items()}}
         )
+        self.status_stream = status_stream
         self._process: subprocess.Popen[str] | None = None
         self._request_index = 0
 
@@ -551,6 +553,15 @@ class JsonLineSubprocessShadowTransport:
                 if line == "":
                     continue
                 if not line.startswith(_RESPONSE_PREFIX):
+                    if (
+                        self.status_stream is not None
+                        and (
+                            line.startswith("ORDER9_SHADOW_STATUS=")
+                            or line.startswith("ORDER9_SHADOW_READY=")
+                        )
+                    ):
+                        self.status_stream.write(line)
+                        self.status_stream.flush()
                     continue
                 response = json.loads(line[len(_RESPONSE_PREFIX) :])
                 if not isinstance(response, dict):
@@ -587,7 +598,7 @@ class JsonLineSubprocessShadowTransport:
                         _REQUEST_PREFIX + json.dumps(request, sort_keys=True) + "\n"
                     )
                     process.stdin.flush()
-                process.wait(timeout=min(self.timeout_s, 5.0))
+                process.wait(timeout=min(self.timeout_s, 30.0))
             except (BrokenPipeError, subprocess.TimeoutExpired):
                 process.terminate()
                 try:

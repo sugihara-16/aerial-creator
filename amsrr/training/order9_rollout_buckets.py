@@ -42,7 +42,9 @@ from amsrr.utils.hashing import hash_file, stable_hash
 
 ORDER9_ROLLOUT_BUCKET_MANIFEST_VERSION = "order9_pi_l_rollout_buckets_v1"
 ORDER9_C3_STAGE_ID = "c3_pi_l_ppo_arbitrary_morphology"
-ORDER9_C3_BUCKET_PRECHECK_VERSION = "order9_c3_bucket_articulated_precheck_v1"
+ORDER9_C3_BUCKET_PRECHECK_VERSION = (
+    "order9_c3_bucket_articulated_precheck_v3_posture_resolver"
+)
 
 
 @dataclass
@@ -316,7 +318,7 @@ def prepare_order9_pi_l_rollout_buckets(
                             used_structural_hashes=used_structural_hashes[split],
                         )
                         topology_source = (
-                            "split_safe_pool_articulated_teacher_prechecked_v1"
+                            "split_safe_pool_articulated_teacher_prechecked_v3"
                         )
                         task.metadata = {
                             **task.metadata,

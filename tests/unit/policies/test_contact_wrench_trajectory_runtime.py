@@ -10,6 +10,8 @@ from amsrr.schemas.policies import (
     CentroidalTarget,
     ContactWrenchTrajectory,
     InteractionKnot,
+    ObjectTarget,
+    PostureTarget,
 )
 
 
@@ -88,3 +90,88 @@ def test_executor_rejects_unsorted_or_uncovered_trajectory() -> None:
     invalid.knots[1].t_rel_s = 0.0
     with pytest.raises(ContactWrenchTrajectoryRuntimeError, match="strictly increasing"):
         executor.install(invalid, plan_start_time_s=0.0)
+
+
+def test_executor_interpolates_resolved_posture_anchor_and_object_targets() -> None:
+    trajectory = ContactWrenchTrajectory(
+        horizon_s=1.0,
+        dt_s=1.0,
+        knots=[
+            InteractionKnot(
+                t_rel_s=0.0,
+                contact_assignments=[],
+                posture_target=PostureTarget(
+                    joint_pos_target={"module_0:q": 0.0},
+                    joint_vel_target={"module_0:q": 1.0},
+                    free_anchor_pose_targets={
+                        3: (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+                    },
+                ),
+                object_targets=[
+                    ObjectTarget(
+                        object_id="box",
+                        pose_target_world=(
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            1.0,
+                        ),
+                    )
+                ],
+            ),
+            InteractionKnot(
+                t_rel_s=1.0,
+                contact_assignments=[],
+                posture_target=PostureTarget(
+                    joint_pos_target={"module_0:q": 1.0},
+                    joint_vel_target={"module_0:q": 1.0},
+                    free_anchor_pose_targets={
+                        3: (
+                            1.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.7071067812,
+                            0.7071067812,
+                        )
+                    },
+                ),
+                object_targets=[
+                    ObjectTarget(
+                        object_id="box",
+                        pose_target_world=(
+                            2.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.0,
+                            0.7071067812,
+                            0.7071067812,
+                        ),
+                    )
+                ],
+            ),
+        ],
+    )
+    executor = ContactWrenchTrajectoryExecutor()
+    executor.install(trajectory, plan_start_time_s=0.0)
+
+    knot = executor.sample(time_s=0.5).active_knot
+
+    assert knot.posture_target.joint_pos_target["module_0:q"] == pytest.approx(
+        0.5
+    )
+    assert knot.posture_target.free_anchor_pose_targets[3][:3] == pytest.approx(
+        (0.5, 0.0, 0.0)
+    )
+    assert knot.object_targets[0].pose_target_world[:3] == pytest.approx(
+        (1.0, 0.0, 0.0)
+    )
+    assert sum(
+        value * value
+        for value in knot.object_targets[0].pose_target_world[3:7]
+    ) == pytest.approx(1.0)

@@ -32,6 +32,7 @@ from amsrr.schemas.runtime import (
 from amsrr.schemas.policies import ControllerStatus
 from amsrr.schemas.task_spec import TaskSpec
 from amsrr.training.order9_articulated_teacher import (
+    Order9ArticulatedTeacherConfig,
     Order9ArticulatedTeacherPlan,
     Order9ArticulatedTrajectoryTeacher,
 )
@@ -41,16 +42,38 @@ from amsrr.training.order9_design_teacher_dataset import (
 from amsrr.utils.hashing import stable_hash
 
 
-ORDER9_C3_ARTICULATED_TEACHER_VERSION = "order9_c3_articulated_teacher_v1"
+ORDER9_C3_ARTICULATED_TEACHER_VERSION = (
+    "order9_c3_articulated_teacher_v3_posture_resolver"
+)
 
 
 @dataclass(frozen=True)
 class Order9C3TeacherConfig:
     maximum_surface_pair_attempts: int = 64
+    preferred_surface_port_ids: tuple[int, int] | None = None
+    preferred_candidate_group_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.maximum_surface_pair_attempts < 1:
             raise ValueError("maximum_surface_pair_attempts must be positive")
+        if self.preferred_surface_port_ids is not None:
+            values = tuple(int(value) for value in self.preferred_surface_port_ids)
+            if (
+                len(values) != 2
+                or len(set(values)) != 2
+                or min(values) < 0
+            ):
+                raise ValueError(
+                    "preferred_surface_port_ids must contain two distinct "
+                    "non-negative port ids"
+                )
+        if (
+            self.preferred_candidate_group_id is not None
+            and not self.preferred_candidate_group_id
+        ):
+            raise ValueError(
+                "preferred_candidate_group_id must be non-empty when provided"
+            )
 
 
 @dataclass(frozen=True)
@@ -77,6 +100,12 @@ def order9_c3_teacher_evidence(
         "teacher_version": bundle.teacher_version,
         "trajectory_teacher_version": bundle.trajectory_plan.teacher_version,
         "ik_solver_version": bundle.trajectory_plan.ik_solution.solver_version,
+        "posture_resolver_version": (
+            bundle.trajectory_plan.posture_resolution.evidence.resolver_version
+        ),
+        "posture_solver_version": (
+            bundle.trajectory_plan.posture_resolution.evidence.solver_version
+        ),
         "selected_surface_port_ids": list(bundle.selected_surface_port_ids),
         "task_conditioned_morphology_hash": (
             bundle.design_output.target_morphology.stable_hash()
@@ -84,7 +113,22 @@ def order9_c3_teacher_evidence(
         "contact_candidate_set_hash": stable_hash(
             bundle.contact_candidate_set.to_dict()
         ),
+        "raw_pi_h_trajectory_hash": stable_hash(
+            bundle.trajectory_plan.raw_trajectory.to_dict()
+        ),
         "trajectory_hash": stable_hash(bundle.trajectory.to_dict()),
+        "posture_resolution_evidence_hash": stable_hash(
+            bundle.trajectory_plan.posture_resolution.evidence.identity_dict()
+        ),
+        "resolved_posture_knot_count": len(bundle.trajectory.knots),
+        "posture_maximum_joint_rate_rad_s": (
+            bundle.trajectory_plan.posture_resolution.evidence
+            .maximum_joint_rate_rad_s
+        ),
+        "posture_minimum_joint_rate_margin_rad_s": (
+            bundle.trajectory_plan.posture_resolution.evidence
+            .minimum_joint_rate_margin_rad_s
+        ),
         "candidate_group_id": bundle.trajectory_plan.candidate_group_id,
         "ik_iterations": bundle.trajectory_plan.ik_solution.iterations,
         "ik_maximum_position_error_m": (
@@ -129,6 +173,21 @@ def build_order9_c3_articulated_teacher(
             "C3 structural morphology has no two free mesh-backed surfaces "
             "on distinct modules"
         )
+    if cfg.preferred_surface_port_ids is not None:
+        requested = frozenset(int(value) for value in cfg.preferred_surface_port_ids)
+        pairs = [
+            pair
+            for pair in pairs
+            if frozenset(
+                (pair[0].port_global_id, pair[1].port_global_id)
+            )
+            == requested
+        ]
+        if not pairs:
+            raise SchemaValidationError(
+                "preferred C3 surface pair is unavailable, occupied, or lies "
+                "on one module"
+            )
     failures: list[str] = []
     for first, second in pairs[: cfg.maximum_surface_pair_attempts]:
         surface_ids = (first.port_global_id, second.port_global_id)
@@ -154,7 +213,12 @@ def build_order9_c3_articulated_teacher(
                 candidates,
             )
             plan = Order9ArticulatedTrajectoryTeacher(
-                physical_model
+                physical_model,
+                config=Order9ArticulatedTeacherConfig(
+                    preferred_candidate_group_id=(
+                        cfg.preferred_candidate_group_id
+                    )
+                ),
             ).plan(
                 high_level_context,
                 initial_object_poses_world={
