@@ -9,9 +9,6 @@ hard checker C_H, fallback, and rolling executor remain separate objects.
 from dataclasses import dataclass
 from typing import Protocol
 
-from amsrr.feasibility.contact_wrench_trajectory import (
-    ContactWrenchTrajectoryFeasibilityChecker,
-)
 from amsrr.policies.contact_wrench_trajectory_runtime import (
     ContactWrenchTrajectoryExecutor,
 )
@@ -24,6 +21,17 @@ class HighLevelProposalPolicy(Protocol):
     """Pure learned pi_H interface: propose, but never check or fall back."""
 
     def propose(self, context: HighLevelPolicyContext) -> ContactWrenchTrajectory:
+        ...
+
+
+class HighLevelTrajectoryChecker(Protocol):
+    """Hard checker boundary; some implementations expose a resolved copy."""
+
+    def check(
+        self,
+        trajectory: ContactWrenchTrajectory,
+        context: HighLevelPolicyContext,
+    ) -> TrajectoryFeasibilityResult:
         ...
 
 
@@ -74,7 +82,7 @@ class HighLevelTrajectoryRuntime:
         self,
         *,
         proposal_policy: HighLevelProposalPolicy,
-        checker: ContactWrenchTrajectoryFeasibilityChecker,
+        checker: HighLevelTrajectoryChecker,
         fallback: HighLevelFallback,
         executor: ContactWrenchTrajectoryExecutor | None = None,
         max_proposal_attempts: int = 2,
@@ -109,12 +117,17 @@ class HighLevelTrajectoryRuntime:
                 continue
             result = self.checker.check(proposal, context)
             if result.feasible:
-                self.executor.install(
+                execution_trajectory = _checked_execution_trajectory(
+                    self.checker,
                     proposal,
+                    context,
+                )
+                self.executor.install(
+                    execution_trajectory,
                     plan_start_time_s=plan_start_time_s,
                 )
                 return HighLevelRuntimeDecision(
-                    trajectory=proposal,
+                    trajectory=execution_trajectory,
                     feasibility_result=result,
                     used_fallback=False,
                     accepted_proposal_attempt=attempt_index,
@@ -139,12 +152,17 @@ class HighLevelTrajectoryRuntime:
             raise RuntimeError(
                 "deterministic high-level fallback failed C_H: " + ",".join(codes)
             )
-        self.executor.install(
+        fallback_execution_trajectory = _checked_execution_trajectory(
+            self.checker,
             fallback_trajectory,
+            context,
+        )
+        self.executor.install(
+            fallback_execution_trajectory,
             plan_start_time_s=plan_start_time_s,
         )
         return HighLevelRuntimeDecision(
-            trajectory=fallback_trajectory,
+            trajectory=fallback_execution_trajectory,
             feasibility_result=fallback_result,
             used_fallback=True,
             accepted_proposal_attempt=None,
@@ -175,3 +193,20 @@ class PlannerFallbackAdapter:
         if plan is None:
             raise TypeError("fallback planner must expose plan(context)")
         return plan(context)
+
+
+def _checked_execution_trajectory(
+    checker: object,
+    raw_trajectory: ContactWrenchTrajectory,
+    context: HighLevelPolicyContext,
+) -> ContactWrenchTrajectory:
+    resolver = getattr(checker, "execution_trajectory", None)
+    if resolver is None:
+        return raw_trajectory
+    resolved = resolver(raw_trajectory, context)
+    if not isinstance(resolved, ContactWrenchTrajectory):
+        raise TypeError(
+            "hard checker execution_trajectory must return "
+            "ContactWrenchTrajectory"
+        )
+    return resolved

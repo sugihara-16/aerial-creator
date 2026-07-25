@@ -7,11 +7,11 @@ from dataclasses import dataclass
 
 import torch
 
-from amsrr.feasibility.contact_wrench_trajectory import (
-    ContactWrenchTrajectoryFeasibilityChecker,
-)
 from amsrr.policies.high_level_policy_base import HighLevelPolicyContext
-from amsrr.policies.high_level_runtime import HighLevelFallback
+from amsrr.policies.high_level_runtime import (
+    HighLevelFallback,
+    HighLevelTrajectoryChecker,
+)
 from amsrr.policies.order9_high_level_policy import (
     ORDER9_FULL_PI_H_VERSION,
     Order9AutoregressiveHighLevelPolicy,
@@ -290,7 +290,7 @@ def sample_order9_pi_h_with_hard_checker(
     policy: Order9AutoregressiveHighLevelPolicy,
     context: HighLevelPolicyContext,
     *,
-    checker: ContactWrenchTrajectoryFeasibilityChecker,
+    checker: HighLevelTrajectoryChecker,
     fallback: HighLevelFallback,
     checkpoint_sha256: str,
     max_proposal_attempts: int = 2,
@@ -327,10 +327,15 @@ def sample_order9_pi_h_with_hard_checker(
         )
         samples.append(sample)
         if feasibility.feasible:
+            execution_trajectory = _checked_execution_trajectory(
+                checker,
+                trajectory,
+                context,
+            )
             return Order9PiHHardGateDecision(
                 samples=tuple(samples),
                 accepted_sample=sample,
-                execution_trajectory=trajectory,
+                execution_trajectory=execution_trajectory,
                 execution_feasibility_result=feasibility,
                 used_fallback=False,
                 fallback_version=None,
@@ -345,10 +350,15 @@ def sample_order9_pi_h_with_hard_checker(
         raise RuntimeError(
             "deterministic pi_H fallback failed C_H: " + ",".join(codes)
         )
+    fallback_execution_trajectory = _checked_execution_trajectory(
+        checker,
+        fallback_trajectory,
+        context,
+    )
     return Order9PiHHardGateDecision(
         samples=tuple(samples),
         accepted_sample=None,
-        execution_trajectory=fallback_trajectory,
+        execution_trajectory=fallback_execution_trajectory,
         execution_feasibility_result=fallback_result,
         used_fallback=True,
         fallback_version=fallback.fallback_version,
@@ -497,6 +507,23 @@ def _proposal_record(
 def _require_sha256(value: str) -> None:
     if len(value) != 64 or any(character not in "0123456789abcdef" for character in value):
         raise SchemaValidationError("Order9 pi_H checkpoint hash must be SHA-256")
+
+
+def _checked_execution_trajectory(
+    checker: object,
+    raw_trajectory: ContactWrenchTrajectory,
+    context: HighLevelPolicyContext,
+) -> ContactWrenchTrajectory:
+    resolver = getattr(checker, "execution_trajectory", None)
+    if resolver is None:
+        return raw_trajectory
+    resolved = resolver(raw_trajectory, context)
+    if not isinstance(resolved, ContactWrenchTrajectory):
+        raise TypeError(
+            "hard checker execution_trajectory must return "
+            "ContactWrenchTrajectory"
+        )
+    return resolved
 
 
 def _copy_context(context: HighLevelPolicyContext) -> HighLevelPolicyContext:

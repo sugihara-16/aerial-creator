@@ -16,9 +16,6 @@ import shutil
 import tempfile
 from typing import Any, Mapping, Sequence
 
-from amsrr.feasibility.contact_wrench_trajectory import (
-    ContactWrenchTrajectoryFeasibilityChecker,
-)
 from amsrr.morphology.random_connected import morphology_structural_hash
 from amsrr.robot_model.physical_model_builder import (
     build_physical_model_from_config,
@@ -39,6 +36,12 @@ from amsrr.training.order9_curriculum import (
     load_order9_learning_config,
 )
 from amsrr.training.order9_hard_checker import build_order9_production_hard_checker
+from amsrr.training.order9_posture_hard_gate import (
+    Order9PostureResolvingHardChecker,
+)
+from amsrr.training.order9_posture_resolver import (
+    Order9PostureCollisionObject,
+)
 from amsrr.training.order9_randomization import Order9RandomizationSample
 from amsrr.utils.hashing import hash_file, stable_hash
 
@@ -111,7 +114,7 @@ class Order9ProductionHardCheckerRuntime:
     def __init__(
         self,
         *,
-        checker: ContactWrenchTrajectoryFeasibilityChecker,
+        checker: Order9PostureResolvingHardChecker,
         backend: ImmutableMainStateShadowBackend,
         driver: PersistentIsaacShadowDriver,
         transport: Order9ShadowWorkerTransport,
@@ -315,6 +318,11 @@ def bind_order9_production_hard_checker(
 
     config.validate()
     _require_sha256(pi_l_checkpoint_sha256, "pi_l_checkpoint_sha256")
+    if bucket.object_geometry_type != "box":
+        raise SchemaValidationError(
+            "the production convex posture gate currently supports only "
+            "task-declared box objects"
+        )
     response = dict(transport.request("describe", {}))
     if response.get("operation") != "describe" or response.get("accepted") is not True:
         raise RuntimeError("Order9 shadow worker rejected identity handshake")
@@ -345,6 +353,10 @@ def bind_order9_production_hard_checker(
             or build_physical_model_from_config(
                 config.production_runtime.robot_model_config_path
             )
+        ),
+        collision_object=Order9PostureCollisionObject(
+            object_id=bucket.object_id,
+            size_m=tuple(float(value) for value in bucket.object_size_m),
         ),
     )
     return Order9ProductionHardCheckerRuntime(

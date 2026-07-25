@@ -53,7 +53,8 @@ from amsrr.schemas.runtime import (
 
 
 ARTICULATED_REACHABILITY_VERSION = "articulated_reachability_v1"
-ARTICULATED_IK_TEACHER_VERSION = "articulated_contact_ik_teacher_v1"
+ARTICULATED_IK_TEACHER_VERSION = "articulated_contact_ik_teacher_v2"
+CENTROIDAL_POSTURE_IK_VERSION = "centroidal_posture_ik_v1"
 
 REACHABILITY_POSTURE_MISSING_CODE = "E_REACHABILITY_POSTURE_MISSING"
 REACHABILITY_JOINT_SET_CODE = "E_REACHABILITY_JOINT_SET"
@@ -99,6 +100,7 @@ class ArticulatedIKConfig:
     position_weight: float = 1.0
     normal_weight: float = 0.35
     joint_regularization_weight: float = 1.0e-6
+    pitch_joint_regularization_weight: float = 1.0e-2
     maximum_joint_step_rad: float = 0.20
     maximum_base_translation_step_m: float = 0.20
     maximum_base_rotation_step_rad: float = 0.20
@@ -122,6 +124,12 @@ class ArticulatedIKConfig:
             value = float(getattr(self, name))
             if not math.isfinite(value) or value <= 0.0:
                 raise ValueError(f"{name} must be finite and positive")
+        pitch_weight = float(self.pitch_joint_regularization_weight)
+        if not math.isfinite(pitch_weight) or pitch_weight < 0.0:
+            raise ValueError(
+                "pitch_joint_regularization_weight must be finite and "
+                "non-negative"
+            )
 
 
 @dataclass(frozen=True)
@@ -135,6 +143,76 @@ class ArticulatedIKSolution:
     maximum_normal_error_rad: float
     iterations: int
     solver_version: str = ARTICULATED_IK_TEACHER_VERSION
+
+
+@dataclass(frozen=True)
+class CentroidalPostureIKConfig:
+    """Bounded q-only IK while the proposed assembled CoM pose stays fixed."""
+
+    maximum_iterations: int = 60
+    relaxed_seed_maximum_iterations: int = 40
+    feasible_refinement_iterations: int = 3
+    damping: float = 2.0e-3
+    position_weight: float = 1.0
+    attitude_weight: float = 0.35
+    continuity_regularization_weight: float = 1.0e-5
+    pitch_joint_regularization_weight: float = 1.0e-2
+    finite_difference_step_rad: float = 1.0e-5
+    maximum_joint_step_rad: float = 0.20
+    maximum_base_translation_step_m: float = 0.20
+    maximum_base_rotation_step_rad: float = 0.20
+    anchor_position_tolerance_m: float = 0.005
+    anchor_attitude_tolerance_rad: float = 0.10
+    maximum_cache_entries: int = 256
+
+    def __post_init__(self) -> None:
+        if self.maximum_iterations < 1:
+            raise ValueError("maximum_iterations must be positive")
+        if self.relaxed_seed_maximum_iterations < 1:
+            raise ValueError(
+                "relaxed_seed_maximum_iterations must be positive"
+            )
+        if self.feasible_refinement_iterations < 0:
+            raise ValueError(
+                "feasible_refinement_iterations must be non-negative"
+            )
+        if self.maximum_cache_entries < 1:
+            raise ValueError("maximum_cache_entries must be positive")
+        for name in (
+            "damping",
+            "position_weight",
+            "attitude_weight",
+            "continuity_regularization_weight",
+            "finite_difference_step_rad",
+            "maximum_joint_step_rad",
+            "maximum_base_translation_step_m",
+            "maximum_base_rotation_step_rad",
+            "anchor_position_tolerance_m",
+            "anchor_attitude_tolerance_rad",
+        ):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{name} must be finite and positive")
+        pitch_weight = float(self.pitch_joint_regularization_weight)
+        if not math.isfinite(pitch_weight) or pitch_weight < 0.0:
+            raise ValueError(
+                "pitch_joint_regularization_weight must be finite and "
+                "non-negative"
+            )
+
+
+@dataclass(frozen=True)
+class CentroidalPostureIKSolution:
+    feasible: bool
+    joint_positions_rad: dict[str, float]
+    base_pose_world: Pose7D
+    centroidal_pose_world: Pose7D
+    anchor_poses_world: dict[int, Pose7D]
+    maximum_position_error_m: float
+    maximum_attitude_error_rad: float
+    iterations: int
+    solver_version: str = CENTROIDAL_POSTURE_IK_VERSION
+    cache_hit: bool = False
 
 
 def resolve_mesh_backed_anchor_references(
@@ -232,6 +310,11 @@ class ArticulatedContactIKSolver:
         ordered_ids = ordered_global_dock_joint_ids(
             morphology, self.physical_model
         )
+        joint_regularization_weights = _joint_regularization_weights(
+            ordered_ids,
+            self.physical_model,
+            self.config,
+        )
         limits = _global_joint_limits(
             morphology, self.physical_model, ordered_ids
         )
@@ -252,6 +335,8 @@ class ArticulatedContactIKSolver:
         maximum_position_error = math.inf
         maximum_normal_error = math.inf
         anchor_poses: dict[int, Pose7D] = {}
+        best_feasible_solution: ArticulatedIKSolution | None = None
+        best_feasible_objective = math.inf
 
         for iteration in range(1, self.config.maximum_iterations + 1):
             result = self.kinematics.compute(
@@ -340,11 +425,20 @@ class ArticulatedContactIKSolver:
                     )
             maximum_position_error = max(position_errors, default=0.0)
             maximum_normal_error = max(normal_errors, default=0.0)
+            regularized_objective = sum(
+                value * value for value in residuals
+            ) + sum(
+                joint_regularization_weights[joint_id]
+                * q[joint_id]
+                * q[joint_id]
+                for joint_id in ordered_ids
+            )
             if (
                 maximum_position_error
                 <= self.config.contact_position_tolerance_m
                 and maximum_normal_error
                 <= self.config.contact_normal_tolerance_rad
+                and regularized_objective < best_feasible_objective
             ):
                 centroidal = _centroidal_pose(
                     morphology,
@@ -353,7 +447,8 @@ class ArticulatedContactIKSolver:
                     result.module_root_poses_world,
                     self._rigid_body_builder,
                 )
-                return ArticulatedIKSolution(
+                best_feasible_objective = regularized_objective
+                best_feasible_solution = ArticulatedIKSolution(
                     feasible=True,
                     joint_positions_rad=dict(q),
                     base_pose_world=base_pose,
@@ -371,10 +466,9 @@ class ArticulatedContactIKSolver:
             normal += (self.config.damping**2) * np.eye(variable_count)
             right = matrix.T @ residual
             for index, joint_id in enumerate(ordered_ids):
-                normal[index, index] += self.config.joint_regularization_weight
-                right[index] -= (
-                    self.config.joint_regularization_weight * q[joint_id]
-                )
+                regularization_weight = joint_regularization_weights[joint_id]
+                normal[index, index] += regularization_weight
+                right[index] -= regularization_weight * q[joint_id]
             try:
                 delta = np.linalg.solve(normal, right)
             except np.linalg.LinAlgError:
@@ -405,6 +499,9 @@ class ArticulatedContactIKSolver:
                 translation_delta,
             )
 
+        if best_feasible_solution is not None:
+            return best_feasible_solution
+
         final = self.kinematics.forward(
             morphology,
             self.physical_model,
@@ -429,6 +526,699 @@ class ArticulatedContactIKSolver:
             maximum_normal_error_rad=maximum_normal_error,
             iterations=self.config.maximum_iterations,
         )
+
+
+class CentroidalPostureIKSolver:
+    """Resolve joint posture without changing a policy-proposed CoM pose.
+
+    The base-root translation is reconstructed from the proposed assembled
+    centroidal pose after every joint update.  Consequently, this solver can
+    search only the Dock joint vector and cannot repair a high-level proposal
+    by translating or rotating the assembled body.
+    """
+
+    solver_version = CENTROIDAL_POSTURE_IK_VERSION
+
+    def __init__(
+        self,
+        physical_model: PhysicalModel,
+        *,
+        config: CentroidalPostureIKConfig | None = None,
+        kinematics: WholeStructureKinematics | None = None,
+    ) -> None:
+        self.physical_model = physical_model
+        self.config = config or CentroidalPostureIKConfig()
+        self.kinematics = kinematics or WholeStructureKinematics()
+        self._rigid_body_builder = RigidBodyControlModelBuilder()
+        self._solution_cache: dict[
+            tuple[object, ...], tuple[dict[str, float], int]
+        ] = {}
+
+    def solve(
+        self,
+        *,
+        morphology: MorphologyGraph,
+        centroidal_pose_world: Pose7D,
+        anchor_pose_targets_world: Mapping[int, Pose7D],
+        initial_joint_positions_rad: Mapping[str, float] | None = None,
+    ) -> CentroidalPostureIKSolution:
+        np = _numpy()
+        _validate_pose7d(centroidal_pose_world, "centroidal_pose_world")
+        ordered_ids = ordered_global_dock_joint_ids(
+            morphology, self.physical_model
+        )
+        limits = _global_joint_limits(
+            morphology, self.physical_model, ordered_ids
+        )
+        reference_q = {
+            joint_id: float(
+                0.0
+                if initial_joint_positions_rad is None
+                else initial_joint_positions_rad.get(joint_id, 0.0)
+            )
+            for joint_id in ordered_ids
+        }
+        reference_q = _clip_joint_map(reference_q, limits)
+        q = dict(reference_q)
+        target_ids = tuple(sorted(int(value) for value in anchor_pose_targets_world))
+        targets = {
+            anchor_id: tuple(
+                float(value)
+                for value in anchor_pose_targets_world[anchor_id]
+            )
+            for anchor_id in target_ids
+        }
+        for anchor_id, target in targets.items():
+            _validate_pose7d(target, f"anchor_pose_targets_world[{anchor_id}]")
+        references = resolve_mesh_backed_anchor_references(
+            morphology,
+            self.physical_model,
+            target_ids,
+        )
+        pitch_ids = _global_pitch_joint_ids(
+            ordered_ids, self.physical_model
+        )
+        cache_key = self._cache_key(
+            morphology=morphology,
+            centroidal_pose_world=centroidal_pose_world,
+            targets=targets,
+            initial_q=reference_q,
+        )
+        cached = self._solution_cache.get(cache_key)
+        if cached is not None:
+            cached_q, cached_iterations = cached
+            cached_solution = self._evaluate_fixed_q(
+                morphology=morphology,
+                centroidal_pose_world=centroidal_pose_world,
+                q=cached_q,
+                references=references,
+                targets=targets,
+                iterations=cached_iterations,
+                cache_hit=True,
+            )
+            if cached_solution.feasible:
+                return cached_solution
+            self._solution_cache.pop(cache_key, None)
+        initial_solution = self._evaluate_fixed_q(
+            morphology=morphology,
+            centroidal_pose_world=centroidal_pose_world,
+            q=q,
+            references=references,
+            targets=targets,
+            iterations=0,
+        )
+        if initial_solution.feasible:
+            self._remember(
+                cache_key,
+                initial_solution.joint_positions_rad,
+                iterations=initial_solution.iterations,
+            )
+            return initial_solution
+        q, relaxed_iterations = self._relaxed_free_base_seed(
+            morphology=morphology,
+            centroidal_pose_world=centroidal_pose_world,
+            q=q,
+            reference_q=reference_q,
+            limits=limits,
+            references=references,
+            targets=targets,
+            pitch_ids=pitch_ids,
+        )
+        best: CentroidalPostureIKSolution | None = None
+        best_objective = math.inf
+        first_feasible_iteration: int | None = None
+        maximum_position_error = math.inf
+        maximum_attitude_error = math.inf
+        last_base_pose: Pose7D = tuple(centroidal_pose_world)
+        last_anchor_poses: dict[int, Pose7D] = {}
+        last_centroidal_pose: Pose7D = tuple(centroidal_pose_world)
+
+        for iteration in range(1, self.config.maximum_iterations + 1):
+            base_pose = base_pose_for_centroidal_target(
+                morphology,
+                self.physical_model,
+                q,
+                tuple(float(value) for value in centroidal_pose_world[:3]),
+                tuple(float(value) for value in centroidal_pose_world[3:7]),
+                kinematics=self.kinematics,
+            )
+            result = self.kinematics.forward(
+                morphology,
+                self.physical_model,
+                q,
+                base_pose,
+                references,
+            )
+            jacobians = self._fixed_centroidal_anchor_jacobians(
+                morphology=morphology,
+                centroidal_pose_world=centroidal_pose_world,
+                q=q,
+                limits=limits,
+                references=references,
+                nominal=result.anchor_poses_world,
+            )
+            centroidal = _centroidal_pose(
+                morphology,
+                self.physical_model,
+                q,
+                result.module_root_poses_world,
+                self._rigid_body_builder,
+            )
+            last_base_pose = base_pose
+            last_anchor_poses = dict(result.anchor_poses_world)
+            last_centroidal_pose = centroidal
+            rows: list[list[float]] = []
+            residuals: list[float] = []
+            position_errors: list[float] = []
+            attitude_errors: list[float] = []
+            for reference in references:
+                anchor_id = reference.anchor.anchor_id
+                actual = result.anchor_poses_world[anchor_id]
+                target = targets[anchor_id]
+                position_error = tuple(
+                    float(target[axis]) - float(actual[axis])
+                    for axis in range(3)
+                )
+                attitude_error = _pose_rotation_error_vector(
+                    target, actual
+                )
+                position_errors.append(_norm(position_error))
+                attitude_errors.append(_norm(attitude_error))
+                jacobian = jacobians[anchor_id]
+                for axis in range(3):
+                    rows.append(
+                        [
+                            self.config.position_weight
+                            * float(jacobian[axis][column])
+                            for column in range(len(ordered_ids))
+                        ]
+                    )
+                    residuals.append(
+                        self.config.position_weight
+                        * position_error[axis]
+                    )
+                for axis in range(3):
+                    rows.append(
+                        [
+                            self.config.attitude_weight
+                            * float(jacobian[axis + 3][column])
+                            for column in range(len(ordered_ids))
+                        ]
+                    )
+                    residuals.append(
+                        self.config.attitude_weight
+                        * attitude_error[axis]
+                    )
+            maximum_position_error = max(position_errors, default=0.0)
+            maximum_attitude_error = max(attitude_errors, default=0.0)
+            objective = sum(value * value for value in residuals)
+            objective += sum(
+                self.config.continuity_regularization_weight
+                * (q[joint_id] - reference_q[joint_id]) ** 2
+                for joint_id in ordered_ids
+            )
+            objective += sum(
+                self.config.pitch_joint_regularization_weight
+                * q[joint_id] ** 2
+                for joint_id in pitch_ids
+            )
+            if (
+                maximum_position_error
+                <= self.config.anchor_position_tolerance_m
+                and maximum_attitude_error
+                <= self.config.anchor_attitude_tolerance_rad
+            ):
+                if first_feasible_iteration is None:
+                    first_feasible_iteration = iteration
+                if objective < best_objective:
+                    best_objective = objective
+                    best = CentroidalPostureIKSolution(
+                        feasible=True,
+                        joint_positions_rad=dict(q),
+                        base_pose_world=base_pose,
+                        centroidal_pose_world=centroidal,
+                        anchor_poses_world=dict(result.anchor_poses_world),
+                        maximum_position_error_m=maximum_position_error,
+                        maximum_attitude_error_rad=maximum_attitude_error,
+                        iterations=relaxed_iterations + iteration,
+                    )
+                if (
+                    iteration - first_feasible_iteration
+                    >= self.config.feasible_refinement_iterations
+                ):
+                    break
+            if not rows:
+                return CentroidalPostureIKSolution(
+                    feasible=True,
+                    joint_positions_rad=dict(q),
+                    base_pose_world=base_pose,
+                    centroidal_pose_world=centroidal,
+                    anchor_poses_world={},
+                    maximum_position_error_m=0.0,
+                    maximum_attitude_error_rad=0.0,
+                    iterations=relaxed_iterations + iteration,
+                )
+            matrix = np.asarray(rows, dtype=float)
+            residual = np.asarray(residuals, dtype=float)
+            normal = matrix.T @ matrix
+            normal += (self.config.damping**2) * np.eye(len(ordered_ids))
+            right = matrix.T @ residual
+            for index, joint_id in enumerate(ordered_ids):
+                normal[index, index] += (
+                    self.config.continuity_regularization_weight
+                )
+                right[index] -= (
+                    self.config.continuity_regularization_weight
+                    * (q[joint_id] - reference_q[joint_id])
+                )
+                if joint_id in pitch_ids:
+                    normal[index, index] += (
+                        self.config.pitch_joint_regularization_weight
+                    )
+                    right[index] -= (
+                        self.config.pitch_joint_regularization_weight
+                        * q[joint_id]
+                    )
+            try:
+                delta = np.linalg.solve(normal, right)
+            except np.linalg.LinAlgError:
+                delta = np.linalg.lstsq(normal, right, rcond=None)[0]
+            delta = np.clip(
+                delta,
+                -self.config.maximum_joint_step_rad,
+                self.config.maximum_joint_step_rad,
+            )
+            q = _clip_joint_map(
+                {
+                    joint_id: q[joint_id] + float(delta[index])
+                    for index, joint_id in enumerate(ordered_ids)
+                },
+                limits,
+            )
+
+        if best is not None:
+            self._remember(
+                cache_key,
+                best.joint_positions_rad,
+                iterations=best.iterations,
+            )
+            return best
+        return CentroidalPostureIKSolution(
+            feasible=False,
+            joint_positions_rad=dict(q),
+            base_pose_world=last_base_pose,
+            centroidal_pose_world=last_centroidal_pose,
+            anchor_poses_world=last_anchor_poses,
+            maximum_position_error_m=maximum_position_error,
+            maximum_attitude_error_rad=maximum_attitude_error,
+            iterations=(
+                relaxed_iterations + self.config.maximum_iterations
+            ),
+        )
+
+    def _evaluate_fixed_q(
+        self,
+        *,
+        morphology: MorphologyGraph,
+        centroidal_pose_world: Pose7D,
+        q: Mapping[str, float],
+        references: Sequence[MeshBackedAnchorReference],
+        targets: Mapping[int, Pose7D],
+        iterations: int,
+        cache_hit: bool = False,
+    ) -> CentroidalPostureIKSolution:
+        base_pose = base_pose_for_centroidal_target(
+            morphology,
+            self.physical_model,
+            q,
+            tuple(float(value) for value in centroidal_pose_world[:3]),
+            tuple(float(value) for value in centroidal_pose_world[3:7]),
+            kinematics=self.kinematics,
+        )
+        result = self.kinematics.forward(
+            morphology,
+            self.physical_model,
+            q,
+            base_pose,
+            references,
+        )
+        centroidal = _centroidal_pose(
+            morphology,
+            self.physical_model,
+            q,
+            result.module_root_poses_world,
+            self._rigid_body_builder,
+        )
+        position_errors = [
+            _norm(
+                tuple(
+                    float(targets[reference.anchor.anchor_id][axis])
+                    - float(
+                        result.anchor_poses_world[
+                            reference.anchor.anchor_id
+                        ][axis]
+                    )
+                    for axis in range(3)
+                )
+            )
+            for reference in references
+        ]
+        attitude_errors = [
+            _norm(
+                _pose_rotation_error_vector(
+                    targets[reference.anchor.anchor_id],
+                    result.anchor_poses_world[
+                        reference.anchor.anchor_id
+                    ],
+                )
+            )
+            for reference in references
+        ]
+        maximum_position = max(position_errors, default=0.0)
+        maximum_attitude = max(attitude_errors, default=0.0)
+        return CentroidalPostureIKSolution(
+            feasible=(
+                maximum_position
+                <= self.config.anchor_position_tolerance_m
+                and maximum_attitude
+                <= self.config.anchor_attitude_tolerance_rad
+            ),
+            joint_positions_rad={
+                joint_id: float(value) for joint_id, value in q.items()
+            },
+            base_pose_world=base_pose,
+            centroidal_pose_world=centroidal,
+            anchor_poses_world=dict(result.anchor_poses_world),
+            maximum_position_error_m=maximum_position,
+            maximum_attitude_error_rad=maximum_attitude,
+            iterations=iterations,
+            cache_hit=cache_hit,
+        )
+
+    def _cache_key(
+        self,
+        *,
+        morphology: MorphologyGraph,
+        centroidal_pose_world: Pose7D,
+        targets: Mapping[int, Pose7D],
+        initial_q: Mapping[str, float],
+    ) -> tuple[object, ...]:
+        centroidal_inverse = inverse_pose(centroidal_pose_world)
+        relative_targets = []
+        for anchor_id in sorted(targets):
+            relative = compose_pose(
+                centroidal_inverse,
+                targets[anchor_id],
+            )
+            quaternion = tuple(float(value) for value in relative[3:7])
+            if quaternion[3] < 0.0:
+                quaternion = tuple(-value for value in quaternion)
+            relative_targets.append(
+                (
+                    int(anchor_id),
+                    *(
+                        round(float(value), 10)
+                        for value in relative[:3]
+                    ),
+                    *(round(value, 10) for value in quaternion),
+                )
+            )
+        return (
+            morphology.stable_hash(),
+            tuple(relative_targets),
+            tuple(
+                (joint_id, round(float(initial_q[joint_id]), 10))
+                for joint_id in initial_q
+            ),
+        )
+
+    def _remember(
+        self,
+        key: tuple[object, ...],
+        q: Mapping[str, float],
+        *,
+        iterations: int,
+    ) -> None:
+        if key not in self._solution_cache and (
+            len(self._solution_cache) >= self.config.maximum_cache_entries
+        ):
+            oldest = next(iter(self._solution_cache))
+            self._solution_cache.pop(oldest)
+        self._solution_cache[key] = (
+            {
+                joint_id: float(value)
+                for joint_id, value in q.items()
+            },
+            int(iterations),
+        )
+
+    def _relaxed_free_base_seed(
+        self,
+        *,
+        morphology: MorphologyGraph,
+        centroidal_pose_world: Pose7D,
+        q: Mapping[str, float],
+        reference_q: Mapping[str, float],
+        limits: Mapping[str, tuple[float, float]],
+        references: Sequence[MeshBackedAnchorReference],
+        targets: Mapping[int, Pose7D],
+        pitch_ids: frozenset[str],
+    ) -> tuple[dict[str, float], int]:
+        """Find a deterministic q seed while temporarily relaxing the CoM."""
+
+        if not references:
+            return dict(q), 0
+        np = _numpy()
+        current_q = dict(q)
+        base_pose = base_pose_for_centroidal_target(
+            morphology,
+            self.physical_model,
+            current_q,
+            tuple(float(value) for value in centroidal_pose_world[:3]),
+            tuple(float(value) for value in centroidal_pose_world[3:7]),
+            kinematics=self.kinematics,
+        )
+        best_q = dict(current_q)
+        best_objective = math.inf
+        for iteration in range(
+            1, self.config.relaxed_seed_maximum_iterations + 1
+        ):
+            result = self.kinematics.compute(
+                morphology,
+                self.physical_model,
+                current_q,
+                base_pose,
+                references,
+            )
+            rows: list[list[float]] = []
+            residuals: list[float] = []
+            position_errors: list[float] = []
+            attitude_errors: list[float] = []
+            joint_count = len(current_q)
+            for reference in references:
+                anchor_id = reference.anchor.anchor_id
+                actual = result.anchor_poses_world[anchor_id]
+                target = targets[anchor_id]
+                position_error = tuple(
+                    float(target[axis]) - float(actual[axis])
+                    for axis in range(3)
+                )
+                attitude_error = _pose_rotation_error_vector(
+                    target, actual
+                )
+                position_errors.append(_norm(position_error))
+                attitude_errors.append(_norm(attitude_error))
+                jacobian = result.anchor_jacobians[anchor_id]
+                base_position_jacobian = _base_position_jacobian(
+                    actual[:3], base_pose[:3]
+                )
+                for axis in range(3):
+                    rows.append(
+                        [
+                            *(
+                                self.config.position_weight
+                                * float(jacobian[axis][column])
+                                for column in range(joint_count)
+                            ),
+                            *(
+                                self.config.position_weight * float(value)
+                                for value in base_position_jacobian[axis]
+                            ),
+                            *(
+                                self.config.position_weight
+                                * (1.0 if axis == column else 0.0)
+                                for column in range(3)
+                            ),
+                        ]
+                    )
+                    residuals.append(
+                        self.config.position_weight
+                        * position_error[axis]
+                    )
+                for axis in range(3):
+                    rows.append(
+                        [
+                            *(
+                                self.config.attitude_weight
+                                * float(jacobian[axis + 3][column])
+                                for column in range(joint_count)
+                            ),
+                            *(
+                                self.config.attitude_weight
+                                * (1.0 if axis == column else 0.0)
+                                for column in range(3)
+                            ),
+                            0.0,
+                            0.0,
+                            0.0,
+                        ]
+                    )
+                    residuals.append(
+                        self.config.attitude_weight
+                        * attitude_error[axis]
+                    )
+            objective = sum(value * value for value in residuals)
+            if objective < best_objective:
+                best_objective = objective
+                best_q = dict(current_q)
+            if (
+                max(position_errors, default=0.0)
+                <= self.config.anchor_position_tolerance_m
+                and max(attitude_errors, default=0.0)
+                <= self.config.anchor_attitude_tolerance_rad
+            ):
+                return dict(current_q), iteration
+            matrix = np.asarray(rows, dtype=float)
+            residual = np.asarray(residuals, dtype=float)
+            normal = matrix.T @ matrix
+            normal += (self.config.damping**2) * np.eye(
+                matrix.shape[1]
+            )
+            right = matrix.T @ residual
+            for index, joint_id in enumerate(current_q):
+                normal[index, index] += (
+                    self.config.continuity_regularization_weight
+                )
+                right[index] -= (
+                    self.config.continuity_regularization_weight
+                    * (current_q[joint_id] - reference_q[joint_id])
+                )
+                if joint_id in pitch_ids:
+                    normal[index, index] += (
+                        self.config.pitch_joint_regularization_weight
+                    )
+                    right[index] -= (
+                        self.config.pitch_joint_regularization_weight
+                        * current_q[joint_id]
+                    )
+            try:
+                delta = np.linalg.solve(normal, right)
+            except np.linalg.LinAlgError:
+                delta = np.linalg.lstsq(normal, right, rcond=None)[0]
+            joint_delta = np.clip(
+                delta[:joint_count],
+                -self.config.maximum_joint_step_rad,
+                self.config.maximum_joint_step_rad,
+            )
+            rotation_delta = _bounded_vector(
+                delta[joint_count : joint_count + 3],
+                self.config.maximum_base_rotation_step_rad,
+            )
+            translation_delta = _bounded_vector(
+                delta[joint_count + 3 :],
+                self.config.maximum_base_translation_step_m,
+            )
+            current_q = _clip_joint_map(
+                {
+                    joint_id: current_q[joint_id]
+                    + float(joint_delta[index])
+                    for index, joint_id in enumerate(current_q)
+                },
+                limits,
+            )
+            base_pose = _apply_base_delta(
+                base_pose,
+                rotation_delta,
+                translation_delta,
+            )
+        return best_q, self.config.relaxed_seed_maximum_iterations
+
+    def _fixed_centroidal_anchor_jacobians(
+        self,
+        *,
+        morphology: MorphologyGraph,
+        centroidal_pose_world: Pose7D,
+        q: Mapping[str, float],
+        limits: Mapping[str, tuple[float, float]],
+        references: Sequence[MeshBackedAnchorReference],
+        nominal: Mapping[int, Pose7D],
+    ) -> dict[int, tuple[tuple[float, ...], ...]]:
+        """Differentiate q -> recentered-base -> anchor pose directly."""
+
+        rows = {
+            reference.anchor.anchor_id: [[] for _ in range(6)]
+            for reference in references
+        }
+        requested_step = float(self.config.finite_difference_step_rad)
+        for joint_id in q:
+            lower, upper = limits[joint_id]
+            plus_room = upper - float(q[joint_id])
+            minus_room = float(q[joint_id]) - lower
+            if plus_room > 1.0e-12:
+                step = min(requested_step, plus_room)
+                perturbed_q = dict(q)
+                perturbed_q[joint_id] = float(q[joint_id]) + step
+                denominator = step
+                forward_order = "after"
+            elif minus_room > 1.0e-12:
+                step = min(requested_step, minus_room)
+                perturbed_q = dict(q)
+                perturbed_q[joint_id] = float(q[joint_id]) - step
+                denominator = step
+                forward_order = "before"
+            else:
+                raise SchemaValidationError(
+                    f"Dock joint {joint_id!r} has no finite-difference room"
+                )
+            perturbed_base = base_pose_for_centroidal_target(
+                morphology,
+                self.physical_model,
+                perturbed_q,
+                tuple(float(value) for value in centroidal_pose_world[:3]),
+                tuple(float(value) for value in centroidal_pose_world[3:7]),
+                kinematics=self.kinematics,
+            )
+            perturbed = self.kinematics.forward(
+                morphology,
+                self.physical_model,
+                perturbed_q,
+                perturbed_base,
+                references,
+            ).anchor_poses_world
+            for reference in references:
+                anchor_id = reference.anchor.anchor_id
+                derivative = (
+                    _pose_finite_difference(
+                        nominal[anchor_id],
+                        perturbed[anchor_id],
+                        denominator,
+                    )
+                    if forward_order == "after"
+                    else _pose_finite_difference(
+                        perturbed[anchor_id],
+                        nominal[anchor_id],
+                        denominator,
+                    )
+                )
+                for axis, value in enumerate(derivative):
+                    rows[anchor_id][axis].append(float(value))
+        return {
+            anchor_id: tuple(
+                tuple(float(value) for value in row)
+                for row in values
+            )
+            for anchor_id, values in rows.items()
+        }
 
 
 class ArticulatedTrajectoryReachabilityEvaluator:
@@ -590,7 +1380,19 @@ class ArticulatedTrajectoryReachabilityEvaluator:
             references = resolve_mesh_backed_anchor_references(
                 context.morphology_graph,
                 self.physical_model,
-                [value.anchor_id for value in active],
+                sorted(
+                    {
+                        value.anchor_id for value in active
+                    }
+                    | set(
+                        (
+                            {}
+                            if posture is None
+                            or posture.free_anchor_pose_targets is None
+                            else posture.free_anchor_pose_targets
+                        )
+                    )
+                ),
             )
             fk = self.kinematics.forward(
                 context.morphology_graph,
@@ -608,7 +1410,13 @@ class ArticulatedTrajectoryReachabilityEvaluator:
             else posture.free_anchor_pose_targets
         )
         active_anchor_ids = {value.anchor_id for value in active}
-        if set(target_poses) != active_anchor_ids:
+        assigned_anchor_ids = {
+            value.anchor_id for value in assignments
+        }
+        if (
+            not active_anchor_ids.issubset(target_poses)
+            or not set(target_poses).issubset(assigned_anchor_ids)
+        ):
             _append_code(codes, REACHABILITY_ANCHOR_TARGET_CODE)
         minimum_position_margin = math.inf
         minimum_normal_margin = math.inf
@@ -650,8 +1458,10 @@ class ArticulatedTrajectoryReachabilityEvaluator:
                 _append_code(codes, REACHABILITY_CONTACT_POSITION_CODE)
             if normal_error > self.config.contact_normal_tolerance_rad:
                 _append_code(codes, REACHABILITY_CONTACT_NORMAL_CODE)
-            target = target_poses.get(assignment.anchor_id)
-            if target is None:
+        for anchor_id, target in target_poses.items():
+            actual = fk.anchor_poses_world.get(anchor_id)
+            if actual is None:
+                _append_code(codes, REACHABILITY_GEOMETRY_CODE)
                 continue
             target_position_error = _norm(
                 tuple(float(target[index]) - float(actual[index]) for index in range(3))
@@ -765,6 +1575,49 @@ def _global_joint_limits(
             float(joint.limit_upper),
         )
     return values
+
+
+def _global_pitch_joint_ids(
+    ordered_ids: Sequence[str],
+    physical_model: PhysicalModel,
+) -> frozenset[str]:
+    """Resolve pitch-mechanism joints from PhysicalModel Dock semantics."""
+
+    pitch_local_ids = {
+        str(mechanism_joint_id)
+        for port in physical_model.dock_ports
+        if port.port_type == "pitch_dock"
+        for mechanism_joint_id in (
+            port.mechanical_limits.get("mechanism_joint_id"),
+        )
+        if isinstance(mechanism_joint_id, str) and mechanism_joint_id
+    }
+    return frozenset(
+        global_id
+        for global_id in ordered_ids
+        if global_id.split(":", 1)[-1] in pitch_local_ids
+    )
+
+
+def _joint_regularization_weights(
+    ordered_ids: Sequence[str],
+    physical_model: PhysicalModel,
+    config: ArticulatedIKConfig,
+) -> dict[str, float]:
+    pitch_joint_ids = _global_pitch_joint_ids(
+        ordered_ids, physical_model
+    )
+    return {
+        joint_id: (
+            config.joint_regularization_weight
+            + (
+                config.pitch_joint_regularization_weight
+                if joint_id in pitch_joint_ids
+                else 0.0
+            )
+        )
+        for joint_id in ordered_ids
+    }
 
 
 def _clip_joint_map(
@@ -1012,6 +1865,57 @@ def _pose_attitude_error(expected: Pose7D, actual: Pose7D) -> float:
     return 2.0 * math.acos(max(-1.0, min(1.0, abs(quaternion[3]))))
 
 
+def _pose_rotation_error_vector(
+    expected: Pose7D,
+    actual: Pose7D,
+) -> tuple[float, float, float]:
+    expected_rotation = transform_from_pose(expected).rotation
+    actual_rotation = transform_from_pose(actual).rotation
+    delta = matmul(expected_rotation, transpose(actual_rotation))
+    x, y, z, w = (float(value) for value in quat_from_matrix(delta))
+    if w < 0.0:
+        x, y, z, w = -x, -y, -z, -w
+    vector_norm = math.sqrt(x * x + y * y + z * z)
+    if vector_norm <= 1.0e-12:
+        return (2.0 * x, 2.0 * y, 2.0 * z)
+    angle = 2.0 * math.atan2(vector_norm, max(0.0, w))
+    scale = angle / vector_norm
+    return (scale * x, scale * y, scale * z)
+
+
+def _pose_finite_difference(
+    before: Pose7D,
+    after: Pose7D,
+    denominator: float,
+) -> tuple[float, float, float, float, float, float]:
+    translation = tuple(
+        (float(after[index]) - float(before[index])) / denominator
+        for index in range(3)
+    )
+    before_rotation = transform_from_pose(before).rotation
+    after_rotation = transform_from_pose(after).rotation
+    delta = matmul(after_rotation, transpose(before_rotation))
+    x, y, z, w = (float(value) for value in quat_from_matrix(delta))
+    if w < 0.0:
+        x, y, z, w = -x, -y, -z, -w
+    vector_norm = math.sqrt(x * x + y * y + z * z)
+    if vector_norm <= 1.0e-15:
+        rotation = (0.0, 0.0, 0.0)
+    else:
+        angle = 2.0 * math.atan2(vector_norm, max(0.0, w))
+        scale = angle / (vector_norm * denominator)
+        rotation = (scale * x, scale * y, scale * z)
+    return (*translation, *rotation)
+
+
+def _validate_pose7d(value: Sequence[float], name: str) -> None:
+    if len(value) != 7 or any(
+        not math.isfinite(float(item)) for item in value
+    ):
+        raise SchemaValidationError(f"{name} must be a finite Pose7D")
+    _normalized_quaternion(value[3:7])
+
+
 def _angle(left: Sequence[float], right: Sequence[float]) -> float:
     return math.acos(max(-1.0, min(1.0, _dot(_unit(left), _unit(right)))))
 
@@ -1071,11 +1975,15 @@ def _numpy() -> object:
 __all__ = [
     "ARTICULATED_IK_TEACHER_VERSION",
     "ARTICULATED_REACHABILITY_VERSION",
+    "CENTROIDAL_POSTURE_IK_VERSION",
     "ArticulatedContactIKSolver",
     "ArticulatedIKConfig",
     "ArticulatedIKSolution",
     "ArticulatedReachabilityConfig",
     "ArticulatedTrajectoryReachabilityEvaluator",
+    "CentroidalPostureIKConfig",
+    "CentroidalPostureIKSolution",
+    "CentroidalPostureIKSolver",
     "base_pose_for_centroidal_target",
     "resolve_mesh_backed_anchor_references",
 ]

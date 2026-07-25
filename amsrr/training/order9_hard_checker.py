@@ -20,6 +20,13 @@ from amsrr.robot_model.physical_model_builder import (
     build_physical_model_from_config,
 )
 from amsrr.schemas.physical_model import PhysicalModel
+from amsrr.training.order9_posture_hard_gate import (
+    Order9PostureResolvingHardChecker,
+)
+from amsrr.training.order9_posture_resolver import (
+    Order9PostureCollisionObject,
+    Order9PostureTrajectoryResolver,
+)
 
 
 def build_order9_production_hard_checker(
@@ -27,12 +34,18 @@ def build_order9_production_hard_checker(
     *,
     config: Order9HardCheckerConfig | None = None,
     physical_model: PhysicalModel | None = None,
-) -> ContactWrenchTrajectoryFeasibilityChecker:
+    collision_object: Order9PostureCollisionObject | None = None,
+) -> Order9PostureResolvingHardChecker:
     resolved = config or Order9HardCheckerConfig()
     resolved.validate()
     resolved_physical_model = physical_model or build_physical_model_from_config(
         "configs/robot/robot_model.yaml"
     )
+    if collision_object is None:
+        raise ValueError(
+            "production Order 9 hard checker requires posture collision "
+            "object identity"
+        )
     qp = LightweightContactWrenchQPEvaluator(
         LightweightContactQPConfig(
             force_scale_n=resolved.qp_force_scale_n,
@@ -46,7 +59,7 @@ def build_order9_production_hard_checker(
         shadow_backend=shadow_backend,
         qp_evaluator=qp,
     )
-    return ContactWrenchTrajectoryFeasibilityChecker(
+    resolved_checker = ContactWrenchTrajectoryFeasibilityChecker(
         config=ContactWrenchTrajectoryCheckerConfig(
             evaluation_mode="production",
             qp_residual_threshold=resolved.qp_residual_threshold,
@@ -56,6 +69,15 @@ def build_order9_production_hard_checker(
         physics_evaluator=evaluator,
         reachability_evaluator=ArticulatedTrajectoryReachabilityEvaluator(
             resolved_physical_model
+        ),
+    )
+    return Order9PostureResolvingHardChecker(
+        physical_model=resolved_physical_model,
+        resolved_checker=resolved_checker,
+        resolver=Order9PostureTrajectoryResolver(
+            resolved_physical_model,
+            collision_object=collision_object,
+            require_native_solver=True,
         ),
     )
 

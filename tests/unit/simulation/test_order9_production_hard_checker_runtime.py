@@ -129,6 +129,14 @@ def test_production_binding_authenticates_descriptor_before_building_checker() -
     assert runtime.checker.config.evaluation_mode == "production"
     assert runtime.checker.config.require_reachability_evaluation is True
     assert runtime.checker.reachability_evaluator is not None
+    assert (
+        runtime.checker.resolver.collision_object.object_id
+        == bucket.object_id
+    )
+    assert (
+        runtime.checker.resolver.ik_solver.solver_version
+        == "centroidal_posture_ik_cpp_eigen_fcl_convex_v1"
+    )
     assert runtime.bucket.bucket_hash
     runtime.close()
     assert transport.closed is True

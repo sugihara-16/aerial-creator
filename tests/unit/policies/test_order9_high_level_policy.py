@@ -319,6 +319,32 @@ def test_pi_h_hard_gate_records_rejection_as_independent_ppo_boundary() -> None:
     assert update.sample_count == 2
 
 
+def test_pi_h_hard_gate_keeps_raw_sample_and_executes_resolved_copy() -> None:
+    context = _context()
+    policy = Order9AutoregressiveHighLevelPolicy(
+        Order9HighLevelPolicyConfig(d_model=32, num_knots=3)
+    )
+    checker = _ResolvingSequencedChecker([True])
+
+    decision = sample_order9_pi_h_with_hard_checker(
+        policy,
+        context,
+        checker=checker,
+        fallback=_StaticFallback(policy.propose(context)),
+        checkpoint_sha256="f" * 64,
+    )
+
+    assert decision.accepted_sample is not None
+    raw = decision.accepted_sample.trajectory
+    assert raw.derived_mode_label != "unit-test-resolved-execution"
+    assert decision.execution_trajectory is not raw
+    assert (
+        decision.execution_trajectory.derived_mode_label
+        == "unit-test-resolved-execution"
+    )
+    assert checker.checked_raw_hash == raw.stable_hash()
+
+
 def test_pi_h_fallback_is_executed_but_never_becomes_actor_transition() -> None:
     context = _context()
     policy = Order9AutoregressiveHighLevelPolicy(
@@ -506,6 +532,23 @@ class _SequencedChecker:
         )
         result.validate()
         return result
+
+
+class _ResolvingSequencedChecker(_SequencedChecker):
+    def __init__(self, outcomes: list[bool]) -> None:
+        super().__init__(outcomes)
+        self.checked_raw_hash: str | None = None
+
+    def check(self, trajectory, context) -> TrajectoryFeasibilityResult:
+        self.checked_raw_hash = trajectory.stable_hash()
+        return super().check(trajectory, context)
+
+    def execution_trajectory(self, trajectory, _context):
+        if trajectory.stable_hash() != self.checked_raw_hash:
+            raise AssertionError("execution request differs from checked raw action")
+        resolved = type(trajectory).from_dict(trajectory.to_dict())
+        resolved.derived_mode_label = "unit-test-resolved-execution"
+        return resolved
 
 
 def _context(*, empty_candidates: bool = False):
