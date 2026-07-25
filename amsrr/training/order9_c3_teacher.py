@@ -206,11 +206,18 @@ def build_order9_c3_articulated_teacher(
                 morphology_graph=design.target_morphology,
                 geometry_descriptors=built.scene_graph.geometry_descriptors,
             )
+            neutral_observation = _neutral_runtime_observation(
+                design.target_morphology,
+                physical_model,
+                task_spec,
+                phase_label="contact_acquisition",
+            )
             high_level_context = HighLevelPolicyContext(
                 built.irg,
                 envelope,
                 design.target_morphology,
                 candidates,
+                runtime_observation=neutral_observation,
             )
             plan = Order9ArticulatedTrajectoryTeacher(
                 physical_model,
@@ -231,11 +238,7 @@ def build_order9_c3_articulated_teacher(
                 envelope,
                 design.target_morphology,
                 candidates,
-                runtime_observation=_neutral_runtime_observation(
-                    design.target_morphology,
-                    physical_model,
-                    task_spec,
-                ),
+                runtime_observation=neutral_observation,
             )
             evaluations = (
                 ArticulatedTrajectoryReachabilityEvaluator(
@@ -334,6 +337,8 @@ def _neutral_runtime_observation(
     morphology: MorphologyGraph,
     physical_model: PhysicalModel,
     task_spec: TaskSpec,
+    *,
+    phase_label: str | None = None,
 ) -> RuntimeObservation:
     dock_ids = sorted(
         {
@@ -364,7 +369,7 @@ def _neutral_runtime_observation(
         ],
         contact_states=[],
         controller_status=ControllerStatus(status="ok", qp_feasible=True),
-        task_progress=TaskProgressState(),
+        task_progress=TaskProgressState(phase_label=phase_label),
     )
 
 

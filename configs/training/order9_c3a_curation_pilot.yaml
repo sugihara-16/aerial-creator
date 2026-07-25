@@ -1,0 +1,122 @@
+version: order9_c3a_manual_curation_pilot_v1
+review_status: pending_final_pose_review
+
+# This is a human-inspection pilot, not a production C3 bucket manifest.
+# A case becomes eligible for later Isaac admission only after:
+#   1. surface_port_ids and candidate_group_id are pinned,
+#   2. the final actual-mesh pose is accepted by the user, and
+#   3. real-Isaac collision/path replay passes.
+semantic_scope: two_contact_c3a_human_mesh_curation_only
+
+sources:
+  morphology_pool: artifacts/p4_full/order9/morphology_pool.json
+  morphology_assets: artifacts/p4_full/order9/c3_preparation/morphology_assets/manifest.json
+  robot_model_config: configs/robot/robot_model.yaml
+  source_urdf: assets/robots/holon/holon.urdf
+  curriculum_config: configs/training/order9_learning_curriculum.yaml
+  canonical_order8_task_bucket: artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/rollout_buckets/buckets/train-000000-5fecfad4f44f/task_spec.json
+
+selection:
+  existing_train_pool_seed: 93013
+  generated_eight_module_chain_seed: 93012039
+  generated_eight_module_chain_structural_hash: 4e6c4402c09a2f42e3aa265d7e2cc19b2124aa4dfab6198af2a2af1db1fd2735
+  required_case_count: 12
+
+cases:
+  - case_id: c3a-02-chain
+    module_count: 2
+    topology: chain
+    structural_hash: 5fecfad4f44f58d56035c5758b30af7ff57ef21c1c0f638c1c005212cce37d47
+    structural_source: existing_train_pool
+    selection_note: initial random graph had no feasible two-surface IK assignment and was replaced within the same train stratum
+    surface_port_ids: [3, 7]
+    candidate_group_id: slot_0:grasp_pair:0
+
+  - case_id: c3a-03-chain
+    module_count: 3
+    topology: chain
+    structural_hash: 6a3d6b75d9c13aa4c11259f9b873060f02f78f034801aa03dbda6c7619816fc8
+    structural_source: existing_train_pool
+    selection_note: initial graph required a pitch surface and was replaced by a train-stratum graph with a feasible yaw-yaw assignment
+    surface_port_ids: [2, 6]
+    candidate_group_id: slot_0:grasp_pair:0
+
+  - case_id: c3a-04-chain
+    module_count: 4
+    topology: chain
+    structural_hash: 0e86a4ff3e71b28b176f2ae977eba8e01c2c6dfbdbe76e38ca540d56fb9f4a5e
+    structural_source: existing_train_pool
+    surface_port_ids: [3, 15]
+    candidate_group_id: slot_0:grasp_pair:0
+
+  - case_id: c3a-04-branched
+    module_count: 4
+    topology: branched
+    structural_hash: effffde1670f0f854f4575e584a2058ec006455808a7175820f8199ee28f7fbf
+    structural_source: existing_train_pool
+    surface_port_ids: [2, 11]
+    candidate_group_id: slot_0:grasp_pair:0
+
+  - case_id: c3a-05-chain
+    module_count: 5
+    topology: chain
+    structural_hash: 4b0f3309f0f910d0576717066d0894173b388dd13465e16f7b3491201e9bb285
+    structural_source: existing_train_pool
+    surface_port_ids: [15, 19]
+    candidate_group_id: slot_0:grasp_pair:1
+
+  - case_id: c3a-05-branched
+    module_count: 5
+    topology: branched
+    structural_hash: 5bf11e12e4d0c5e5f7115dbd80b17852e033131cdf2ed5ade89f3a89655d541c
+    structural_source: existing_train_pool
+    surface_port_ids: [3, 14]
+    candidate_group_id: slot_0:grasp_pair:1
+
+  - case_id: c3a-06-chain
+    module_count: 6
+    topology: chain
+    structural_hash: de92a533003f89644c550e9021af1929e66acac246bcaf3402bcd8de1810a593
+    structural_source: existing_train_pool
+    surface_port_ids: [14, 23]
+    candidate_group_id: slot_0:grasp_pair:2
+
+  - case_id: c3a-06-branched
+    module_count: 6
+    topology: branched
+    structural_hash: 3f12a3f6afaae5827d364e43cfa3b3beb2a7aef6d814628219a29281d3e21ae4
+    structural_source: existing_train_pool
+    surface_port_ids: [10, 19]
+    candidate_group_id: slot_0:grasp_pair:1
+
+  - case_id: c3a-07-chain
+    module_count: 7
+    topology: chain
+    structural_hash: 176cc1d8cbd7cc5b669dea884c894d26d7a064967e56c8be36a36d8b124c46aa
+    structural_source: existing_train_pool
+    surface_port_ids: [19, 26]
+    candidate_group_id: slot_0:grasp_pair:0
+
+  - case_id: c3a-07-branched
+    module_count: 7
+    topology: branched
+    structural_hash: 7fcdf924d99c82c27bb3cb7ad3de038f2b334840d735ede91c07be2d7769146e
+    structural_source: existing_train_pool
+    surface_port_ids: [22, 26]
+    candidate_group_id: slot_0:grasp_pair:1
+
+  - case_id: c3a-08-chain
+    module_count: 8
+    topology: chain
+    structural_hash: 4e6c4402c09a2f42e3aa265d7e2cc19b2124aa4dfab6198af2a2af1db1fd2735
+    structural_source: generated_train_candidate
+    surface_port_ids: [30, 27]
+    candidate_group_id: slot_0:grasp_pair:0
+
+  - case_id: c3a-08-branched
+    module_count: 8
+    topology: branched
+    structural_hash: f647dd03d229e1b7ec29a66446c4305a96ec13e7fa1113cd881e417411543dca
+    structural_source: existing_train_pool
+    surface_port_ids: [27, 30]
+    candidate_group_id: slot_0:grasp_pair:1
