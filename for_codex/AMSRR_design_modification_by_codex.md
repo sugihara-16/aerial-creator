@@ -2,7 +2,461 @@
 
 This file records implementation-time supplements or deviations from `A-MSRR_codex_ready_spec_v0_4_ja.md`.
 
+## 2026-07-27
+
+### Order 9 C3 Accepted Nominal Replay and Runtime Planner Boundary
+
+- The deterministic configuration-space planner is an offline `pi_H` teacher
+  generator only.  C3 learning and deployed inference must not instantiate or
+  execute that planner.  The final human-reviewed approach/contact trajectories
+  are immutable, SHA-256-bound training inputs.
+- The accepted C3 set contains all `42` buckets (`28` train, `14` validation).
+  User-reviewed replacements supersede aggregate indices `19`, `27`, and `41`;
+  the final set manifest SHA-256 is
+  `117065d301b680b660ae138ba94824b83ba1bae7a3544e2ad499a3bee1d31f4c`.
+  The separate human-review record binds every exact artifact and animation
+  scene hash and records `42/42` accepted decisions.  This review establishes
+  ideal-tracking nominal geometry only, not learned-policy or dynamics success.
+- Each production rollout bucket binds one accepted component artifact,
+  timeline, collision-validation record, animation scene, and selected surface
+  pair by hash.  Runtime loading fails closed on a changed bucket/task/
+  structure/PhysicalModel identity, missing or rejected human decision,
+  changed bytes, non-accepted collision record, or a request to enable the
+  configuration-space planner.
+- During C3, the saved nominal trajectory is materialized as device tensors at
+  `10 Hz`.  Its CoM pose/twist and nominal Dock-joint position/velocity are
+  linearly sampled on the `50 Hz` controller clock; after the accepted phase
+  trajectory ends, the final reference is held.  `pi_L` consumes the current
+  nominal reference and produces its learned correction, after which QPID/QP
+  remains the sole owner of final actuator commands.
+- This replay rule is C3-specific.  Once learned `pi_H` is introduced in later
+  curriculum stages, its `1--2 Hz`, `1--3 s` horizon of CoM/anchor poses and
+  wrench ranges is resolved by the deterministic trajectory IK into the same
+  nominal-reference contract.  The offline configuration-space teacher is
+  still not run at learning or inference time.
+
+### Order 9 C3 Initializer Physical-Model Rebind
+
+- The C2-derived active-knot initializer was created before the approved pitch
+  grasp-frame and collision-mesh URDF update.  Its tensors and policy contracts
+  remain applicable, but its checkpoint metadata carried the obsolete
+  PhysicalModel hash.  A C3 PPO parent must match the current PhysicalModel
+  fail-closed; silently accepting the old hash is prohibited.
+- A separate metadata-only rebind artifact copies every policy tensor exactly,
+  preserves the C2 parent, schedule, stage, feature/action contracts, random
+  seed, and initializer status, and changes only the target PhysicalModel
+  provenance plus explicit rebind ancestry.  Source and target state-dict hash
+  are both
+  `aeeef39db0b72f36571913f60d2266dbb828b250b81e1bde647baac18075b45d`.
+  The rebound checkpoint SHA-256 is
+  `c926f783bd5b868ac393d8d3f8d6b9edd988c8cfb441649218fded88c27d8e52`;
+  its current PhysicalModel hash is
+  `23dfd5a15d170b356e00a188f952afe98b5646b728a245493c36de36f789591a`.
+- This is an artifact-lineage correction, not retraining, transfer learning,
+  reward modification, architecture modification, or a relaxation of physical
+  validation.  Stage startup now checks the initializer PhysicalModel hash
+  before collection rather than waiting for the first PPO update.
+
+### Order 9 C3 Production Preflight Boundary
+
+- The production setting is `1024` Isaac environments per collector process
+  and `256` rollout steps per environment.  One update consists of one train
+  and one validation shard (`524,288` environment steps); the configured C3
+  target resolves to `14` complete updates (`7,340,032` environment steps).
+- No-training real-Isaac smoke evidence covers the rebound initializer on the
+  accepted nominal path and a worst-case eight-module accepted bucket at
+  `1024` environments.  TensorBoard evidence contains reward terms by phase,
+  phase occupancy, task/safety/QP rates, throughput, GPU load, process memory,
+  and system load.  The complete preflight is frozen in
+  `c3_preflight_accepted_nominal_v1/preflight_manifest_v1.json`, SHA-256
+  `53916f9c2731c22ad0fa3b40362ed2ce5de0be46edfb302493acc2e88d5da4f4`.
+- These checks authorize starting C3 collection/training; they do not claim a
+  PPO update, grasp, lift, transport, release, or task-success result.
+
+## 2026-07-26
+
+### Order 9 Contact-Acquisition Local Configuration-Space Planner
+
+- The deterministic warm-up teacher uses different configuration-space
+  planning semantics by task phase.  Detached `approach` motion continues to
+  use the global overhead planner.  Once a collision-free pregrasp state has
+  been reached, `contact_acquisition` is a local closure problem and must not
+  use overhead or full-domain base samples merely because they are
+  collision-free.
+- Contact acquisition searches in the following deterministic order: the
+  direct pregrasp-to-grasp edge, a fixed coordinate-wise bridge, and a
+  seed-fixed local bidirectional RRT-Connect fallback.  Every candidate edge
+  remains densely checked by the same convex self/object/support/ground
+  oracle.  The local base domain is restricted to a `0.03 m` tube around the
+  pregrasp-to-grasp translation segment and a ceiling of the higher endpoint
+  plus `0.02 m`; the fallback is capped at `160` samples.  These constraints
+  express contact-phase locality, not a relaxation of collision clearance or
+  final anchor accuracy.
+- A contact assignment/group is eligible for nominal C3 preparation only if
+  the teacher can produce the complete collision-checked approach and contact
+  path.  Final-pose feasibility or a successful approach alone is
+  insufficient.  On local-contact failure, generation tries the next
+  deterministic contact group and fails closed if none has a complete path.
+- Human review may reject a collision-clear final posture for an undesirable
+  morphology/anchor combination, such as an extreme vertical stacking that
+  is not itself a proxy collision.  Such a decision excludes only the exact
+  unordered surface-port pair for the hash-bound bucket structure; it does
+  not introduce a generalized posture heuristic, change the task or
+  structure, or relax any collision/path gate.  Replacement preparation must
+  reselect a different surface pair and regenerate the complete approach plus
+  contact trajectory.  Rejection files bind the source bucket manifest and
+  structural hash, and multiple reviewed rejections for one bucket are
+  cumulative.
+- When a bucket has a hash-bound human-reviewed final grasp pose, its accepted
+  Dock-joint vector may be reused only as an internal contact-goal IK seed.
+  The stored vector must reproduce the reviewed joint-solution hash before it
+  is admitted.  It does not become a learned `pi_H` output or bypass contact,
+  collision, joint-limit, or complete-path checks.  Once IK refines that seed
+  to an actually feasible goal, the local corridor is defined between the
+  reached pregrasp state and that refined feasible goal, rather than an
+  unrefined desired base pose.  The goal itself is still checked by the full
+  collision oracle before it defines the corridor endpoint.
+- This amendment is internal to the deterministic teacher and nominal IK
+  preparation.  Learned/runtime `pi_H` remains joint-command-free and still
+  outputs anchor assignment/poses, wrench ranges, and CoM poses; no
+  `PostureTarget`, `PolicyCommand`, observation/action, or checkpoint schema
+  changes.  The accepted configuration states remain optional internal IK
+  seeds/references as specified by the route-preservation amendment below.
+- Index 04 and 09 are the representative acceptance evidence.  Their contact
+  phases now use three-state local paths, with maximum centroidal-CoM rises of
+  `0.860 mm` and below `0.001 mm`, respectively, and both pass independent
+  saved-frame replay against current convex proxies.  This remains
+  ideal-tracking preparation evidence: exact visual-mesh swept collision,
+  learned `pi_L`, QPID, Isaac dynamics/contact, grasp/transport/release, and
+  C3 learning remain separate boundaries.
+- The completed current-lineage preparation contains all `42` buckets
+  (`28` train and `14` validation), with exactly six buckets at every module
+  count from `2` through `8`.  Independent replay accepted all `14,652`
+  saved frames against the current convex self/object/support/ground oracle.
+  The aggregate manifest SHA-256 is
+  `423188ed10a981fde97621d1655456253b789b92a9727855adb2adcf29d6b568`.
+  This completes nominal-trajectory preparation only; it does not broaden the
+  ideal-tracking evidence into learned-controller or physical task success.
+
+### Order 9 Configuration-Route Preservation Across the Joint-Free `pi_H` Boundary
+
+- `pi_H` remains joint-command-free: its learned/runtime output contains the
+  selected anchor assignment, anchor-pose trajectory, contact-wrench range,
+  and CoM-pose trajectory.  A deterministic configuration-space teacher may
+  use Dock-joint states internally to construct a collision-free route, but
+  those states are not added to the `pi_H` action, `PostureTarget`, or another
+  persisted learned-policy command.
+- For morphologies with redundant kinematics, projecting a valid full-state
+  planner waypoint to CoM and selected-anchor poses is not sufficient to
+  preserve the planned homotopy/posture: trajectory IK may converge to a
+  different task-space-equivalent joint solution and reintroduce a collision
+  or fail to advance.  Therefore the deterministic planner's joint state may
+  be passed across the internal teacher/resolver boundary as a per-raw-knot
+  IK seed/reference.  It initializes the nominal IK solve but does not replace
+  its task-space constraints, collision gate, rate limits, or final solved
+  joint trajectory.  Resolver evidence records the seed-trajectory hash when
+  this path is used.
+- A rolling-horizon teacher may cache the remaining accepted configuration
+  route to avoid replanning the same expensive full-state path.  Cache reuse
+  is permitted only when phase, morphology, allowed contacts, obstacle scene,
+  and exact desired goal identities match.  Before each reuse, the active edge
+  from the measured/current configuration is densely rechecked by the same
+  self/object/support/ground collision oracle; failure invalidates the cache
+  and triggers fresh planning.  Overhead shortcutting may remove only
+  collision-checked interior waypoints and must preserve the initial lift and
+  terminal descent semantics.
+- Contact acquisition goal search may include the immediately preceding
+  collision-free pregrasp state as an IK continuation seed in addition to the
+  desired-state and zero-state seeds.  This changes solver initialization,
+  not the contact target, anchor tolerance, collision margin, or feasibility
+  criterion.
+- The 5--8-module C3 nominal artifacts are ideal-tracking preparation
+  evidence only.  Independent convex-proxy replay accepted every saved frame,
+  but this does not substitute for learned `pi_L`/QPID/Isaac dynamics or
+  exact-mesh production admission.
+
+### Order 9 Bucket-Specific Support and Ground-Safe Nominal C3 Trajectories
+
+- The earlier three-bucket configuration-space pilot is superseded for C3
+  preparation by
+  `nominal_trajectories_bucket_support_ground_v4`.  Its diagnostic scene had
+  mixed a large virtual support with the bucket task geometry, so neither its
+  rejected support poses nor its HTML scene may be used as support/ground
+  evidence.
+- Each bucket now owns one finite support collision box derived from the same
+  object start/goal geometry used by the Order 8 raised-support task:
+  X size is transport distance plus object X size plus `0.05 m`, Y size is
+  object Y size minus `0.04 m` (with a `0.05 m` lower bound), height is the
+  task support height, and its centre is the object start/goal midpoint.  The
+  object bottom coincides with the support top at its initial pose.  The
+  object and support are checked as separate native convex obstacles so that
+  selected object contacts remain allowed while every robot/support contact
+  remains prohibited.
+- Ground collision is represented by the infinite half-space `z >= 0`, not a
+  second oversized box.  The native collision oracle conservatively checks
+  the world AABB of every current convex robot proxy and rejects a state when
+  its minimum Z is below the plane after applying the configured numerical
+  tolerance.  The finite blue ground patch in HTML is visualization only.
+  This is an additive internal collision-checker input; it changes no
+  persisted `TaskSpec`, policy observation/action, `PostureTarget`, or
+  `PolicyCommand` schema.
+- Receding-horizon configuration-space planning still validates every dense
+  edge sample against self/object/support/ground collisions.  To prevent the
+  former lateral/preform waypoint oscillation, a state already aligned above
+  the exact goal may take the fully checked vertical descent edge, and only
+  final-waypoint selection uses small equivalence tolerances (`5 mm`
+  translation, `1 mrad` attitude, `35 mrad` joint angle).  These tolerances
+  do not relax collision sampling or the exact final goal.  Detached approach
+  projection is capped at `0.20 rad/s` and the pilot-only intermediate anchor
+  reconstruction tolerance is `11 mm`; the final contact target/gate is
+  unchanged.
+- The regenerated 2/3/4-module trajectories contain `12/15/14` rolling
+  windows and last `36/45/42 s`.  An independent replay checked all
+  `361/451/421` saved frames (`1233/1233` total) with the current native
+  convex oracle.  Every frame passed self/object/support/ground checks with
+  zero violating pairs/proxies; minimum ground clearances are
+  `0.133512/0.131705/0.132969 m`.  Maximum intermediate anchor errors are
+  `10.901/9.093/9.734 mm`, within the explicitly pilot-scoped `11 mm` bound.
+- This evidence assumes exact tracking of the deterministic `pi_H` teacher
+  plus nominal IK trajectory.  It does not claim learned `pi_L`, QPID,
+  contact-force, dynamics, exact visual-mesh admission, Isaac execution,
+  grasp/transport success, production bucket promotion, or C3 learning.
+
+### Order 9 Deterministic Configuration-Space π_H Teacher
+
+- User-approved method amendment: the deterministic warm-up `pi_H` teacher
+  no longer authors approach/contact-acquisition motion with fixed
+  up/lateral/down staging heuristics.  It plans in the combined
+  configuration space of assembled-base `SE(3)` and every global Dock joint
+  using seed-fixed bidirectional RRT-Connect.  Every tree edge is sampled
+  against the native convex collision proxy before it may enter a teacher
+  path.  The learned/runtime `pi_H` interface is unchanged: the accepted
+  full-state path is projected back to phase-local CoM and free-anchor pose
+  targets, and deterministic dense IK still produces the nominal joint
+  trajectory downstream.
+- Convex collision is mandatory for C3 nominal generation.  A caller may no
+  longer produce or archive these trajectories with
+  `collision_gate_status=not_configured`.  Both the configuration-space edge
+  oracle and the 10 Hz posture resolver use the same current-lineage native
+  proxy geometry.  The existing requested `5 mm` non-contact margin,
+  `0.2 mm` numerical/proxy feasibility tolerance, and `2 mm` selected-contact
+  penetration bound remain unchanged.
+- Per the user's requested permissive pilot boundary, no new exact-STL,
+  visual-mesh, swept-volume, Isaac, contact-force, learned-policy, or dynamic
+  task-success gate was added.  Existing anchor tolerances also remain
+  unchanged (`10 mm` position and `0.1 rad` attitude in the C3 teacher
+  resolver).  This pilot proves convex-proxy collision-free nominal
+  construction only; later offline and Isaac admission remain separate.
+- Three current-lineage pilot buckets (2/3/4 modules) were generated under
+  `nominal_trajectories_configuration_space_v2`.  All `21` rolling windows
+  report convex collision acceptance and zero violating pairs; minimum
+  recorded clearance is `4.807--4.818 mm`, consistent with the requested
+  margin minus its unchanged numerical tolerance.  The respective plans use
+  `6/8/7` windows and last `18/24/21 s`.  No 42-bucket regeneration, C3
+  learning, checkpoint, reward, controller, or production promotion occurred.
+
 ## 2026-07-25
+
+### Order 9 Pitch-Dock Object-Grasp Contact Frame
+
+- The user-defined object-grasp frame for each pitch Dock is a fixed frame
+  translated exactly `+0.0424086 m` along the local X axis of
+  `pitch_connect_point_{1,2}`.  The authored
+  `pitch_grasp_contact_frame_{1,2}` links are object-contact semantics only:
+  structural Dock assembly continues to use the unchanged
+  `pitch_connect_point_{1,2}` frames.  Yaw Dock object-grasp frames remain
+  identical to their assembly connect frames.
+- `DockPortSpec` gains the backward-compatible optional transform
+  `grasp_contact_frame_from_connect`.  The PhysicalModel builder requires the
+  authored pitch frame and records its fixed transform; gripper-surface
+  resolution, grammar-created `RobotAnchor.local_pose`, fixed-morphology
+  teacher anchors, whole-structure kinematic checks, and curation markers all
+  consume the composed object-grasp frame.  The grammar identity advances to
+  `order9_holon_sequential_design_grammar_v3_grasp_contact_frame`; old v2
+  anchor records must not be silently reinterpreted.
+- This frame correction does not relax the existing `5 mm` non-contact
+  clearance or `2 mm` selected-contact penetration gates.  The regenerated
+  80-entry morphology pool preserves every split/module-count/structural-hash
+  tuple, while PhysicalModel-bound artifacts move to a separate
+  `morphology_assets_grasp_frame_v1` lineage.
+- A diagnostic four-module pitch/pitch case proves that IK can reach the new
+  frames (`0.897 mm` maximum contact-position error) while retaining
+  `6.511 mm` minimum non-contact clearance.  Final admission still fails:
+  selected pitch-mesh penetration is `3.388 mm`, above the unchanged `2 mm`
+  limit.  This residual matches the known approximately `5 mm` mesh
+  protrusion beyond the authored grasp frame and cannot be removed by changing
+  joint angles while keeping that frame on the requested object contact.
+  Therefore no pitch candidate is admitted from this diagnostic; pitch
+  candidate generation remains blocked until the mesh protrusion is removed
+  and the PhysicalModel-bound assets are regenerated.
+- Mesh-correction resolution (supersedes only the blocker in the preceding
+  bullet): the user removed the pitch-mesh protrusion and corrected the pitch
+  mesh orientation in the xacro, while also making rotor-arm 1/4 collision
+  geometry match their visual mesh.  The normalized runtime URDF now carries
+  the same geometry changes while preserving its intentional `thrust_1--4`
+  link normalization.  Exact-STL recomputation confirms that the six authored
+  same-module overlap pairs are unchanged; their manifest is rebound to the
+  new URDF and collision-mesh hashes rather than trusting the old exclusions.
+- The same four-module pitch/pitch case, surface ports `[0,12]` and contact
+  group `slot_0:grasp_pair:1`, now passes on the first collision-aware solve:
+  maximum selected-contact penetration is `0.864 mm` against the unchanged
+  `2 mm` limit, minimum non-contact clearance is `6.768 mm` against the
+  unchanged `5 mm` margin, and both violation counts are zero.  The earlier
+  pitch-candidate blocker is therefore resolved at the offline native gate.
+  This remains convex/FCL static-pose evidence; human review and subsequent
+  real-Isaac path/contact admission remain separate requirements.
+- C3a batch 004 resumes human curation on the corrected geometry with five
+  previously unused train-pool structures, one for every module count
+  `4--8`.  Every selected pair uses at least one pitch grasp frame: the
+  four- and five-module cases use pitch/yaw, while the six-, seven-, and
+  eight-module cases use pitch/pitch.  All five pass the unchanged native
+  gates with maximum selected-contact penetration `0.813--1.503 mm`,
+  minimum non-contact clearance `5.189--11.272 mm`, and zero violations.
+  They remain pending scene-hash-bound human Accept/Reject/Recalculate
+  decisions and are not production bucket or Isaac evidence.
+- Batch-004 disposition: the user subsequently accepted all five exact
+  scene hashes.  Hash-bound real-Isaac static-pose replay passed all five
+  saved base/joint solutions with selected penetration `<=2 mm`, no
+  non-selected object contact, and no prohibited cross-module physical
+  contact.  This does not supersede the required trajectory boundary:
+  no hash-bound closure path was replayed, so all five remain ineligible for
+  production promotion.  Static selected-contact force also exceeded the
+  unchanged Order 8 `30 N` diagnostic threshold in three cases
+  (`115.812`, `57.430`, and `61.737 N`); this is retained as a separate
+  limitation rather than silently converting a static collision pass into
+  grasp/transport evidence.
+- C3a batch 005 contains another five previously unused train-pool structures,
+  one for every module count `4--8`, and every pair again uses at least one
+  pitch grasp frame.  The four- and five-module cases use yaw/pitch; the
+  six-, seven-, and eight-module cases use pitch/pitch.  All five pass the
+  unchanged offline native gates with maximum selected-contact penetration
+  `1.502 mm`, minimum non-contact clearance `5.657 mm`, and zero violation
+  counts.  The user subsequently accepted all five exact scene hashes, and
+  hash-bound real-Isaac static-pose replay passed all five saved states.
+  Cases 04/05 measured `33.151/50.479 N`, above the unchanged `30 N`
+  diagnostic threshold; no closure trajectory was replayed, so none is
+  production-eligible.
+- C3a batch 006 contains five further unused train-pool structures, one for
+  every module count `4--8`.  Four- and eight-module cases use pitch/yaw;
+  five-, six-, and seven-module cases use pitch/pitch.  All five pass the
+  offline native gates with maximum selected-contact penetration `1.513 mm`,
+  minimum non-contact clearance `5.152 mm`, and zero violation counts.  They
+  were all accepted by the user.  The accepted four-module scene is
+  deterministic recalculation index `3`, with a user note that the whole
+  vehicle is strongly tilted.  Exact hash-bound Isaac replay passed the other
+  four scenes, but that four-module scene failed because the selected pitch
+  body had no physical contact observation; only its yaw-selected body
+  contacted.  This is a static admission failure even though the offline
+  convex gate and human geometry review passed.
+- C3a batch 007 uses the final unused train-pool structure in every
+  `4--8`-module stratum.  Four- and five-module cases use pitch/yaw; six-,
+  seven-, and eight-module cases use pitch/pitch.  The seven-module case
+  requires deterministic collision seed `6` and a `-20 mm` Y centroidal
+  offset.  All five pass the offline native gates with maximum selected
+  penetration `1.500 mm`, minimum non-contact clearance `5.132 mm`, and zero
+  violation counts.  The user accepted four scenes and rejected the
+  seven-module scene for visually excessive inter-body proximity/overlap.
+  Isaac did not execute the rejected scene; all four accepted scenes passed
+  static admission.  The four-/five-module selected-contact forces were
+  `30.866/35.434 N`, above the unchanged `30 N` diagnostic threshold, and no
+  trajectory was replayed, so none is production-eligible.
+- After batch 007, the unused existing-train-pool count is zero in every
+  `4--8`-module stratum (eight total train structures per stratum).  Further
+  curation cannot silently continue under the same provenance rule.  It must
+  either expand/regenerate the split-owned morphology pool or explicitly
+  admit isolated generated train candidates, with the resulting split and
+  artifact-lineage consequences recorded first.
+- Curation may pipeline computation across that human boundary: while one
+  batch remains open in the browser, the next batch may search unused
+  train-pool structures and prepare offline candidates.  The prepared batch
+  cannot replace the active review page, inherit acceptance, enter Isaac, or
+  alter a production bucket until the preceding exact-scene decisions are
+  recorded.  This is an operational scheduling rule only; it changes no
+  policy, feasibility, trajectory, dataset, or promotion semantics.
+
+### Order 9 C3a Accepted-Pose Real-Isaac Admission Boundary
+
+- The first five scene-hash-bound human-accepted C3a poses were replayed in
+  real Isaac from their exact final base/joint/object state.  The runner
+  authenticates the review decision, scene, morphology, generated URDF/USD,
+  PhysicalModel, Order 8 contact thresholds, and its own immutable bytes.
+  The IK pose is a generated-URDF `baselink` pose, so Isaac spawn uses the
+  hash-bound generated-URDF root-to-baselink transform rather than writing it
+  directly as the articulation-root pose.  Isaac collision filtering matches
+  the existing production arbitrary-morphology runtime: all same-module
+  internal pairs and the intended inter-module Dock pairs are filtered, while
+  every cross-module non-Dock pair and every non-selected robot/object pair is
+  monitored.  This avoids treating the known Isaac convex/importer
+  `main_body`/`thrust_1` same-module overlap as morphology self-collision; the
+  original exact-mesh/FCL gate remains responsible for the static geometry
+  check.
+- A raw PhysX patch alone is not physical-contact evidence.  The static
+  diagnostic reuses the hash-bound Order 8 thresholds and classifies a finite,
+  unsaturated patch as physical only when absolute solver force is at least
+  `0.5 N` or separation is at most `-0.1 mm`.  It archives pair-level raw and
+  physical counts, maximum force, minimum separation, exact-pose readback, GPU
+  resource evidence, and the missing-path limitation.  Five fixed-SHA runs
+  used runner SHA-256
+  `f247752193ac51821237dfd431c8816b344b84e28ba3bfded88b15a7e89320f2`;
+  all five passed the narrowly named
+  `static_pose_collision_contact_pass`: both assigned bodies had physical
+  object contact, selected penetration remained below `2 mm`, and there was
+  no cross-module non-Dock or non-selected robot/object contact.
+- This is **not** production C3 bucket admission.  The reviewed artifacts bind
+  only one final pose and contain no collision-admitted approach/closure path,
+  so all five retain `not_run_missing_bound_path` and the production-eligible
+  count is zero.  Static-spawn peak selected force also exceeded the unchanged
+  Order 8 `30 N` hard limit in three cases: `52.049 N` for the six-module
+  branched pose, `249.477 N` for the seven-module chain pose, and `37.492 N`
+  for the new eight-module branched pose.  The six-module chain and retried
+  eight-module branched poses measured `23.061 N` and `29.488 N`,
+  respectively.  These direct-penetration spawn transients are reported as a
+  limitation rather than silently used as either a static-pose rejection gate
+  or a runtime force pass.  No bucket was promoted and no learning/checkpoint
+  state changed.
+- Method-level decision remains open: either reduce/regenerate the nominal
+  contact penetration and require the `30 N` bound in this direct static
+  diagnostic, or bind and replay the actual collision-admitted
+  approach/closure trajectory and apply the unchanged runtime force gate
+  there.  Until that choice is approved and the missing path is supplied,
+  static human/Isaac results cannot be promoted to C3 production buckets.
+
+### Order 9 Selected-Contact Penetration Hard Gate
+
+- The ordinary convex/FCL collision gate continues to exempt only the
+  explicitly assigned anchor-link/object pairs from its non-contact `5 mm`
+  clearance requirement so that intended contact remains representable.
+  Those exempt pairs are no longer unchecked: the native kernel separately
+  evaluates their convex signed distance and fails final configuration
+  admission if maximum penetration exceeds `2 mm`.  This limit reuses the
+  existing Order 8 selected-contact `max_penetration_m` contract rather than
+  introducing a new task-specific tolerance.  A pair at positive separation
+  is not rejected by this penetration-only gate; physical contact existence
+  and force remain later Isaac/runtime evidence.
+- Admission now archives the penetration limit, maximum selected-contact
+  penetration, violating-pair count, and per-selected-link signed-distance
+  records.  The selected pairs remain outside the ordinary collision penalty,
+  so an invalid contact geometry is rejected rather than silently converted
+  into a `5 mm` non-contact gap.  The collision-aware solver/gate identity
+  advances to
+  `centroidal_posture_ik_cpp_eigen_fcl_convex_v2_contact_penetration`;
+  deployments must rebuild the hash-bound native extension.  No policy,
+  TaskSpec, morphology, trajectory, controller, reward, dataset, bucket, or
+  checkpoint schema changes.
+- The corrected gate separated the completed first human review exactly as
+  intended: accepted yaw contact links measured approximately `1.5 mm`
+  nominal convex penetration, while the four user-rejected poses contained
+  selected pitch-link penetration of approximately `42--47 mm`.  This is
+  convex-proxy static-pose evidence, not original-STL or Isaac contact,
+  dynamics, path, grasp, or transport evidence.
+- A separate five-case review batch preserves all four rejected structural
+  hashes and substitutes penetration-admitted yaw/yaw assignments; its fifth
+  case is a previously unused train-pool eight-module branched morphology.
+  All five have zero selected-contact and ordinary collision violations.
+  Maximum selected-contact penetration spans `1.472--1.542 mm`, and minimum
+  non-contact convex clearance spans `5.077--6.246 mm`.  The batch is
+  hash-bound and remains pending human review; it does not mutate the
+  completed twelve-case decision archive or any production C3 bucket.
 
 ### Order 9 Controller-Side Load-Limited Contact Preload
 
@@ -56,6 +510,49 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 - Curation now has two explicit inspection stages.  The neutral stage renders a top view of the actual URDF visual meshes with every free mesh-backed Dock surface labelled.  After a surface pair and object contact-candidate group are pinned, the existing articulated deterministic teacher solves the final grasp pose and an offline interactive viewer renders the actual URDF visual and collision STL instances, object geometry, selected surfaces, contact targets, and normals.  The browser viewer is an inspection aid only: it does not establish collision clearance, collision-free interpolation, controller tracking, dynamics, grasp, transport, or task success.
 - Human selections are reproducible rather than advisory.  The articulated-teacher configuration accepts optional exact contact-candidate-group and surface-port-pair selectors; when present, it fails closed instead of silently choosing another candidate.  Defaults preserve the existing exhaustive automatic search, and no persisted morphology, task, trajectory, feasibility, policy, controller, dataset, or checkpoint schema changes.
 - The pilot pins yaw-surface pairs for all `12` cases.  Every exact assignment passed the unchanged articulated IK tolerances and the independent hard reachability recheck.  Across the set, maximum contact position error is `0.538 mm`, maximum contact-normal error is `1.0683e-5 rad`, and maximum absolute pitch target is `0.000578 deg`.  These are kinematic results only.  Every case remains `pending_user_accept_or_reject`; only user-accepted poses may proceed to real-Isaac mesh collision/path replay, and only a subsequent Isaac pass may make a case eligible for production bucket admission.
+
+- Collision-aware curation v2 supplement (supersedes the v1 final-pose
+  selection, not its historical evidence): each pinned surface/contact
+  assignment now passes through the production native fixed-centroidal
+  convex/FCL posture IK and a separate post-solve `5 mm` collision admission
+  before it is presented for human review.  The curation-only build does not
+  require the production transport/release trajectory recheck because the
+  reviewed artifact is one static final grasp pose; this exclusion is
+  explicit in its metadata and cannot authorize a runtime trajectory.
+  Production teacher calls retain the full recheck by default.
+- Five v1 free-base-only assignments were rejected by the new collision-aware
+  admission and replaced by the first feasible pair in the unchanged
+  deterministic surface-pair ordering: 5-module branched `[14,18] / group 2`,
+  6-module chain `[13,21] / group 3`, 6-module branched `[8,19] / group 1`,
+  7-module chain `[16,27] / group 0`, and 8-module branched
+  `[18,29] / group 1`.  All twelve v2 candidates have zero prohibited
+  violating pairs; minimum convex clearance ranges from `5.099` to
+  `10.534 mm`.  This remains convex model evidence rather than original-mesh
+  or Isaac path/dynamics evidence.
+- The local interactive viewer now owns a review-only control plane:
+  `accept`, `reject`, and deterministic `recalculate` actions are persisted
+  to a scene-hash-bound `review_decisions.json`.  Recalculation keeps the
+  pinned morphology/surface/contact assignment and searches the next
+  deterministic CoM/joint seed, then returns the case to pending review.
+  These decisions never bypass collision admission, mutate a production
+  bucket, or constitute Isaac acceptance.
+- Curation-rendering frame correction: the collision-aware posture solution
+  expresses `base_pose_world` at the PhysicalModel `fc`/generated-URDF
+  `baselink`, whereas the WebGL scene places the generated URDF's root link.
+  The first v2 render passed the former directly as the latter and therefore
+  displayed every robot approximately `60.935 mm` above its solved pose even
+  though native IK/collision admission used the correct frame.  Those review
+  images are invalidated.  The viewer now derives `root_T_baselink` from each
+  generated URDF and applies
+  `world_T_root = world_T_baselink * inverse(root_T_baselink)`; scene
+  generation also fails closed unless every rendered selected-anchor pose
+  reproduces the IK solution.  The corrected viewer identity is
+  `order9_c3_curation_mesh_viewer_v3_baselink_frame_review`.  Across the
+  regenerated 12 cases, all 24 selected-anchor position residuals to their
+  planned object contacts remain within the unchanged native `5 mm`
+  tolerance (maximum `3.944 mm`, mean `0.341 mm`).  This correction changes
+  only human-review geometry and provenance; it does not upgrade planned
+  contact markers to measured Isaac contact evidence.
 
 ### Order 9 Articulated IK Pitch-Posture Preference
 
