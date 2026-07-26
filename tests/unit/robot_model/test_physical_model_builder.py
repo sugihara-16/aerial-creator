@@ -16,8 +16,8 @@ def test_physical_model_total_mass_positive() -> None:
 
     assert physical_model.model_id == "holon"
     assert physical_model.urdf_path.endswith("assets/robots/holon/holon.urdf")
-    assert len(physical_model.links) == 29
-    assert len(physical_model.joints) == 28
+    assert len(physical_model.links) == 31
+    assert len(physical_model.joints) == 30
     assert physical_model.aggregate_mass_kg == math.fsum(
         link.mass_kg for link in physical_model.links
     )
@@ -53,6 +53,10 @@ def test_physical_model_rotors_and_dock_ports() -> None:
     assert all(port.compatible_port_types for port in physical_model.dock_ports)
     pitch = next(port for port in physical_model.dock_ports if port.port_id == "pitch_connect_point_1")
     yaw = next(port for port in physical_model.dock_ports if port.port_id == "yaw_connect_point_1")
+    assert pitch.grasp_contact_frame_from_connect == pytest.approx(
+        (0.0424086, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+    )
+    assert yaw.grasp_contact_frame_from_connect is None
     relative = dock_module_relative_pose(pitch.local_pose, yaw.local_pose)
     assert pitch.local_pose[0] > 0.2
     assert yaw.local_pose[0] < -0.2

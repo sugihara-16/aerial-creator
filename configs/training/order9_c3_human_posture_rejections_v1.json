@@ -1,0 +1,25 @@
+{
+  "bucket_manifest_path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/rollout_buckets_current_lineage_v5/manifest.json",
+  "bucket_manifest_sha256": "6ff736540ef735a435c2748b56efcd41f680942b19b82af9a67431e15f29bbda",
+  "entries": [
+    {
+      "bucket_id": "train-000019-7fcdf924d99c",
+      "excluded_surface_port_id_pairs": [[21, 27]],
+      "reason": "human-rejected extreme projected module stacking in the nominal final posture",
+      "structural_hash": "7fcdf924d99c82c27bb3cb7ad3de038f2b334840d735ede91c07be2d7769146e"
+    },
+    {
+      "bucket_id": "train-000027-7fe33c662d36",
+      "excluded_surface_port_id_pairs": [[19, 22]],
+      "reason": "human-rejected extreme projected module stacking in the nominal final posture",
+      "structural_hash": "7fe33c662d369c3c40b4c5f241abcfdb4f2c368cc2109ffd0053b9b7ed2c82b0"
+    },
+    {
+      "bucket_id": "validation-000041-e5cebed20861",
+      "excluded_surface_port_id_pairs": [[18, 25]],
+      "reason": "human-rejected extreme projected module stacking in the nominal final posture",
+      "structural_hash": "e5cebed2086108b451fa54b4ca70a2bd7769c8c300d7c41180e42d6f74079d63"
+    }
+  ],
+  "rejection_version": "order9_c3_human_posture_rejection_v1"
+}

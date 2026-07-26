@@ -21,9 +21,9 @@ def test_urdf_parse_holon_if_present() -> None:
 def test_urdf_parse_holon_xacro_reference() -> None:
     model = load_urdf("module_urdf/holon.urdf.xacro", rotor_link_patterns=["thrust"])
 
-    assert len(model.links) == 29
-    assert len(model.joints) == 28
-    assert model.joint_type_counts == {"fixed": 16, "revolute": 8, "continuous": 4}
+    assert len(model.links) == 31
+    assert len(model.joints) == 30
+    assert model.joint_type_counts == {"fixed": 18, "revolute": 8, "continuous": 4}
     assert model.total_mass_kg > 0.0
     assert model.root_links == ["root"]
     assert model.frame_tree_valid

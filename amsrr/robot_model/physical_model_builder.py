@@ -6,7 +6,12 @@ from typing import Any
 
 from amsrr.robot_model.joint_actuator_model import JointActuatorModel, JointActuatorSpec, load_joint_actuator_model
 from amsrr.robot_model.thrust_model import ThrustModel, ThrustModelEntry, load_thrust_model, normalize_rotor_id
-from amsrr.robot_model.urdf_loader import URDFJoint, URDFModel, load_urdf
+from amsrr.robot_model.urdf_loader import (
+    URDFJoint,
+    URDFModel,
+    load_urdf,
+    rpy_to_quat,
+)
 from amsrr.robot_model.urdf_transforms import link_poses_in_module_frame
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.physical_model import (
@@ -133,6 +138,42 @@ def _mechanism_joint_for_port(urdf_model: URDFModel, parent_link: str) -> URDFJo
     return None
 
 
+def _grasp_contact_frame_from_connect(
+    urdf_model: URDFModel,
+    connect_joint: URDFJoint,
+    *,
+    port_type: str,
+) -> tuple[float, float, float, float, float, float, float] | None:
+    if port_type != "pitch_dock":
+        return None
+    prefix = "pitch_connect_point_"
+    if not connect_joint.name.startswith(prefix):
+        raise SchemaValidationError(
+            "pitch Dock connect joint does not use the expected "
+            f"{prefix!r} prefix: {connect_joint.name!r}"
+        )
+    suffix = connect_joint.name.removeprefix(prefix)
+    frame_link = f"pitch_grasp_contact_frame_{suffix}"
+    frame_joint = _joint_by_child(urdf_model).get(frame_link)
+    if frame_joint is None:
+        raise SchemaValidationError(
+            f"pitch Dock {connect_joint.name!r} has no authored "
+            f"grasp contact frame link {frame_link!r}"
+        )
+    if (
+        frame_joint.joint_type != "fixed"
+        or frame_joint.parent_link != connect_joint.child_link
+    ):
+        raise SchemaValidationError(
+            f"pitch grasp contact frame {frame_link!r} must be attached by "
+            f"a fixed joint directly to {connect_joint.child_link!r}"
+        )
+    return (
+        *tuple(float(value) for value in frame_joint.origin_xyz),
+        *tuple(float(value) for value in rpy_to_quat(frame_joint.origin_rpy)),
+    )
+
+
 def _build_dock_ports(
     urdf_model: URDFModel,
     joint_actuator_model: JointActuatorModel | None = None,
@@ -167,6 +208,13 @@ def _build_dock_ports(
                 local_pose=link_poses_module[joint.child_link],
                 port_type=port_type,  # type: ignore[arg-type]
                 compatible_port_types=_compatible_port_types(port_type),
+                grasp_contact_frame_from_connect=(
+                    _grasp_contact_frame_from_connect(
+                        urdf_model,
+                        joint,
+                        port_type=port_type,
+                    )
+                ),
                 latch_axis_local=joint.axis_xyz,
                 mechanical_limits=mechanical_limits,
             )

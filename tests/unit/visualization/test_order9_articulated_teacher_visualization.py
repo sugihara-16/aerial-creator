@@ -15,14 +15,14 @@ from amsrr.robot_model.physical_model_builder import (
     build_physical_model_from_config,
 )
 from amsrr.schemas.task_spec import TaskSpec
-from amsrr.training.order9_articulated_teacher import (
-    Order9ArticulatedTrajectoryTeacher,
-)
 from amsrr.training.order9_c3_teacher import _neutral_runtime_observation
 from amsrr.visualization.order9_articulated_teacher import (
     ORDER9_ARTICULATED_TEACHER_ANIMATION_VERSION,
     build_order9_articulated_teacher_animation_payload,
     write_order9_articulated_teacher_animation,
+)
+from tests.unit.training.test_order9_articulated_teacher import (
+    _production_teacher,
 )
 
 
@@ -50,7 +50,7 @@ def test_articulated_teacher_animation_contains_fk_object_and_joint_targets(
         morphology_graph=morphology,
         geometry_descriptors=built.scene_graph.geometry_descriptors,
     )
-    plan = Order9ArticulatedTrajectoryTeacher(physical).plan(
+    plan = _production_teacher(task, physical).plan(
         HighLevelPolicyContext(
             built.irg,
             envelope,

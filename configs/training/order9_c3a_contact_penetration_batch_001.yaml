@@ -1,0 +1,68 @@
+version: order9_c3a_contact_penetration_review_batch_v1
+review_status: pending_final_pose_review
+
+# Static two-contact review candidates.  Every final pose must pass:
+#   - native convex/FCL self and non-contact object clearance >= 5 mm,
+#   - selected-anchor/object convex penetration <= 2 mm,
+#   - the existing articulated IK and hard reachability tolerances.
+# Human acceptance and later real-Isaac admission remain separate evidence.
+semantic_scope: two_contact_c3a_human_mesh_curation_only
+
+sources:
+  morphology_pool: artifacts/p4_full/order9/morphology_pool.json
+  morphology_assets: artifacts/p4_full/order9/c3_preparation/morphology_assets/manifest.json
+  robot_model_config: configs/robot/robot_model.yaml
+  source_urdf: assets/robots/holon/holon.urdf
+  curriculum_config: configs/training/order9_learning_curriculum.yaml
+  canonical_order8_task_bucket: artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/rollout_buckets/buckets/train-000000-5fecfad4f44f/task_spec.json
+
+selection:
+  required_case_count: 5
+  selected_contact_penetration_limit_m: 0.002
+  non_contact_collision_margin_m: 0.005
+
+cases:
+  - case_id: c3a-b01-06-chain-retry
+    module_count: 6
+    topology: chain
+    structural_hash: de92a533003f89644c550e9021af1929e66acac246bcaf3402bcd8de1810a593
+    structural_source: existing_train_pool
+    selection_note: retry of user-rejected c3a-06-chain with a penetration-admitted yaw-yaw assignment
+    surface_port_ids: [15, 23]
+    candidate_group_id: slot_0:grasp_pair:1
+
+  - case_id: c3a-b01-06-branched-retry
+    module_count: 6
+    topology: branched
+    structural_hash: 3f12a3f6afaae5827d364e43cfa3b3beb2a7aef6d814628219a29281d3e21ae4
+    structural_source: existing_train_pool
+    selection_note: retry of user-rejected c3a-06-branched with a penetration-admitted yaw-yaw assignment
+    surface_port_ids: [2, 10]
+    candidate_group_id: slot_0:grasp_pair:1
+
+  - case_id: c3a-b01-07-chain-retry
+    module_count: 7
+    topology: chain
+    structural_hash: 176cc1d8cbd7cc5b669dea884c894d26d7a064967e56c8be36a36d8b124c46aa
+    structural_source: existing_train_pool
+    selection_note: retry of user-rejected c3a-07-chain with a penetration-admitted yaw-yaw assignment
+    surface_port_ids: [18, 26]
+    candidate_group_id: slot_0:grasp_pair:0
+
+  - case_id: c3a-b01-08-branched-retry
+    module_count: 8
+    topology: branched
+    structural_hash: f647dd03d229e1b7ec29a66446c4305a96ec13e7fa1113cd881e417411543dca
+    structural_source: existing_train_pool
+    selection_note: retry of user-rejected c3a-08-branched with a penetration-admitted yaw-yaw assignment
+    surface_port_ids: [15, 18]
+    candidate_group_id: slot_0:grasp_pair:0
+
+  - case_id: c3a-b01-08-branched-new
+    module_count: 8
+    topology: branched
+    structural_hash: 05afa5d407ec0a778f5f5f9e9607233ab886287c125c7a1f691091483975e67d
+    structural_source: existing_train_pool
+    selection_note: previously unused train-pool structure with a penetration-admitted yaw-yaw assignment
+    surface_port_ids: [19, 31]
+    candidate_group_id: slot_0:grasp_pair:2

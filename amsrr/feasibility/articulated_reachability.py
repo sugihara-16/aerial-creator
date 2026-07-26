@@ -8,7 +8,7 @@ does not search, repair, rank, or project policy output.
 """
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Mapping, Sequence
 
 from amsrr.controllers.rigid_body_model import RigidBodyControlModelBuilder
@@ -53,8 +53,12 @@ from amsrr.schemas.runtime import (
 
 
 ARTICULATED_REACHABILITY_VERSION = "articulated_reachability_v1"
-ARTICULATED_IK_TEACHER_VERSION = "articulated_contact_ik_teacher_v2"
-CENTROIDAL_POSTURE_IK_VERSION = "centroidal_posture_ik_v1"
+ARTICULATED_IK_TEACHER_VERSION = (
+    "articulated_contact_ik_teacher_v3_feasibility_bootstrap"
+)
+CENTROIDAL_POSTURE_IK_VERSION = (
+    "centroidal_posture_ik_v2_feasibility_bootstrap"
+)
 
 REACHABILITY_POSTURE_MISSING_CODE = "E_REACHABILITY_POSTURE_MISSING"
 REACHABILITY_JOINT_SET_CODE = "E_REACHABILITY_JOINT_SET"
@@ -164,6 +168,7 @@ class CentroidalPostureIKConfig:
     anchor_position_tolerance_m: float = 0.005
     anchor_attitude_tolerance_rad: float = 0.10
     maximum_cache_entries: int = 256
+    use_relaxed_seed: bool = True
 
     def __post_init__(self) -> None:
         if self.maximum_iterations < 1:
@@ -178,6 +183,8 @@ class CentroidalPostureIKConfig:
             )
         if self.maximum_cache_entries < 1:
             raise ValueError("maximum_cache_entries must be positive")
+        if not isinstance(self.use_relaxed_seed, bool):
+            raise ValueError("use_relaxed_seed must be boolean")
         for name in (
             "damping",
             "position_weight",
@@ -502,6 +509,39 @@ class ArticulatedContactIKSolver:
         if best_feasible_solution is not None:
             return best_feasible_solution
 
+        # The pitch posture term is a soft preference, not a reachability
+        # constraint.  For small morphologies a valid grasp may require pitch
+        # motion large enough that the regularized solve cannot enter the
+        # contact-feasible basin from neutral.  Bootstrap once without the
+        # pitch preference, then rerun the ordinary weighted solve from that
+        # feasible state.  The second solve records its initial feasible
+        # iterate, so refinement can never discard the bootstrap solution.
+        if self.config.pitch_joint_regularization_weight > 0.0:
+            bootstrap = ArticulatedContactIKSolver(
+                self.physical_model,
+                config=replace(
+                    self.config,
+                    pitch_joint_regularization_weight=0.0,
+                ),
+                kinematics=self.kinematics,
+            ).solve(
+                morphology=morphology,
+                assignments=assignments,
+                candidates=candidates,
+                initial_joint_positions_rad=initial_joint_positions_rad,
+                initial_base_pose_world=initial_base_pose_world,
+            )
+            if bootstrap.feasible:
+                return self.solve(
+                    morphology=morphology,
+                    assignments=assignments,
+                    candidates=candidates,
+                    initial_joint_positions_rad=(
+                        bootstrap.joint_positions_rad
+                    ),
+                    initial_base_pose_world=bootstrap.base_pose_world,
+                )
+
         final = self.kinematics.forward(
             morphology,
             self.physical_model,
@@ -634,16 +674,27 @@ class CentroidalPostureIKSolver:
                 iterations=initial_solution.iterations,
             )
             return initial_solution
-        q, relaxed_iterations = self._relaxed_free_base_seed(
-            morphology=morphology,
-            centroidal_pose_world=centroidal_pose_world,
-            q=q,
-            reference_q=reference_q,
-            limits=limits,
-            references=references,
-            targets=targets,
-            pitch_ids=pitch_ids,
-        )
+        if self.config.use_relaxed_seed and (
+            initial_solution.maximum_position_error_m <= 0.15
+            and initial_solution.maximum_attitude_error_rad <= 0.50
+        ):
+            # Dense trajectory continuation already supplies a nearby branch
+            # seed.  A free-base relaxed seed here can jump to an equivalent
+            # but discontinuous articulated solution.
+            relaxed_iterations = 0
+        elif self.config.use_relaxed_seed:
+            q, relaxed_iterations = self._relaxed_free_base_seed(
+                morphology=morphology,
+                centroidal_pose_world=centroidal_pose_world,
+                q=q,
+                reference_q=reference_q,
+                limits=limits,
+                references=references,
+                targets=targets,
+                pitch_ids=pitch_ids,
+            )
+        else:
+            relaxed_iterations = 0
         best: CentroidalPostureIKSolution | None = None
         best_objective = math.inf
         first_feasible_iteration: int | None = None
@@ -823,6 +874,35 @@ class CentroidalPostureIKSolver:
                 iterations=best.iterations,
             )
             return best
+
+        # Keep the user-requested pitch penalty a posture preference rather
+        # than an accidental reachability constraint.  The same feasibility
+        # bootstrap used by the final-contact solver is required here because
+        # the dense trajectory resolver now solves every 10--20 Hz target,
+        # including small intermediate motions from the neutral posture.
+        if self.config.pitch_joint_regularization_weight > 0.0:
+            bootstrap = CentroidalPostureIKSolver(
+                self.physical_model,
+                config=replace(
+                    self.config,
+                    pitch_joint_regularization_weight=0.0,
+                ),
+                kinematics=self.kinematics,
+            ).solve(
+                morphology=morphology,
+                centroidal_pose_world=centroidal_pose_world,
+                anchor_pose_targets_world=anchor_pose_targets_world,
+                initial_joint_positions_rad=initial_joint_positions_rad,
+            )
+            if bootstrap.feasible:
+                return self.solve(
+                    morphology=morphology,
+                    centroidal_pose_world=centroidal_pose_world,
+                    anchor_pose_targets_world=anchor_pose_targets_world,
+                    initial_joint_positions_rad=(
+                        bootstrap.joint_positions_rad
+                    ),
+                )
         return CentroidalPostureIKSolution(
             feasible=False,
             joint_positions_rad=dict(q),

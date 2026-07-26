@@ -4,6 +4,7 @@ from dataclasses import replace
 
 import pytest
 
+from amsrr.geometry.pose_math import compose_pose
 from amsrr.irg.irg_builder import IRGBuilder
 from amsrr.morphology.grasp_carry_designs import (
     GraspCarryMorphologyVariant,
@@ -58,6 +59,22 @@ def test_resolves_only_unoccupied_ports_to_actual_mesh_backed_dock_links(
         assert surface.mechanism_joint_id == mechanism_joint_id
         assert mechanism_joint.child_link == surface.mechanism_link_id
         assert surface.connect_frame_module == physical_port.local_pose
+        expected_grasp_module = compose_pose(
+            physical_port.local_pose,
+            physical_port.grasp_contact_frame_from_connect
+            or (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+        )
+        assert surface.grasp_contact_frame_module == pytest.approx(
+            expected_grasp_module
+        )
+        if surface.port_type == "pitch_dock":
+            assert surface.grasp_contact_frame_link[0] == pytest.approx(
+                0.0874086
+            )
+        else:
+            assert surface.grasp_contact_frame_module == pytest.approx(
+                surface.connect_frame_module
+            )
         assert surface.collision_primitives
         assert all(
             primitive.link_id == surface.mechanism_link_id

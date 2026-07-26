@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import math
 from pathlib import Path
 from time import perf_counter
-from typing import Mapping, Protocol
+from typing import Mapping, Protocol, Sequence
 
 from amsrr.feasibility.articulated_reachability import (
     CENTROIDAL_POSTURE_IK_VERSION,
@@ -36,8 +36,32 @@ from amsrr.utils.hashing import stable_hash
 
 
 ORDER9_POSTURE_TRAJECTORY_RESOLVER_VERSION = (
-    "order9_posture_trajectory_resolver_v2_native"
+    "order9_posture_trajectory_resolver_v6_planner_seed_reference"
 )
+
+
+@dataclass(frozen=True)
+class Order9PostureCollisionBox:
+    """Static box obstacle checked by the convex posture collision path."""
+
+    box_id: str
+    size_m: tuple[float, float, float]
+    pose_world: Pose7D
+
+    def __post_init__(self) -> None:
+        if not self.box_id:
+            raise ValueError("collision box_id must be non-empty")
+        if len(self.size_m) != 3 or any(
+            not math.isfinite(float(value)) or float(value) <= 0.0
+            for value in self.size_m
+        ):
+            raise ValueError(
+                "collision box size_m must contain three positive values"
+            )
+        if len(self.pose_world) != 7 or any(
+            not math.isfinite(float(value)) for value in self.pose_world
+        ):
+            raise ValueError("collision box pose_world must be a finite Pose7D")
 
 
 @dataclass(frozen=True)
@@ -47,6 +71,8 @@ class Order9PostureCollisionObject:
     object_id: str
     size_m: tuple[float, float, float]
     initial_pose_world: Pose7D | None = None
+    environment_boxes: tuple[Order9PostureCollisionBox, ...] = ()
+    ground_plane_z_m: float | None = None
 
     def __post_init__(self) -> None:
         if not self.object_id:
@@ -66,6 +92,16 @@ class Order9PostureCollisionObject:
                 raise ValueError(
                     "collision object initial pose must be a finite Pose7D"
                 )
+        if len({box.box_id for box in self.environment_boxes}) != len(
+            self.environment_boxes
+        ):
+            raise ValueError(
+                "collision environment box identities must be unique"
+            )
+        if self.ground_plane_z_m is not None and not math.isfinite(
+            float(self.ground_plane_z_m)
+        ):
+            raise ValueError("collision ground plane z must be finite")
 
 
 @dataclass(frozen=True)
@@ -159,6 +195,7 @@ class Order9PostureResolutionEvidence:
     external_violation_codes: tuple[str, ...]
     external_margins: Mapping[str, float]
     initial_joint_state_hash: str
+    nominal_joint_seed_trajectory_hash: str | None
 
     def identity_dict(self) -> dict[str, object]:
         """Deterministic resolver identity; excludes wall-clock telemetry."""
@@ -203,6 +240,9 @@ class Order9PostureResolutionEvidence:
             "external_violation_codes": list(self.external_violation_codes),
             "external_margins": dict(self.external_margins),
             "initial_joint_state_hash": self.initial_joint_state_hash,
+            "nominal_joint_seed_trajectory_hash": (
+                self.nominal_joint_seed_trajectory_hash
+            ),
         }
 
     def to_dict(self) -> dict[str, object]:
@@ -254,7 +294,12 @@ class Order9PostureTrajectoryResolver:
             ik_config=CentroidalPostureIKConfig(
                 anchor_position_tolerance_m=(
                     self.config.anchor_position_tolerance_m
-                )
+                ),
+                continuity_regularization_weight=1.0e-5,
+                # The resolver already supplies continuation seeds from the
+                # preceding raw/dense trajectory.  A free-base relaxed seed
+                # can jump branches and create a discontinuous nominal path.
+                use_relaxed_seed=False,
             ),
         )
         collision_methods = (
@@ -277,6 +322,10 @@ class Order9PostureTrajectoryResolver:
         context: HighLevelPolicyContext,
         raw_trajectory: ContactWrenchTrajectory,
         initial_joint_positions_rad: Mapping[str, float],
+        nominal_joint_seed_positions_by_raw_knot: Sequence[
+            Mapping[str, float]
+        ]
+        | None = None,
         external_validator: Order9PostureTrajectoryValidator | None = None,
     ) -> Order9ResolvedPostureTrajectory:
         start_time = perf_counter()
@@ -293,15 +342,25 @@ class Order9PostureTrajectoryResolver:
             initial_joint_positions_rad,
             ordered_ids,
         )
-        sparse_q: list[dict[str, float]] = []
-        current_q = dict(initial_q)
+        nominal_seed_positions = _validate_nominal_joint_seed_positions(
+            nominal_joint_seed_positions_by_raw_knot,
+            raw_knot_count=len(raw.knots),
+            ordered_ids=ordered_ids,
+        )
         iterations: list[int] = []
         cache_hits: list[bool] = []
         position_errors: list[float] = []
         attitude_errors: list[float] = []
         collision_clearances: list[float] = []
         collision_violating_pair_counts: list[int] = []
-        for knot_index, knot in enumerate(raw.knots):
+
+        def solve_knot(
+            knot: InteractionKnot,
+            *,
+            seed_q: Mapping[str, float],
+            label: str,
+            record_evidence: bool,
+        ) -> dict[str, float]:
             centroidal = knot.centroidal_target
             if (
                 centroidal is None
@@ -310,7 +369,7 @@ class Order9PostureTrajectoryResolver:
             ):
                 raise SchemaValidationError(
                     "posture resolver requires a complete centroidal pose at "
-                    f"raw knot {knot_index}"
+                    f"{label}"
                 )
             posture = knot.posture_target
             anchor_targets = (
@@ -329,33 +388,36 @@ class Order9PostureTrajectoryResolver:
                 missing = sorted(active_anchor_ids - set(anchor_targets))
                 raise SchemaValidationError(
                     "posture resolver raw active knot lacks anchor pose "
-                    f"targets for {missing}"
+                    f"targets for {missing} at {label}"
                 )
-            if anchor_targets:
-                if self.collision_object is not None:
-                    self.ik_solver.set_collision_scene(
-                        morphology=context.morphology_graph,
-                        object_pose_world=_collision_object_pose(
-                            context=context,
-                            knot=knot,
-                            collision_object=self.collision_object,
-                        ),
-                        object_size_m=self.collision_object.size_m,
-                        allowed_anchor_ids=_allowed_object_contact_anchors(
-                            context=context,
-                            knot=knot,
-                            object_id=self.collision_object.object_id,
-                        ),
-                    )
-                solution = self.ik_solver.solve(
+            if not anchor_targets:
+                return dict(seed_q)
+            centroidal_pose_world = (
+                *centroidal.com_pos_world,
+                *centroidal.body_orientation_world,
+            )
+            if self.collision_object is not None:
+                self.ik_solver.set_collision_scene(
                     morphology=context.morphology_graph,
-                    centroidal_pose_world=(
-                        *centroidal.com_pos_world,
-                        *centroidal.body_orientation_world,
+                    object_pose_world=_collision_object_pose(
+                        context=context,
+                        knot=knot,
+                        collision_object=self.collision_object,
                     ),
-                    anchor_pose_targets_world=anchor_targets,
-                    initial_joint_positions_rad=current_q,
+                    object_size_m=self.collision_object.size_m,
+                    allowed_anchor_ids=_allowed_object_contact_anchors(
+                        context=context,
+                        knot=knot,
+                        object_id=self.collision_object.object_id,
+                    ),
                 )
+            solution = self.ik_solver.solve(
+                morphology=context.morphology_graph,
+                centroidal_pose_world=centroidal_pose_world,
+                anchor_pose_targets_world=anchor_targets,
+                initial_joint_positions_rad=seed_q,
+            )
+            if record_evidence:
                 iterations.append(int(solution.iterations))
                 cache_hits.append(bool(solution.cache_hit))
                 position_errors.append(
@@ -364,25 +426,66 @@ class Order9PostureTrajectoryResolver:
                 attitude_errors.append(
                     float(solution.maximum_attitude_error_rad)
                 )
-                if not solution.feasible:
-                    raise SchemaValidationError(
-                        "posture resolver could not realize raw knot "
-                        f"{knot_index} without changing its CoM/anchor plan "
-                        f"(position={solution.maximum_position_error_m:.6g}, "
-                        "attitude="
-                        f"{solution.maximum_attitude_error_rad:.6g})"
-                    )
-                if self.collision_object is not None:
+            if not solution.feasible:
+                collision_metrics = getattr(
+                    self.ik_solver,
+                    "last_native_collision_metrics",
+                    None,
+                )
+                raise SchemaValidationError(
+                    "posture resolver could not realize "
+                    f"{label} without changing its CoM/anchor plan "
+                    f"(position={solution.maximum_position_error_m:.6g}, "
+                    "attitude="
+                    f"{solution.maximum_attitude_error_rad:.6g}, "
+                    f"collision={collision_metrics})"
+                )
+            if self.collision_object is not None and record_evidence:
+                # The primary movable-object scene is already installed for
+                # the IK solve above.  Validate that scene directly, then
+                # switch only for the additional static environment boxes.
+                # Sparse knots are included again in the dense output, so
+                # checking the dense pass avoids redundant native calls.
+                collision_scenes = [
+                    (
+                        self.collision_object.object_id,
+                        None,
+                        None,
+                        None,
+                    ),
+                    *[
+                        (
+                            box.box_id,
+                            box.pose_world,
+                            box.size_m,
+                            (),
+                        )
+                        for box in self.collision_object.environment_boxes
+                    ],
+                ]
+                for (
+                    obstacle_id,
+                    obstacle_pose,
+                    obstacle_size,
+                    allowed_anchor_ids,
+                ) in collision_scenes:
+                    if obstacle_pose is not None:
+                        self.ik_solver.set_collision_scene(
+                            morphology=context.morphology_graph,
+                            object_pose_world=obstacle_pose,
+                            object_size_m=obstacle_size,
+                            allowed_anchor_ids=allowed_anchor_ids,
+                        )
                     collision = self.ik_solver.check_configuration(
                         morphology=context.morphology_graph,
-                        centroidal_pose_world=(
-                            *centroidal.com_pos_world,
-                            *centroidal.body_orientation_world,
-                        ),
+                        centroidal_pose_world=centroidal_pose_world,
                         joint_positions_rad=solution.joint_positions_rad,
                         exact=False,
                         margin_m=float(
                             self.ik_solver.collision_config.collision_margin_m
+                        ),
+                        ground_plane_z_m=(
+                            self.collision_object.ground_plane_z_m
                         ),
                     )
                     collision_clearances.append(
@@ -394,14 +497,67 @@ class Order9PostureTrajectoryResolver:
                     if collision.get("accepted") is not True:
                         raise SchemaValidationError(
                             "posture resolver convex collision gate rejected "
-                            f"raw knot {knot_index} "
+                            f"{label} against {obstacle_id!r} "
                             "(minimum_clearance_m="
                             f"{collision['minimum_clearance_m']:.6g}, "
                             "violating_pair_count="
                             f"{collision['violating_pair_count']})"
                         )
-                current_q = dict(solution.joint_positions_rad)
+            return dict(solution.joint_positions_rad)
+
+        # First solve the raw 1--2 Hz waypoints.  Their q values are internal
+        # IK seeds only; they never enter the raw pi_H contract.  Interpolating
+        # these seeds for each dense target prevents a redundant articulated
+        # mechanism from jumping to a different IK branch between otherwise
+        # nearby task-space samples.
+        raw_times = tuple(float(knot.t_rel_s) for knot in raw.knots)
+        sparse_q: list[dict[str, float]] = []
+        current_q = dict(initial_q)
+        for raw_index, knot in enumerate(raw.knots):
+            current_q = solve_knot(
+                knot,
+                seed_q=(
+                    current_q
+                    if nominal_seed_positions is None
+                    else nominal_seed_positions[raw_index]
+                ),
+                label=f"raw knot {raw_index}",
+                record_evidence=False,
+            )
             sparse_q.append(dict(current_q))
+
+        times = _dense_sample_times(
+            raw,
+            output_rate_hz=self.config.output_rate_hz,
+            maximum_output_knots=self.config.maximum_output_knots,
+        )
+        sampled_knots = [
+            executor.sample(time_s=time_s).active_knot
+            for time_s in times
+        ]
+        resolved_q: list[dict[str, float]] = []
+        for knot_index, (time_s, knot) in enumerate(
+            zip(times, sampled_knots, strict=True)
+        ):
+            left, right, blend = _sparse_bracket(
+                list(raw_times),
+                float(time_s),
+            )
+            seed_q = {
+                joint_id: (
+                    (1.0 - blend) * sparse_q[left][joint_id]
+                    + blend * sparse_q[right][joint_id]
+                )
+                for joint_id in ordered_ids
+            }
+            resolved_q.append(
+                solve_knot(
+                    knot,
+                    seed_q=seed_q,
+                    label=f"dense knot {knot_index}",
+                    record_evidence=True,
+                )
+            )
 
         joint_rate_limit = (
             _dock_velocity_limit(self.physical_model)
@@ -411,9 +567,9 @@ class Order9PostureTrajectoryResolver:
             maximum_joint_rate,
             maximum_rate_segment,
             minimum_required_segment_duration,
-        ) = _maximum_sparse_joint_rate(
-            raw,
-            sparse_q,
+        ) = _maximum_timed_joint_rate(
+            times,
+            resolved_q,
             ordered_ids,
             joint_rate_limit_rad_s=joint_rate_limit,
         )
@@ -428,8 +584,9 @@ class Order9PostureTrajectoryResolver:
             )
         resolved = self._dense_trajectory(
             raw=raw,
-            executor=executor,
-            sparse_q=sparse_q,
+            times=times,
+            sampled_knots=sampled_knots,
+            resolved_q=resolved_q,
             ordered_ids=ordered_ids,
         )
         validation = None
@@ -523,6 +680,11 @@ class Order9PostureTrajectoryResolver:
                 else dict(validation.margins or {})
             ),
             initial_joint_state_hash=stable_hash(initial_q),
+            nominal_joint_seed_trajectory_hash=(
+                None
+                if nominal_seed_positions is None
+                else stable_hash(nominal_seed_positions)
+            ),
         )
         return Order9ResolvedPostureTrajectory(
             raw_trajectory=raw,
@@ -534,37 +696,32 @@ class Order9PostureTrajectoryResolver:
         self,
         *,
         raw: ContactWrenchTrajectory,
-        executor: ContactWrenchTrajectoryExecutor,
-        sparse_q: list[dict[str, float]],
+        times: tuple[float, ...],
+        sampled_knots: list[InteractionKnot],
+        resolved_q: list[dict[str, float]],
         ordered_ids: tuple[str, ...],
     ) -> ContactWrenchTrajectory:
-        times = _dense_sample_times(
-            raw,
-            output_rate_hz=self.config.output_rate_hz,
-            maximum_output_knots=self.config.maximum_output_knots,
-        )
-        raw_times = [float(knot.t_rel_s) for knot in raw.knots]
+        if not (
+            len(times) == len(sampled_knots) == len(resolved_q)
+        ):
+            raise SchemaValidationError(
+                "posture resolver dense IK sample identity differs"
+            )
         knots = []
-        for time_s in times:
-            sample = executor.sample(time_s=time_s)
-            knot = sample.active_knot
-            left, right, ratio = _sparse_bracket(raw_times, time_s)
-            q = {
-                joint_id: _lerp(
-                    sparse_q[left][joint_id],
-                    sparse_q[right][joint_id],
-                    ratio,
-                )
-                for joint_id in ordered_ids
-            }
-            if left == right:
+        for index, (time_s, source_knot, q) in enumerate(
+            zip(times, sampled_knots, resolved_q, strict=True)
+        ):
+            knot = InteractionKnot.from_dict(source_knot.to_dict())
+            if len(times) == 1:
                 qdot = {joint_id: 0.0 for joint_id in ordered_ids}
             else:
-                duration = raw_times[right] - raw_times[left]
+                left = max(0, index - 1)
+                right = min(len(times) - 1, index + 1)
+                duration = float(times[right]) - float(times[left])
                 qdot = {
                     joint_id: (
-                        sparse_q[right][joint_id]
-                        - sparse_q[left][joint_id]
+                        resolved_q[right][joint_id]
+                        - resolved_q[left][joint_id]
                     )
                     / duration
                     for joint_id in ordered_ids
@@ -786,21 +943,41 @@ def _validate_initial_joint_state(
     return result
 
 
-def _maximum_sparse_joint_rate(
-    trajectory: ContactWrenchTrajectory,
-    sparse_q: list[dict[str, float]],
+def _validate_nominal_joint_seed_positions(
+    values: Sequence[Mapping[str, float]] | None,
+    *,
+    raw_knot_count: int,
+    ordered_ids: tuple[str, ...],
+) -> tuple[dict[str, float], ...] | None:
+    if values is None:
+        return None
+    if len(values) != raw_knot_count:
+        raise SchemaValidationError(
+            "posture resolver nominal seed count differs from raw knots"
+        )
+    result = tuple(
+        _validate_initial_joint_state(value, ordered_ids)
+        for value in values
+    )
+    return result
+
+
+def _maximum_timed_joint_rate(
+    times: tuple[float, ...],
+    q_samples: list[dict[str, float]],
     ordered_ids: tuple[str, ...],
     *,
     joint_rate_limit_rad_s: float,
 ) -> tuple[float, int | None, float]:
+    if len(times) != len(q_samples):
+        raise SchemaValidationError(
+            "posture resolver rate sample identity differs"
+        )
     maximum = 0.0
     maximum_segment: int | None = None
     required_duration = 0.0
-    for index in range(1, len(trajectory.knots)):
-        duration = (
-            float(trajectory.knots[index].t_rel_s)
-            - float(trajectory.knots[index - 1].t_rel_s)
-        )
+    for index in range(1, len(times)):
+        duration = float(times[index]) - float(times[index - 1])
         if duration <= 0.0:
             raise SchemaValidationError(
                 "posture resolver raw knot times must be strictly increasing"
@@ -808,8 +985,8 @@ def _maximum_sparse_joint_rate(
         maximum_delta = max(
             (
                 abs(
-                    sparse_q[index][joint_id]
-                    - sparse_q[index - 1][joint_id]
+                    q_samples[index][joint_id]
+                    - q_samples[index - 1][joint_id]
                 )
                 for joint_id in ordered_ids
             ),
@@ -843,7 +1020,9 @@ def _dense_sample_times(
     output = tuple(sorted(values))
     if len(output) > maximum_output_knots:
         raise SchemaValidationError(
-            "posture resolver dense trajectory exceeds maximum_output_knots"
+            "posture resolver dense trajectory exceeds maximum_output_knots "
+            f"(horizon_s={trajectory.horizon_s:.6g}, "
+            f"knot_count={len(output)}, limit={maximum_output_knots})"
         )
     return output
 

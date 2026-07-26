@@ -766,6 +766,14 @@ def _validate_anchor_references(
             config.authored_pose_tolerance,
         ):
             raise SchemaValidationError("Selected surface connect frame is stale")
+        if not _poses_close(
+            anchor.local_pose,
+            surface.grasp_contact_frame_link,
+            config.authored_pose_tolerance,
+        ):
+            raise SchemaValidationError(
+                "Selected anchor grasp contact frame is stale"
+            )
         if not surface.collision_primitives:
             raise SchemaValidationError("Selected gripper surface must be mesh-backed")
         for primitive in surface.collision_primitives:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -331,7 +332,9 @@ def install_cpp_centroidal_pose_patch(
 class NativeCentroidalPostureIKSolver(CentroidalPostureIKSolver):
     """Run the complete deterministic IK iteration inside C++/Eigen."""
 
-    solver_version = "centroidal_posture_ik_cpp_eigen_v1"
+    solver_version = (
+        "centroidal_posture_ik_cpp_eigen_v3_continuous_seed"
+    )
 
     def __init__(
         self,
@@ -483,6 +486,7 @@ class NativeCentroidalPostureIKSolver(CentroidalPostureIKSolver):
                 "maximum_base_rotation_step_rad",
                 "anchor_position_tolerance_m",
                 "anchor_attitude_tolerance_rad",
+                "use_relaxed_seed",
             )
         }
         if self.collision_config is not None:
@@ -570,4 +574,28 @@ class NativeCentroidalPostureIKSolver(CentroidalPostureIKSolver):
                 solution.joint_positions_rad,
                 iterations=solution.iterations,
             )
+        elif self.config.pitch_joint_regularization_weight > 0.0:
+            bootstrap = self.__class__(
+                self.physical_model,
+                kinematics=self.kinematics,
+                config=replace(
+                    self.config,
+                    pitch_joint_regularization_weight=0.0,
+                ),
+                collision_config=self.collision_config,
+            ).solve(
+                morphology=morphology,
+                centroidal_pose_world=centroidal_pose_world,
+                anchor_pose_targets_world=anchor_pose_targets_world,
+                initial_joint_positions_rad=initial_joint_positions_rad,
+            )
+            if bootstrap.feasible:
+                return self.solve(
+                    morphology=morphology,
+                    centroidal_pose_world=centroidal_pose_world,
+                    anchor_pose_targets_world=anchor_pose_targets_world,
+                    initial_joint_positions_rad=(
+                        bootstrap.joint_positions_rad
+                    ),
+                )
         return solution

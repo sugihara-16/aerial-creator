@@ -1,0 +1,26 @@
+version: order9_c3a_contact_penetration_review_batch_v1
+review_status: diagnostic_only
+semantic_scope: pitch_grasp_contact_frame_gate_probe_only
+
+sources:
+  morphology_pool: artifacts/p4_full/order9/morphology_pool.json
+  morphology_assets: artifacts/p4_full/order9/c3_preparation/morphology_assets_grasp_frame_mesh_v2/manifest.json
+  robot_model_config: configs/robot/robot_model.yaml
+  source_urdf: assets/robots/holon/holon.urdf
+  curriculum_config: configs/training/order9_learning_curriculum.yaml
+  canonical_order8_task_bucket: artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/rollout_buckets/buckets/train-000000-5fecfad4f44f/task_spec.json
+
+selection:
+  required_case_count: 1
+  selected_contact_penetration_limit_m: 0.002
+  non_contact_collision_margin_m: 0.005
+
+cases:
+  - case_id: c3a-b04-probe-04-chain
+    module_count: 4
+    topology: chain
+    structural_hash: 0e86a4ff3e71b28b176f2ae977eba8e01c2c6dfbdbe76e38ca540d56fb9f4a5e
+    structural_source: existing_train_pool
+    selection_note: diagnostic pitch-pitch pair after authored pitch grasp contact frame
+    surface_port_ids: [0, 12]
+    candidate_group_id: slot_0:grasp_pair:1

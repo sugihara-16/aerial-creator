@@ -6,7 +6,11 @@ from dataclasses import dataclass, replace
 from typing import Iterable
 
 from amsrr.feasibility.checker import FeasibilityChecker
-from amsrr.geometry.pose_math import pose_from_transform, transform_from_xyz_rpy
+from amsrr.geometry.pose_math import (
+    compose_pose,
+    pose_from_transform,
+    transform_from_xyz_rpy,
+)
 from amsrr.morphology.dock_geometry import (
     modules_with_dock_aligned_poses,
     relative_pose_for_dock_ports,
@@ -36,7 +40,7 @@ from amsrr.utils.hashing import stable_hash
 
 
 ORDER9_DESIGN_GRAMMAR_VERSION = (
-    "order9_holon_sequential_design_grammar_v2_mesh_anchor_frame"
+    "order9_holon_sequential_design_grammar_v3_grasp_contact_frame"
 )
 
 
@@ -671,6 +675,14 @@ class Order9DesignGrammar:
                     connect_joint.origin_rpy,
                 )
             )
+            grasp_from_connect = (
+                physical.grasp_contact_frame_from_connect
+                or (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+            )
+            grasp_contact_link_pose = compose_pose(
+                link_local_pose,
+                grasp_from_connect,
+            )
             collision_primitives = [
                 primitive
                 for primitive in self.context.physical_model.collision_primitives
@@ -692,6 +704,15 @@ class Order9DesignGrammar:
                 "dock_port_local_id": physical.port_id,
                 "dock_port_type": physical.port_type,
                 "dock_mechanism_link_id": physical.parent_link,
+                "dock_connect_frame_local_pose": list(link_local_pose),
+                "grasp_contact_frame_from_connect": list(
+                    grasp_from_connect
+                ),
+                "grasp_contact_frame_source": (
+                    "urdf_authored_pitch_grasp_contact_frame"
+                    if physical.grasp_contact_frame_from_connect is not None
+                    else "dock_connect_frame_identity"
+                ),
                 "dock_mechanism_joint_id": physical.mechanical_limits.get(
                     "mechanism_joint_id"
                 ),
@@ -718,7 +739,7 @@ class Order9DesignGrammar:
                             "module_id": port.module_id,
                             "surface_port_id": port.port_global_id,
                             "link_id": physical.parent_link,
-                            "local_pose": list(link_local_pose),
+                            "local_pose": list(grasp_contact_link_pose),
                             "anchor_type": CONTACT_MODE_TO_ANCHOR_TYPE[mode],
                             "capability": capability,
                             "suggested_slot_id": int(slot["slot_id"]),

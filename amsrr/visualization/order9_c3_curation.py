@@ -23,16 +23,22 @@ from typing import Iterable, Mapping, Sequence
 
 from amsrr.geometry.pose_math import (
     Transform3D,
+    compose_pose,
     compose_transform,
+    inverse_pose,
     pose_from_transform,
     transform_from_pose,
     transform_from_xyz_rpy,
 )
+from amsrr.robot_model.urdf_loader import load_urdf
+from amsrr.robot_model.urdf_transforms import link_poses_in_root_frame
 from amsrr.schemas.common import Pose7D, SchemaValidationError
 from amsrr.utils.hashing import hash_file
 
 
-ORDER9_C3_CURATION_VIEWER_VERSION = "order9_c3_curation_mesh_viewer_v1"
+ORDER9_C3_CURATION_VIEWER_VERSION = (
+    "order9_c3_curation_mesh_viewer_v3_baselink_frame_review"
+)
 _IDENTITY_POSE: Pose7D = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
 _MODULE_LINK_PATTERN = re.compile(r"^module_(\d+)__(.+)$")
 
@@ -248,6 +254,41 @@ def build_order9_c3_urdf_mesh_scene(
     )
 
 
+def order9_c3_urdf_root_pose_from_baselink_pose(
+    urdf_path: str | Path,
+    baselink_pose_world: Pose7D,
+) -> Pose7D:
+    """Convert the PhysicalModel module-frame pose to the URDF root pose."""
+
+    source = Path(urdf_path).resolve()
+    if not source.is_file():
+        raise FileNotFoundError(source)
+    _finite_vector(baselink_pose_world, 7, "baselink_pose_world")
+    model = load_urdf(source)
+    if len(model.root_links) != 1:
+        raise SchemaValidationError(
+            f"C3 viewer requires one URDF root, got {model.root_links}"
+        )
+    metadata = model.metadata.get("baselink")
+    baselink_id = (
+        metadata.get("name") if isinstance(metadata, dict) else None
+    )
+    if not isinstance(baselink_id, str) or not baselink_id:
+        raise SchemaValidationError(
+            "C3 viewer URDF lacks a baselink frame identity"
+        )
+    poses_root = link_poses_in_root_frame(model)
+    root_to_baselink = poses_root.get(baselink_id)
+    if root_to_baselink is None:
+        raise SchemaValidationError(
+            f"C3 viewer baselink {baselink_id!r} is absent from the URDF tree"
+        )
+    return compose_pose(
+        tuple(float(value) for value in baselink_pose_world),
+        inverse_pose(root_to_baselink),
+    )
+
+
 def write_order9_c3_stl_mesh_library(
     mesh_paths: Iterable[str | Path],
     output_path: str | Path,
@@ -310,6 +351,8 @@ def render_order9_c3_mesh_viewer(
     boxes: Sequence[Order9C3ViewerBox] = (),
     metadata: Mapping[str, object] | None = None,
     default_view: str = "iso",
+    animation: Mapping[str, object] | None = None,
+    semantic_scope: str | None = None,
 ) -> Order9C3MeshViewerArtifacts:
     """Write a small HTML/JSON scene referencing shared exact STL bytes."""
 
@@ -321,12 +364,35 @@ def render_order9_c3_mesh_viewer(
     for required in (library, viewer_js):
         if not required.is_file():
             raise FileNotFoundError(required)
+    if animation is not None:
+        frames = animation.get("frames")
+        if not isinstance(frames, list) or not frames:
+            raise SchemaValidationError(
+                "mesh viewer animation requires non-empty frames"
+            )
+        for index, frame in enumerate(frames):
+            if not isinstance(frame, dict):
+                raise SchemaValidationError(
+                    f"mesh viewer animation frame {index} is invalid"
+                )
+            matrices = frame.get("model_matrices")
+            if (
+                not isinstance(matrices, list)
+                or len(matrices) != len(urdf_scene.instances)
+            ):
+                raise SchemaValidationError(
+                    "mesh viewer animation frame instance identity differs"
+                )
     scene_path = destination.with_suffix(".scene.json")
     payload = {
         "viewer_version": ORDER9_C3_CURATION_VIEWER_VERSION,
         "semantic_scope": (
-            "human inspection of URDF-referenced mesh geometry; not Isaac "
-            "collision, dynamics, path-feasibility, or grasp-success evidence"
+            semantic_scope
+            or (
+                "human inspection of URDF-referenced mesh geometry; not Isaac "
+                "collision, dynamics, path-feasibility, or grasp-success "
+                "evidence"
+            )
         ),
         "title": str(title),
         "subtitle": str(subtitle),
@@ -362,6 +428,7 @@ def render_order9_c3_mesh_viewer(
             for box in boxes
         ],
         "metadata": dict(metadata or {}),
+        "animation": None if animation is None else dict(animation),
     }
     destination.parent.mkdir(parents=True, exist_ok=True)
     scene_path.write_text(
@@ -624,11 +691,17 @@ def _viewer_html(
     .label.selected{{font-size:13px;border-width:2px;background:#fff4bf}}
     #toolbar{{position:absolute;left:12px;top:12px;display:flex;gap:6px;flex-wrap:wrap;max-width:70%;padding:8px;border-radius:8px;background:rgba(255,255,255,.9);box-shadow:0 2px 10px #0002}}
     button,label.control{{font:13px system-ui,sans-serif;border:1px solid #aeb6bf;border-radius:5px;background:white;padding:5px 8px}}
+    button.review-accept{{background:#e7f8ec;border-color:#53a96b}} button.review-reject{{background:#fdeaea;border-color:#c85b5b}} button.review-recompute{{background:#fff4d6;border-color:#c79a2b}}
+    button:disabled{{opacity:.5;cursor:wait}}
     label.control{{display:flex;align-items:center;gap:4px}}
     #info{{position:absolute;right:12px;top:12px;max-width:34em;padding:10px 12px;border-radius:8px;background:rgba(255,255,255,.91);box-shadow:0 2px 10px #0002}}
     #info h1{{font-size:16px;margin:0 0 4px}} #info p{{font-size:12px;margin:0;color:#46515c}}
+    #review-controls{{position:absolute;right:12px;bottom:12px;max-width:38em;padding:9px;border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 2px 10px #0002}}
+    #review-controls .row{{display:flex;gap:6px;align-items:center;flex-wrap:wrap}} #review-note{{min-width:18em;flex:1;padding:5px 7px;border:1px solid #aeb6bf;border-radius:5px}} #review-status{{font:12px ui-monospace,monospace;margin-top:6px;color:#39434d}}
+    #animation-controls{{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);display:flex;gap:7px;align-items:center;min-width:min(60vw,760px);padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 2px 10px #0002}}
+    #animation-controls[hidden]{{display:none}} #animation-slider{{flex:1;min-width:180px}} #animation-time{{font:12px ui-monospace,monospace;min-width:13em;text-align:right}} #animation-speed{{font:13px system-ui,sans-serif;padding:4px}}
     #status{{position:absolute;left:12px;bottom:12px;padding:6px 9px;border-radius:5px;background:rgba(0,0,0,.66);color:white;font:12px ui-monospace,monospace}}
-    body.capture #toolbar{{display:none}} body.capture #info{{max-width:42em}}
+    body.capture #toolbar,body.capture #review-controls,body.capture #animation-controls{{display:none!important}} body.capture #info{{max-width:42em}}
   </style>
 </head>
 <body>
@@ -643,6 +716,25 @@ def _viewer_html(
     <label class="control"><input id="object-toggle" type="checkbox" checked>object</label>
   </div>
   <div id="info"><h1>{escaped_title}</h1><p id="subtitle"></p></div>
+  <div id="review-controls" hidden>
+    <div class="row">
+      <button class="review-accept" data-review-action="accept">Accept</button>
+      <button class="review-reject" data-review-action="reject">Reject</button>
+      <button class="review-recompute" data-review-action="recalculate">再計算</button>
+      <input id="review-note" type="text" placeholder="任意メモ">
+    </div>
+    <div id="review-status">判定待ち</div>
+  </div>
+  <div id="animation-controls" hidden>
+    <button id="animation-play" type="button">Play</button>
+    <input id="animation-slider" type="range" min="0" max="0" step="1" value="0">
+    <select id="animation-speed" aria-label="playback speed">
+      <option value="0.25">0.25×</option><option value="0.5">0.5×</option>
+      <option value="1" selected>1×</option><option value="2">2×</option>
+      <option value="4">4×</option>
+    </select>
+    <span id="animation-time">t=0.00 s</span>
+  </div>
   <div id="status">loading exact STL geometry…</div>
   <script>window.AMSRR_ORDER9_SCENE={encoded_scene};</script>
   <script src="{mesh_library_source}"></script>

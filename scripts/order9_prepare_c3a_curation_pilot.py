@@ -20,13 +20,17 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from amsrr.feasibility.articulated_reachability import (  # noqa: E402
+    _global_joint_limits,
     resolve_mesh_backed_anchor_references,
 )
 from amsrr.feasibility.morphology_flight import (  # noqa: E402
     MorphologyFlightFeasibilityChecker,
     MorphologyFlightFeasibilityConfig,
 )
-from amsrr.geometry.pose_math import transform_from_pose  # noqa: E402
+from amsrr.feasibility.order9_posture_collision import (  # noqa: E402
+    CollisionAwareIKConfig,
+)
+from amsrr.geometry.pose_math import compose_pose, transform_from_pose  # noqa: E402
 from amsrr.morphology.random_connected import (  # noqa: E402
     RandomConnectedMorphologyDistribution,
     morphology_structural_hash,
@@ -36,6 +40,9 @@ from amsrr.robot_model.fixed_morphology_urdf import (  # noqa: E402
 )
 from amsrr.robot_model.gripper_surfaces import (  # noqa: E402
     resolve_unoccupied_gripper_surfaces,
+)
+from amsrr.robot_model.whole_structure_kinematics import (  # noqa: E402
+    ordered_global_dock_joint_ids,
 )
 from amsrr.robot_model.physical_model_builder import (  # noqa: E402
     build_physical_model_from_config,
@@ -53,22 +60,31 @@ from amsrr.training.order9_c3_teacher import (  # noqa: E402
     build_order9_c3_articulated_teacher,
     order9_c3_teacher_evidence,
 )
+from amsrr.training.order9_posture_resolver import (  # noqa: E402
+    Order9PostureCollisionObject,
+    Order9PostureTrajectoryResolver,
+)
 from amsrr.utils.hashing import hash_file, stable_hash  # noqa: E402
 from amsrr.visualization.order9_c3_curation import (  # noqa: E402
     ORDER9_C3_CURATION_VIEWER_VERSION,
     Order9C3ViewerBox,
     Order9C3ViewerMarker,
     build_order9_c3_urdf_mesh_scene,
+    order9_c3_urdf_root_pose_from_baselink_pose,
     render_order9_c3_mesh_viewer,
     transformed_link_axis,
     write_order9_c3_stl_mesh_library,
     write_order9_c3_viewer_javascript,
 )
+from amsrr.visualization.order9_c3_review import (  # noqa: E402
+    reset_order9_c3_review_after_recalculation,
+)
 
 
 DEFAULT_CONFIG = "configs/training/order9_c3a_curation_pilot.yaml"
-DEFAULT_OUTPUT = "artifacts/p4_full/order9/c3a_curation_pilot_v1"
-PILOT_VERSION = "order9_c3a_manual_curation_pilot_v1"
+DEFAULT_OUTPUT = "artifacts/p4_full/order9/c3a_curation_pilot_v2"
+PILOT_VERSION = "order9_c3a_collision_aware_curation_pilot_v2"
+BATCH_VERSION = "order9_c3a_contact_penetration_review_batch_v1"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -88,6 +104,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--chrome", default="google-chrome")
     parser.add_argument("--screenshot-width", type=int, default=1800)
     parser.add_argument("--screenshot-height", type=int, default=1300)
+    parser.add_argument(
+        "--recompute-case",
+        help="Regenerate one existing case with the next deterministic IK seed.",
+    )
+    parser.add_argument(
+        "--recompute-index",
+        type=int,
+        default=0,
+        help="First deterministic collision-aware IK attempt for recomputation.",
+    )
     return parser
 
 
@@ -114,11 +140,32 @@ def main() -> int:
         repository_root=REPOSITORY_ROOT,
         expected_pool_sha256=hash_file(pool_path),
     )
-    task = _pilot_task(task_path)
+    curation_version = str(config["version"])
+    task = _pilot_task(
+        task_path,
+        curation_version=curation_version,
+    )
     output.mkdir(parents=True, exist_ok=True)
     cases_root = output / "cases"
     shared = output / "shared"
     shared.mkdir(parents=True, exist_ok=True)
+    if args.recompute_case:
+        return _recompute_existing_case(
+            case_id=str(args.recompute_case),
+            recompute_index=int(args.recompute_index),
+            config=config,
+            output=output,
+            cases_root=cases_root,
+            shared=shared,
+            pool=pool,
+            assets=assets,
+            physical_model=physical_model,
+            source_urdf=source_urdf,
+            task=task,
+            chrome=None if args.skip_screenshots else args.chrome,
+            screenshot_width=args.screenshot_width,
+            screenshot_height=args.screenshot_height,
+        )
 
     prepared: list[dict[str, Any]] = []
     all_mesh_paths: set[Path] = set()
@@ -188,7 +235,7 @@ def main() -> int:
             ),
             markers=neutral_markers,
             metadata={
-                "pilot_version": PILOT_VERSION,
+                "pilot_version": curation_version,
                 "inspection_stage": "neutral_anchor_selection",
                 "structural_hash": case["structural_hash"],
                 "structural_source": case["structural_source"],
@@ -250,6 +297,8 @@ def main() -> int:
                 chrome=None if args.skip_screenshots else args.chrome,
                 screenshot_width=args.screenshot_width,
                 screenshot_height=args.screenshot_height,
+                recompute_index=0,
+                curation_version=curation_version,
             )
             record["review_status"] = "pending_final_pose_review"
             record["surface_port_ids"] = list(final["surface_port_ids"])
@@ -263,7 +312,7 @@ def main() -> int:
         )
 
     manifest = {
-        "pilot_version": PILOT_VERSION,
+        "pilot_version": curation_version,
         "viewer_version": ORDER9_C3_CURATION_VIEWER_VERSION,
         "semantic_scope": (
             "two-contact human actual-mesh curation only; not production "
@@ -313,33 +362,85 @@ def main() -> int:
 
 def _load_config(path: Path) -> dict[str, Any]:
     payload = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict) or payload.get("version") != PILOT_VERSION:
+    if (
+        not isinstance(payload, dict)
+        or payload.get("version") not in {PILOT_VERSION, BATCH_VERSION}
+    ):
         raise SchemaValidationError("C3a curation config version mismatch")
     cases = payload.get("cases")
-    if not isinstance(cases, list) or len(cases) != 12:
-        raise SchemaValidationError("C3a pilot requires exactly 12 cases")
-    expected = [
-        (2, "chain"),
-        (3, "chain"),
-        (4, "chain"),
-        (4, "branched"),
-        (5, "chain"),
-        (5, "branched"),
-        (6, "chain"),
-        (6, "branched"),
-        (7, "chain"),
-        (7, "branched"),
-        (8, "chain"),
-        (8, "branched"),
-    ]
-    actual = [
-        (int(case.get("module_count", -1)), str(case.get("topology", "")))
-        for case in cases
-    ]
-    if actual != expected:
-        raise SchemaValidationError(
-            "C3a pilot cases must preserve the approved module/topology order"
+    if not isinstance(cases, list):
+        raise SchemaValidationError("C3a curation cases must be a list")
+    if payload["version"] == PILOT_VERSION:
+        if len(cases) != 12:
+            raise SchemaValidationError(
+                "C3a pilot requires exactly 12 cases"
+            )
+        expected = [
+            (2, "chain"),
+            (3, "chain"),
+            (4, "chain"),
+            (4, "branched"),
+            (5, "chain"),
+            (5, "branched"),
+            (6, "chain"),
+            (6, "branched"),
+            (7, "chain"),
+            (7, "branched"),
+            (8, "chain"),
+            (8, "branched"),
+        ]
+        actual = [
+            (
+                int(case.get("module_count", -1)),
+                str(case.get("topology", "")),
+            )
+            for case in cases
+        ]
+        if actual != expected:
+            raise SchemaValidationError(
+                "C3a pilot cases must preserve the approved "
+                "module/topology order"
+            )
+    else:
+        selection = payload.get("selection", {})
+        required_count = int(
+            selection.get(
+                "required_case_count",
+                -1,
+            )
         )
+        if required_count <= 0 or len(cases) != required_count:
+            raise SchemaValidationError(
+                "C3a review batch case count does not match "
+                "selection.required_case_count"
+            )
+        gate = CollisionAwareIKConfig()
+        if not math.isclose(
+            float(selection.get(
+                "selected_contact_penetration_limit_m",
+                math.nan,
+            )),
+            gate.max_selected_contact_penetration_m,
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        ):
+            raise SchemaValidationError(
+                "C3a review batch selected-contact penetration limit "
+                "does not match the production collision gate"
+            )
+        if not math.isclose(
+            float(selection.get(
+                "non_contact_collision_margin_m",
+                math.nan,
+            )),
+            gate.collision_margin_m,
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        ):
+            raise SchemaValidationError(
+                "C3a review batch non-contact collision margin does not "
+                "match the production collision gate"
+            )
     case_ids = [str(case.get("case_id", "")) for case in cases]
     hashes = [str(case.get("structural_hash", "")) for case in cases]
     if (
@@ -366,7 +467,110 @@ def _load_config(path: Path) -> dict[str, Any]:
     return payload
 
 
-def _pilot_task(path: Path) -> TaskSpec:
+def _recompute_existing_case(
+    *,
+    case_id: str,
+    recompute_index: int,
+    config: dict[str, Any],
+    output: Path,
+    cases_root: Path,
+    shared: Path,
+    pool: Order3MorphologyPoolManifest,
+    assets: object,
+    physical_model: object,
+    source_urdf: Path,
+    task: TaskSpec,
+    chrome: str | None,
+    screenshot_width: int,
+    screenshot_height: int,
+) -> int:
+    manifest_path = output / "manifest.json"
+    mesh_library = shared / "mesh_library.js"
+    viewer_js = shared / "order9_c3_mesh_viewer.js"
+    for required in (manifest_path, mesh_library, viewer_js):
+        if not required.is_file():
+            raise FileNotFoundError(required)
+    matches = [
+        value for value in config["cases"] if value["case_id"] == case_id
+    ]
+    if len(matches) != 1:
+        raise SchemaValidationError(
+            f"recompute case {case_id!r} is not in the pilot config"
+        )
+    case = matches[0]
+    graph, _graph_source = _case_graph(
+        case,
+        config=config,
+        pool=pool,
+        physical_model=physical_model,
+    )
+    urdf_path = _case_urdf(
+        case,
+        graph=graph,
+        assets=assets,
+        source_urdf=source_urdf,
+        cases_root=cases_root,
+    )
+    final = _solve_and_render_final(
+        case=case,
+        graph=graph,
+        urdf_path=urdf_path,
+        task=task,
+        physical_model=physical_model,
+        mesh_library=mesh_library,
+        viewer_js=viewer_js,
+        case_dir=cases_root / case_id,
+        chrome=chrome,
+        screenshot_width=screenshot_width,
+        screenshot_height=screenshot_height,
+        recompute_index=recompute_index,
+        curation_version=str(config["version"]),
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    records = [
+        value for value in manifest["cases"] if value["case_id"] == case_id
+    ]
+    if len(records) != 1:
+        raise SchemaValidationError(
+            f"recompute manifest lacks one case {case_id!r}"
+        )
+    records[0]["final_pose"] = final
+    records[0]["review_status"] = "pending_user_accept_or_reject"
+    manifest["viewer_version"] = ORDER9_C3_CURATION_VIEWER_VERSION
+    manifest["review_status"] = "pending_final_pose_review"
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    reset_order9_c3_review_after_recalculation(
+        output,
+        case_id=case_id,
+        note="",
+        recompute_index=int(final["collision_aware"]["attempt_index"]),
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    _write_index(output / "index.html", manifest)
+    print(
+        "ORDER9_C3A_RECOMPUTE="
+        + json.dumps(
+            {
+                "case_id": case_id,
+                "attempt_index": final["collision_aware"]["attempt_index"],
+                "viewer": final["viewer_path"],
+                "manifest": _portable(manifest_path),
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+    return 0
+
+
+def _pilot_task(
+    path: Path,
+    *,
+    curation_version: str = PILOT_VERSION,
+) -> TaskSpec:
     task = TaskSpec.from_json(path.read_text(encoding="utf-8"))
     task.task_id = "order9-c3a-manual-curation-pilot"
     task.metadata = {
@@ -382,7 +586,7 @@ def _pilot_task(path: Path) -> TaskSpec:
     task.metadata = {
         **task.metadata,
         "dataset_split": "train",
-        "curation_pilot_version": PILOT_VERSION,
+        "curation_pilot_version": str(curation_version),
         "curation_only": True,
     }
     task.validate()
@@ -506,7 +710,9 @@ def _neutral_surface_markers(
                     f"M{surface.module_id} "
                     f"{surface.port_local_id}"
                 ),
-                position_world=tuple(surface.connect_frame_design[:3]),
+                position_world=tuple(
+                    surface.grasp_contact_frame_design[:3]
+                ),
                 direction_world=tuple(surface.neutral_outward_axis_design),
                 color_rgba=(0.96, 0.22, 0.08, 1.0),
                 kind="surface",
@@ -528,6 +734,8 @@ def _solve_and_render_final(
     chrome: str | None,
     screenshot_width: int,
     screenshot_height: int,
+    recompute_index: int,
+    curation_version: str = PILOT_VERSION,
 ) -> dict[str, Any]:
     requested_group = case.get("candidate_group_id")
     bundle = build_order9_c3_articulated_teacher(
@@ -542,13 +750,8 @@ def _solve_and_render_final(
             preferred_candidate_group_id=(
                 None if requested_group is None else str(requested_group)
             ),
+            require_full_trajectory_recheck=False,
         ),
-    )
-    solution = bundle.trajectory_plan.ik_solution
-    final_scene = build_order9_c3_urdf_mesh_scene(
-        urdf_path,
-        joint_positions_rad=solution.joint_positions_rad,
-        root_pose_world=solution.base_pose_world,
     )
     active_knot = next(
         knot
@@ -567,6 +770,30 @@ def _solve_and_render_final(
         candidate.candidate_id: candidate
         for candidate in bundle.contact_candidate_set.candidates
     }
+    object_ids = {
+        candidate_by_id[assignment.candidate_id].target_entity_id
+        for assignment in assignments
+    }
+    if len(object_ids) != 1:
+        raise SchemaValidationError(
+            "C3 curation collision solve requires one assigned object"
+        )
+    object_box = _task_box(task, next(iter(object_ids)))
+    solution, collision_evidence = _collision_aware_final_solution(
+        bundle=bundle,
+        physical_model=physical_model,
+        object_box=object_box,
+        assignments=assignments,
+        recompute_index=recompute_index,
+    )
+    final_scene = build_order9_c3_urdf_mesh_scene(
+        urdf_path,
+        joint_positions_rad=solution.joint_positions_rad,
+        root_pose_world=order9_c3_urdf_root_pose_from_baselink_pose(
+            urdf_path,
+            solution.base_pose_world,
+        ),
+    )
     selected_anchor_ids = [assignment.anchor_id for assignment in assignments]
     references = resolve_mesh_backed_anchor_references(
         bundle.design_output.target_morphology,
@@ -581,14 +808,21 @@ def _solve_and_render_final(
         surface_by_anchor[assignment.anchor_id].port_global_id: assignment
         for assignment in assignments
     }
-    physical_joint_by_id = {
-        joint.joint_id: joint for joint in physical_model.joints
-    }
+    _validate_rendered_anchor_poses(
+        final_scene=final_scene,
+        references=references,
+        solution=solution,
+    )
     markers: list[Order9C3ViewerMarker] = []
     for surface in resolve_unoccupied_gripper_surfaces(graph, physical_model):
-        connect_joint = physical_joint_by_id[surface.port_local_id]
-        link_id = f"module_{surface.module_id}__{connect_joint.child_link}"
-        pose = final_scene.link_poses_world[link_id]
+        link_id = (
+            f"module_{surface.module_id}__"
+            f"{surface.mechanism_link_id}"
+        )
+        pose = compose_pose(
+            final_scene.link_poses_world[link_id],
+            surface.grasp_contact_frame_link,
+        )
         assignment = assignment_by_surface.get(surface.port_global_id)
         label = f"P{surface.port_global_id} M{surface.module_id}"
         selected = assignment is not None
@@ -642,7 +876,7 @@ def _solve_and_render_final(
                 "normal_world": list(candidate.normal_world),
             }
         )
-    boxes = (_task_box(task, candidate_by_id[assignments[0].candidate_id].target_entity_id),)
+    boxes = (object_box,)
     final_html = case_dir / "final_grasp_mesh.html"
     evidence = order9_c3_teacher_evidence(bundle)
     final_artifacts = render_order9_c3_mesh_viewer(
@@ -658,12 +892,20 @@ def _solve_and_render_final(
         markers=markers,
         boxes=boxes,
         metadata={
-            "pilot_version": PILOT_VERSION,
+            "pilot_version": str(curation_version),
             "inspection_stage": "final_ik_pose",
             "structural_hash": case["structural_hash"],
             "surface_port_ids": list(bundle.selected_surface_port_ids),
             "candidate_group_id": bundle.trajectory_plan.candidate_group_id,
             "teacher_evidence": evidence,
+            "collision_aware_ik": collision_evidence,
+            "production_trajectory_recheck_status": (
+                "not_run_static_curation_final_pose_only"
+            ),
+            "review": {
+                "case_id": case["case_id"],
+                "api_path": "/api/order9-c3-review",
+            },
         },
         default_view="iso",
     )
@@ -691,7 +933,7 @@ def _solve_and_render_final(
             "solver_version": solution.solver_version,
             "iterations": solution.iterations,
             "maximum_position_error_m": solution.maximum_position_error_m,
-            "maximum_normal_error_rad": solution.maximum_normal_error_rad,
+            "maximum_attitude_error_rad": solution.maximum_attitude_error_rad,
             "maximum_absolute_pitch_deg": math.degrees(
                 max(pitch_values, default=0.0)
             ),
@@ -701,13 +943,242 @@ def _solve_and_render_final(
                 sorted(solution.joint_positions_rad.items())
             ),
         },
+        "collision_aware": collision_evidence,
+        "teacher_ik": {
+            "solver_version": bundle.trajectory_plan.ik_solution.solver_version,
+            "maximum_position_error_m": (
+                bundle.trajectory_plan.ik_solution.maximum_position_error_m
+            ),
+            "maximum_normal_error_rad": (
+                bundle.trajectory_plan.ik_solution.maximum_normal_error_rad
+            ),
+        },
         "teacher_evidence": evidence,
+        "production_trajectory_recheck_status": (
+            "not_run_static_curation_final_pose_only"
+        ),
         "viewer_path": _portable(final_artifacts.html_path),
         "scene_path": _portable(final_artifacts.scene_path),
-        "iso_png_path": _portable(final_png) if final_png.is_file() else None,
+        "iso_png_path": (
+            _portable(final_png)
+            if chrome is not None and final_png.is_file()
+            else None
+        ),
         "review_status": "pending_user_accept_or_reject",
         "isaac_admission_status": "not_run",
     }
+
+
+def _collision_aware_final_solution(
+    *,
+    bundle: object,
+    physical_model: object,
+    object_box: Order9C3ViewerBox,
+    assignments: list[object],
+    recompute_index: int,
+) -> tuple[object, dict[str, Any]]:
+    if recompute_index < 0:
+        raise ValueError("recompute_index must be non-negative")
+    morphology = bundle.design_output.target_morphology
+    teacher_solution = bundle.trajectory_plan.ik_solution
+    anchor_ids = tuple(
+        sorted(int(assignment.anchor_id) for assignment in assignments)
+    )
+    anchor_targets = {
+        anchor_id: teacher_solution.anchor_poses_world[anchor_id]
+        for anchor_id in anchor_ids
+    }
+    resolver = Order9PostureTrajectoryResolver(
+        physical_model,
+        collision_object=Order9PostureCollisionObject(
+            object_id=object_box.object_id,
+            size_m=object_box.size_m,
+            initial_pose_world=object_box.pose_world,
+        ),
+        require_native_solver=True,
+    )
+    solver = resolver.ik_solver
+    solver.set_collision_scene(
+        morphology=morphology,
+        object_pose_world=object_box.pose_world,
+        object_size_m=object_box.size_m,
+        allowed_anchor_ids=anchor_ids,
+    )
+    failures = []
+    for attempt_index in range(recompute_index, recompute_index + 16):
+        centroidal_target = _curation_centroidal_target(
+            teacher_solution.centroidal_pose_world,
+            attempt_index,
+        )
+        initial_q = _curation_joint_seed(
+            teacher_solution.joint_positions_rad,
+            morphology=morphology,
+            physical_model=physical_model,
+            attempt_index=attempt_index,
+        )
+        candidate = solver.solve(
+            morphology=morphology,
+            centroidal_pose_world=centroidal_target,
+            anchor_pose_targets_world=anchor_targets,
+            initial_joint_positions_rad=initial_q,
+        )
+        if not candidate.feasible:
+            failures.append(
+                f"{attempt_index}:ik:"
+                f"{candidate.maximum_position_error_m:.6g}/"
+                f"{candidate.maximum_attitude_error_rad:.6g}"
+            )
+            continue
+        admission = solver.check_configuration(
+            morphology=morphology,
+            centroidal_pose_world=candidate.centroidal_pose_world,
+            joint_positions_rad=candidate.joint_positions_rad,
+            exact=False,
+            margin_m=float(solver.collision_config.collision_margin_m),
+        )
+        if not bool(admission.get("accepted")):
+            failures.append(
+                f"{attempt_index}:collision:"
+                f"{admission.get('minimum_clearance_m')}:"
+                "selected_contact_penetration:"
+                f"{admission.get('maximum_selected_contact_penetration_m')}"
+            )
+            continue
+        return candidate, {
+            "attempt_index": attempt_index,
+            "solver_version": candidate.solver_version,
+            "collision_gate_version": candidate.solver_version,
+            "collision_margin_m": float(
+                solver.collision_config.collision_margin_m
+            ),
+            "minimum_clearance_m": float(
+                admission["minimum_clearance_m"]
+            ),
+            "violating_pair_count": int(
+                admission["violating_pair_count"]
+            ),
+            "selected_contact_penetration_limit_m": float(
+                admission["selected_contact_penetration_limit_m"]
+            ),
+            "maximum_selected_contact_penetration_m": float(
+                admission["maximum_selected_contact_penetration_m"]
+            ),
+            "selected_contact_penetration_violating_pair_count": int(
+                admission[
+                    "selected_contact_penetration_violating_pair_count"
+                ]
+            ),
+            "selected_contact_pairs": list(
+                admission["selected_contact_pairs"]
+            ),
+            "centroidal_offset_m": [
+                float(centroidal_target[index])
+                - float(teacher_solution.centroidal_pose_world[index])
+                for index in range(3)
+            ],
+            "joint_solution_hash": stable_hash(
+                dict(sorted(candidate.joint_positions_rad.items()))
+            ),
+            "admission_exact_mesh": False,
+            "admission_status": "accepted",
+        }
+    raise SchemaValidationError(
+        "C3 curation exhausted collision-aware final-pose attempts: "
+        + "; ".join(failures[:8])
+    )
+
+
+def _validate_rendered_anchor_poses(
+    *,
+    final_scene: object,
+    references: tuple[object, ...],
+    solution: object,
+) -> None:
+    for reference in references:
+        surface = reference.surface
+        link_id = (
+            f"module_{surface.module_id}__"
+            f"{surface.mechanism_link_id}"
+        )
+        rendered = compose_pose(
+            final_scene.link_poses_world[link_id],
+            surface.grasp_contact_frame_link,
+        )
+        expected = solution.anchor_poses_world[
+            reference.anchor.anchor_id
+        ]
+        position_error = math.sqrt(
+            sum(
+                (
+                    float(rendered[index])
+                    - float(expected[index])
+                )
+                ** 2
+                for index in range(3)
+            )
+        )
+        if position_error > 1.0e-6:
+            raise SchemaValidationError(
+                "C3 viewer URDF frame conversion disagrees with posture IK "
+                f"for anchor {reference.anchor.anchor_id}: "
+                f"{position_error:.6g} m"
+            )
+
+
+def _curation_centroidal_target(
+    reference: tuple[float, ...],
+    attempt_index: int,
+) -> tuple[float, ...]:
+    offsets = (
+        (0.0, 0.0, 0.0),
+        (0.0, 0.0, 0.02),
+        (0.0, 0.0, -0.02),
+        (0.02, 0.0, 0.0),
+        (-0.02, 0.0, 0.0),
+        (0.0, 0.02, 0.0),
+        (0.0, -0.02, 0.0),
+        (0.03, 0.03, 0.0),
+        (0.03, -0.03, 0.0),
+        (-0.03, 0.03, 0.0),
+        (-0.03, -0.03, 0.0),
+        (0.0, 0.0, 0.04),
+        (0.0, 0.0, -0.04),
+    )
+    ring = attempt_index // len(offsets)
+    scale = 1.0 + 0.5 * float(ring)
+    offset = offsets[attempt_index % len(offsets)]
+    return (
+        float(reference[0]) + scale * offset[0],
+        float(reference[1]) + scale * offset[1],
+        float(reference[2]) + scale * offset[2],
+        *tuple(float(value) for value in reference[3:7]),
+    )
+
+
+def _curation_joint_seed(
+    reference: dict[str, float],
+    *,
+    morphology: MorphologyGraph,
+    physical_model: object,
+    attempt_index: int,
+) -> dict[str, float]:
+    joint_ids = ordered_global_dock_joint_ids(morphology, physical_model)
+    limits = _global_joint_limits(morphology, physical_model, joint_ids)
+    if attempt_index == 0:
+        return dict(reference)
+    if attempt_index == 1:
+        return {joint_id: 0.0 for joint_id in joint_ids}
+    output = {}
+    for index, joint_id in enumerate(joint_ids):
+        amplitude = (
+            0.04 if "pitch_dock_mech_joint" in joint_id else 0.12
+        )
+        value = float(reference[joint_id]) + amplitude * math.sin(
+            float((attempt_index + 1) * (index + 1))
+        )
+        lower, upper = limits[joint_id]
+        output[joint_id] = min(max(value, lower), upper)
+    return output
 
 
 def _task_box(task: TaskSpec, object_id: str) -> Order9C3ViewerBox:
@@ -815,7 +1286,8 @@ def _write_index(path: Path, manifest: dict[str, Any]) -> None:
             f"<td>{case['topology']}</td>"
             f'<td><a href="{_relative(neutral, root)}">interactive neutral</a></td>'
             f"<td>{final_link}</td>"
-            f"<td>{case['review_status']}</td>"
+            f'<td data-review-case="{case["case_id"]}">'
+            f"{case['review_status']}</td>"
             f"<td>{image}</td>"
             "</tr>"
         )
@@ -825,13 +1297,27 @@ def _write_index(path: Path, manifest: dict[str, Any]) -> None:
 <style>body{font-family:system-ui,sans-serif;margin:24px;color:#17202a}
 table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccd1d1;padding:7px;vertical-align:top}
 th{background:#edf2f7}img{width:300px;height:auto}code{font-size:12px}</style></head><body>
-<h1>Order 9 C3a — 12-case mesh curation pilot</h1>
+<h1>Order 9 C3a — """
+        + str(int(manifest["case_count"]))
+        + """-case mesh curation</h1>
+<p><code>"""
+        + str(manifest["pilot_version"])
+        + """</code></p>
 <p>This is human-inspection evidence only. It is not Isaac collision/path or grasp-success evidence.</p>
 <table><thead><tr><th>case</th><th>modules</th><th>topology</th><th>neutral</th>
 <th>final</th><th>status</th><th>top view</th></tr></thead><tbody>
 """
         + "\n".join(rows)
-        + "</tbody></table></body></html>\n",
+        + """</tbody></table>
+<script>
+for (const cell of document.querySelectorAll("[data-review-case]")) {
+  fetch(`/api/order9-c3-review?case_id=${encodeURIComponent(cell.dataset.reviewCase)}`)
+    .then(response => response.json())
+    .then(payload => { if (payload.ok) cell.textContent = payload.review_status; })
+    .catch(() => {});
+}
+</script></body></html>
+""",
         encoding="utf-8",
     )
 

@@ -308,6 +308,8 @@ struct SolverConfig {
   double anchor_position_tolerance_m = 0.005;
   double anchor_attitude_tolerance_rad = 0.10;
   double collision_margin_m = 0.005;
+  double collision_feasibility_tolerance_m = 0.0002;
+  bool use_relaxed_seed = true;
   double collision_activation_distance_m = 0.025;
   double collision_weight = 4.0;
   int collision_refinement_iterations = 20;
@@ -356,6 +358,7 @@ struct CollisionScene {
   std::shared_ptr<fcl::Boxd> object_shape;
   std::unordered_set<std::uint64_t> allowed_object_instances;
   std::vector<CollisionPair> pairs;
+  std::vector<CollisionPair> selected_contact_pairs;
 };
 
 struct CollisionFrameCache {
@@ -763,6 +766,22 @@ class Kernel {
         active_collision_scene_.allowed_object_instances.begin(),
         active_collision_scene_.allowed_object_instances.end());
     std::sort(allowed_instances.begin(), allowed_instances.end());
+    if (object_enabled) {
+      active_collision_scene_.selected_contact_pairs.reserve(
+          allowed_instances.size());
+      for (std::uint64_t instance : allowed_instances) {
+        const int module = static_cast<int>(instance >> 32);
+        const int geometry = static_cast<int>(
+            instance & std::numeric_limits<std::uint32_t>::max());
+        active_collision_scene_.selected_contact_pairs.push_back(
+            CollisionPair{
+                module *
+                        static_cast<int>(collision_geometry_.size()) +
+                    geometry,
+                CollisionTargetKind::kObject,
+                -1});
+      }
+    }
     std::string pair_cache_key = object_enabled ? "1" : "0";
     for (std::uint64_t instance : allowed_instances) {
       pair_cache_key += "|" + std::to_string(instance);
@@ -1045,9 +1064,18 @@ class Kernel {
         py::cast<double>(config_values["anchor_position_tolerance_m"]);
     config.anchor_attitude_tolerance_rad =
         py::cast<double>(config_values["anchor_attitude_tolerance_rad"]);
+    if (config_values.contains("use_relaxed_seed")) {
+      config.use_relaxed_seed =
+          py::cast<bool>(config_values["use_relaxed_seed"]);
+    }
     if (config_values.contains("collision_margin_m")) {
       config.collision_margin_m =
           py::cast<double>(config_values["collision_margin_m"]);
+    }
+    if (config_values.contains("collision_feasibility_tolerance_m")) {
+      config.collision_feasibility_tolerance_m =
+          py::cast<double>(
+              config_values["collision_feasibility_tolerance_m"]);
     }
     if (config_values.contains("collision_activation_distance_m")) {
       config.collision_activation_distance_m = py::cast<double>(
@@ -1134,7 +1162,9 @@ class Kernel {
       py::array_t<double, py::array::c_style | py::array::forcecast>
           centroidal_p,
       bool exact,
-      double margin_m) const {
+      double margin_m,
+      double max_selected_contact_penetration_m,
+      double ground_plane_z_m) const {
     require_rank(q, 2, "q");
     require_rank(centroidal_r, 2, "centroidal_r");
     require_rank(centroidal_p, 1, "centroidal_p");
@@ -1147,6 +1177,17 @@ class Kernel {
     }
     if (!active_collision_scene_.enabled) {
       throw std::runtime_error("collision scene is not configured");
+    }
+    if (!std::isfinite(max_selected_contact_penetration_m) ||
+        max_selected_contact_penetration_m < 0.0) {
+      throw std::invalid_argument(
+          "maximum selected-contact penetration must be finite and "
+          "non-negative");
+    }
+    if (!std::isfinite(ground_plane_z_m) &&
+        !std::isnan(ground_plane_z_m)) {
+      throw std::invalid_argument(
+          "ground plane z must be finite or NaN when disabled");
     }
     Eigen::VectorXd q_values(module_count_ * local_joint_count_);
     auto input = q.unchecked<2>();
@@ -1166,6 +1207,54 @@ class Kernel {
         active_collision_scene_,
         exact,
         margin_m);
+    const bool ground_plane_enabled = std::isfinite(ground_plane_z_m);
+    double minimum_ground_clearance_m =
+        std::numeric_limits<double>::infinity();
+    int ground_violating_proxy_count = 0;
+    py::list ground_violating_proxies;
+    if (ground_plane_enabled) {
+      const CollisionFrameCache frames = collision_frame_cache(
+          evaluation, active_collision_scene_, exact);
+      for (int instance = 0;
+           instance < static_cast<int>(frames.proxy_aabbs.size());
+           ++instance) {
+        const double clearance =
+            frames.proxy_aabbs[instance].first[2] - ground_plane_z_m;
+        minimum_ground_clearance_m =
+            std::min(minimum_ground_clearance_m, clearance);
+        if (clearance + 1.0e-12 >= margin_m) {
+          continue;
+        }
+        ++ground_violating_proxy_count;
+        py::dict detail;
+        detail["instance"] = instance;
+        detail["clearance_m"] = clearance;
+        ground_violating_proxies.append(std::move(detail));
+      }
+    }
+    double maximum_selected_contact_penetration_m = 0.0;
+    int selected_contact_penetration_violating_pair_count = 0;
+    py::list selected_contact_pairs;
+    for (const CollisionPair& pair :
+         active_collision_scene_.selected_contact_pairs) {
+      const double clearance = pair_clearance(
+          evaluation, active_collision_scene_, pair, exact);
+      const double penetration = std::max(0.0, -clearance);
+      const bool violating =
+          penetration > max_selected_contact_penetration_m + 1.0e-12;
+      maximum_selected_contact_penetration_m = std::max(
+          maximum_selected_contact_penetration_m, penetration);
+      if (violating) {
+        ++selected_contact_penetration_violating_pair_count;
+      }
+      py::dict detail;
+      detail["first_instance"] = pair.first_instance;
+      detail["second_kind"] = "object";
+      detail["clearance_m"] = clearance;
+      detail["penetration_m"] = penetration;
+      detail["violating"] = violating;
+      selected_contact_pairs.append(std::move(detail));
+    }
     py::dict output;
     output["minimum_clearance_m"] = metrics.minimum;
     output["violating_pair_count"] = metrics.active_count;
@@ -1178,7 +1267,32 @@ class Kernel {
         metrics.broad_phase_pruned_count;
     output["accepted"] =
         metrics.colliding_count == 0 &&
-        metrics.minimum + 1.0e-12 >= margin_m;
+        metrics.minimum + 1.0e-12 >= margin_m &&
+        selected_contact_penetration_violating_pair_count == 0 &&
+        ground_violating_proxy_count == 0;
+    output["ground_plane_enabled"] = ground_plane_enabled;
+    if (ground_plane_enabled) {
+      output["ground_plane_z_m"] = ground_plane_z_m;
+      output["minimum_ground_clearance_m"] =
+          minimum_ground_clearance_m;
+    } else {
+      output["ground_plane_z_m"] = py::none();
+      output["minimum_ground_clearance_m"] = py::none();
+    }
+    output["ground_violating_proxy_count"] =
+        ground_violating_proxy_count;
+    output["ground_violating_proxies"] =
+        std::move(ground_violating_proxies);
+    output["selected_contact_pair_count"] =
+        active_collision_scene_.selected_contact_pairs.size();
+    output["selected_contact_penetration_limit_m"] =
+        max_selected_contact_penetration_m;
+    output["maximum_selected_contact_penetration_m"] =
+        maximum_selected_contact_penetration_m;
+    output["selected_contact_penetration_violating_pair_count"] =
+        selected_contact_penetration_violating_pair_count;
+    output["selected_contact_pairs"] =
+        std::move(selected_contact_pairs);
     std::vector<int> ordered(metrics.clearances.size());
     for (int index = 0;
          index < static_cast<int>(ordered.size());
@@ -2173,21 +2287,28 @@ class Kernel {
         initial.maximum_attitude_error <=
             config.anchor_attitude_tolerance_rad &&
         (!active_collision_scene_.enabled ||
-         initial.minimum_proxy_clearance >= config.collision_margin_m);
+         initial.minimum_proxy_clearance >=
+             config.collision_margin_m -
+                 config.collision_feasibility_tolerance_m);
     if (initial.feasible ||
         (anchors.empty() && !active_collision_scene_.enabled)) {
       return initial;
     }
 
-    const auto relaxed = relaxed_seed(
-        initial_q,
-        initial_q,
-        lower,
-        upper,
-        pitch,
-        centroidal,
-        anchors,
-        config);
+    std::pair<Eigen::VectorXd, int> relaxed{initial_q, 0};
+    if (config.use_relaxed_seed &&
+        (initial.maximum_position_error > 0.15 ||
+         initial.maximum_attitude_error > 0.50)) {
+      relaxed = relaxed_seed(
+          initial_q,
+          initial_q,
+          lower,
+          upper,
+          pitch,
+          centroidal,
+          anchors,
+          config);
+    }
     Eigen::VectorXd q = relaxed.first;
     const int relaxed_iterations = relaxed.second;
     NativeSolution best;
@@ -2327,7 +2448,9 @@ class Kernel {
       if (maximum_position <= config.anchor_position_tolerance_m &&
           maximum_attitude <= config.anchor_attitude_tolerance_rad &&
           (!active_collision_scene_.enabled ||
-           collision.minimum >= config.collision_margin_m)) {
+           collision.minimum >=
+               config.collision_margin_m -
+                   config.collision_feasibility_tolerance_m)) {
         if (first_feasible_iteration < 0) {
           first_feasible_iteration = iteration;
         }

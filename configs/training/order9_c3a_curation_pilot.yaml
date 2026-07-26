@@ -1,16 +1,17 @@
-version: order9_c3a_manual_curation_pilot_v1
+version: order9_c3a_collision_aware_curation_pilot_v2
 review_status: pending_final_pose_review
 
 # This is a human-inspection pilot, not a production C3 bucket manifest.
 # A case becomes eligible for later Isaac admission only after:
 #   1. surface_port_ids and candidate_group_id are pinned,
-#   2. the final actual-mesh pose is accepted by the user, and
-#   3. real-Isaac collision/path replay passes.
+#   2. native convex collision-aware IK and its independent 5 mm admission pass,
+#   3. the final actual-mesh pose is accepted by the user, and
+#   4. real-Isaac collision/path replay passes.
 semantic_scope: two_contact_c3a_human_mesh_curation_only
 
 sources:
   morphology_pool: artifacts/p4_full/order9/morphology_pool.json
-  morphology_assets: artifacts/p4_full/order9/c3_preparation/morphology_assets/manifest.json
+  morphology_assets: artifacts/p4_full/order9/c3_preparation/morphology_assets_grasp_frame_mesh_v2/manifest.json
   robot_model_config: configs/robot/robot_model.yaml
   source_urdf: assets/robots/holon/holon.urdf
   curriculum_config: configs/training/order9_learning_curriculum.yaml
@@ -70,23 +71,26 @@ cases:
     topology: branched
     structural_hash: 5bf11e12e4d0c5e5f7115dbd80b17852e033131cdf2ed5ade89f3a89655d541c
     structural_source: existing_train_pool
-    surface_port_ids: [3, 14]
-    candidate_group_id: slot_0:grasp_pair:1
+    selection_note: previous free-base-only pair was replaced by the first deterministic native collision-aware final-pose admission
+    surface_port_ids: [14, 18]
+    candidate_group_id: slot_0:grasp_pair:2
 
   - case_id: c3a-06-chain
     module_count: 6
     topology: chain
     structural_hash: de92a533003f89644c550e9021af1929e66acac246bcaf3402bcd8de1810a593
     structural_source: existing_train_pool
-    surface_port_ids: [14, 23]
-    candidate_group_id: slot_0:grasp_pair:2
+    selection_note: previous free-base-only pair was replaced by the first deterministic native collision-aware final-pose admission
+    surface_port_ids: [13, 21]
+    candidate_group_id: slot_0:grasp_pair:3
 
   - case_id: c3a-06-branched
     module_count: 6
     topology: branched
     structural_hash: 3f12a3f6afaae5827d364e43cfa3b3beb2a7aef6d814628219a29281d3e21ae4
     structural_source: existing_train_pool
-    surface_port_ids: [10, 19]
+    selection_note: previous free-base-only pair was replaced by the first deterministic native collision-aware final-pose admission
+    surface_port_ids: [8, 19]
     candidate_group_id: slot_0:grasp_pair:1
 
   - case_id: c3a-07-chain
@@ -94,7 +98,8 @@ cases:
     topology: chain
     structural_hash: 176cc1d8cbd7cc5b669dea884c894d26d7a064967e56c8be36a36d8b124c46aa
     structural_source: existing_train_pool
-    surface_port_ids: [19, 26]
+    selection_note: previous free-base-only pair was replaced by the first deterministic native collision-aware final-pose admission
+    surface_port_ids: [16, 27]
     candidate_group_id: slot_0:grasp_pair:0
 
   - case_id: c3a-07-branched
@@ -118,5 +123,6 @@ cases:
     topology: branched
     structural_hash: f647dd03d229e1b7ec29a66446c4305a96ec13e7fa1113cd881e417411543dca
     structural_source: existing_train_pool
-    surface_port_ids: [27, 30]
+    selection_note: previous free-base-only pair was replaced by the first deterministic native collision-aware final-pose admission
+    surface_port_ids: [18, 29]
     candidate_group_id: slot_0:grasp_pair:1

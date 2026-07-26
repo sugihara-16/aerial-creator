@@ -11,6 +11,31 @@
 
   const params = new URLSearchParams(location.search);
   if (params.get("capture") === "1") document.body.classList.add("capture");
+  const animation = scene.animation && Array.isArray(scene.animation.frames)
+    && scene.animation.frames.length ? scene.animation : null;
+  const requestedFrame = params.get("frame");
+  let animationFrameIndex = animation && requestedFrame === "last"
+    ? animation.frames.length - 1
+    : Math.max(
+        0,
+        Math.min(
+          animation ? animation.frames.length - 1 : 0,
+          Number.parseInt(requestedFrame || "0", 10) || 0,
+        ),
+      );
+  function activeAnimationFrame() {
+    return animation ? animation.frames[animationFrameIndex] : null;
+  }
+  function activeModelMatrix(instance, index) {
+    const frame = activeAnimationFrame();
+    return frame && frame.model_matrices
+      ? frame.model_matrices[index] : instance.model_matrix;
+  }
+  function activeBoxPose(box, index) {
+    const frame = activeAnimationFrame();
+    return frame && frame.box_poses && frame.box_poses[index]
+      ? frame.box_poses[index] : box.pose_world;
+  }
   const gl = canvas.getContext("webgl2", {
     alpha: false, antialias: true, depth: true, preserveDrawingBuffer: true
   });
@@ -251,15 +276,27 @@
   function include(point) {
     for(let a=0;a<3;++a){bounds.min[a]=Math.min(bounds.min[a],point[a]);bounds.max[a]=Math.max(bounds.max[a],point[a]);}
   }
-  for(const instance of scene.instances.filter(x=>x.layer==="visual"&&x.detail_class==="shape")){
-    const mesh=meshes.get(instance.mesh_key), matrix=instance.model_matrix;
-    for(const x of [mesh.min[0],mesh.max[0]])for(const y of [mesh.min[1],mesh.max[1]])for(const z of [mesh.min[2],mesh.max[2]])
-      include(transformPoint(matrix,[x,y,z]));
+  const boundsFrames = animation ? animation.frames : [null];
+  for(const frame of boundsFrames) {
+    for(let index=0; index<scene.instances.length; ++index) {
+      const instance=scene.instances[index];
+      if(instance.layer!=="visual" || instance.detail_class!=="shape")continue;
+      const mesh=meshes.get(instance.mesh_key);
+      const matrix=frame && frame.model_matrices
+        ? frame.model_matrices[index] : instance.model_matrix;
+      for(const x of [mesh.min[0],mesh.max[0]])for(const y of [mesh.min[1],mesh.max[1]])for(const z of [mesh.min[2],mesh.max[2]])
+        include(transformPoint(matrix,[x,y,z]));
+    }
   }
   for(const marker of scene.markers) include(marker.position_world);
-  for(const box of scene.boxes) {
-    const matrix=poseMatrix(box.pose_world,box.size_m.map(x=>x/2));
-    for(const x of [-1,1])for(const y of [-1,1])for(const z of [-1,1])include(transformPoint(matrix,[x,y,z]));
+  for(const frame of boundsFrames) {
+    for(let index=0; index<scene.boxes.length; ++index) {
+      const box=scene.boxes[index];
+      const pose=frame && frame.box_poses && frame.box_poses[index]
+        ? frame.box_poses[index] : box.pose_world;
+      const matrix=poseMatrix(pose,box.size_m.map(x=>x/2));
+      for(const x of [-1,1])for(const y of [-1,1])for(const z of [-1,1])include(transformPoint(matrix,[x,y,z]));
+    }
   }
   if(!Number.isFinite(bounds.min[0])){bounds.min=[-1,-1,-1];bounds.max=[1,1,1];}
   const center=bounds.min.map((v,i)=>(v+bounds.max[i])/2);
@@ -316,19 +353,21 @@
     gl.clearColor(.96,.97,.985,1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
     gl.useProgram(meshProgram);gl.uniformMatrix4fv(meshUniforms.viewProjection,false,vp);
     const layer=collision?"collision":"visual";
-    for(const instance of scene.instances) {
+    for(let instanceIndex=0; instanceIndex<scene.instances.length; ++instanceIndex) {
+      const instance=scene.instances[instanceIndex];
       if(instance.layer!==layer || (!fullDetail&&instance.detail_class==="full"))continue;
       const mesh=meshes.get(instance.mesh_key);
       gl.bindVertexArray(mesh.vao);
-      gl.uniformMatrix4fv(meshUniforms.model,false,new Float32Array(instance.model_matrix));
+      gl.uniformMatrix4fv(meshUniforms.model,false,new Float32Array(activeModelMatrix(instance,instanceIndex)));
       gl.uniform4fv(meshUniforms.color,new Float32Array(instance.color_rgba));
       gl.drawArrays(gl.TRIANGLES,0,mesh.count);
     }
     if(showObject) {
       gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);gl.depthMask(false);
       gl.bindVertexArray(cubeVao);
-      for(const box of scene.boxes) {
-        gl.uniformMatrix4fv(meshUniforms.model,false,poseMatrix(box.pose_world,box.size_m.map(x=>x/2)));
+      for(let boxIndex=0; boxIndex<scene.boxes.length; ++boxIndex) {
+        const box=scene.boxes[boxIndex];
+        gl.uniformMatrix4fv(meshUniforms.model,false,poseMatrix(activeBoxPose(box,boxIndex),box.size_m.map(x=>x/2)));
         gl.uniform4fv(meshUniforms.color,new Float32Array(box.color_rgba));
         gl.drawArrays(gl.TRIANGLES,0,cubePositions.length/3);
       }
@@ -337,13 +376,22 @@
     gl.useProgram(lineProgram);gl.uniformMatrix4fv(lineUniforms.viewProjection,false,vp);
     if(markerLineGeometry.count){gl.bindVertexArray(markerLineGeometry.vao);gl.uniform1f(lineUniforms.pointSize,1);gl.drawArrays(gl.LINES,0,markerLineGeometry.count);}
     if(markerPointGeometry.count){gl.bindVertexArray(markerPointGeometry.vao);gl.uniform1f(lineUniforms.pointSize,13);gl.drawArrays(gl.POINTS,0,markerPointGeometry.count);}
-    for(const [item,element] of labelElements) {
-      const projected=project(item.position_world,vp);
+    const frame=activeAnimationFrame();
+    for(let labelIndex=0;labelIndex<labelElements.length;++labelIndex) {
+      const [item,element]=labelElements[labelIndex];
+      const position=frame && frame.label_positions
+        && labelIndex<scene.labels.length
+        && frame.label_positions[labelIndex]
+        ? frame.label_positions[labelIndex] : item.position_world;
+      const projected=project(position,vp);
       const visible=showLabels&&projected&&projected[2]>=-1&&projected[2]<=1;
       element.style.display=visible?"block":"none";
       if(visible){element.style.left=`${projected[0]}px`;element.style.top=`${projected[1]}px`;}
     }
-    status.textContent=`exact STL | ${scene.instances.filter(x=>x.layer===layer&& (fullDetail||x.detail_class!=="full")).length} mesh instances | drag: orbit, wheel: zoom`;
+    const animationText=frame
+      ? ` | t=${Number(frame.time_s).toFixed(2)} s | ${frame.phase || ""} | window ${frame.window_index}`
+      : "";
+    status.textContent=`exact STL | ${scene.instances.filter(x=>x.layer===layer&& (fullDetail||x.detail_class!=="full")).length} mesh instances${animationText} | drag: orbit, wheel: zoom`;
   }
 
   let dragging=false,last=[0,0];
@@ -362,6 +410,135 @@
   document.getElementById("detail-toggle").addEventListener("change",event=>{fullDetail=event.target.checked;render();});
   document.getElementById("collision-toggle").addEventListener("change",event=>{collision=event.target.checked;render();});
   document.getElementById("object-toggle").addEventListener("change",event=>{showObject=event.target.checked;render();});
+  const animationControls=document.getElementById("animation-controls");
+  const animationPlay=document.getElementById("animation-play");
+  const animationSlider=document.getElementById("animation-slider");
+  const animationTime=document.getElementById("animation-time");
+  const animationSpeed=document.getElementById("animation-speed");
+  let animationPlaying=false,animationRequest=null,animationLastTimestamp=null;
+  function updateAnimationControls() {
+    if(!animation)return;
+    const frame=activeAnimationFrame();
+    animationSlider.value=String(animationFrameIndex);
+    animationPlay.textContent=animationPlaying?"Pause":"Play";
+    animationTime.textContent=`t=${Number(frame.time_s).toFixed(2)} s | ${frame.phase || ""} | window ${frame.window_index}`;
+  }
+  function setAnimationFrame(index) {
+    if(!animation)return;
+    animationFrameIndex=Math.max(0,Math.min(animation.frames.length-1,Number(index)||0));
+    updateAnimationControls();
+    render();
+  }
+  function stopAnimation() {
+    animationPlaying=false;
+    animationLastTimestamp=null;
+    if(animationRequest!==null)cancelAnimationFrame(animationRequest);
+    animationRequest=null;
+    updateAnimationControls();
+  }
+  function animationTick(timestamp) {
+    if(!animationPlaying||!animation)return;
+    if(animationLastTimestamp===null)animationLastTimestamp=timestamp;
+    const speed=Number(animationSpeed.value)||1;
+    const elapsed=(timestamp-animationLastTimestamp)*0.001*speed;
+    let next=animationFrameIndex;
+    while(next+1<animation.frames.length
+      && Number(animation.frames[next+1].time_s)-Number(animation.frames[animationFrameIndex].time_s)<=elapsed+1e-9)next++;
+    if(next>animationFrameIndex){
+      const advanced=Number(animation.frames[next].time_s)-Number(animation.frames[animationFrameIndex].time_s);
+      animationLastTimestamp+=advanced/speed*1000;
+      setAnimationFrame(next);
+    }
+    if(animationFrameIndex>=animation.frames.length-1){stopAnimation();return;}
+    animationRequest=requestAnimationFrame(animationTick);
+  }
+  if(animation) {
+    animationControls.hidden=false;
+    animationSlider.max=String(animation.frames.length-1);
+    animationSlider.addEventListener("input",()=>{stopAnimation();setAnimationFrame(animationSlider.value);});
+    animationPlay.addEventListener("click",()=>{
+      if(animationPlaying){stopAnimation();return;}
+      if(animationFrameIndex>=animation.frames.length-1)setAnimationFrame(0);
+      animationPlaying=true;animationLastTimestamp=null;updateAnimationControls();
+      animationRequest=requestAnimationFrame(animationTick);
+    });
+    updateAnimationControls();
+  }
+  const review = scene.metadata && scene.metadata.review;
+  const reviewControls = document.getElementById("review-controls");
+  const reviewStatus = document.getElementById("review-status");
+  const reviewNote = document.getElementById("review-note");
+  const reviewButtons = [...document.querySelectorAll("[data-review-action]")];
+  function setReviewBusy(busy) {
+    for (const button of reviewButtons) button.disabled = busy;
+  }
+  function downloadReviewRequest(action) {
+    const payload = {
+      case_id: review.case_id,
+      action,
+      note: reviewNote.value,
+      scene_sha256: review.scene_sha256 || null,
+      viewer_version: scene.viewer_version
+    };
+    const blob = new Blob([JSON.stringify(payload,null,2)+"\n"], {type:"application/json"});
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = `${review.case_id}.${action}.json`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    reviewStatus.textContent = "review server未接続: request JSONをdownloadしました";
+  }
+  async function reviewRequest(action) {
+    if (!review) return;
+    if (location.protocol === "file:") {
+      downloadReviewRequest(action);
+      return;
+    }
+    setReviewBusy(true);
+    reviewStatus.textContent = `${action}を処理中…`;
+    try {
+      const response = await fetch(review.api_path || "/api/order9-c3-review", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({
+          case_id: review.case_id,
+          action,
+          note: reviewNote.value,
+          scene_sha256: review.scene_sha256 || null
+        })
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok) throw new Error(payload.error || `HTTP ${response.status}`);
+      reviewStatus.textContent = `${payload.case_id}: ${payload.review_status}`;
+      if (payload.note !== undefined) reviewNote.value = payload.note || "";
+      if (payload.reload_url) location.replace(payload.reload_url);
+    } catch (error) {
+      reviewStatus.textContent = `失敗: ${error.message}`;
+    } finally {
+      setReviewBusy(false);
+    }
+  }
+  async function loadReviewState() {
+    if (!review || location.protocol === "file:") return;
+    try {
+      const endpoint = review.api_path || "/api/order9-c3-review";
+      const response = await fetch(`${endpoint}?case_id=${encodeURIComponent(review.case_id)}`);
+      const payload = await response.json();
+      if (response.ok && payload.ok) {
+        reviewStatus.textContent = `${payload.case_id}: ${payload.review_status}`;
+        reviewNote.value = payload.note || "";
+      }
+    } catch (_error) {
+      reviewStatus.textContent = "review serverの状態を取得できません";
+    }
+  }
+  if (review) {
+    reviewControls.hidden = false;
+    for (const button of reviewButtons) {
+      button.addEventListener("click",()=>reviewRequest(button.dataset.reviewAction));
+    }
+    loadReviewState();
+  }
   setView(params.get("view")||scene.default_view||"iso");
   document.documentElement.dataset.ready="true";
   window.AMSRR_ORDER9_VIEWER_READY=true;

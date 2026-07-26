@@ -39,10 +39,14 @@ from amsrr.feasibility.order9_native_posture_ik import (
 @dataclass(frozen=True)
 class CollisionAwareIKConfig:
     collision_margin_m: float = 0.005
+    # The optimizer targets the full margin.  Feasibility comparisons allow
+    # only this sub-millimetre solver/proxy discretization tolerance.
+    collision_feasibility_tolerance_m: float = 0.0002
+    max_selected_contact_penetration_m: float = 0.002
     collision_activation_distance_m: float = 0.020
-    collision_weight: float = 4.0
-    collision_refinement_iterations: int = 20
-    collision_line_search_steps: int = 8
+    collision_weight: float = 8.0
+    collision_refinement_iterations: int = 40
+    collision_line_search_steps: int = 10
 
     def __post_init__(self) -> None:
         for name in (
@@ -53,6 +57,28 @@ class CollisionAwareIKConfig:
             value = float(getattr(self, name))
             if not math.isfinite(value) or value <= 0.0:
                 raise ValueError(f"{name} must be finite and positive")
+        if (
+            not math.isfinite(
+                float(self.max_selected_contact_penetration_m)
+            )
+            or self.max_selected_contact_penetration_m < 0.0
+        ):
+            raise ValueError(
+                "max_selected_contact_penetration_m must be finite and "
+                "non-negative"
+            )
+        if (
+            not math.isfinite(
+                float(self.collision_feasibility_tolerance_m)
+            )
+            or self.collision_feasibility_tolerance_m < 0.0
+            or self.collision_feasibility_tolerance_m
+            >= self.collision_margin_m
+        ):
+            raise ValueError(
+                "collision_feasibility_tolerance_m must be finite, "
+                "non-negative, and smaller than collision_margin_m"
+            )
         if self.collision_activation_distance_m < self.collision_margin_m:
             raise ValueError(
                 "collision_activation_distance_m must be at least the "
@@ -68,6 +94,12 @@ class CollisionAwareIKConfig:
     def to_native_dict(self) -> dict[str, float | int]:
         return {
             "collision_margin_m": float(self.collision_margin_m),
+            "collision_feasibility_tolerance_m": float(
+                self.collision_feasibility_tolerance_m
+            ),
+            "max_selected_contact_penetration_m": float(
+                self.max_selected_contact_penetration_m
+            ),
             "collision_activation_distance_m": float(
                 self.collision_activation_distance_m
             ),
@@ -407,7 +439,10 @@ class CollisionAwareNativeCentroidalPostureIKSolver(
 ):
     """Native IK with convex-hull collision avoidance."""
 
-    solver_version = "centroidal_posture_ik_cpp_eigen_fcl_convex_v1"
+    solver_version = (
+        "centroidal_posture_ik_cpp_eigen_fcl_convex_"
+        "v6_continuous_seed_proxy_ground"
+    )
 
     def __init__(
         self,
@@ -474,6 +509,7 @@ class CollisionAwareNativeCentroidalPostureIKSolver(
         joint_positions_rad: Mapping[str, float],
         exact: bool,
         margin_m: float,
+        ground_plane_z_m: float | None = None,
     ) -> dict[str, object]:
         self.kinematics._ensure_graph(morphology)
         if morphology is not self._scene_morphology:
@@ -501,8 +537,32 @@ class CollisionAwareNativeCentroidalPostureIKSolver(
                 centroidal_r,
                 centroidal_p,
                 bool(exact),
-                float(margin_m),
+                max(
+                    0.0,
+                    float(margin_m)
+                    - float(
+                        self.collision_config
+                        .collision_feasibility_tolerance_m
+                    ),
+                ),
+                float(
+                    self.collision_config
+                    .max_selected_contact_penetration_m
+                ),
+                (
+                    float("nan")
+                    if ground_plane_z_m is None
+                    else float(ground_plane_z_m)
+                ),
             )
+        )
+        result["requested_collision_margin_m"] = float(margin_m)
+        result["effective_collision_margin_m"] = max(
+            0.0,
+            float(margin_m)
+            - float(
+                self.collision_config.collision_feasibility_tolerance_m
+            ),
         )
         geometry = self.kinematics.collision_geometry
         assert geometry is not None
@@ -533,4 +593,32 @@ class CollisionAwareNativeCentroidalPostureIKSolver(
                 )
             details.append(detail)
         result["worst_pairs"] = details
+        contact_details = []
+        for pair in result.get("selected_contact_pairs", []):
+            first_instance = int(pair["first_instance"])
+            contact_details.append(
+                {
+                    **dict(pair),
+                    "first_module_index": (
+                        first_instance // geometry_count
+                    ),
+                    "first_link_id": geometry.link_ids[
+                        first_instance % geometry_count
+                    ],
+                }
+            )
+        result["selected_contact_pairs"] = contact_details
+        ground_details = []
+        for item in result.get("ground_violating_proxies", []):
+            instance = int(item["instance"])
+            ground_details.append(
+                {
+                    **dict(item),
+                    "module_index": instance // geometry_count,
+                    "link_id": geometry.link_ids[
+                        instance % geometry_count
+                    ],
+                }
+            )
+        result["ground_violating_proxies"] = ground_details
         return result

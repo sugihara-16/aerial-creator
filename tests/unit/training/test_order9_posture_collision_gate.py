@@ -2,14 +2,19 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from amsrr.training.order9_articulated_teacher import (
-    Order9ArticulatedTrajectoryTeacher,
+import pytest
+
+from amsrr.feasibility.order9_posture_collision import (
+    CollisionAwareIKConfig,
 )
 from amsrr.training.order9_posture_resolver import (
     Order9PostureCollisionObject,
     Order9PostureTrajectoryResolver,
 )
-from tests.unit.training.test_order9_articulated_teacher import _system
+from tests.unit.training.test_order9_articulated_teacher import (
+    _production_teacher,
+    _system,
+)
 
 
 class _AcceptedCollisionSolver:
@@ -33,14 +38,39 @@ class _AcceptedCollisionSolver:
             "accepted": True,
             "minimum_clearance_m": 0.012,
             "violating_pair_count": 0,
+            "maximum_selected_contact_penetration_m": 0.0015,
+            "selected_contact_penetration_violating_pair_count": 0,
         }
+
+
+def test_selected_contact_penetration_limit_matches_order8_contract() -> None:
+    config = CollisionAwareIKConfig()
+
+    assert config.max_selected_contact_penetration_m == pytest.approx(
+        0.002
+    )
+    assert config.to_native_dict()[
+        "max_selected_contact_penetration_m"
+    ] == pytest.approx(0.002)
+    assert config.collision_margin_m == pytest.approx(0.005)
+    assert config.collision_feasibility_tolerance_m == pytest.approx(
+        0.0002
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="max_selected_contact_penetration_m",
+    ):
+        CollisionAwareIKConfig(
+            max_selected_contact_penetration_m=-1.0e-6
+        )
 
 
 def test_resolver_installs_and_archives_convex_collision_gate(
     grasp_carry_dict: dict,
 ) -> None:
     task, physical, context = _system(grasp_carry_dict)
-    plan = Order9ArticulatedTrajectoryTeacher(physical).plan(
+    plan = _production_teacher(task, physical).plan(
         context,
         initial_object_poses_world={
             obj.object_id: obj.pose_world for obj in task.scene.objects
@@ -74,7 +104,7 @@ def test_resolver_installs_and_archives_convex_collision_gate(
     )
 
     assert solver.scene_calls
-    assert solver.check_calls == len(solver.scene_calls)
+    assert solver.check_calls < len(solver.scene_calls)
     assert result.evidence.collision_gate_status == "accepted"
     assert result.evidence.collision_gate_version == solver.solver_version
     assert result.evidence.minimum_collision_clearance_m == 0.012
@@ -84,21 +114,30 @@ def test_resolver_installs_and_archives_convex_collision_gate(
         == tuple(geometry.primitive_params["size_m"])
         for call in solver.scene_calls
     )
-    expected_allowed_anchor_ids = [
-        tuple(
-            sorted(
-                assignment.anchor_id
-                for assignment in knot.contact_assignments
-                if assignment.schedule_state
-                in {"attach", "maintain", "slide"}
+    def expected_allowed(knots):
+        return [
+            tuple(
+                sorted(
+                    assignment.anchor_id
+                    for assignment in knot.contact_assignments
+                    if assignment.schedule_state
+                    in {"attach", "maintain", "slide"}
+                )
             )
-        )
-        for knot in plan.raw_trajectory.knots
-        if (
-            knot.posture_target is not None
-            and knot.posture_target.free_anchor_pose_targets
-        )
-    ]
+            for knot in knots
+            if (
+                knot.posture_target is not None
+                and knot.posture_target.free_anchor_pose_targets
+            )
+        ]
+
+    expected_allowed_anchor_ids = (
+        expected_allowed(plan.raw_trajectory.knots)
+        + expected_allowed(result.trajectory.knots)
+    )
     assert [
         call["allowed_anchor_ids"] for call in solver.scene_calls
     ] == expected_allowed_anchor_ids
+    assert solver.check_calls == len(
+        expected_allowed(result.trajectory.knots)
+    )

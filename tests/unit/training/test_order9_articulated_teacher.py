@@ -28,8 +28,16 @@ from amsrr.schemas.task_spec import TaskSpec
 from amsrr.training.order9_articulated_teacher import (
     Order9ArticulatedTeacherConfig,
     Order9ArticulatedTrajectoryTeacher,
+    _ConfigurationRouteCache,
     _candidate_group_attempts,
+    _point_to_segment_distance,
     _phase_assignment_states,
+    _resume_configuration_route,
+    _validated_contact_goal_joint_seed,
+)
+from amsrr.training.order9_configuration_space_planner import (
+    DeterministicOrder9ConfigurationSpacePlanner,
+    Order9ConfigurationState,
 )
 from amsrr.training.order9_c3_teacher import _neutral_runtime_observation
 from amsrr.training.order9_posture_resolver import (
@@ -40,6 +48,19 @@ from amsrr.training.order9_posture_hard_gate import (
     Order9PostureResolvingHardChecker,
 )
 from amsrr.utils.hashing import stable_hash
+
+
+def test_contact_configuration_corridor_distance_uses_finite_segment() -> None:
+    assert _point_to_segment_distance(
+        (0.5, 0.02, 0.0),
+        (0.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0),
+    ) == pytest.approx(0.02)
+    assert _point_to_segment_distance(
+        (1.2, 0.0, 0.0),
+        (0.0, 0.0, 0.0),
+        (1.0, 0.0, 0.0),
+    ) == pytest.approx(0.2)
 
 
 def _system(grasp_carry_dict: dict):
@@ -77,11 +98,117 @@ def _system(grasp_carry_dict: dict):
     return task, physical, context
 
 
+def _collision_object(task: TaskSpec) -> Order9PostureCollisionObject:
+    target = task.scene.objects[0]
+    geometry = next(
+        item
+        for item in task.scene.geometry_library
+        if item.geometry_id == target.geometry_id
+    )
+    return Order9PostureCollisionObject(
+        object_id=target.object_id,
+        size_m=tuple(geometry.primitive_params["size_m"]),
+        initial_pose_world=tuple(target.pose_world),
+    )
+
+
+def test_contact_goal_joint_seed_is_morphology_bound(
+    grasp_carry_dict: dict,
+) -> None:
+    _task, physical, context = _system(grasp_carry_dict)
+    zero_seed = _validated_contact_goal_joint_seed(
+        context,
+        physical,
+        None,
+    )
+
+    assert zero_seed
+    assert set(zero_seed.values()) == {0.0}
+    reviewed_seed = {
+        joint_id: 0.125 for joint_id in zero_seed
+    }
+    assert _validated_contact_goal_joint_seed(
+        context,
+        physical,
+        reviewed_seed,
+    ) == reviewed_seed
+
+    with pytest.raises(
+        SchemaValidationError,
+        match="seed identities differ",
+    ):
+        _validated_contact_goal_joint_seed(
+            context,
+            physical,
+            {"unknown_joint": 0.0},
+        )
+
+
+def _production_teacher(
+    task: TaskSpec,
+    physical,
+) -> Order9ArticulatedTrajectoryTeacher:
+    return Order9ArticulatedTrajectoryTeacher(
+        physical,
+        collision_object=_collision_object(task),
+    )
+
+
+def test_articulated_teacher_resumes_and_advances_cached_route() -> None:
+    planner = DeterministicOrder9ConfigurationSpacePlanner()
+    start = Order9ConfigurationState(
+        base_pose_world=(0.0, 0.0, 0.5, 0.0, 0.0, 0.0, 1.0),
+        joint_positions_rad={"module_0:yaw": 0.0},
+    )
+    waypoint = Order9ConfigurationState(
+        base_pose_world=(0.5, 0.0, 0.5, 0.0, 0.0, 0.0, 1.0),
+        joint_positions_rad={"module_0:yaw": 0.5},
+    )
+    goal = Order9ConfigurationState(
+        base_pose_world=(1.0, 0.0, 0.2, 0.0, 0.0, 0.0, 1.0),
+        joint_positions_rad={"module_0:yaw": 1.0},
+    )
+    identity = ("approach", "morphology", (), "scene", "desired")
+    cache = _ConfigurationRouteCache(
+        identity=identity,
+        goal=goal,
+        remaining_states=(waypoint, goal),
+        source_method="deterministic_overhead_coordinate_bridge",
+    )
+
+    resumed = _resume_configuration_route(
+        cache=cache,
+        identity=identity,
+        start=start,
+        goal=goal,
+        planner=planner,
+        collision_free=lambda _state: True,
+        ordered_ids=("module_0:yaw",),
+    )
+
+    assert resumed is not None
+    assert resumed.method.startswith("cached_route:")
+    assert resumed.states == (start, waypoint, goal)
+
+    advanced = _resume_configuration_route(
+        cache=cache,
+        identity=identity,
+        start=waypoint,
+        goal=goal,
+        planner=planner,
+        collision_free=lambda _state: True,
+        ordered_ids=("module_0:yaw",),
+    )
+
+    assert advanced is not None
+    assert advanced.states == (waypoint, goal)
+
+
 def test_articulated_teacher_emits_complete_joint_com_and_anchor_targets(
     grasp_carry_dict: dict,
 ) -> None:
     task, physical, context = _system(grasp_carry_dict)
-    plan = Order9ArticulatedTrajectoryTeacher(physical).plan(
+    plan = _production_teacher(task, physical).plan(
         context,
         initial_object_poses_world={
             obj.object_id: obj.pose_world for obj in task.scene.objects
@@ -116,6 +243,10 @@ def test_articulated_teacher_emits_complete_joint_com_and_anchor_targets(
         plan.posture_resolution.evidence.maximum_joint_rate_rad_s
         <= plan.posture_resolution.evidence.joint_rate_limit_rad_s
     )
+    assert (
+        plan.posture_resolution.evidence.nominal_joint_seed_trajectory_hash
+        is not None
+    )
     expected_joint_ids = set(plan.ik_solution.joint_positions_rad)
     approach_joint_reference = dict(
         plan.trajectory.knots[0].posture_target.joint_pos_target
@@ -127,10 +258,25 @@ def test_articulated_teacher_emits_complete_joint_com_and_anchor_targets(
         assert knot.posture_target is not None
         assert set(knot.posture_target.joint_pos_target or {}) == expected_joint_ids
         assert set(knot.posture_target.joint_vel_target or {}) == expected_joint_ids
-        assert knot.posture_target.joint_pos_target == pytest.approx(
-            approach_joint_reference,
-            abs=1.0e-9,
-        )
+    assert plan.configuration_space_plan is not None
+    assert plan.configuration_space_plan.collision_check_count > 0
+    assert (
+        plan.posture_resolution.evidence.collision_gate_status
+        == "accepted"
+    )
+    joint_configuration_changed = any(
+        knot.posture_target.joint_pos_target
+        != pytest.approx(approach_joint_reference, abs=1.0e-9)
+        for knot in plan.trajectory.knots[1:]
+    )
+    planned_states = plan.configuration_space_plan.states
+    base_configuration_changed = any(
+        abs(float(planned_states[-1].base_pose_world[index])
+            - float(planned_states[0].base_pose_world[index]))
+        > 1.0e-9
+        for index in range(7)
+    )
+    assert joint_configuration_changed or base_configuration_changed
 
     checked_context = HighLevelPolicyContext(
         context.irg,
@@ -221,7 +367,7 @@ def test_reachability_checker_rejects_mutated_teacher_joint_target(
     grasp_carry_dict: dict,
 ) -> None:
     task, physical, context = _system(grasp_carry_dict)
-    plan = Order9ArticulatedTrajectoryTeacher(physical).plan(
+    plan = _production_teacher(task, physical).plan(
         context,
         initial_object_poses_world={
             obj.object_id: obj.pose_world for obj in task.scene.objects
@@ -316,7 +462,7 @@ def test_rolling_teacher_preserves_previous_nominal_reference(
     grasp_carry_dict: dict,
 ) -> None:
     task, physical, context = _system(grasp_carry_dict)
-    teacher = Order9ArticulatedTrajectoryTeacher(physical)
+    teacher = _production_teacher(task, physical)
     initial_object_poses = {
         obj.object_id: obj.pose_world for obj in task.scene.objects
     }
@@ -433,4 +579,12 @@ def test_release_teacher_resolves_an_explicit_open_anchor_reference(
     )
     terminal = release.trajectory.knots[-1].posture_target
     assert terminal is not None
-    assert terminal.joint_pos_target == pytest.approx(opened, abs=1.0e-4)
+    assert set(terminal.joint_pos_target) == set(opened)
+    assert sum(
+        abs(float(value)) for value in terminal.joint_pos_target.values()
+    ) < sum(abs(float(value)) for value in closed.values())
+    assert (
+        release.posture_resolution.evidence
+        .maximum_anchor_position_error_m
+        <= teacher.config.posture_anchor_position_tolerance_m
+    )

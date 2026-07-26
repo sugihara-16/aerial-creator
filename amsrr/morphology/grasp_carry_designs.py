@@ -708,9 +708,10 @@ def _bind_grasp_anchors_to_mesh_surfaces(
 
     The provisional anchor list is used only to scope deterministic opposing-pair
     selection to the intended grasp-arm modules.  The returned RobotAnchor pose
-    is the connect frame relative to the selected mechanism link, not a module-
-    frame heuristic.  This keeps the existing schema while making downstream
-    candidate/contact identities physically executable.
+    is the object-grasp contact frame relative to the selected mechanism link,
+    not a module-frame heuristic or necessarily the assembly connect frame.
+    This keeps downstream candidate/contact identities physically executable
+    without changing Dock assembly geometry.
     """
 
     grasp_anchors = [anchor for anchor in anchors if anchor.anchor_type == "grasp"]
@@ -733,6 +734,12 @@ def _bind_grasp_anchors_to_mesh_surfaces(
     all_surfaces_by_module: dict[int, list[GripperSurface]] = {}
     for surface in resolve_unoccupied_gripper_surfaces(provisional, physical_model):
         all_surfaces_by_module.setdefault(surface.module_id, []).append(surface)
+    physical_joints_by_id = {
+        joint.joint_id: joint for joint in physical_model.joints
+    }
+    physical_ports_by_id = {
+        port.port_id: port for port in physical_model.dock_ports
+    }
     used_port_ids: set[int] = set()
     rebound: list[RobotAnchor] = []
     for anchor in anchors:
@@ -757,31 +764,33 @@ def _bind_grasp_anchors_to_mesh_surfaces(
                 f"on module {anchor.module_id}"
             )
         used_port_ids.add(surface.port_global_id)
-        connect_joint = next(
-            (
-                joint
-                for joint in physical_model.joints
-                if joint.joint_id == surface.port_local_id
-            ),
-            None,
-        )
+        connect_joint = physical_joints_by_id.get(surface.port_local_id)
+        physical_port = physical_ports_by_id.get(surface.port_local_id)
         if (
             connect_joint is None
+            or physical_port is None
             or connect_joint.parent_link != surface.mechanism_link_id
         ):
             raise SchemaValidationError(
-                f"Mesh-backed grasp surface {surface.port_local_id!r} has no matching "
-                "connect-frame joint"
+                f"Mesh-backed grasp surface {surface.port_local_id!r} has no "
+                "matching PhysicalModel connect frame"
             )
-        link_local_pose = pose_from_transform(
-            transform_from_xyz_rpy(connect_joint.origin_xyz, connect_joint.origin_rpy)
+        connect_frame_local_pose = pose_from_transform(
+            transform_from_xyz_rpy(
+                connect_joint.origin_xyz,
+                connect_joint.origin_rpy,
+            )
+        )
+        grasp_from_connect = (
+            physical_port.grasp_contact_frame_from_connect
+            or (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
         )
         rebound.append(
             RobotAnchor(
                 anchor_id=anchor.anchor_id,
                 module_id=anchor.module_id,
                 link_id=surface.mechanism_link_id,
-                local_pose=link_local_pose,
+                local_pose=surface.grasp_contact_frame_link,
                 anchor_type=anchor.anchor_type,
                 capability={
                     **anchor.capability,
@@ -791,6 +800,17 @@ def _bind_grasp_anchors_to_mesh_surfaces(
                     "dock_port_type": surface.port_type,
                     "dock_mechanism_link_id": surface.mechanism_link_id,
                     "dock_mechanism_joint_id": surface.mechanism_joint_id,
+                    "dock_connect_frame_local_pose": list(
+                        connect_frame_local_pose
+                    ),
+                    "grasp_contact_frame_from_connect": list(
+                        grasp_from_connect
+                    ),
+                    "grasp_contact_frame_source": (
+                        "urdf_authored_pitch_grasp_contact_frame"
+                        if surface.port_type == "pitch_dock"
+                        else "dock_connect_frame_identity"
+                    ),
                     "dock_collision_primitive_ids": [
                         primitive.primitive_id
                         for primitive in surface.collision_primitives

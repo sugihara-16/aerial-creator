@@ -1,0 +1,70 @@
+version: order9_c3a_contact_penetration_review_batch_v1
+review_status: pending_final_pose_review
+
+# Static two-contact review candidates using the corrected pitch grasp mesh.
+# Every final pose must pass:
+#   - native convex/FCL self and non-contact object clearance >= 5 mm,
+#   - selected-anchor/object convex penetration <= 2 mm,
+#   - the existing articulated IK and hard reachability tolerances.
+# Human acceptance and later real-Isaac admission remain separate evidence.
+semantic_scope: two_contact_c3a_human_mesh_curation_only
+
+sources:
+  morphology_pool: artifacts/p4_full/order9/morphology_pool.json
+  morphology_assets: artifacts/p4_full/order9/c3_preparation/morphology_assets_grasp_frame_mesh_v2/manifest.json
+  robot_model_config: configs/robot/robot_model.yaml
+  source_urdf: assets/robots/holon/holon.urdf
+  curriculum_config: configs/training/order9_learning_curriculum.yaml
+  canonical_order8_task_bucket: artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/rollout_buckets/buckets/train-000000-5fecfad4f44f/task_spec.json
+
+selection:
+  required_case_count: 5
+  selected_contact_penetration_limit_m: 0.002
+  non_contact_collision_margin_m: 0.005
+  require_pitch_contact_count: 5
+
+cases:
+  - case_id: c3a-b07-04-chain
+    module_count: 4
+    topology: chain
+    structural_hash: edc6e343145fa38b6abed10571965b4391e87f5709b89d9c2a509bb8c4d7fc20
+    structural_source: existing_train_pool
+    selection_note: previously unused train-pool structure with a corrected-mesh pitch-yaw assignment
+    surface_port_ids: [1, 15]
+    candidate_group_id: slot_0:grasp_pair:0
+
+  - case_id: c3a-b07-05-chain
+    module_count: 5
+    topology: chain
+    structural_hash: e92005201ef488398a1b418567db4d03504bb298ca2003915643e18cf53f1682
+    structural_source: existing_train_pool
+    selection_note: previously unused train-pool structure with a corrected-mesh pitch-yaw assignment
+    surface_port_ids: [4, 18]
+    candidate_group_id: slot_0:grasp_pair:0
+
+  - case_id: c3a-b07-06-branched
+    module_count: 6
+    topology: branched
+    structural_hash: bf248752344b95e508819bc391802f85135e3af4446be6db69080110919364f5
+    structural_source: existing_train_pool
+    selection_note: previously unused train-pool structure with a corrected-mesh pitch-pitch assignment
+    surface_port_ids: [16, 20]
+    candidate_group_id: slot_0:grasp_pair:0
+
+  - case_id: c3a-b07-07-branched
+    module_count: 7
+    topology: branched
+    structural_hash: f6661475a0477081ce8811730452fb0cd2c50b46ada364e3c7b8f6e0a0adf365
+    structural_source: existing_train_pool
+    selection_note: previously unused train-pool structure with a corrected-mesh pitch-pitch assignment; collision-aware solve accepts deterministic seed 6
+    surface_port_ids: [1, 21]
+    candidate_group_id: slot_0:grasp_pair:2
+
+  - case_id: c3a-b07-08-branched
+    module_count: 8
+    topology: branched
+    structural_hash: f708f7ad3f393b160f9eb9e1e2e2c09a6aa6906aee504332b4a0ef83b4a8679a
+    structural_source: existing_train_pool
+    selection_note: previously unused train-pool structure with a corrected-mesh pitch-pitch assignment
+    surface_port_ids: [20, 29]
+    candidate_group_id: slot_0:grasp_pair:0

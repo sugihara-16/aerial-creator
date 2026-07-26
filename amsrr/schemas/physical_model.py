@@ -91,6 +91,7 @@ class DockPortSpec(SchemaBase):
     local_pose: Pose7D
     port_type: Literal["pitch_dock", "yaw_dock", "generic_dock"]
     compatible_port_types: list[str]
+    grasp_contact_frame_from_connect: Pose7D | None = None
     latch_axis_local: Vector3 | None = None
     mechanical_limits: dict[str, Any] = field(default_factory=dict)
 
@@ -98,6 +99,12 @@ class DockPortSpec(SchemaBase):
         require_non_empty(self.port_id, "DockPortSpec.port_id")
         require_non_empty(self.parent_link, "DockPortSpec.parent_link")
         require_len(self.local_pose, 7, "DockPortSpec.local_pose")
+        if self.grasp_contact_frame_from_connect is not None:
+            require_len(
+                self.grasp_contact_frame_from_connect,
+                7,
+                "DockPortSpec.grasp_contact_frame_from_connect",
+            )
         if self.latch_axis_local is not None:
             require_len(self.latch_axis_local, 3, "DockPortSpec.latch_axis_local")
 
@@ -153,4 +160,3 @@ class PhysicalModel(SchemaBase):
                 from amsrr.schemas.common import SchemaValidationError
 
                 raise SchemaValidationError(f"JointModel {joint.joint_id!r} references an unknown link")
-

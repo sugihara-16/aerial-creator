@@ -12,6 +12,7 @@ from amsrr.visualization.order9_c3_curation import (
     Order9C3ViewerBox,
     Order9C3ViewerMarker,
     build_order9_c3_urdf_mesh_scene,
+    order9_c3_urdf_root_pose_from_baselink_pose,
     render_order9_c3_mesh_viewer,
     write_order9_c3_stl_mesh_library,
     write_order9_c3_viewer_javascript,
@@ -42,6 +43,7 @@ def _binary_triangle_stl() -> bytes:
 def _urdf(mesh_path: Path) -> str:
     return f"""<?xml version="1.0"?>
 <robot name="viewer_unit">
+  <baselink name="module_0__fc"/>
   <link name="module_0__root">
     <visual>
       <origin xyz="0 0 0" rpy="0 0 0"/>
@@ -52,6 +54,12 @@ def _urdf(mesh_path: Path) -> str:
       <geometry><mesh filename="{mesh_path}"/></geometry>
     </collision>
   </link>
+  <link name="module_0__fc"/>
+  <joint name="module_0__fc_joint" type="fixed">
+    <parent link="module_0__root"/>
+    <child link="module_0__fc"/>
+    <origin xyz="0 0.0001 0.060935" rpy="0 0 0"/>
+  </joint>
   <link name="module_0__tip">
     <visual><geometry><mesh filename="{mesh_path}"/></geometry></visual>
   </link>
@@ -63,6 +71,40 @@ def _urdf(mesh_path: Path) -> str:
   </joint>
 </robot>
 """
+
+
+def test_curation_viewer_converts_baselink_world_pose_to_urdf_root(
+    tmp_path: Path,
+) -> None:
+    mesh_path = tmp_path / "triangle.STL"
+    mesh_path.write_bytes(_binary_triangle_stl())
+    urdf_path = tmp_path / "robot.urdf"
+    urdf_path.write_text(_urdf(mesh_path), encoding="utf-8")
+    baselink_pose_world = (
+        2.0,
+        3.0,
+        4.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    )
+
+    root_pose_world = order9_c3_urdf_root_pose_from_baselink_pose(
+        urdf_path,
+        baselink_pose_world,
+    )
+    scene = build_order9_c3_urdf_mesh_scene(
+        urdf_path,
+        root_pose_world=root_pose_world,
+    )
+
+    assert root_pose_world[:3] == pytest.approx(
+        (2.0, 2.9999, 3.939065)
+    )
+    assert scene.link_poses_world["module_0__fc"] == pytest.approx(
+        baselink_pose_world
+    )
 
 
 def test_curation_viewer_resolves_exact_stl_and_global_joint_ids(
@@ -142,7 +184,13 @@ def test_curation_viewer_writes_shared_library_html_and_scene(
                 size_m=(0.3, 0.4, 0.15),
             ),
         ),
-        metadata={"evidence": "unit"},
+        metadata={
+            "evidence": "unit",
+            "review": {
+                "case_id": "unit-case",
+                "api_path": "/api/order9-c3-review",
+            },
+        },
     )
 
     assert artifacts.viewer_version == ORDER9_C3_CURATION_VIEWER_VERSION
@@ -153,10 +201,71 @@ def test_curation_viewer_writes_shared_library_html_and_scene(
     assert "../shared/mesh_library.js" in page
     assert "../shared/viewer.js" in page
     assert "not Isaac collision" in page
+    assert "data-review-action=\"accept\"" in page
+    assert "data-review-action=\"reject\"" in page
+    assert "data-review-action=\"recalculate\"" in page
+    javascript = viewer_js.read_text(encoding="utf-8")
+    assert "/api/order9-c3-review" in javascript
+    assert "downloadReviewRequest" in javascript
     archived = json.loads(artifacts.scene_path.read_text(encoding="utf-8"))
     assert archived["metadata"]["evidence"] == "unit"
     assert archived["markers"][0]["selected"] is True
     assert archived["boxes"][0]["size_m"] == [0.3, 0.4, 0.15]
+    assert archived["metadata"]["review"]["case_id"] == "unit-case"
+
+    animation = {
+        "animation_version": "unit-animation-v1",
+        "frames_per_second": 10,
+        "frame_count": 2,
+        "duration_s": 0.1,
+        "frames": [
+            {
+                "frame_index": index,
+                "time_s": 0.1 * index,
+                "phase": "approach",
+                "window_index": 0,
+                "window_local_time_s": 0.1 * index,
+                "model_matrices": [
+                    list(value["model_matrix"])
+                    for value in scene.instances
+                ],
+                "label_positions": [
+                    list(value["position_world"])
+                    for value in scene.module_labels
+                ],
+                "box_poses": [
+                    [0.0, 0.0, 0.1 * index, 0.0, 0.0, 0.0, 1.0]
+                ],
+            }
+            for index in range(2)
+        ],
+    }
+    animated = render_order9_c3_mesh_viewer(
+        urdf_scene=scene,
+        html_path=tmp_path / "animated/nominal.html",
+        mesh_library_path=library_path,
+        viewer_javascript_path=viewer_js,
+        title="unit animation",
+        subtitle="ideal tracking",
+        boxes=(
+            Order9C3ViewerBox(
+                object_id="object",
+                pose_world=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+                size_m=(0.3, 0.4, 0.15),
+            ),
+        ),
+        animation=animation,
+        semantic_scope="unit nominal animation",
+    )
+    animated_page = animated.html_path.read_text(encoding="utf-8")
+    animated_scene = json.loads(
+        animated.scene_path.read_text(encoding="utf-8")
+    )
+    assert 'id="animation-play"' in animated_page
+    assert 'id="animation-slider"' in animated_page
+    assert animated_scene["animation"]["frame_count"] == 2
+    assert len(animated_scene["animation"]["frames"]) == 2
+    assert animated_scene["semantic_scope"] == "unit nominal animation"
 
 
 def test_curation_viewer_rejects_ascii_stl(tmp_path: Path) -> None:

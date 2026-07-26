@@ -1,0 +1,53 @@
+{
+  "entries": [
+    {
+      "bucket_id": "train-000003-3b95da871f01",
+      "candidate_group_id": "slot_0:grasp_pair:3",
+      "review_case_id": "c3a-b02-05-branched",
+      "review_manifest_path": "artifacts/p4_full/order9/c3a_contact_penetration_batch_002/manifest.json",
+      "review_manifest_sha256": "d37e239515fa38772432dc4bdc87e6b598e7ffa89c206c6dd35420a11fed8dfc",
+      "structural_hash": "3b95da871f01ce962592bae42751f7959b1d01c7c3e76863a7e1fb7518a9acb8",
+      "surface_port_ids": [
+        6,
+        18
+      ]
+    },
+    {
+      "bucket_id": "train-000018-3f12a3f6afaa",
+      "candidate_group_id": "slot_0:grasp_pair:1",
+      "review_case_id": "c3a-b01-06-branched-retry",
+      "review_manifest_path": "artifacts/p4_full/order9/c3a_contact_penetration_batch_001/manifest.json",
+      "review_manifest_sha256": "42ce1bc9d5e8239df213aab260c732630cb0cbcfb428602886a9920310da82b4",
+      "structural_hash": "3f12a3f6afaae5827d364e43cfa3b3beb2a7aef6d814628219a29281d3e21ae4",
+      "surface_port_ids": [
+        2,
+        10
+      ]
+    },
+    {
+      "bucket_id": "train-000005-176cc1d8cbd7",
+      "candidate_group_id": "slot_0:grasp_pair:0",
+      "review_case_id": "c3a-b01-07-chain-retry",
+      "review_manifest_path": "artifacts/p4_full/order9/c3a_contact_penetration_batch_001/manifest.json",
+      "review_manifest_sha256": "42ce1bc9d5e8239df213aab260c732630cb0cbcfb428602886a9920310da82b4",
+      "structural_hash": "176cc1d8cbd7cc5b669dea884c894d26d7a064967e56c8be36a36d8b124c46aa",
+      "surface_port_ids": [
+        18,
+        26
+      ]
+    },
+    {
+      "bucket_id": "train-000006-05afa5d407ec",
+      "candidate_group_id": "slot_0:grasp_pair:2",
+      "review_case_id": "c3a-b01-08-branched-new",
+      "review_manifest_path": "artifacts/p4_full/order9/c3a_contact_penetration_batch_001/manifest.json",
+      "review_manifest_sha256": "42ce1bc9d5e8239df213aab260c732630cb0cbcfb428602886a9920310da82b4",
+      "structural_hash": "05afa5d407ec0a778f5f5f9e9607233ab886287c125c7a1f691091483975e67d",
+      "surface_port_ids": [
+        19,
+        31
+      ]
+    }
+  ],
+  "override_version": "order9_c3_reviewed_contact_override_v1"
+}

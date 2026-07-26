@@ -1,0 +1,68 @@
+version: order9_c3a_contact_penetration_review_batch_v1
+review_status: pending_final_pose_review
+
+# Static two-contact review candidates.  Every final pose must pass:
+#   - native convex/FCL self and non-contact object clearance >= 5 mm,
+#   - selected-anchor/object convex penetration <= 2 mm,
+#   - the existing articulated IK and hard reachability tolerances.
+# Human acceptance and later real-Isaac admission remain separate evidence.
+semantic_scope: two_contact_c3a_human_mesh_curation_only
+
+sources:
+  morphology_pool: artifacts/p4_full/order9/morphology_pool.json
+  morphology_assets: artifacts/p4_full/order9/c3_preparation/morphology_assets/manifest.json
+  robot_model_config: configs/robot/robot_model.yaml
+  source_urdf: assets/robots/holon/holon.urdf
+  curriculum_config: configs/training/order9_learning_curriculum.yaml
+  canonical_order8_task_bucket: artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/rollout_buckets/buckets/train-000000-5fecfad4f44f/task_spec.json
+
+selection:
+  required_case_count: 5
+  selected_contact_penetration_limit_m: 0.002
+  non_contact_collision_margin_m: 0.005
+
+cases:
+  - case_id: c3a-b03-04-chain
+    module_count: 4
+    topology: chain
+    structural_hash: a9b26f370bbaebded616870b5776663b6b08bcc35ff75c120a65651bc3a42ec6
+    structural_source: existing_train_pool
+    selection_note: previously unused train-pool structure with a penetration-admitted yaw-yaw assignment on the Y faces
+    surface_port_ids: [6, 14]
+    candidate_group_id: slot_0:grasp_pair:2
+
+  - case_id: c3a-b03-05-chain
+    module_count: 5
+    topology: chain
+    structural_hash: 7ff2093e58bc3742e948c7b1b5fff5ef26288b9764731af499d2daa6a0cdff1e
+    structural_source: existing_train_pool
+    selection_note: previously unused train-pool structure with a penetration-admitted yaw-yaw assignment on the X faces
+    surface_port_ids: [14, 19]
+    candidate_group_id: slot_0:grasp_pair:1
+
+  - case_id: c3a-b03-06-branched
+    module_count: 6
+    topology: branched
+    structural_hash: 190f3a425b3ee281c0369cbde5672fa840925a9ab292f4ff3b55d52540963e86
+    structural_source: existing_train_pool
+    selection_note: previously unused train-pool structure with a penetration-admitted yaw-yaw assignment on the Y faces
+    surface_port_ids: [14, 18]
+    candidate_group_id: slot_0:grasp_pair:2
+
+  - case_id: c3a-b03-07-chain
+    module_count: 7
+    topology: chain
+    structural_hash: d020cd9c751f8acdb756bbc220f3496f7bc79349f62d56f264392350ae24a706
+    structural_source: existing_train_pool
+    selection_note: previously unused train-pool structure with a penetration-admitted yaw-yaw assignment on the X faces
+    surface_port_ids: [7, 26]
+    candidate_group_id: slot_0:grasp_pair:0
+
+  - case_id: c3a-b03-08-branched
+    module_count: 8
+    topology: branched
+    structural_hash: 5d56435a61a2fa0f1b7aad6ffac00c6e2307f04d417b157a2a6cee60d9883f92
+    structural_source: existing_train_pool
+    selection_note: previously unused train-pool structure with a penetration-admitted yaw-yaw assignment on the X faces
+    surface_port_ids: [10, 26]
+    candidate_group_id: slot_0:grasp_pair:0

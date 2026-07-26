@@ -23,6 +23,7 @@ from amsrr.schemas.physical_model import (
 )
 
 _MESH_BACKED_COLLISION_TYPES = {"mesh", "convex"}
+_IDENTITY_POSE: Pose7D = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
 _CONVEX_DECOMPOSITION_MESH_SUFFIXES = (
     ".dae",
     ".obj",
@@ -65,6 +66,9 @@ class GripperSurface:
     mechanism_joint_limit_upper: float | None
     connect_frame_module: Pose7D
     connect_frame_design: Pose7D
+    grasp_contact_frame_link: Pose7D
+    grasp_contact_frame_module: Pose7D
+    grasp_contact_frame_design: Pose7D
     neutral_outward_axis_design: Vector3
     collision_primitives: tuple[GripperCollisionPrimitive, ...]
 
@@ -91,9 +95,9 @@ def resolve_unoccupied_gripper_surfaces(
     """Resolve free graph Dock ports to mesh-backed mechanism collision bodies.
 
     Every DockEdge endpoint is treated as occupied even if a stale ``PortNode``
-    flag says otherwise.  The returned connect-frame and collision metadata are
-    sourced from ``PhysicalModel`` after their correspondence with the graph is
-    checked.
+    flag says otherwise.  Assembly connect frames, object-grasp contact frames,
+    and collision metadata are sourced from ``PhysicalModel`` after their
+    correspondence with the graph is checked.
     """
 
     modules_by_id = {module.module_id: module for module in morphology.modules}
@@ -158,6 +162,28 @@ def resolve_unoccupied_gripper_surfaces(
             module.pose_in_design_frame,
             physical_port.local_pose,
         )
+        connect_frame_link = pose_from_transform(
+            transform_from_xyz_rpy(
+                connect_joint.origin_xyz,
+                connect_joint.origin_rpy,
+            )
+        )
+        grasp_from_connect = (
+            physical_port.grasp_contact_frame_from_connect
+            or _IDENTITY_POSE
+        )
+        grasp_contact_frame_link = compose_pose(
+            connect_frame_link,
+            grasp_from_connect,
+        )
+        grasp_contact_frame_module = compose_pose(
+            physical_port.local_pose,
+            grasp_from_connect,
+        )
+        grasp_contact_frame_design = compose_pose(
+            module.pose_in_design_frame,
+            grasp_contact_frame_module,
+        )
         mechanism_axis_design = _mechanism_axis_in_design(
             module_pose=module.pose_in_design_frame,
             connect_frame_module=physical_port.local_pose,
@@ -166,10 +192,13 @@ def resolve_unoccupied_gripper_surfaces(
         )
         neutral_outward_axis = _unit(
             matvec(
-                transform_from_pose(connect_frame_design).rotation,
+                transform_from_pose(grasp_contact_frame_design).rotation,
                 (1.0, 0.0, 0.0),
             ),
-            label=f"DockPortSpec {physical_port.port_id!r} outward axis",
+            label=(
+                f"DockPortSpec {physical_port.port_id!r} grasp-contact "
+                "outward axis"
+            ),
         )
         surfaces.append(
             GripperSurface(
@@ -186,6 +215,9 @@ def resolve_unoccupied_gripper_surfaces(
                 mechanism_joint_limit_upper=mechanism_joint.limit_upper,
                 connect_frame_module=physical_port.local_pose,
                 connect_frame_design=connect_frame_design,
+                grasp_contact_frame_link=grasp_contact_frame_link,
+                grasp_contact_frame_module=grasp_contact_frame_module,
+                grasp_contact_frame_design=grasp_contact_frame_design,
                 neutral_outward_axis_design=neutral_outward_axis,
                 collision_primitives=collision_primitives,
             )
@@ -246,8 +278,8 @@ def select_opposing_gripper_surface_pair(
         ):
             continue
         delta = _subtract(
-            second.connect_frame_design[:3],
-            first.connect_frame_design[:3],
+            second.grasp_contact_frame_design[:3],
+            first.grasp_contact_frame_design[:3],
         )
         separation = _norm(delta)
         if separation <= 1.0e-12:

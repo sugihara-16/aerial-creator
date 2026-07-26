@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pytest
 import torch
-from amsrr.geometry.pose_math import pose_from_transform, transform_from_xyz_rpy
+from amsrr.geometry.pose_math import (
+    compose_pose,
+    pose_from_transform,
+    transform_from_xyz_rpy,
+)
 from amsrr.policies.order9_design_runtime import (
     Order9DesignRuntime,
     Order9DesignRuntimeConfig,
@@ -98,6 +102,11 @@ def test_order9_grammar_replays_teacher_through_real_masks_and_feasible_stop(
                 connect_joint.origin_xyz,
                 connect_joint.origin_rpy,
             )
+        )
+        expected = compose_pose(
+            expected,
+            physical_port.grasp_contact_frame_from_connect
+            or (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
         )
         assert anchor.link_id == physical_port.parent_link
         assert anchor.local_pose == pytest.approx(expected)

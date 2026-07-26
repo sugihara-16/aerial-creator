@@ -66,7 +66,7 @@
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="mesh/rotor_arm_1.STL" />
+        <mesh filename="mesh/rotor_arm_pitch.STL" />
       </geometry>
     </collision>
   </link>
@@ -183,7 +183,7 @@
       <inertia ixx="0.000114173293280184" ixy="-9.37810923948629E-06" ixz="-8.87429925132249E-07" iyy="7.46981083615199E-05" iyz="2.47744569585702E-06" izz="0.00010099002155708" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 1.5708" />
+      <origin xyz="0 0 0" rpy="3.14159265358979 0 0" />
       <geometry>
         <mesh filename="mesh/pitch_dock_mech_1.STL" />
       </geometry>
@@ -192,7 +192,7 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 1.5708" />
+      <origin xyz="0 0 0" rpy="3.14159265358979 0 0" />
       <geometry>
         <mesh filename="mesh/pitch_dock_mech_1.STL" />
       </geometry>
@@ -220,6 +220,15 @@
     <parent link="pitch_dock_mech1" />
     <child link="pitch_connect_dummy_1" />
     <axis xyz="0 1 0" />
+  </joint>
+
+  <link name="pitch_grasp_contact_frame_1">
+  </link>
+
+  <joint name="pitch_grasp_contact_frame_joint_1" type="fixed">
+    <origin xyz="0.0424086 0 0" rpy="0 0 0" />
+    <parent link="pitch_connect_dummy_1" />
+    <child link="pitch_grasp_contact_frame_1" />
   </joint>
 
 
@@ -592,7 +601,7 @@
     <collision>
       <origin xyz="0 0 0" rpy="0 0 0" />
       <geometry>
-        <mesh filename="mesh/rotor_arm_4.STL" />
+        <mesh filename="mesh/rotor_arm_pitch.STL" />
       </geometry>
     </collision>
   </link>
@@ -709,7 +718,7 @@
       <inertia ixx="0.000114173292290504" ixy="-9.37811054885086E-06" ixz="-8.87430519893771E-07" iyy="7.46981113729601E-05" iyz="2.47744138193205E-06" izz="0.000100990016313002" />
     </inertial>
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 1.5708" />
+      <origin xyz="0 0 0" rpy="3.14159265358979 0 0" />
       <geometry>
         <mesh filename="mesh/pitch_dock_mech_2.STL" />
       </geometry>
@@ -718,7 +727,7 @@
       </material>
     </visual>
     <collision>
-      <origin xyz="0 0 0" rpy="0 0 1.5708" />
+      <origin xyz="0 0 0" rpy="3.14159265358979 0 0" />
       <geometry>
         <mesh filename="mesh/pitch_dock_mech_2.STL" />
       </geometry>
@@ -733,6 +742,15 @@
     <parent link="pitch_dock_mech2" />
     <child link="pitch_connect_dummy_2" />
     <axis xyz="0 1 0" />
+  </joint>
+
+  <link name="pitch_grasp_contact_frame_2">
+  </link>
+
+  <joint name="pitch_grasp_contact_frame_joint_2" type="fixed">
+    <origin xyz="0.0424086 0 0" rpy="0 0 0" />
+    <parent link="pitch_connect_dummy_2" />
+    <child link="pitch_grasp_contact_frame_2" />
   </joint>
 
 

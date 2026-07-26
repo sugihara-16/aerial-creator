@@ -4,6 +4,9 @@ from dataclasses import dataclass
 
 import pytest
 
+from amsrr.feasibility.order9_posture_collision import (
+    CollisionAwareNativeCentroidalPostureIKSolver,
+)
 from amsrr.schemas.morphology import MorphologyGraph
 from amsrr.simulation.order9_production_hard_checker_runtime import (
     bind_order9_production_hard_checker,
@@ -135,7 +138,7 @@ def test_production_binding_authenticates_descriptor_before_building_checker() -
     )
     assert (
         runtime.checker.resolver.ik_solver.solver_version
-        == "centroidal_posture_ik_cpp_eigen_fcl_convex_v1"
+        == CollisionAwareNativeCentroidalPostureIKSolver.solver_version
     )
     assert runtime.bucket.bucket_hash
     runtime.close()
