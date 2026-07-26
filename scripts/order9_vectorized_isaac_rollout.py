@@ -67,6 +67,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--morphology-graph-json")
     parser.add_argument("--task-spec-json")
+    parser.add_argument("--c3-nominal-set-manifest")
+    parser.add_argument("--c3-nominal-set-sha256")
+    parser.add_argument("--c3-nominal-artifact-sha256")
     parser.add_argument(
         "--teacher-dataset-manifest",
         default="artifacts/p4_full/order9/c0_teacher/dataset/manifest.json",
@@ -222,9 +225,11 @@ from amsrr.training.order9_curriculum import (
 from amsrr.training.order9_curriculum_lineage import (
     load_order9_stage_parent_checkpoint,
 )
-from amsrr.training.order9_c3_teacher import (
-    build_order9_c3_articulated_teacher,
-    order9_c3_teacher_evidence,
+from amsrr.training.order9_c3_nominal_runtime import (
+    Order9C3NominalTensorReference,
+)
+from amsrr.training.order9_c3_nominal_trajectory import (
+    load_order9_c3_accepted_nominal_bundle,
 )
 from amsrr.training.order9_evaluation import (
     Order9EvaluationEpisode,
@@ -425,6 +430,16 @@ def main() -> dict[str, object]:
         )
     if bool(stage.topology_randomized) and args_cli.morphology_graph_json is None:
         raise ValueError("topology-randomized stage requires --morphology-graph-json")
+    if stage.stage_id == "c3_pi_l_ppo_arbitrary_morphology" and not all(
+        (
+            args_cli.c3_nominal_set_manifest,
+            args_cli.c3_nominal_set_sha256,
+            args_cli.c3_nominal_artifact_sha256,
+        )
+    ):
+        raise ValueError(
+            "C3 rollout requires its hash-bound accepted nominal trajectory"
+        )
     configured_runtime = resolve_order9_stage_runtime(config, stage)
     if (
         configured_runtime.rollout_steps_per_environment is None
@@ -509,24 +524,27 @@ def main() -> dict[str, object]:
         if args_cli.selected_gripper_friction is not None
         else float(friction_resolution.robot_surface_friction or 4.5)
     )
+    accepted_nominal_bundle = None
     if bool(stage.topology_randomized):
-        c3_teacher = build_order9_c3_articulated_teacher(
-            task_spec=task,
-            structural_target=morphology,
-            physical_model=physical,
+        bucket_id = task.metadata.get("order9_rollout_bucket_id")
+        if not isinstance(bucket_id, str) or not bucket_id:
+            raise ValueError("C3 task lacks its rollout bucket identity")
+        accepted_nominal_bundle = load_order9_c3_accepted_nominal_bundle(
+            Path(str(args_cli.c3_nominal_set_manifest)),
+            bucket_id=bucket_id,
+            repository_root=repository,
+            expected_set_sha256=str(args_cli.c3_nominal_set_sha256),
+            expected_artifact_sha256=str(
+                args_cli.c3_nominal_artifact_sha256
+            ),
+            expected_task_spec_sha256=hash_file(
+                Path(str(args_cli.task_spec_json))
+            ),
+            expected_physical_model_hash=physical.stable_hash(),
         )
-        expected_teacher_evidence = task.metadata.get(
-            "order9_c3_articulated_teacher_precheck"
-        )
-        if expected_teacher_evidence is not None:
-            actual_teacher_evidence = order9_c3_teacher_evidence(c3_teacher)
-            if actual_teacher_evidence != expected_teacher_evidence:
-                raise RuntimeError(
-                    "Order9 C3 runtime teacher differs from its bucket precheck"
-                )
-        morphology = c3_teacher.design_output.target_morphology
-        teacher_trajectory = c3_teacher.trajectory
-        candidates = c3_teacher.contact_candidate_set
+        morphology = accepted_nominal_bundle.morphology
+        teacher_trajectory = accepted_nominal_bundle.trajectory
+        candidates = accepted_nominal_bundle.contact_candidate_set
         assignments = _maintain_assignments(teacher_trajectory)
     else:
         teacher_trajectory, assignments, candidates = _teacher_assignments(
@@ -684,7 +702,30 @@ def main() -> dict[str, object]:
         policy_frame_origins_world=scene.env_origins,
         active_knot_trajectory=teacher_trajectory,
     )
-    task_runtime = Order9TensorObjectTaskRuntime()
+    c3_nominal_reference = (
+        None
+        if accepted_nominal_bundle is None
+        else Order9C3NominalTensorReference(
+            phase_trajectories=(
+                accepted_nominal_bundle.phase_trajectories
+            ),
+            module_ids=policy_runtime.builder.module_ids,
+            joint_ids=policy_runtime.decoder.local_joint_ids,
+            device=scene.device,
+            dtype=torch.float32,
+            provenance=accepted_nominal_bundle.provenance,
+        )
+    )
+    task_runtime_config = Order9ObjectTaskRuntimeConfig()
+    if c3_nominal_reference is not None:
+        for phase, duration_s in (
+            c3_nominal_reference.phase_durations_s.items()
+        ):
+            task_runtime_config.phase_duration_s[phase] = max(
+                float(task_runtime_config.phase_duration_s[phase]),
+                float(duration_s) + 5.0,
+            )
+    task_runtime = Order9TensorObjectTaskRuntime(task_runtime_config)
     teacher_reference = None
     if stage.stage_id == "c1_pi_l_bc_fixed_nominal":
         dataset_manifest_sha256 = checkpoint.metadata.input_artifact_hashes.get(
@@ -742,20 +783,31 @@ def main() -> dict[str, object]:
                 task_object_pose_world=tuple(target_object.pose_world),
             )
     else:
-        _align_arbitrary_phase_zero(
-            scene,
-            sim=sim,
-            io=io,
-            candidate_points=[
-                next(
-                    candidate.contact_pose_world
-                    for candidate in candidates.candidates
-                    if candidate.candidate_id == assignment.candidate_id
-                )
-                for assignment in assignments
-            ],
-            approach_offset_m=Order9ObjectTaskRuntimeConfig().approach_offset_m,
-        )
+        if c3_nominal_reference is not None:
+            _install_c3_nominal_phase_zero(
+                scene,
+                sim=sim,
+                io=io,
+                policy_runtime=policy_runtime,
+                nominal_reference=c3_nominal_reference,
+            )
+        else:
+            _align_arbitrary_phase_zero(
+                scene,
+                sim=sim,
+                io=io,
+                candidate_points=[
+                    next(
+                        candidate.contact_pose_world
+                        for candidate in candidates.candidates
+                        if candidate.candidate_id == assignment.candidate_id
+                    )
+                    for assignment in assignments
+                ],
+                approach_offset_m=(
+                    Order9ObjectTaskRuntimeConfig().approach_offset_m
+                ),
+            )
         all_ids = torch.arange(scene.num_envs, device=scene.device)
         bank.capture(
             scene,
@@ -842,6 +894,13 @@ def main() -> dict[str, object]:
         scene_origins=scene.env_origins,
         task_object_position_world=task_object_position_world,
     )
+    if c3_nominal_reference is not None:
+        target = c3_nominal_reference.condition(
+            target,
+            phase_index=phase_index,
+            phase_elapsed_s=phase_elapsed,
+            scene_origins=scene.env_origins,
+        )
     reward_state = reward_engine.initial_state(
         object_pose_world=state.object_pose_world,
         desired_object_pose_world=target.phase_goal_object_pose_world,
@@ -905,6 +964,8 @@ def main() -> dict[str, object]:
             object_mass_properties_readback=object_mass_properties_readback,
             actuator_readback=actuator_readback,
             teacher_reference=teacher_reference,
+            c3_nominal_reference=c3_nominal_reference,
+            phase_duration_s=task_runtime.config.phase_duration_s,
             deterministic_policy=deterministic_policy,
             initial_phase_zero=initial_phase_zero,
             diagnostic_initial_phase_index=(
@@ -1157,6 +1218,13 @@ def main() -> dict[str, object]:
             scene_origins=scene.env_origins,
             task_object_position_world=task_object_position_world,
         )
+        if c3_nominal_reference is not None:
+            target = c3_nominal_reference.condition(
+                target,
+                phase_index=phase_index,
+                phase_elapsed_s=phase_elapsed,
+                scene_origins=scene.env_origins,
+            )
         reward_state = _reset_goal_distance_for_phase_transition(
             reward.next_state,
             env_ids=next_ids,
@@ -1462,7 +1530,7 @@ def _next_ppo_update_index(metadata: dict[str, object]) -> int:
     raw = metadata.get("ppo_update_index")
     if raw is None:
         return 0
-    if not isinstance(raw, int) or isinstance(raw, bool) or raw < 0:
+    if not isinstance(raw, int) or isinstance(raw, bool) or raw < -1:
         raise ValueError("Order9 parent checkpoint PPO update index is invalid")
     return raw + 1
 
@@ -2070,6 +2138,114 @@ def _align_arbitrary_phase_zero(
     scene.update(0.0)
 
 
+def _install_c3_nominal_phase_zero(
+    scene: InteractiveScene,
+    *,
+    sim: sim_utils.SimulationContext,
+    io: Order9TensorIsaacIO,
+    policy_runtime: Order9TensorPiLRuntime,
+    nominal_reference: Order9C3NominalTensorReference,
+) -> None:
+    """Install the first accepted nominal knot before replay begins."""
+
+    robot = scene["robot"]
+    env_ids = torch.arange(scene.num_envs, device=scene.device)
+    q = _torch(robot.data.default_joint_pos).clone()
+    qdot = torch.zeros_like(q)
+    reference_q = nominal_reference.initial_joint_positions().to(
+        device=scene.device, dtype=q.dtype
+    )
+    reference_qdot = nominal_reference.initial_joint_velocities().to(
+        device=scene.device, dtype=q.dtype
+    )
+    if tuple(nominal_reference.module_ids) != tuple(io.module_ids):
+        raise RuntimeError("C3 nominal phase-zero module identity differs")
+    local_index = {
+        joint_id: index for index, joint_id in enumerate(io.local_joint_ids)
+    }
+    for module_row, _module_id in enumerate(io.module_ids):
+        for reference_joint, joint_id in enumerate(nominal_reference.joint_ids):
+            if joint_id not in local_index:
+                raise RuntimeError(
+                    f"C3 nominal phase-zero joint is unknown: {joint_id}"
+                )
+            robot_index = io.local_joint_indices[module_row][local_index[joint_id]]
+            if robot_index < 0:
+                raise RuntimeError(
+                    f"C3 nominal phase-zero joint was merged: {joint_id}"
+                )
+            q[:, robot_index] = reference_q[module_row, reference_joint]
+            qdot[:, robot_index] = reference_qdot[
+                module_row, reference_joint
+            ]
+    robot.write_joint_position_to_sim_index(position=q, env_ids=env_ids)
+    robot.write_joint_velocity_to_sim_index(velocity=qdot, env_ids=env_ids)
+    sim.forward()
+    scene.update(0.0)
+
+    state = io.gather_state(robot=robot, object_asset=scene["object"])
+    control = policy_runtime.builder.build(
+        module_pose_world=state.module_pose_world,
+        module_twist_world=state.module_twist_world,
+        local_joint_positions_rad=state.local_joint_positions_rad,
+    )
+    origin_zero = scene.env_origins[0]
+    current_root = _torch(robot.data.root_pose_w)[0].clone()
+    current_root[:3] -= origin_zero
+    current_body = control.body_pose_world[0].clone()
+    current_body[:3] -= origin_zero
+    root_to_body = compose_pose(
+        inverse_pose(tuple(float(value) for value in current_root.tolist())),
+        tuple(float(value) for value in current_body.tolist()),
+    )
+    desired_body = tuple(
+        float(value) for value in nominal_reference.initial_body_pose().tolist()
+    )
+    desired_root_local = compose_pose(desired_body, inverse_pose(root_to_body))
+    desired_root = torch.tensor(
+        desired_root_local, device=scene.device, dtype=q.dtype
+    ).reshape(1, 7).expand(scene.num_envs, -1).clone()
+    desired_root[:, :3] += scene.env_origins
+    root_twist = nominal_reference.initial_body_twist().to(
+        device=scene.device, dtype=q.dtype
+    ).reshape(1, 6).expand(scene.num_envs, -1)
+    robot.write_root_pose_to_sim_index(root_pose=desired_root, env_ids=env_ids)
+    robot.write_root_velocity_to_sim_index(
+        root_velocity=root_twist, env_ids=env_ids
+    )
+    robot.set_joint_position_target_index(target=q, env_ids=env_ids)
+    robot.set_joint_velocity_target_index(
+        target=torch.zeros_like(qdot), env_ids=env_ids
+    )
+    sim.forward()
+    scene.update(0.0)
+
+    installed = io.gather_state(robot=robot, object_asset=scene["object"])
+    installed_control = policy_runtime.builder.build(
+        module_pose_world=installed.module_pose_world,
+        module_twist_world=installed.module_twist_world,
+        local_joint_positions_rad=installed.local_joint_positions_rad,
+    )
+    expected_body = nominal_reference.initial_body_pose().to(
+        device=scene.device, dtype=q.dtype
+    ).reshape(1, 7).expand(scene.num_envs, -1).clone()
+    expected_body[:, :3] += scene.env_origins
+    position_error = torch.linalg.vector_norm(
+        installed_control.body_pose_world[:, :3] - expected_body[:, :3], dim=-1
+    )
+    orientation_error = _quaternion_distance_rad(
+        installed_control.body_pose_world[:, 3:7], expected_body[:, 3:7]
+    )
+    if (
+        float(position_error.max().item()) > 2.0e-4
+        or float(orientation_error.max().item()) > 2.0e-4
+    ):
+        raise RuntimeError(
+            "C3 accepted nominal phase-zero installation differs from its "
+            "centroidal target"
+        )
+
+
 def _transport_distance(task: TaskSpec, object_id: str) -> float:
     obj = next(value for value in task.scene.objects if value.object_id == object_id)
     goal = next(
@@ -2130,6 +2306,8 @@ def _rollout_metadata(
     object_mass_properties_readback,
     actuator_readback,
     teacher_reference,
+    c3_nominal_reference,
+    phase_duration_s,
     deterministic_policy,
     initial_phase_zero,
     diagnostic_initial_phase_index,
@@ -2179,6 +2357,11 @@ def _rollout_metadata(
             None
             if teacher_reference is None
             else dict(teacher_reference.provenance)
+        ),
+        "c3_nominal_reference": (
+            None
+            if c3_nominal_reference is None
+            else dict(c3_nominal_reference.provenance)
         ),
         "task_specs": [task.to_dict() for task in tasks],
         "environment_splits": [split.value for _ in tasks],
@@ -2230,9 +2413,7 @@ def _rollout_metadata(
         "actor_phase_index_by_runtime": list(
             ORDER9_OBJECT_TASK_ACTOR_PHASE_INDEX_BY_RUNTIME
         ),
-        "phase_duration_s": dict(
-            Order9ObjectTaskRuntimeConfig().phase_duration_s
-        ),
+        "phase_duration_s": dict(phase_duration_s),
         "evaluation_mode": bool(args_cli.evaluation_jsonl is not None),
         "deterministic_policy": bool(deterministic_policy),
         "initial_phase_zero": bool(initial_phase_zero),

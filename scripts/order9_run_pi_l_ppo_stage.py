@@ -89,6 +89,7 @@ def main() -> int:
         initial_checkpoint_path=args.initial_checkpoint,
         repository_root=repository,
         additional_update_count=args.additional_update_count,
+        expected_physical_model_hash=physical_model.stable_hash(),
     )
     buckets = validate_order9_pi_l_stage_runner_inputs(
         config,

@@ -32,6 +32,7 @@ from amsrr.training.order9_curriculum import (
 from amsrr.training.order9_c3_teacher import (
     ORDER9_C3_ARTICULATED_TEACHER_VERSION,
     build_order9_c3_articulated_teacher,
+    build_order9_c3_posture_collision_object,
     order9_c3_teacher_evidence,
 )
 from amsrr.training.order9_pipeline import order9_schedule_hash, order9_stage_by_id
@@ -43,7 +44,7 @@ from amsrr.utils.hashing import hash_file, stable_hash
 ORDER9_ROLLOUT_BUCKET_MANIFEST_VERSION = "order9_pi_l_rollout_buckets_v1"
 ORDER9_C3_STAGE_ID = "c3_pi_l_ppo_arbitrary_morphology"
 ORDER9_C3_BUCKET_PRECHECK_VERSION = (
-    "order9_c3_bucket_articulated_precheck_v3_posture_resolver"
+    "order9_c3_bucket_articulated_precheck_v5_approach_convex_nominal"
 )
 
 
@@ -318,7 +319,7 @@ def prepare_order9_pi_l_rollout_buckets(
                             used_structural_hashes=used_structural_hashes[split],
                         )
                         topology_source = (
-                            "split_safe_pool_articulated_teacher_prechecked_v3"
+                            "split_safe_pool_articulated_teacher_prechecked_v5"
                         )
                         task.metadata = {
                             **task.metadata,
@@ -571,6 +572,7 @@ def _precheck_c3_structural_graph(
         task_spec=task,
         structural_target=graph,
         physical_model=physical_model,
+        collision_object=build_order9_c3_posture_collision_object(task),
     )
     return order9_c3_teacher_evidence(bundle)
 
@@ -631,7 +633,7 @@ def order9_pi_l_collector_arguments(
     task_path = manifest_path.parent / bucket.task_spec_path
     graph_path = manifest_path.parent / bucket.morphology_graph_path
     robot_usd = _resolve(bucket.robot_usd_path, repository)
-    return [
+    arguments = [
         "--split",
         bucket.split.value,
         "--seed",
@@ -655,6 +657,32 @@ def order9_pi_l_collector_arguments(
         "--estimated-com-object",
         *(repr(float(value)) for value in bucket.estimated_com_object),
     ]
+    accepted = bucket.metadata.get("accepted_nominal_trajectory")
+    if accepted is not None:
+        if not isinstance(accepted, dict):
+            raise SchemaValidationError(
+                "Order9 accepted nominal trajectory binding is invalid"
+            )
+        for name in (
+            "set_manifest_path",
+            "set_manifest_sha256",
+            "artifact_sha256",
+        ):
+            if not accepted.get(name):
+                raise SchemaValidationError(
+                    f"Order9 accepted nominal trajectory lacks {name}"
+                )
+        arguments.extend(
+            [
+                "--c3-nominal-set-manifest",
+                str(_resolve(str(accepted["set_manifest_path"]), repository)),
+                "--c3-nominal-set-sha256",
+                str(accepted["set_manifest_sha256"]),
+                "--c3-nominal-artifact-sha256",
+                str(accepted["artifact_sha256"]),
+            ]
+        )
+    return arguments
 
 
 def _resolve(path: str | Path, repository: Path) -> Path:

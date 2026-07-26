@@ -33,6 +33,9 @@ from amsrr.training.order9_curriculum import (
 from amsrr.training.order9_curriculum_lineage import (
     load_order9_stage_parent_checkpoint,
 )
+from amsrr.training.order9_c3_nominal_trajectory import (
+    validate_order9_c3_nominal_trajectory_set_bytes,
+)
 from amsrr.training.order9_dataset import load_order9_dataset_index
 from amsrr.training.order9_online_training import Order9OnlineTrainingResult
 from amsrr.training.order9_pipeline import order9_schedule_hash, order9_stage_by_id
@@ -138,6 +141,7 @@ def resolve_order9_pi_l_stage_plan(
     initial_checkpoint_path: str | Path,
     repository_root: str | Path,
     additional_update_count: int = 0,
+    expected_physical_model_hash: str | None = None,
 ) -> Order9PiLStagePlan:
     config.validate()
     stage = order9_stage_by_id(config, stage_id)
@@ -177,6 +181,14 @@ def resolve_order9_pi_l_stage_plan(
         expected_family=Order9PolicyFamily.PI_L,
         update_index=0,
     )
+    if (
+        expected_physical_model_hash is not None
+        and initial_loaded.metadata.physical_model_hash
+        != expected_physical_model_hash
+    ):
+        raise SchemaValidationError(
+            "Order9 pi_L stage initializer physical-model hash mismatch"
+        )
     expected_parent_sha = initial_loaded.sha256
     parent_path = initial
     completed_steps = 0
@@ -273,6 +285,62 @@ def validate_order9_pi_l_stage_runner_inputs(
                 "Order9 C3 rollout buckets lack the current articulated-teacher "
                 "precheck"
             )
+        nominal_path_raw = manifest.metadata.get(
+            "c3_nominal_set_manifest_path"
+        )
+        nominal_sha256 = manifest.metadata.get(
+            "c3_nominal_set_manifest_sha256"
+        )
+        review_path_raw = manifest.metadata.get(
+            "c3_human_review_manifest_path"
+        )
+        review_sha256 = manifest.metadata.get(
+            "c3_human_review_manifest_sha256"
+        )
+        if (
+            manifest.metadata.get("c3_accepted_nominal_trajectory_bound")
+            is not True
+            or manifest.metadata.get(
+                "c3_configuration_space_planner_runtime_enabled"
+            )
+            is not False
+            or not all(
+                isinstance(value, str) and value
+                for value in (
+                    nominal_path_raw,
+                    nominal_sha256,
+                    review_path_raw,
+                    review_sha256,
+                )
+            )
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 rollout buckets lack accepted nominal replay binding"
+            )
+        nominal_path = _resolve(str(nominal_path_raw), repository)
+        nominal = validate_order9_c3_nominal_trajectory_set_bytes(
+            nominal_path,
+            repository_root=repository,
+            expected_sha256=str(nominal_sha256),
+        )
+        review_path = _resolve(str(review_path_raw), repository)
+        if hash_file(review_path) != review_sha256:
+            raise SchemaValidationError("Order9 C3 human review bytes changed")
+        review = json.loads(review_path.read_text(encoding="utf-8"))
+        review_entries = review.get("entries")
+        if (
+            review.get("nominal_set_manifest_sha256") != nominal_sha256
+            or review.get("accepted_count") != len(manifest.buckets)
+            or review.get("rejected_count") != 0
+            or not isinstance(review_entries, list)
+            or {entry.get("bucket_id") for entry in review_entries}
+            != {bucket.bucket_id for bucket in manifest.buckets}
+            or any(entry.get("decision") != "accepted" for entry in review_entries)
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 human review does not accept the complete nominal set"
+            )
+        nominal_by_bucket = {entry.bucket_id: entry for entry in nominal.entries}
         for bucket in manifest.buckets:
             topology_metadata = bucket.metadata.get("topology_provider")
             evidence = (
@@ -285,6 +353,27 @@ def validate_order9_pi_l_stage_runner_inputs(
             ):
                 raise SchemaValidationError(
                     "Order9 C3 rollout bucket lacks articulated-teacher evidence"
+                )
+            accepted = bucket.metadata.get("accepted_nominal_trajectory")
+            nominal_entry = nominal_by_bucket.get(bucket.bucket_id)
+            if (
+                not isinstance(accepted, dict)
+                or nominal_entry is None
+                or accepted.get("set_manifest_path") != nominal_path_raw
+                or accepted.get("set_manifest_sha256") != nominal_sha256
+                or accepted.get("artifact_sha256")
+                != nominal_entry.artifact_sha256
+                or accepted.get("animation_scene_sha256")
+                != nominal_entry.animation_scene_sha256
+                or accepted.get(
+                    "configuration_space_planner_runtime_enabled"
+                )
+                is not False
+                or float(accepted.get("nominal_reference_rate_hz", 0.0))
+                != 10.0
+            ):
+                raise SchemaValidationError(
+                    f"Order9 C3 nominal replay binding differs: {bucket.bucket_id}"
                 )
     _validate_current_bucket_randomization(
         config,
