@@ -2,6 +2,42 @@
 
 ## Global Worklog
 
+### 2026-08-22 (A-MSRR standalone specification v0.5 consolidation)
+
+- Spec version: `A-MSRR_codex_ready_spec_v0_5_ja.md`.
+- Work package / Agent label: Cross-cutting Agent A/I/J/K/L specification,
+  controller-boundary, training-lineage, and acceptance documentation.
+- Summary: Preserved v0.4 and created a standalone v0.5 source of truth by
+  integrating the accepted implementation-time changes through the promoted
+  Order-9 C3 update 18. Current normative contracts, hash-bound evidence, and
+  superseded diagnostics are now explicitly separated.
+- Files changed: `for_codex/A-MSRR_codex_ready_spec_v0_5_ja.md`,
+  `for_codex/AGENTS.md`,
+  `for_codex/A-MSRR_QP_PID_controller_design_spec_v0_1_ja.md`,
+  `for_codex/AMSRR_design_modification_by_codex.md`, and this worklog.
+- Schema/interface changes: None. This is a documentation-precedence
+  consolidation and does not alter runtime schemas, tensor shapes, policy
+  parameters, checkpoints, controller code, curriculum, or datasets.
+- Upstream dependencies used: v0.4, the chronological design-modification
+  log, the current Order-9 curriculum and source contracts, and
+  `C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json` plus its protected release.
+- Downstream impact: v0.5 is the active implementation specification; v0.4
+  remains historical. The next learning entry point remains
+  `r1_teacher_trajectory_collection` after fail-closed C3/R1 preflight.
+- Tests run: document fence/heading/conflict-marker checks; authoritative
+  local-reference and SHA-256 checks for the promoted checkpoint, promotion
+  manifest, C2 ancestor, and v9 initializer; 26 focused curriculum,
+  contact-space-action, and execution-bundle unit tests passed.
+- Commands run: `diff`, `rg`, `awk`, `sha256sum`, `cmp`, and
+  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q` on the three focused
+  test modules.
+- Assumptions: The promoted release ledger and protected byte identities are
+  authoritative for C3; historical WORKLOG/experiment-log references retain
+  the spec version active when each event occurred.
+- Blockers / open questions: None for the v0.5 documentation release.
+- Next steps: Use v0.5 for the next task and run the R1 distribution/checkpoint/
+  nominal-dependency/storage preflight before collecting new teacher data.
+
 ### 2026-08-04 (Order 9 C3 2--3-module PPO subcurriculum)
 
 - Scope: Start the approved low-complexity C3 subcurriculum on every available
@@ -10821,3 +10857,31 @@
   accordance with the agreed rule that reward must first improve/converge.
   The update-3 checkpoint is retained as diagnostic evidence, not as the new
   accepted continuation parent.
+
+### Agent A/I/J/K/L: v0.5 standalone specification consolidation
+
+#### 2026-08-22
+
+- Scope: Consolidate v0.4 and accepted implementation-time modifications into
+  one current standalone specification without changing runtime behavior.
+- Files changed: v0.5 specification, assistant instructions, QP/PID parent
+  reference, chronological design log, and worklog.
+- Upstream dependencies: v0.4, current schemas/controller/training source,
+  Order-9 curriculum, promoted C3 release ledger, and protected artifacts.
+- Implemented: Current precedence; centroidal-QPID/local-servo authority;
+  raw joint-free `pi_H` plus deterministic posture resolver; common v9
+  contact-space action; deployable/privileged boundary; morphology-aware
+  nominal preload; outcome/factorized credit; C0--C3 lineage; R1--R4
+  continuation; artifact retention and update-18 hash binding.
+- Not implemented: No code, config, checkpoint, dataset, policy, controller,
+  training, evaluation, or cleanup mutation.
+- Schema/interface changes: None.
+- Downstream impact: Agent work must use v0.5 as source of truth and treat the
+  named old action masks, fixed preload, wrench gate, and failed lineages as
+  historical unless explicitly reproducing diagnostics.
+- Tests added: None (documentation-only change).
+- Tests passed: 26 focused unit tests; document structure and four artifact
+  SHA checks passed.
+- Handoff notes: Preserve v0.4. Begin from the protected promoted C3 update-18
+  checkpoint and `r1_teacher_trajectory_collection`, subject to preflight.
+- Open questions: None.

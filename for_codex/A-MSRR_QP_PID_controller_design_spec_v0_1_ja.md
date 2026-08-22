@@ -1,8 +1,8 @@
 # A-MSRR QP/PID 制御器設計仕様書 v0.1 draft
 
 **対象:** P4-control / P4a low-level flight validation  
-**親仕様:** `A-MSRR_codex_ready_spec_v0_4_ja.md` Sections 20, 23.5, 24.5.2, 25, 26.9-26.10, 27.1  
-**位置づけ:** 全体設計書を補完する制御器専用仕様。原則として全体設計書と矛盾する場合は全体設計書を優先する。ただし、ユーザー承認済みの設計変更として Section 14 と `AMSRR_design_modification_by_codex.md` の 2026-07-12 entry に明記した事項は、その範囲に限り従来記述を supersede する。
+**親仕様:** `A-MSRR_codex_ready_spec_v0_5_ja.md` Sections 20, 23.5, 24.5.2, 25, 26.9-26.10, 27.1<br>
+**位置づけ:** 全体設計書を補完する制御器専用仕様。v0.5は本書Section 14の承認済み改訂を本文へ統合済みである。矛盾する旧記述が本書Section 1--13に残る場合は、親仕様v0.5と本書Section 14を優先する。
 
 ---
 

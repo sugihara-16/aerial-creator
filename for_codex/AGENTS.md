@@ -19,8 +19,11 @@ Agent X work package の範囲だけを担当する。
 最新の設計書を source of truth として扱うこと。
 
 ```text
-A-MSRR_codex_ready_spec_v0_4_ja.md
+A-MSRR_codex_ready_spec_v0_5_ja.md
 ```
+
+`A-MSRR_codex_ready_spec_v0_4_ja.md` は履歴として保持する。新規実装判断に旧版を
+直接適用せず、v0.5のprecedence ruleとcurrent contractを使用すること。
 
 repository 内で `DESIGN_SPEC.md` などの canonical filename が使われている場合、その内容が最新仕様と一致しているときだけ active copy として扱う。
 
@@ -58,7 +61,7 @@ work package には依存関係がある。設計書の implementation order に
 また、ユーザーから指示があった場合は、次の作業における``Agent X work package``自体の提案もすること。
 
 ## 実装ルール
-- 実装時は、まず該当箇所のv0.4設計書を確認してください。設計書に未定義な仕様については、システムに整合するようAMSRR_design_modification_by_codex.mdを作りましたので、に実装案を策定し、提示してください。また、設計書で指定された仕様では不都合がある場合についても同様に、修正設計案を提示してください。
+- 実装時は、まず該当箇所のv0.5設計書を確認してください。設計書に未定義な仕様については、`AMSRR_design_modification_by_codex.md` の既存履歴とシステム整合性を確認して実装案を策定し、提示してください。また、設計書で指定された仕様では不都合がある場合についても同様に、修正設計案を提示してください。
 - 設計書からの変更した内容や補足した内容は、worklogとは別にAMSRR_design_modification_by_codex.mdにも記録する
 - schema-first implementation を優先する。
 - 変更は、依頼された work package の範囲に限定し、最小限に保つ。

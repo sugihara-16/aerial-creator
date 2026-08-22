@@ -1,6 +1,33 @@
 # AMSRR_design_modification_by_codex.md
 
-This file records implementation-time supplements or deviations from `A-MSRR_codex_ready_spec_v0_4_ja.md`.
+This file records implementation-time supplements or deviations that were
+originally accumulated against `A-MSRR_codex_ready_spec_v0_4_ja.md`. Current
+normative state is consolidated in `A-MSRR_codex_ready_spec_v0_5_ja.md`; this
+file remains the chronological decision/evidence log.
+
+## 2026-08-22
+
+### v0.5 Standalone Specification Consolidation
+
+- The user approved consolidating v0.4 and this chronological modification
+  log into `A-MSRR_codex_ready_spec_v0_5_ja.md` while preserving v0.4 as
+  history. The new document is the active standalone source of truth.
+- The consolidation distinguishes current normative contracts from measured
+  evidence and superseded/failed diagnostics. In particular, the promoted
+  common C3 v9 contract and release ledger supersede module-count action masks,
+  compression-only lineages, exact-wrench hard gates, rounded-Gaussian action
+  trials, fixed 12 mm preload, and diagnostic checkpoints.
+- v0.5 incorporates the centroidal-only QPID/independent-joint-servo boundary,
+  joint-free `pi_H`, the common contact-space v9 action, deployable-versus-
+  privileged observation boundary, morphology-aware nominal preload, C3
+  factorized credit, the actual C0--C3 lineage, R1--R4 continuation, and the
+  promoted update-18 artifact identity.
+- `for_codex/AGENTS.md` and the QP/PID supplement now identify v0.5 as their
+  parent source. Historical WORKLOG and experiment-log references to v0.4 are
+  intentionally retained as records of the version active at those times.
+- This consolidation changes documentation precedence only. It introduces no
+  runtime schema, tensor shape, policy parameter, checkpoint, controller,
+  curriculum configuration, dataset, or promotion result.
 
 ## 2026-08-07
 
