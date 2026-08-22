@@ -1,0 +1,2543 @@
+{
+  "report_version": "order9_c3_artifact_cleanup_v2_transitive_complete",
+  "generated_at_utc": "2026-08-22T08:47:29.075182+00:00",
+  "mode": "applied",
+  "release_id": "c3_pi_l_promoted_update18_v1",
+  "protected_release_ledger": "for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json",
+  "protected_file_count": 180,
+  "safety_audit_passed": true,
+  "ledger_errors": [],
+  "containment_errors": [],
+  "retained_c3_children": [
+    "actuator_aware_nominal_preload_v2",
+    "actuator_aware_nominal_preload_v3",
+    "actuator_aware_nominal_preload_v4",
+    "contact_residual_initializers",
+    "contact_space_initializers",
+    "diagnostics",
+    "execution_bundles",
+    "morphology_invariant_compression_initializers",
+    "nominal_trajectories_release_smooth_clear300_all_v16",
+    "nominal_trajectories_val33_open35_smooth_clear300_v18",
+    "rollout_buckets_current_lineage_v5",
+    "training_lineages"
+  ],
+  "retained_training_lineages": [
+    "contact_space_projected_qpid_physical_feasibility_from_zero_command_v1",
+    "incremental_full_action_min2_clear300_from_update3_v1",
+    "incremental_full_action_min2_clear300_preload_screened_from_update3_v2"
+  ],
+  "target_count": 354,
+  "target_allocated_size_bytes": 650876272640,
+  "targets": [
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_local_planner_v8_queue",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 729088,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectories_bucket_support_ground_modules_5_to_8_v4.ewzav_qt",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 36745216,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_04_local_contact_v5.nk8x0bem",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 36749312,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_04_local_contact_v6.gnp7rcng",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 36749312,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_04_local_contact_v7.taop44xv",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 36749312,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_09_local_contact_v5.094oogh2",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 41205760,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_12_v4.jqhaa__z",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 36745216,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_17_v4.b97jcdid",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 36745216,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_19_v4.odi_yj_v",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 36749312,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_20_v4.k3kwgrr6",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 36745216,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_26_local_planner_v8.0hgeayc9",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 36745216,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_27_local_planner_v8.b4dmlc73",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 36749312,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_posture_replacement_index41_ports_21_31_v1.6d1yvok3",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 36745216,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/actuator_aware_nominal_preload_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 952041472,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/evaluations",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 28660441088,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/generations",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 26750001152,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/index41_parallel_candidate_logs",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 36864,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/logs",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 32768,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/method_diagnostics",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 15905460224,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_2_3_dynamics_trackable_v1_review.json",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 45056,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_2_3_robust_idx1_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 118710272,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_2_3_robust_parts_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 1078173696,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_2_3_terminal_retime_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 569683968,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_collision_val33_arc300_release_open_then_lift150_v2",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 4096,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_collision_val33_val38_arc300_release_x2_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 4096,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_collision_val34_release_clear150_v3.json",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 4096,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_expansion_4m_train42_candidate_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 114937856,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_expansion_4m_train43_candidate_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 126959616,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_expansion_4m_train44_candidate_v2",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 129212416,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_expansion_4m_train45_candidate_v3",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 126312448,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_margin15_vrate_trial_train000000",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 91549696,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_margin_15mm_trial_composed_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 36864,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_margin_15mm_trial_train000000",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 78831616,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx23_reselect_h40_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 123105280,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx2_group0_h40_pregrasp110_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 143130624,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx2_h40_pregrasp110_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 139120640,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx2_h40_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 138846208,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx2_reselect_h40_pregrasp110_v2",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 139116544,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx30_reselect_h40_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 135086080,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx37_h40_margin15_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 122249216,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx37_h40_pregrasp110_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 122249216,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx37_h40_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 122236928,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx9_group0_h20_pregrasp110_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 147648512,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx9_group0_h40_pregrasp110_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 147664896,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx9_h0_pregrasp110_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 135688192,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx9_h20_pregrasp110_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 135757824,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx9_reselect_h40_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 135639040,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_reselect_h40_pregrasp110_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 320700416,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_2_3_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 400412672,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_2_3_v2",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 493699072,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_2_3_v3",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 56139776,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_2_3_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 70471680,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_2_3_v5",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 123207680,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_2_3_v6",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 900382720,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_continuous_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 49135616,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_idx23_pilot_v11",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 49160192,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_idx2_group0_pilot_v9",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 26374144,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_idx9_group0_pilot_v10",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 27832320,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_idx9_group0h40_v12",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 31506432,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_idx9_h0_pilot_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 28917760,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_margin15_pilot_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 10887168,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_pregrasp110_complete_v6",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 45219840,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_pregrasp110_idx2reselect_v7",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 16031744,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_pregrasp110_pilot_v5",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 51032064,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_support_clear_v2",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 11538432,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_support_clear_v3",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 15478784,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_train42_v14",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 18788352,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_train43_v17",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 49516544,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_train44_v16",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 9867264,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_train45_v15",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 1241088,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 381997056,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_val30_v12",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 50311168,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_val37_final_v13",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 51036160,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_5m_continuous_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 125808640,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_6m_continuous_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 117174272,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_7m_continuous_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 55713792,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_7m_continuous_v2",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 58220544,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_7m_index12_original_contact_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 6586368,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_7m_z20_index12_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 11534336,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_7m_z40_to10_index12_contact_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 24449024,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_7m_z40_to10_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 148180992,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_7m_z40_to20_index12_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 249856,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_8m_continuous_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 401408,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_8m_continuous_v2",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 143511552,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_support_clear_v2",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 156950528,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_support_clear_v3_val32",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 125763584,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_support_clear_v4_val32_bound",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 125763584,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_val32_reselected_contact_x4_v10",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 32473088,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_val32_reselected_v9",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 150843392,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_val32_z100_to0_approach_x2_v7",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 32886784,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_val32_z200_to0_approach_x2_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 32886784,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_val32_z50_to0_approach_x2_v6",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 32886784,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_val32_z50_to0_v5",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 28864512,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_bucket_support_ground_remaining_batch_01b_reselected_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 104415232,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_bucket_support_ground_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 159133696,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_configuration_space_v2",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 100720640,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_current_lineage_complete_task_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 1120415744,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_current_lineage_complete_task_v2",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 1108504576,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_current_lineage_complete_task_v2_review.json",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 45056,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_current_lineage_human_accepted_v1.html",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 16384,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_current_lineage_human_accepted_v1_manifest.json",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 49152,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_current_lineage_human_review_v1.json",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 57344,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_current_lineage_local_planner_v8_manifest.json",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 45056,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_current_lineage_v1_live.html",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 12288,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_release_clear300_all_v15",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 1208709120,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_release_smooth_clear300_val33_open35_v19",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 40960,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_arc300_place_clear30_open_then_lift_v7",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 32497664,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_arc300_place_clear30_v6",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 28372992,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_arc300_place_clear50_open_then_lift_v9",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 32497664,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_arc300_place_clear50_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 28372992,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_arc300_release_open_then_lift150_v5",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 32497664,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_open35_smooth_clear300_v18",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 29995008,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_open35_stage1_v17",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 29982720,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_partial_release_stage1_v12",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 28368896,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_partial_release_v13",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 29585408,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_release_open_then_lift150_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 32497664,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_release_prelift150_30s_v2",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 32538624,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_release_prelift150_retreat_x2_v3",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 35663872,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_release_retreat_arc300_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 28368896,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_safe_setdown_release_stage1_v10",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 24662016,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_safe_setdown_release_v11",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 28798976,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_val38_arc300_release_x2_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 69971968,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val34_release_clear150_v14",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 31121408,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val38_approach_x2_contact_x4_v2",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 33853440,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val38_approach_x2_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 32641024,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val38_release_retreat_arc20_v3",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 33882112,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val38_release_retreat_arc300_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 33861632,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_7m_index05_robot_z40_to10_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 34508800,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_7m_index12_robot_z20_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 30998528,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_7m_index12_robot_z40_to10_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 30998528,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_7m_index12_robot_z40_to20_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 30994432,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_7m_index19_robot_z40_to10_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 33157120,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_7m_index26_robot_z40_to10_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 31752192,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_7m_index33_robot_z40_to10_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 28364800,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_7m_index40_robot_z40_to10_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 30515200,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_5m_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 88805376,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_6m_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 104316928,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_7m_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 127193088,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_8m_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 125927424,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_00_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 61272064,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_01_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 77893632,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_02_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 90378240,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_03_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 88711168,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_04_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 104448000,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_05_complete_task_subset_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 34508800,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_05_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 147636224,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_06_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 125919232,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_07_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 61304832,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_07_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 61300736,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_08_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 75018240,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_08_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 75022336,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_09_local_contact_v7",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 94179328,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_09_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 86765568,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_09_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 106508288,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_10_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 79302656,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_10_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 79298560,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_11_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 87244800,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_11_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 87244800,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_12_complete_task_subset_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 31002624,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_12_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 108519424,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_13_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 110706688,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_13_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 110706688,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_14_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 61296640,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_14_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 61296640,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_15_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 77983744,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_15_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 77983744,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_16_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 77959168,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_16_v4",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 77963264,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_17_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 79327232,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_18_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 104034304,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_19_complete_task_subset_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 33157120,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_19_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 127201280,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_20_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 125657088,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_21_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 61321216,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_22_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 72019968,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_23_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 78991360,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_24_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 74539008,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_25_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 109973504,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_26_complete_task_subset_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 31752192,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_26_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 127737856,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_27_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 140075008,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_28_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 59019264,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_29_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 68526080,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_30_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 86605824,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_31_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 84037632,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_32_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 75001856,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_33_complete_task_subset_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 28364800,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_33_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 95313920,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_34_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 110919680,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_35_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 58998784,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_36_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 66187264,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_37_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 90505216,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_38_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 106520576,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_39_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 98705408,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_40_complete_task_subset_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 30515200,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_40_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 101494784,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_41_local_planner_v8",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 95268864,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_posture_replacement_index41_ports_13_31_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 95731712,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_posture_replacements_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 277757952,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/rejected_pregrasp_support_diagnostics_v1",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 42176512,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/reset_banks",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 5378048,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/rollout_buckets",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 1564672,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/stage_runner_state.json",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 36864,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/tensor_native_update0.log",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 16384,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/tensorboard",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 116879360,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/update_000000",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 98304,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/update_000001",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 98304,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/update_000002",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 61440,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/update_000003",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 110592,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/update_000004",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 61440,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/update_000005",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 40960,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/update_000006",
+      "reason": "superseded C3 top-level experiment or generated artifact",
+      "allocated_size_bytes": 53248,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/bucket40_short_signed_normal_probe_v1",
+      "reason": "superseded diagnostic",
+      "allocated_size_bytes": 13422592,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/contact_space_v7_qp_physical_feasibility_v2_fixed_2_3_16of16",
+      "reason": "superseded diagnostic",
+      "allocated_size_bytes": 28672,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/contact_space_v7_qp_physical_feasibility_v2_modules2",
+      "reason": "superseded diagnostic",
+      "allocated_size_bytes": 552251392,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/contact_space_v7_qp_physical_feasibility_v2_modules3",
+      "reason": "superseded diagnostic",
+      "allocated_size_bytes": 639844352,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/contact_space_v7_release_qpid_v1",
+      "reason": "superseded diagnostic",
+      "allocated_size_bytes": 210481152,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/continuous_validation_bottleneck_v1",
+      "reason": "superseded diagnostic",
+      "allocated_size_bytes": 48803840,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/continuous_validation_optimization_v1",
+      "reason": "superseded diagnostic",
+      "allocated_size_bytes": 1984339968,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/phase_balanced_stabilized_v1_smoke",
+      "reason": "superseded diagnostic",
+      "allocated_size_bytes": 1175552,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/qp_regression_isolation_v1",
+      "reason": "superseded diagnostic",
+      "allocated_size_bytes": 1732608,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/qpid_reset_v4_m04_update2",
+      "reason": "superseded diagnostic",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/action_contract_ablation_nomask_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 9575608320,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/action_contract_ablation_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 13020942336,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/action_contract_morphology_trained_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 260841472,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/boundary_preserving_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 3370078208,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/boundary_preserving_v2",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 13143797760,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/boundary_tail_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 9429893120,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/common_compression_2_8_from_clean_initializer_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 2506932224,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/common_compression_stagewise_2_8_from_clean_initializer_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 631496704,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/common_compression_stagewise_2_8_from_clean_initializer_v2",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 426950656,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/complete_task_v2_diagnostics",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 1327104,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/complete_task_v2_phase_reset_banks",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 364544,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_compression_action_w10_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 8328577024,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_residual_from_piecewise_u9_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 7378743296,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_place_release_tail_stagewise_2_8_from_clean_initializer_v2",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 208252928,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_stagewise_2_8_from_clean_initializer_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 70029312,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_wrench_admission_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 14072901632,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/full_action_independent_compression_stagewise_2_8_from_clean_initializer_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 18927190016,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/joint_head_from_piecewise_u9_fresh_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 7378497536,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/mixed_state_inheritance_outcome_only_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 10720665600,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/mixed_state_inheritance_outcome_only_v1_runner.log",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 57344,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_3_curriculum_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 38702854144,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_4_compression_only_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 4774019072,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_4_curriculum_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 24700395520,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_4_pregrasp110_v2",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 12988182528,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_5_compression_only_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 11468247040,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_5_morphology_invariant_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 4439482368,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_5_nominal_screen_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 385024,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_6_morphology_invariant_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 4899840000,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_6_warm_start_step080_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 4651515904,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_6_warm_start_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 4390096896,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_7_morphology_invariant_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 96841728,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_7_span20_calibrated_from_stronger_u21_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 12454166528,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_7_stronger_bootstrap_from_u21_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 373522432,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_7_warm_start_step080_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 17492357120,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_8_joint_only_from_u1_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 20960256000,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_8_span20_from_2_7_u1_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 13520166912,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/outcome_gate_contact_residual_from_update9_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 7487971328,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/outcome_gate_from_update9_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 3975639040,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/outcome_gate_wrench_soft1_from_update9_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 7378137088,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/outcome_only_w0_from_clean_initializer_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 19803709440,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/phase_balanced_stabilized_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 2961661952,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/phase_balanced_stabilized_v2",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 4522471424,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/phase_balanced_stabilized_v3",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 5673897984,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/phase_reset_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 2311688192,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/phase_reset_v2",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 30203289600,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/phase_reset_v2_runner_console.log",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 53248,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/privileged_wrench_phase_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 309579776,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/privileged_wrench_piecewise_log_v2",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 617328640,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/replicated_topology_privileged_teacher_w10_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 4309331968,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/topology_stratified_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 22754394112,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/virtual_contact_joint_load_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 15995514880,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/w10_joint_head_from_initializer_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 18567966720,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/wrench_gate_curriculum_kl010_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 656494592,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/wrench_gate_curriculum_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 4181413888,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/wrench_weight10_contact_only_fresh_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 3924594688,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/wrench_weight10_fresh_v1",
+      "reason": "superseded PPO lineage",
+      "allocated_size_bytes": 7072911360,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/diagnostics",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 151552,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/generations_update14_reward_summary_stdout.log",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 45056,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/generations_update15_reward_summary_stdout.log",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 45056,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/module_07_contact_normal_categorical_81_v1_from_update2",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 97579008,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/module_07_contact_normal_categorical_uniform_10_20mm_v1_from_update2",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 34791424,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/module_07_contact_normal_quantized_0p5mm_v1_from_update2",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 281927680,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 432156672,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_actuator_aware_physical_minimum_from_clean_c2_v1",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 18456145920,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_v1",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 1824296960,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_4",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 2335019008,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_5",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 6703992832,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_5_transition_backward_p90_v1",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 11269722112,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_5_transition_focused_v1",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 1535066112,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_6_contact_feedback_v8_from_update12_v1",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 114765824,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_6_factorized_actor_credit_from_update12_v1",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 1244217344,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_6_from_update12_virtual_contact_4mm_v1",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 10543628288,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_6_normal_exploration_std030_from_update15_v1",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 3888881664,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_6_uniform_transition_p90_from_update12_v1",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 12317188096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_coordinate_credit_limit20mm_v1_from_update2",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 257933312,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_coordinate_credit_v1_from_update2",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 862277632,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_feedback_v8_from_2_6_update0_v1",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 263163904,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_head_extra_pass_v1_from_update2",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 704262144,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_normal_categorical_uniform_10_20mm_v1_from_m07_update3",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 137252864,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_normal_limit20mm_v1_from_update2",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 578240512,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_8_actuator_aware_nominal_preload_calibrated_stratified_v3_from_2_7_update4",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 2020880384,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_8_actuator_aware_nominal_preload_calibrated_v2_from_2_7_update4",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 516186112,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_8_actuator_aware_nominal_preload_v1_from_2_7_update4",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 8822726656,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_8_contact_normal_categorical_uniform_10_20mm_v1_from_2_7_update4",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 1448796160,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/release_action_diagnosis_old16_vs_min2_v1",
+      "reason": "superseded contact-space branch",
+      "allocated_size_bytes": 572305408,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_from_update3_v1/modules_2_4",
+      "reason": "superseded preload audit",
+      "allocated_size_bytes": 137678848,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_from_update3_v1/orchestrator_logs",
+      "reason": "superseded preload audit",
+      "allocated_size_bytes": 40960,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_from_update3_v1/preload_audit_module4_achieved_refined_v2.json",
+      "reason": "superseded preload audit",
+      "allocated_size_bytes": 32768,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_from_update3_v1/preload_audit_module4_v1.json",
+      "reason": "superseded preload audit",
+      "allocated_size_bytes": 32768,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_from_update3_v1/stagewise_runner_state.json",
+      "reason": "superseded preload audit",
+      "allocated_size_bytes": 53248,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_probe_teacher_v1_from_update16",
+      "reason": "superseded incremental-training branch",
+      "allocated_size_bytes": 449798144,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_training_preload_deficit_categorical_teacher_v1_from_update16",
+      "reason": "superseded incremental-training branch",
+      "allocated_size_bytes": 3555328,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_training_preload_deficit_categorical_teacher_v2_from_update16",
+      "reason": "superseded incremental-training branch",
+      "allocated_size_bytes": 143364096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_training_preload_deficit_normal_weight3_v1_from_update16",
+      "reason": "superseded incremental-training branch",
+      "allocated_size_bytes": 143613952,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_training_preload_deficit_v1_from_update16",
+      "reason": "superseded incremental-training branch",
+      "allocated_size_bytes": 874848256,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_8_ppo_plus_probe_teacher_v1_from_update17",
+      "reason": "superseded incremental-training branch",
+      "allocated_size_bytes": 104128512,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_8_teacher_pretrain_then_ppo_v1_from_update17/teacher_pretrain/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/generations/generation_000000/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/generations/generation_000001/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/generations/generation_000002/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/generations/generation_000003/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4694282240,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_4/generations/generation_000004/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_4/generations/generation_000005/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_4/generations/generation_000006/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_5/generations/generation_000006/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_5/generations/generation_000007/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_5/generations/generation_000008/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_6/generations/generation_000008/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_6/generations/generation_000009/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_6/generations/generation_000010/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7/generations/generation_000010/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7/generations/generation_000011/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7/generations/generation_000012/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7/generations/generation_000013/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7/generations/generation_000014/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7/generations/generation_000015/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7/generations/generation_000016/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7/generations/generation_000017/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_ppo_plus_probe_teacher_v1_from_update16/final_update_000017/evaluations/fresh_forgetting_modules_02_06_v1/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_ppo_plus_probe_teacher_v1_from_update16/ppo_stage/generations/generation_000017/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_8_teacher_pretrain_then_ppo_v1_from_update17/ppo_stage/evaluations/forgetting_post_update18_modules_02_07_phase_reset_v1/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_8_teacher_pretrain_then_ppo_v1_from_update17/ppo_stage/generations/generation_000018/raw",
+      "reason": "reproducible raw rollout tensor directory",
+      "allocated_size_bytes": 4096,
+      "kind": "directory"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/evaluations/update_000003_continuous_fixed_2_3_16_release_clear300_bundle_v1/buckets/validation-000028-e40693909bf0/evaluation_rollout.pt",
+      "reason": "reproducible evaluation rollout tensor",
+      "allocated_size_bytes": 296550400,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/evaluations/update_000003_continuous_fixed_2_3_16_release_clear300_bundle_v1/buckets/validation-000029-adb534d78b21/evaluation_rollout.pt",
+      "reason": "reproducible evaluation rollout tensor",
+      "allocated_size_bytes": 345796608,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/evaluations/update_000003_continuous_fixed_2_3_16_release_clear300_bundle_v1/buckets/validation-000035-e40693909bf0/evaluation_rollout.pt",
+      "reason": "reproducible evaluation rollout tensor",
+      "allocated_size_bytes": 296554496,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/evaluations/update_000003_continuous_fixed_2_3_16_release_clear300_bundle_v1/buckets/validation-000036-ce4fc615b095/evaluation_rollout.pt",
+      "reason": "reproducible evaluation rollout tensor",
+      "allocated_size_bytes": 335650816,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/evaluations/update_000003_continuous_fixed_2_3_16_v1/buckets/validation-000028-e40693909bf0/evaluation_rollout.pt",
+      "reason": "reproducible evaluation rollout tensor",
+      "allocated_size_bytes": 220954624,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/evaluations/update_000003_continuous_fixed_2_3_16_v1/buckets/validation-000029-adb534d78b21/evaluation_rollout.pt",
+      "reason": "reproducible evaluation rollout tensor",
+      "allocated_size_bytes": 263233536,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/evaluations/update_000003_continuous_fixed_2_3_16_v1/buckets/validation-000035-e40693909bf0/evaluation_rollout.pt",
+      "reason": "reproducible evaluation rollout tensor",
+      "allocated_size_bytes": 220155904,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/evaluations/update_000003_continuous_fixed_2_3_16_v1/buckets/validation-000036-ce4fc615b095/evaluation_rollout.pt",
+      "reason": "reproducible evaluation rollout tensor",
+      "allocated_size_bytes": 335437824,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_ppo_plus_probe_teacher_v1_from_update16/final_update_000017/evaluations/continuous_validation_module_07_v1/buckets/validation-000033-5f82dc3a08e9/evaluation_rollout.pt",
+      "reason": "reproducible evaluation rollout tensor",
+      "allocated_size_bytes": 465117184,
+      "kind": "file"
+    },
+    {
+      "path": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_ppo_plus_probe_teacher_v1_from_update16/final_update_000017/evaluations/continuous_validation_module_07_v1/buckets/validation-000040-783dd4e143cb/evaluation_rollout.pt",
+      "reason": "reproducible evaluation rollout tensor",
+      "allocated_size_bytes": 446881792,
+      "kind": "file"
+    }
+  ],
+  "deleted_count": 354,
+  "deleted_paths": [
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_local_planner_v8_queue",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectories_bucket_support_ground_modules_5_to_8_v4.ewzav_qt",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_04_local_contact_v5.nk8x0bem",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_04_local_contact_v6.gnp7rcng",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_04_local_contact_v7.taop44xv",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_09_local_contact_v5.094oogh2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_12_v4.jqhaa__z",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_17_v4.b97jcdid",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_19_v4.odi_yj_v",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_20_v4.k3kwgrr6",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_26_local_planner_v8.0hgeayc9",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_bucket_support_ground_index_27_local_planner_v8.b4dmlc73",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/.nominal_trajectory_posture_replacement_index41_ports_21_31_v1.6d1yvok3",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/actuator_aware_nominal_preload_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/evaluations",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/generations",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/index41_parallel_candidate_logs",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/logs",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/method_diagnostics",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_2_3_dynamics_trackable_v1_review.json",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_2_3_robust_idx1_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_2_3_robust_parts_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_2_3_terminal_retime_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_collision_val33_arc300_release_open_then_lift150_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_collision_val33_val38_arc300_release_x2_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_collision_val34_release_clear150_v3.json",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_expansion_4m_train42_candidate_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_expansion_4m_train43_candidate_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_expansion_4m_train44_candidate_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_expansion_4m_train45_candidate_v3",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_margin15_vrate_trial_train000000",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_margin_15mm_trial_composed_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_margin_15mm_trial_train000000",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx23_reselect_h40_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx2_group0_h40_pregrasp110_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx2_h40_pregrasp110_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx2_h40_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx2_reselect_h40_pregrasp110_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx30_reselect_h40_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx37_h40_margin15_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx37_h40_pregrasp110_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx37_h40_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx9_group0_h20_pregrasp110_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx9_group0_h40_pregrasp110_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx9_h0_pregrasp110_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx9_h20_pregrasp110_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_idx9_reselect_h40_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_repair_4m_reselect_h40_pregrasp110_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_2_3_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_2_3_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_2_3_v3",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_2_3_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_2_3_v5",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_2_3_v6",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_continuous_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_idx23_pilot_v11",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_idx2_group0_pilot_v9",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_idx9_group0_pilot_v10",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_idx9_group0h40_v12",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_idx9_h0_pilot_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_margin15_pilot_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_pregrasp110_complete_v6",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_pregrasp110_idx2reselect_v7",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_pregrasp110_pilot_v5",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_support_clear_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_support_clear_v3",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_train42_v14",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_train43_v17",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_train44_v16",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_train45_v15",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_val30_v12",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_4m_val37_final_v13",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_5m_continuous_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_6m_continuous_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_7m_continuous_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_7m_continuous_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_7m_index12_original_contact_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_7m_z20_index12_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_7m_z40_to10_index12_contact_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_7m_z40_to10_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_7m_z40_to20_index12_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_8m_continuous_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_screening_8m_continuous_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_support_clear_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_support_clear_v3_val32",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_support_clear_v4_val32_bound",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_val32_reselected_contact_x4_v10",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_val32_reselected_v9",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_val32_z100_to0_approach_x2_v7",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_val32_z200_to0_approach_x2_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_val32_z50_to0_approach_x2_v6",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_6m_val32_z50_to0_v5",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_bucket_support_ground_remaining_batch_01b_reselected_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_bucket_support_ground_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_configuration_space_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_current_lineage_complete_task_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_current_lineage_complete_task_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_current_lineage_complete_task_v2_review.json",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_current_lineage_human_accepted_v1.html",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_current_lineage_human_accepted_v1_manifest.json",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_current_lineage_human_review_v1.json",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_current_lineage_local_planner_v8_manifest.json",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_current_lineage_v1_live.html",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_release_clear300_all_v15",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_release_smooth_clear300_val33_open35_v19",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_arc300_place_clear30_open_then_lift_v7",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_arc300_place_clear30_v6",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_arc300_place_clear50_open_then_lift_v9",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_arc300_place_clear50_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_arc300_release_open_then_lift150_v5",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_open35_smooth_clear300_v18",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_open35_stage1_v17",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_partial_release_stage1_v12",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_partial_release_v13",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_release_open_then_lift150_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_release_prelift150_30s_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_release_prelift150_retreat_x2_v3",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_release_retreat_arc300_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_safe_setdown_release_stage1_v10",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_safe_setdown_release_v11",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_val38_arc300_release_x2_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val34_release_clear150_v14",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val38_approach_x2_contact_x4_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val38_approach_x2_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val38_release_retreat_arc20_v3",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val38_release_retreat_arc300_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_7m_index05_robot_z40_to10_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_7m_index12_robot_z20_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_7m_index12_robot_z40_to10_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_7m_index12_robot_z40_to20_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_7m_index19_robot_z40_to10_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_7m_index26_robot_z40_to10_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_7m_index33_robot_z40_to10_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_7m_index40_robot_z40_to10_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_5m_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_6m_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_7m_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_8m_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_00_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_01_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_02_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_03_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_04_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_05_complete_task_subset_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_05_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_06_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_07_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_07_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_08_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_08_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_09_local_contact_v7",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_09_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_09_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_10_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_10_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_11_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_11_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_12_complete_task_subset_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_12_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_13_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_13_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_14_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_14_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_15_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_15_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_16_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_16_v4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_17_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_18_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_19_complete_task_subset_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_19_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_20_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_21_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_22_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_23_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_24_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_25_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_26_complete_task_subset_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_26_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_27_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_28_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_29_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_30_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_31_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_32_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_33_complete_task_subset_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_33_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_34_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_35_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_36_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_37_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_38_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_39_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_40_complete_task_subset_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_40_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_bucket_support_ground_index_41_local_planner_v8",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_posture_replacement_index41_ports_13_31_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectory_posture_replacements_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/rejected_pregrasp_support_diagnostics_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/reset_banks",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/rollout_buckets",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/stage_runner_state.json",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/tensor_native_update0.log",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/tensorboard",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/update_000000",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/update_000001",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/update_000002",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/update_000003",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/update_000004",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/update_000005",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/update_000006",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/bucket40_short_signed_normal_probe_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/contact_space_v7_qp_physical_feasibility_v2_fixed_2_3_16of16",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/contact_space_v7_qp_physical_feasibility_v2_modules2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/contact_space_v7_qp_physical_feasibility_v2_modules3",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/contact_space_v7_release_qpid_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/continuous_validation_bottleneck_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/continuous_validation_optimization_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/phase_balanced_stabilized_v1_smoke",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/qp_regression_isolation_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/qpid_reset_v4_m04_update2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/action_contract_ablation_nomask_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/action_contract_ablation_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/action_contract_morphology_trained_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/boundary_preserving_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/boundary_preserving_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/boundary_tail_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/common_compression_2_8_from_clean_initializer_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/common_compression_stagewise_2_8_from_clean_initializer_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/common_compression_stagewise_2_8_from_clean_initializer_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/complete_task_v2_diagnostics",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/complete_task_v2_phase_reset_banks",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_compression_action_w10_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_residual_from_piecewise_u9_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_place_release_tail_stagewise_2_8_from_clean_initializer_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_stagewise_2_8_from_clean_initializer_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_wrench_admission_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/full_action_independent_compression_stagewise_2_8_from_clean_initializer_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/joint_head_from_piecewise_u9_fresh_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/mixed_state_inheritance_outcome_only_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/mixed_state_inheritance_outcome_only_v1_runner.log",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_3_curriculum_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_4_compression_only_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_4_curriculum_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_4_pregrasp110_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_5_compression_only_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_5_morphology_invariant_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_5_nominal_screen_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_6_morphology_invariant_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_6_warm_start_step080_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_6_warm_start_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_7_morphology_invariant_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_7_span20_calibrated_from_stronger_u21_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_7_stronger_bootstrap_from_u21_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_7_warm_start_step080_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_8_joint_only_from_u1_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_8_span20_from_2_7_u1_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/outcome_gate_contact_residual_from_update9_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/outcome_gate_from_update9_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/outcome_gate_wrench_soft1_from_update9_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/outcome_only_w0_from_clean_initializer_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/phase_balanced_stabilized_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/phase_balanced_stabilized_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/phase_balanced_stabilized_v3",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/phase_reset_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/phase_reset_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/phase_reset_v2_runner_console.log",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/privileged_wrench_phase_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/privileged_wrench_piecewise_log_v2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/replicated_topology_privileged_teacher_w10_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/topology_stratified_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/virtual_contact_joint_load_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/w10_joint_head_from_initializer_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/wrench_gate_curriculum_kl010_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/wrench_gate_curriculum_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/wrench_weight10_contact_only_fresh_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/wrench_weight10_fresh_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/diagnostics",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/generations_update14_reward_summary_stdout.log",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/generations_update15_reward_summary_stdout.log",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/module_07_contact_normal_categorical_81_v1_from_update2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/module_07_contact_normal_categorical_uniform_10_20mm_v1_from_update2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/module_07_contact_normal_quantized_0p5mm_v1_from_update2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_actuator_aware_physical_minimum_from_clean_c2_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_5",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_5_transition_backward_p90_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_5_transition_focused_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_6_contact_feedback_v8_from_update12_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_6_factorized_actor_credit_from_update12_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_6_from_update12_virtual_contact_4mm_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_6_normal_exploration_std030_from_update15_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_6_uniform_transition_p90_from_update12_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_coordinate_credit_limit20mm_v1_from_update2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_coordinate_credit_v1_from_update2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_feedback_v8_from_2_6_update0_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_head_extra_pass_v1_from_update2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_normal_categorical_uniform_10_20mm_v1_from_m07_update3",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_normal_limit20mm_v1_from_update2",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_8_actuator_aware_nominal_preload_calibrated_stratified_v3_from_2_7_update4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_8_actuator_aware_nominal_preload_calibrated_v2_from_2_7_update4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_8_actuator_aware_nominal_preload_v1_from_2_7_update4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_8_contact_normal_categorical_uniform_10_20mm_v1_from_2_7_update4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/release_action_diagnosis_old16_vs_min2_v1",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_from_update3_v1/modules_2_4",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_from_update3_v1/orchestrator_logs",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_from_update3_v1/preload_audit_module4_achieved_refined_v2.json",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_from_update3_v1/preload_audit_module4_v1.json",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_from_update3_v1/stagewise_runner_state.json",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_probe_teacher_v1_from_update16",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_training_preload_deficit_categorical_teacher_v1_from_update16",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_training_preload_deficit_categorical_teacher_v2_from_update16",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_training_preload_deficit_normal_weight3_v1_from_update16",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_training_preload_deficit_v1_from_update16",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_8_ppo_plus_probe_teacher_v1_from_update17",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_8_teacher_pretrain_then_ppo_v1_from_update17/teacher_pretrain/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/generations/generation_000000/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/generations/generation_000001/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/generations/generation_000002/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/generations/generation_000003/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_4/generations/generation_000004/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_4/generations/generation_000005/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_4/generations/generation_000006/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_5/generations/generation_000006/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_5/generations/generation_000007/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_5/generations/generation_000008/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_6/generations/generation_000008/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_6/generations/generation_000009/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_6/generations/generation_000010/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7/generations/generation_000010/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7/generations/generation_000011/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7/generations/generation_000012/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7/generations/generation_000013/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7/generations/generation_000014/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7/generations/generation_000015/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7/generations/generation_000016/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7/generations/generation_000017/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_ppo_plus_probe_teacher_v1_from_update16/final_update_000017/evaluations/fresh_forgetting_modules_02_06_v1/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_ppo_plus_probe_teacher_v1_from_update16/ppo_stage/generations/generation_000017/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_8_teacher_pretrain_then_ppo_v1_from_update17/ppo_stage/evaluations/forgetting_post_update18_modules_02_07_phase_reset_v1/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_8_teacher_pretrain_then_ppo_v1_from_update17/ppo_stage/generations/generation_000018/raw",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/evaluations/update_000003_continuous_fixed_2_3_16_release_clear300_bundle_v1/buckets/validation-000028-e40693909bf0/evaluation_rollout.pt",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/evaluations/update_000003_continuous_fixed_2_3_16_release_clear300_bundle_v1/buckets/validation-000029-adb534d78b21/evaluation_rollout.pt",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/evaluations/update_000003_continuous_fixed_2_3_16_release_clear300_bundle_v1/buckets/validation-000035-e40693909bf0/evaluation_rollout.pt",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/evaluations/update_000003_continuous_fixed_2_3_16_release_clear300_bundle_v1/buckets/validation-000036-ce4fc615b095/evaluation_rollout.pt",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/evaluations/update_000003_continuous_fixed_2_3_16_v1/buckets/validation-000028-e40693909bf0/evaluation_rollout.pt",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/evaluations/update_000003_continuous_fixed_2_3_16_v1/buckets/validation-000029-adb534d78b21/evaluation_rollout.pt",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/evaluations/update_000003_continuous_fixed_2_3_16_v1/buckets/validation-000035-e40693909bf0/evaluation_rollout.pt",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_normal_contact_quality_min2_v1/evaluations/update_000003_continuous_fixed_2_3_16_v1/buckets/validation-000036-ce4fc615b095/evaluation_rollout.pt",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_ppo_plus_probe_teacher_v1_from_update16/final_update_000017/evaluations/continuous_validation_module_07_v1/buckets/validation-000033-5f82dc3a08e9/evaluation_rollout.pt",
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/incremental_full_action_min2_clear300_preload_screened_from_update3_v2/modules_2_7_ppo_plus_probe_teacher_v1_from_update16/final_update_000017/evaluations/continuous_validation_module_07_v1/buckets/validation-000040-783dd4e143cb/evaluation_rollout.pt"
+  ],
+  "deletion_recovery": "Deleted superseded experiments and raw tensors are not directly recoverable. Promotion-critical artifacts are protected; the one initially omitted transitive nominal component was exactly recovered, hash-verified, restored, and added to the protected ledger.",
+  "initial_direct_ledger_safety_audit_passed": true,
+  "initial_transitive_runtime_audit_passed": false,
+  "final_transitive_runtime_audit_passed": true,
+  "transitive_runtime_errors": [],
+  "restored_after_cleanup_paths": [
+    "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_open35_smooth_clear300_v18"
+  ],
+  "transitive_dependency_recovery": {
+    "omitted_dependency": "artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/nominal_trajectories_val33_open35_smooth_clear300_v18",
+    "detection": "production nominal-set byte validator failed on the retained 43-bucket manifest immediately after deletion",
+    "cause": "the first cleanup preflight checked direct ledger members but did not traverse a sibling component referenced by the accepted set manifest",
+    "recovery": "all 41 files restored from read-only ext4 data-block scanning and accepted only by pre-recorded SHA-256 equality",
+    "component_manifest_sha256": "a8542e1f96e3372e24095b6ca96105c5913ecb68a83d4e9c6b91a8fc6edc9104",
+    "collision_validation_sha256": "30895472d0a49c38748e71831acb1ec05b3bc0800141d67cdbbe5d8fb15e6ca7",
+    "bucket_manifest_sha256": "f70bbfc08eafd67d5ca2af14949d5d03cb339679f9ce000b6e23327dfbf8b0b5",
+    "final_validation": [
+      "source accepted nominal set: 43/43",
+      "protected accepted nominal set: 43/43",
+      "source/protected copies: byte-identical"
+    ],
+    "prevention": "cleanup v2 retains the sibling component and executes the production transitive nominal-set validator before any future deletion"
+  },
+  "post_cleanup_disk": {
+    "free_bytes": 732786049024,
+    "free_gib": 682.46,
+    "used_bytes": 245732237312
+  }
+}
