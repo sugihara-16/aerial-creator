@@ -12,8 +12,9 @@ import json
 import math
 import os
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
+from amsrr.geometry.pose_math import compose_pose, inverse_pose
 from amsrr.feasibility.articulated_reachability import (
     base_pose_for_centroidal_target,
 )
@@ -43,6 +44,11 @@ from amsrr.schemas.policies import (
     ControllerStatus,
     InteractionKnot,
 )
+from amsrr.simulation.order9_object_task_runtime import (
+    ORDER9_OBJECT_TASK_PHASES,
+    Order9ObjectTaskPhase,
+    Order9ObjectTaskRuntimeConfig,
+)
 from amsrr.schemas.task_spec import TaskSpec
 from amsrr.training.order9_articulated_teacher import (
     Order9ArticulatedTeacherConfig,
@@ -61,12 +67,15 @@ from amsrr.utils.hashing import hash_file, stable_hash
 
 
 ORDER9_C3_NOMINAL_TRAJECTORY_VERSION = (
-    "order9_c3_nominal_configuration_space_v5_local_contact_corridor"
+    "order9_c3_nominal_configuration_space_v6_complete_task_phases"
 )
 ORDER9_C3_NOMINAL_TRAJECTORY_SET_VERSION = (
-    "order9_c3_nominal_trajectory_set_v5_local_contact_corridor"
+    "order9_c3_nominal_trajectory_set_v6_complete_task_phases"
 )
 _PHASES_TO_GRASP = ("approach", "contact_acquisition")
+_COMPLETE_TASK_PHASES = tuple(
+    phase.value for phase in ORDER9_OBJECT_TASK_PHASES
+)
 
 
 @dataclass(frozen=True)
@@ -171,6 +180,45 @@ class Order9C3NominalWindowArtifact(SchemaBase):
 
 
 @dataclass
+class Order9C3NominalPhaseArtifact(SchemaBase):
+    phase: str
+    trajectory_path: str
+    trajectory_sha256: str
+    trajectory_hash: str
+    knot_count: int
+    generation_method: str
+    collision_validation_status: str = "pending_offline_admission"
+
+    def validate(self) -> None:
+        if self.phase not in _COMPLETE_TASK_PHASES:
+            raise SchemaValidationError(
+                f"unknown C3 nominal task phase: {self.phase!r}"
+            )
+        for name in (
+            "trajectory_path",
+            "generation_method",
+            "collision_validation_status",
+        ):
+            require_non_empty(
+                str(getattr(self, name)),
+                f"Order9C3NominalPhaseArtifact.{name}",
+            )
+        for name in ("trajectory_sha256", "trajectory_hash"):
+            _require_sha256(str(getattr(self, name)), name)
+        if self.knot_count < 2:
+            raise SchemaValidationError(
+                "C3 nominal phase trajectory requires at least two knots"
+            )
+        if self.collision_validation_status not in {
+            "pending_offline_admission",
+            "accepted_offline_admission",
+        }:
+            raise SchemaValidationError(
+                "C3 nominal phase collision status is invalid"
+            )
+
+
+@dataclass
 class Order9C3NominalTrajectoryArtifact(SchemaBase):
     bucket_id: str
     split: DatasetSplit
@@ -194,6 +242,7 @@ class Order9C3NominalTrajectoryArtifact(SchemaBase):
     final_phase_target_reached: bool
     proxy_collision_validation_status: str
     windows: list[Order9C3NominalWindowArtifact]
+    phase_trajectories: list[Order9C3NominalPhaseArtifact]
     selection_evidence: dict[str, Any] = field(default_factory=dict)
     artifact_version: str = ORDER9_C3_NOMINAL_TRAJECTORY_VERSION
 
@@ -248,9 +297,18 @@ class Order9C3NominalTrajectoryArtifact(SchemaBase):
             raise SchemaValidationError(
                 "C3 nominal trajectory window indices are not contiguous"
             )
-        if self.final_phase != "contact_acquisition":
+        for window in self.windows:
+            window.validate()
+        phases = [value.phase for value in self.phase_trajectories]
+        if phases != list(_COMPLETE_TASK_PHASES):
             raise SchemaValidationError(
-                "C3 nominal grasp trajectory must end in contact acquisition"
+                "C3 nominal artifact must persist all eight task phases in order"
+            )
+        for phase in self.phase_trajectories:
+            phase.validate()
+        if self.final_phase != Order9ObjectTaskPhase.SETTLE.value:
+            raise SchemaValidationError(
+                "C3 nominal complete trajectory must end in settle"
             )
         if not self.final_phase_target_reached:
             raise SchemaValidationError(
@@ -370,6 +428,9 @@ def generate_order9_c3_nominal_grasp_trajectory(
     physical_model: PhysicalModel,
     maximum_windows_per_phase: int = 32,
     enforce_proxy_collision_during_generation: bool = True,
+    collision_margin_m: float = 0.005,
+    grasp_contact_height_offset_m: float = 0.0,
+    pregrasp_clearance_m: float = 0.08,
     preferred_surface_port_ids: tuple[int, int] | None = None,
     preferred_candidate_group_id: str | None = None,
     excluded_surface_port_id_pairs: tuple[tuple[int, int], ...] = (),
@@ -389,6 +450,9 @@ def generate_order9_c3_nominal_grasp_trajectory(
             enforce_proxy_collision_during_generation=(
                 enforce_proxy_collision_during_generation
             ),
+            collision_margin_m=collision_margin_m,
+            grasp_contact_height_offset_m=grasp_contact_height_offset_m,
+            pregrasp_clearance_m=pregrasp_clearance_m,
             preferred_surface_port_ids=preferred_surface_port_ids,
             preferred_candidate_group_id=preferred_candidate_group_id,
             excluded_surface_port_id_pairs=excluded_surface_port_id_pairs,
@@ -410,6 +474,9 @@ def generate_order9_c3_nominal_grasp_trajectory(
         config=Order9C3TeacherConfig(
             preferred_surface_port_ids=preferred_surface_port_ids,
             excluded_surface_port_id_pairs=excluded_surface_port_id_pairs,
+            collision_margin_m=collision_margin_m,
+            grasp_contact_height_offset_m=grasp_contact_height_offset_m,
+            pregrasp_clearance_m=pregrasp_clearance_m,
         ),
         collision_object=(
             collision_object
@@ -437,6 +504,9 @@ def generate_order9_c3_nominal_grasp_trajectory(
                 enforce_proxy_collision_during_generation=(
                     enforce_proxy_collision_during_generation
                 ),
+                collision_margin_m=collision_margin_m,
+                grasp_contact_height_offset_m=grasp_contact_height_offset_m,
+                pregrasp_clearance_m=pregrasp_clearance_m,
                 preferred_surface_port_ids=preferred_surface_port_ids,
                 preferred_candidate_group_id=group_id,
                 excluded_surface_port_id_pairs=(
@@ -462,6 +532,9 @@ def _generate_order9_c3_nominal_grasp_trajectory_once(
     physical_model: PhysicalModel,
     maximum_windows_per_phase: int = 32,
     enforce_proxy_collision_during_generation: bool = True,
+    collision_margin_m: float = 0.005,
+    grasp_contact_height_offset_m: float = 0.0,
+    pregrasp_clearance_m: float = 0.08,
     preferred_surface_port_ids: tuple[int, int] | None = None,
     preferred_candidate_group_id: str | None = None,
     excluded_surface_port_id_pairs: tuple[tuple[int, int], ...] = (),
@@ -488,6 +561,9 @@ def _generate_order9_c3_nominal_grasp_trajectory_once(
             preferred_surface_port_ids=preferred_surface_port_ids,
             preferred_candidate_group_id=preferred_candidate_group_id,
             excluded_surface_port_id_pairs=excluded_surface_port_id_pairs,
+            collision_margin_m=collision_margin_m,
+            grasp_contact_height_offset_m=grasp_contact_height_offset_m,
+            pregrasp_clearance_m=pregrasp_clearance_m,
         ),
         collision_object=(
             collision_object
@@ -512,7 +588,9 @@ def _generate_order9_c3_nominal_grasp_trajectory_once(
         config=Order9ArticulatedTeacherConfig(
             preferred_candidate_group_id=(
                 selection.trajectory_plan.candidate_group_id
-            )
+            ),
+            collision_margin_m=collision_margin_m,
+            pregrasp_clearance_m=pregrasp_clearance_m,
         ),
         collision_object=(
             collision_object
@@ -687,18 +765,636 @@ def _generate_order9_c3_nominal_grasp_trajectory_once(
     return result
 
 
+def materialize_order9_c3_complete_task_phases(
+    *,
+    phase_trajectories: Mapping[str, ContactWrenchTrajectory],
+    task_spec: TaskSpec,
+    lift_clearance_m: float,
+    retreat_offset_m: float,
+    phase_duration_s: Mapping[str, float] | None = None,
+    nominal_dt_s: float = 0.1,
+) -> dict[str, ContactWrenchTrajectory]:
+    """Freeze all C3 task phases as offline, collision-checkable references.
+
+    Approach and contact acquisition are the accepted configuration-space
+    planner output.  The remaining task edges are deterministic.  Release is
+    deliberately performed while ascending by one lift clearance, followed by
+    an elevated retreat, so opening a morphology cannot sweep through the
+    payload support surface.
+    """
+
+    if set(phase_trajectories) != set(_PHASES_TO_GRASP):
+        raise SchemaValidationError(
+            "C3 complete-task materialization requires approach/contact input"
+        )
+    durations = dict(
+        Order9ObjectTaskRuntimeConfig().phase_duration_s
+        if phase_duration_s is None
+        else phase_duration_s
+    )
+    if set(durations) != set(_COMPLETE_TASK_PHASES) or any(
+        not math.isfinite(float(value)) or float(value) <= 0.0
+        for value in durations.values()
+    ):
+        raise SchemaValidationError(
+            "C3 complete-task phase durations are invalid"
+        )
+    for name, value in (
+        ("lift_clearance_m", lift_clearance_m),
+        ("retreat_offset_m", retreat_offset_m),
+        ("nominal_dt_s", nominal_dt_s),
+    ):
+        if not math.isfinite(float(value)) or float(value) <= 0.0:
+            raise SchemaValidationError(f"C3 complete-task {name} is invalid")
+    approach = phase_trajectories[Order9ObjectTaskPhase.APPROACH.value]
+    contact = phase_trajectories[
+        Order9ObjectTaskPhase.CONTACT_ACQUISITION.value
+    ]
+    approach.validate()
+    contact.validate()
+    contact_start = contact.knots[0]
+    contact_end = contact.knots[-1]
+    start_body, _, open_q, _ = _complete_task_knot_state(contact_start)
+    grasp_body, _, grasp_q, _ = _complete_task_knot_state(contact_end)
+    del start_body
+
+    object_targets = [
+        goal
+        for goal in task_spec.goals
+        if goal.goal_type == "object_pose"
+        and goal.target_entity_id is not None
+        and goal.target_pose_world is not None
+    ]
+    if len(object_targets) != 1:
+        raise SchemaValidationError(
+            "C3 complete-task materialization requires one object-pose goal"
+        )
+    goal = object_targets[0]
+    scene_objects = [
+        value
+        for value in task_spec.scene.objects
+        if value.object_id == goal.target_entity_id
+    ]
+    if len(scene_objects) != 1:
+        raise SchemaValidationError(
+            "C3 complete-task target object is missing from the scene"
+        )
+    object_id = scene_objects[0].object_id
+    object_start = tuple(float(value) for value in scene_objects[0].pose_world)
+    object_goal = tuple(float(value) for value in goal.target_pose_world)
+    approach = _bind_static_object_target(
+        approach,
+        object_id=object_id,
+        object_pose=object_start,
+    )
+    contact = _bind_static_object_target(
+        contact,
+        object_id=object_id,
+        object_pose=object_start,
+    )
+    lift = float(lift_clearance_m)
+    del retreat_offset_m
+    object_to_grasp_body = compose_pose(
+        inverse_pose(object_start), grasp_body
+    )
+    grasp_lifted = _translated_pose(grasp_body, z=lift)
+    body_at_goal = compose_pose(
+        object_goal,
+        object_to_grasp_body,
+    )
+    body_at_goal_lifted = _translated_pose(body_at_goal, z=lift)
+    object_lifted = _translated_pose(object_start, z=lift)
+    object_goal_lifted = _translated_pose(object_goal, z=lift)
+
+    result = {
+        Order9ObjectTaskPhase.APPROACH.value: approach,
+        Order9ObjectTaskPhase.CONTACT_ACQUISITION.value: contact,
+    }
+    generated = (
+        (
+            Order9ObjectTaskPhase.LIFT.value,
+            grasp_body,
+            grasp_lifted,
+            grasp_q,
+            grasp_q,
+            object_start,
+            object_lifted,
+            "maintain",
+        ),
+        (
+            Order9ObjectTaskPhase.TRANSPORT.value,
+            grasp_lifted,
+            body_at_goal_lifted,
+            grasp_q,
+            grasp_q,
+            object_lifted,
+            object_goal_lifted,
+            "maintain",
+        ),
+        (
+            Order9ObjectTaskPhase.PLACE.value,
+            body_at_goal_lifted,
+            body_at_goal,
+            grasp_q,
+            grasp_q,
+            object_goal_lifted,
+            object_goal,
+            "maintain",
+        ),
+    )
+    for (
+        phase,
+        body_start,
+        body_end,
+        q_start,
+        q_end,
+        object_phase_start,
+        object_phase_end,
+        schedule_state,
+    ) in generated:
+        result[phase] = _build_complete_task_phase_trajectory(
+            template=contact_end,
+            phase=phase,
+            duration_s=float(durations[phase]),
+            dt_s=float(nominal_dt_s),
+            body_start=body_start,
+            body_end=body_end,
+            q_start=q_start,
+            q_end=q_end,
+            object_id=object_id,
+            object_start=object_phase_start,
+            object_end=object_phase_end,
+            contact_schedule_state=schedule_state,
+            anchor_pose_translation_origin=object_start,
+            contract_version=contact.contract_version,
+            preserve_body_object_relative=True,
+        )
+    release = _build_reversed_accepted_phase_trajectory(
+        source=contact,
+        phase=Order9ObjectTaskPhase.RELEASE.value,
+        duration_s=float(durations[Order9ObjectTaskPhase.RELEASE.value]),
+        dt_s=float(nominal_dt_s),
+        source_object_pose=object_start,
+        target_object_pose=object_goal,
+        added_clearance_start_m=0.0,
+        added_clearance_end_m=lift,
+        contact_schedule_state="release",
+    )
+    retreat = _build_reversed_accepted_phase_trajectory(
+        source=approach,
+        phase=Order9ObjectTaskPhase.RETREAT.value,
+        duration_s=float(durations[Order9ObjectTaskPhase.RETREAT.value]),
+        dt_s=float(nominal_dt_s),
+        source_object_pose=object_start,
+        target_object_pose=object_goal,
+        added_clearance_start_m=lift,
+        added_clearance_end_m=lift,
+        contact_schedule_state="inactive",
+    )
+    result[Order9ObjectTaskPhase.RELEASE.value] = release
+    result[Order9ObjectTaskPhase.RETREAT.value] = retreat
+    retreat_end_body, _, retreat_end_q, _ = _complete_task_knot_state(
+        retreat.knots[-1]
+    )
+    result[Order9ObjectTaskPhase.SETTLE.value] = (
+        _build_complete_task_phase_trajectory(
+            template=retreat.knots[-1],
+            phase=Order9ObjectTaskPhase.SETTLE.value,
+            duration_s=float(
+                durations[Order9ObjectTaskPhase.SETTLE.value]
+            ),
+            dt_s=float(nominal_dt_s),
+            body_start=retreat_end_body,
+            body_end=retreat_end_body,
+            q_start=retreat_end_q,
+            q_end=retreat_end_q,
+            object_id=object_id,
+            object_start=object_goal,
+            object_end=object_goal,
+            contact_schedule_state="inactive",
+            anchor_pose_translation_origin=object_goal,
+            contract_version=contact.contract_version,
+        )
+    )
+    if tuple(result) != _COMPLETE_TASK_PHASES:
+        raise SchemaValidationError(
+            "C3 complete-task trajectory phase order changed"
+        )
+    return result
+
+
+def _bind_static_object_target(
+    trajectory: ContactWrenchTrajectory,
+    *,
+    object_id: str,
+    object_pose: Sequence[float],
+) -> ContactWrenchTrajectory:
+    knots = []
+    for knot in trajectory.knots:
+        payload = knot.to_dict()
+        payload["object_targets"] = [
+            {
+                "object_id": object_id,
+                "pose_target_world": [float(value) for value in object_pose],
+                "twist_target_world": [0.0] * 6,
+            }
+        ]
+        knots.append(InteractionKnot.from_dict(payload))
+    value = ContactWrenchTrajectory(
+        horizon_s=float(trajectory.horizon_s),
+        dt_s=float(trajectory.dt_s),
+        knots=knots,
+        derived_mode_label=trajectory.derived_mode_label,
+        contract_version=trajectory.contract_version,
+    )
+    value.validate()
+    return value
+
+
+def _build_reversed_accepted_phase_trajectory(
+    *,
+    source: ContactWrenchTrajectory,
+    phase: str,
+    duration_s: float,
+    dt_s: float,
+    source_object_pose: Sequence[float],
+    target_object_pose: Sequence[float],
+    added_clearance_start_m: float,
+    added_clearance_end_m: float,
+    contact_schedule_state: str,
+) -> ContactWrenchTrajectory:
+    """Time-reverse one accepted path under a rigid object-frame transform."""
+
+    knot_count = max(2, int(math.ceil(duration_s / dt_s)) + 1)
+    actual_dt_s = duration_s / float(knot_count - 1)
+    source_times = [float(knot.t_rel_s) for knot in source.knots]
+    object_delta = compose_pose(
+        tuple(float(value) for value in target_object_pose),
+        inverse_pose(tuple(float(value) for value in source_object_pose)),
+    )
+    knots = []
+    upper_index = len(source.knots) - 1
+    for index in range(knot_count):
+        progress = index / float(knot_count - 1)
+        source_time = (1.0 - progress) * float(source.horizon_s)
+        while upper_index > 0 and source_times[upper_index - 1] >= source_time:
+            upper_index -= 1
+        if upper_index == 0:
+            lower_index = 0
+            upper_index = 1
+        else:
+            lower_index = upper_index - 1
+        lower = source.knots[lower_index]
+        upper = source.knots[upper_index]
+        span = max(
+            float(upper.t_rel_s) - float(lower.t_rel_s), 1.0e-12
+        )
+        alpha = min(
+            max((source_time - float(lower.t_rel_s)) / span, 0.0),
+            1.0,
+        )
+        lower_pose, _, lower_q, _ = _complete_task_knot_state(lower)
+        upper_pose, _, upper_q, _ = _complete_task_knot_state(upper)
+        source_pose = (
+            *[
+                (1.0 - alpha) * float(lower_pose[axis])
+                + alpha * float(upper_pose[axis])
+                for axis in range(3)
+            ],
+            *_normalized_quaternion_lerp(
+                lower_pose[3:7], upper_pose[3:7], alpha
+            ),
+        )
+        body_pose = list(compose_pose(object_delta, source_pose))
+        clearance = (
+            (1.0 - progress) * float(added_clearance_start_m)
+            + progress * float(added_clearance_end_m)
+        )
+        body_pose[2] += clearance
+        q = {
+            key: (1.0 - alpha) * float(value)
+            + alpha * float(upper_q[key])
+            for key, value in lower_q.items()
+        }
+        payload = lower.to_dict()
+        payload["t_rel_s"] = index * actual_dt_s
+        centroidal = dict(payload.get("centroidal_target") or {})
+        centroidal["com_pos_world"] = body_pose[:3]
+        centroidal["com_vel_world"] = [0.0, 0.0, 0.0]
+        centroidal["body_orientation_world"] = body_pose[3:7]
+        payload["centroidal_target"] = centroidal
+        posture = dict(payload.get("posture_target") or {})
+        posture["joint_pos_target"] = q
+        posture["joint_vel_target"] = {key: 0.0 for key in q}
+        free_anchors = posture.get("free_anchor_pose_targets")
+        if isinstance(free_anchors, Mapping):
+            transformed = {}
+            for key, value in free_anchors.items():
+                pose = list(
+                    compose_pose(
+                        object_delta,
+                        tuple(float(item) for item in value),
+                    )
+                )
+                pose[2] += clearance
+                transformed[key] = pose
+            posture["free_anchor_pose_targets"] = transformed
+        payload["posture_target"] = posture
+        assignments = []
+        if contact_schedule_state != "inactive":
+            for assignment in lower.contact_assignments:
+                value = assignment.to_dict()
+                value["schedule_state"] = contact_schedule_state
+                assignments.append(value)
+        payload["contact_assignments"] = assignments
+        payload["object_targets"] = [
+            {
+                "object_id": source.knots[0].object_targets[0].object_id,
+                "pose_target_world": [
+                    float(value) for value in target_object_pose
+                ],
+                "twist_target_world": [0.0] * 6,
+            }
+        ]
+        payload["guard_conditions"] = []
+        knots.append(InteractionKnot.from_dict(payload))
+    trajectory = ContactWrenchTrajectory(
+        horizon_s=duration_s,
+        dt_s=actual_dt_s,
+        knots=knots,
+        derived_mode_label=(
+            f"order9_c3_reversed_accepted_clearance_phase:{phase}"
+        ),
+        contract_version=source.contract_version,
+    )
+    trajectory.validate()
+    return trajectory
+
+
+def _build_complete_task_phase_trajectory(
+    *,
+    template: InteractionKnot,
+    phase: str,
+    duration_s: float,
+    dt_s: float,
+    body_start: Sequence[float],
+    body_end: Sequence[float],
+    q_start: Mapping[str, float],
+    q_end: Mapping[str, float],
+    object_id: str,
+    object_start: Sequence[float],
+    object_end: Sequence[float],
+    contact_schedule_state: str,
+    anchor_pose_translation_origin: Sequence[float],
+    contract_version: str,
+    preserve_body_object_relative: bool = False,
+) -> ContactWrenchTrajectory:
+    knot_count = max(2, int(math.ceil(duration_s / dt_s)) + 1)
+    actual_dt_s = duration_s / float(knot_count - 1)
+    body_delta = [
+        float(body_end[index]) - float(body_start[index])
+        for index in range(3)
+    ]
+    object_delta = [
+        float(object_end[index]) - float(object_start[index])
+        for index in range(3)
+    ]
+    q_delta = {
+        key: float(q_end[key]) - float(value)
+        for key, value in q_start.items()
+    }
+    if set(q_delta) != set(q_end):
+        raise SchemaValidationError(
+            "C3 complete-task joint identities changed within a phase"
+        )
+    body_relative_to_object = (
+        compose_pose(inverse_pose(object_start), body_start)
+        if preserve_body_object_relative
+        else None
+    )
+    knots = []
+    for index in range(knot_count):
+        progress = index / float(knot_count - 1)
+        smooth = progress * progress * (3.0 - 2.0 * progress)
+        derivative = 6.0 * progress * (1.0 - progress)
+        body_pose = [
+            float(body_start[axis]) + smooth * body_delta[axis]
+            for axis in range(3)
+        ] + list(
+            _normalized_quaternion_lerp(
+                body_start[3:7], body_end[3:7], smooth
+            )
+        )
+        object_pose = [
+            float(object_start[axis]) + smooth * object_delta[axis]
+            for axis in range(3)
+        ] + list(
+            _normalized_quaternion_lerp(
+                object_start[3:7], object_end[3:7], smooth
+            )
+        )
+        if body_relative_to_object is not None:
+            body_pose = list(
+                compose_pose(tuple(object_pose), body_relative_to_object)
+            )
+        q = {
+            key: float(value) + smooth * q_delta[key]
+            for key, value in q_start.items()
+        }
+        qdot = {
+            key: q_delta[key] / duration_s * derivative
+            for key in q_start
+        }
+        payload = template.to_dict()
+        payload["t_rel_s"] = index * actual_dt_s
+        centroidal = dict(payload.get("centroidal_target") or {})
+        centroidal["com_pos_world"] = body_pose[:3]
+        centroidal["com_vel_world"] = [
+            value / duration_s * derivative for value in body_delta
+        ]
+        centroidal["body_orientation_world"] = body_pose[3:7]
+        payload["centroidal_target"] = centroidal
+        posture = dict(payload.get("posture_target") or {})
+        posture["joint_pos_target"] = q
+        posture["joint_vel_target"] = qdot
+        free_anchors = posture.get("free_anchor_pose_targets")
+        if isinstance(free_anchors, Mapping):
+            posture["free_anchor_pose_targets"] = {
+                key: list(
+                    compose_pose(
+                        tuple(object_pose),
+                        compose_pose(
+                            inverse_pose(
+                                tuple(
+                                    float(item)
+                                    for item in anchor_pose_translation_origin
+                                )
+                            ),
+                            tuple(float(item) for item in value),
+                        ),
+                    )
+                )
+                for key, value in free_anchors.items()
+            }
+        payload["posture_target"] = posture
+        assignments = []
+        if contact_schedule_state != "inactive":
+            for assignment in template.contact_assignments:
+                value = assignment.to_dict()
+                value["schedule_state"] = contact_schedule_state
+                assignments.append(value)
+        payload["contact_assignments"] = assignments
+        payload["object_targets"] = [
+            {
+                "object_id": object_id,
+                "pose_target_world": object_pose,
+                "twist_target_world": [
+                    *[
+                        value / duration_s * derivative
+                        for value in object_delta
+                    ],
+                    0.0,
+                    0.0,
+                    0.0,
+                ],
+            }
+        ]
+        payload["guard_conditions"] = []
+        knots.append(InteractionKnot.from_dict(payload))
+    trajectory = ContactWrenchTrajectory(
+        horizon_s=duration_s,
+        dt_s=actual_dt_s,
+        knots=knots,
+        derived_mode_label=f"order9_c3_complete_task_phase:{phase}",
+        contract_version=contract_version,
+    )
+    trajectory.validate()
+    return trajectory
+
+
+def _complete_task_knot_state(
+    knot: InteractionKnot,
+) -> tuple[
+    tuple[float, ...],
+    tuple[float, ...],
+    dict[str, float],
+    dict[str, float],
+]:
+    centroidal = knot.centroidal_target
+    posture = knot.posture_target
+    if (
+        centroidal is None
+        or centroidal.com_pos_world is None
+        or centroidal.body_orientation_world is None
+        or posture is None
+        or posture.joint_pos_target is None
+        or posture.joint_vel_target is None
+    ):
+        raise SchemaValidationError(
+            "C3 complete-task source knot lacks centroidal/joint targets"
+        )
+    return (
+        tuple(float(value) for value in centroidal.com_pos_world)
+        + tuple(float(value) for value in centroidal.body_orientation_world),
+        tuple(
+            float(value)
+            for value in (centroidal.com_vel_world or (0.0, 0.0, 0.0))
+        )
+        + (0.0, 0.0, 0.0),
+        {str(key): float(value) for key, value in posture.joint_pos_target.items()},
+        {str(key): float(value) for key, value in posture.joint_vel_target.items()},
+    )
+
+
+def _translated_pose(
+    pose: Sequence[float],
+    *,
+    x: float = 0.0,
+    y: float = 0.0,
+    z: float = 0.0,
+) -> tuple[float, ...]:
+    return (
+        float(pose[0]) + float(x),
+        float(pose[1]) + float(y),
+        float(pose[2]) + float(z),
+        *[float(value) for value in pose[3:7]],
+    )
+
+
+def _normalized_quaternion_lerp(
+    start: Sequence[float],
+    end: Sequence[float],
+    progress: float,
+) -> tuple[float, float, float, float]:
+    left = [float(value) for value in start]
+    right = [float(value) for value in end]
+    if sum(a * b for a, b in zip(left, right)) < 0.0:
+        right = [-value for value in right]
+    value = [
+        (1.0 - progress) * a + progress * b
+        for a, b in zip(left, right)
+    ]
+    norm = math.sqrt(sum(item * item for item in value))
+    if norm <= 1.0e-12:
+        raise SchemaValidationError("C3 complete-task quaternion is singular")
+    return tuple(item / norm for item in value)
+
+
+def _phase_trajectories_from_nominal_windows(
+    windows: Sequence[Order9C3NominalWindow],
+) -> dict[str, ContactWrenchTrajectory]:
+    return _join_phase_windows(
+        (
+            (
+                window.phase,
+                float(window.global_start_time_s),
+                window.plan.trajectory,
+            )
+            for window in windows
+        )
+    )
+
+
+def _flatten_complete_phase_trajectories(
+    phases: Mapping[str, ContactWrenchTrajectory],
+) -> tuple[dict[str, Any], ...]:
+    records = []
+    offset = 0.0
+    for phase in _COMPLETE_TASK_PHASES:
+        trajectory = phases[phase]
+        for knot_index, knot in enumerate(trajectory.knots):
+            if records and knot_index == 0:
+                continue
+            records.append(
+                {
+                    "sample_index": len(records),
+                    "global_time_s": offset + float(knot.t_rel_s),
+                    "phase": phase,
+                    "phase_local_time_s": float(knot.t_rel_s),
+                    "phase_target_reached": True,
+                    "knot": knot.to_dict(),
+                }
+            )
+        offset += float(trajectory.horizon_s)
+    return tuple(records)
+
+
 def write_order9_c3_nominal_trajectory_artifact(
     result: Order9C3NominalTrajectory,
     *,
     output_dir: str | Path,
     bucket_id: str,
     split: DatasetSplit,
+    task_spec: TaskSpec,
+    lift_clearance_m: float,
     task_spec_sha256: str,
     structural_hash: str,
     physical_model_hash: str,
     robot_urdf_path: str | Path,
+    retreat_offset_m: float | None = None,
+    phase_duration_s: Mapping[str, float] | None = None,
 ) -> Order9C3NominalTrajectoryArtifact:
-    """Persist raw/resolved windows and one flattened inspection timeline."""
+    """Persist raw windows plus the complete eight-phase nominal contract."""
 
     destination = Path(output_dir).resolve()
     if destination.exists():
@@ -712,6 +1408,23 @@ def write_order9_c3_nominal_trajectory_artifact(
     morphology_path = destination / "task_conditioned_morphology.json"
     candidates_path = destination / "contact_candidate_set.json"
     timeline_path = destination / "nominal_timeline.json"
+    grasp_phases = _phase_trajectories_from_nominal_windows(result.windows)
+    complete_phases = materialize_order9_c3_complete_task_phases(
+        phase_trajectories=grasp_phases,
+        task_spec=task_spec,
+        lift_clearance_m=lift_clearance_m,
+        retreat_offset_m=(
+            Order9ObjectTaskRuntimeConfig().retreat_offset_m
+            if retreat_offset_m is None
+            else float(retreat_offset_m)
+        ),
+        phase_duration_s=phase_duration_s,
+    )
+    complete_timeline = _flatten_complete_phase_trajectories(complete_phases)
+    complete_duration_s = sum(
+        float(complete_phases[phase].horizon_s)
+        for phase in _COMPLETE_TASK_PHASES
+    )
     _write_new_text(
         morphology_path,
         result.selection_bundle.design_output.target_morphology.to_json(
@@ -738,8 +1451,8 @@ def write_order9_c3_nominal_trajectory_artifact(
                 "proxy_collision_validation_status": (
                     result.proxy_collision_validation_status
                 ),
-                "duration_s": result.duration_s,
-                "records": list(result.timeline),
+                "duration_s": complete_duration_s,
+                "records": list(complete_timeline),
             }
         ),
     )
@@ -807,6 +1520,25 @@ def write_order9_c3_nominal_trajectory_artifact(
                 ),
             )
         )
+    phase_artifacts = []
+    for phase in _COMPLETE_TASK_PHASES:
+        trajectory = complete_phases[phase]
+        phase_path = destination / "phases" / f"{phase}.json"
+        _write_new_text(phase_path, trajectory.to_json(indent=2) + "\n")
+        phase_artifacts.append(
+            Order9C3NominalPhaseArtifact(
+                phase=phase,
+                trajectory_path=_relative(phase_path, destination),
+                trajectory_sha256=hash_file(phase_path),
+                trajectory_hash=stable_hash(trajectory.to_dict()),
+                knot_count=len(trajectory.knots),
+                generation_method=(
+                    "configuration_space_planner_resolved"
+                    if phase in _PHASES_TO_GRASP
+                    else "deterministic_complete_task_edge"
+                ),
+            )
+        )
     manifest = Order9C3NominalTrajectoryArtifact(
         bucket_id=bucket_id,
         split=split,
@@ -837,15 +1569,14 @@ def write_order9_c3_nominal_trajectory_artifact(
         selected_candidate_group_id=(
             result.selection_bundle.trajectory_plan.candidate_group_id
         ),
-        duration_s=result.duration_s,
-        final_phase=result.windows[-1].phase,
-        final_phase_target_reached=(
-            result.windows[-1].plan.phase_target_reached
-        ),
+        duration_s=complete_duration_s,
+        final_phase=Order9ObjectTaskPhase.SETTLE.value,
+        final_phase_target_reached=True,
         proxy_collision_validation_status=(
             result.proxy_collision_validation_status
         ),
         windows=window_artifacts,
+        phase_trajectories=phase_artifacts,
         selection_evidence=order9_c3_teacher_evidence(
             result.selection_bundle
         ),
@@ -899,6 +1630,13 @@ def validate_order9_c3_nominal_trajectory_artifact_bytes(
                     root / window.resolver_evidence_path,
                     window.resolver_evidence_sha256,
                 ),
+            )
+        )
+    for phase in artifact.phase_trajectories:
+        checks.append(
+            (
+                root / phase.trajectory_path,
+                phase.trajectory_sha256,
             )
         )
     for path, expected in checks:
@@ -1086,20 +1824,38 @@ def _load_nominal_phase_trajectories(
     root: Path,
     artifact: Order9C3NominalTrajectoryArtifact,
 ) -> dict[str, ContactWrenchTrajectory]:
-    by_phase: dict[str, list[tuple[float, ContactWrenchTrajectory]]] = {}
-    phase_start: dict[str, float] = {}
-    for window in artifact.windows:
-        path = root / window.resolved_trajectory_path
+    phase_trajectories = {}
+    for phase_artifact in artifact.phase_trajectories:
+        path = root / phase_artifact.trajectory_path
         trajectory = ContactWrenchTrajectory.from_json(
             path.read_text(encoding="utf-8")
         )
         trajectory.validate()
-        if stable_hash(trajectory.to_dict()) != window.resolved_trajectory_hash:
-            raise SchemaValidationError("C3 nominal resolved trajectory changed")
-        by_phase.setdefault(window.phase, []).append(
-            (float(window.global_start_time_s), trajectory)
+        if (
+            stable_hash(trajectory.to_dict())
+            != phase_artifact.trajectory_hash
+            or len(trajectory.knots) != phase_artifact.knot_count
+        ):
+            raise SchemaValidationError(
+                "C3 nominal complete phase trajectory changed"
+            )
+        phase_trajectories[phase_artifact.phase] = trajectory
+    if tuple(phase_trajectories) != _COMPLETE_TASK_PHASES:
+        raise SchemaValidationError(
+            "C3 accepted nominal set must contain all task phases"
         )
-        phase_start.setdefault(window.phase, float(window.global_start_time_s))
+    return phase_trajectories
+
+
+def _join_phase_windows(
+    windows: Iterable[tuple[str, float, ContactWrenchTrajectory]],
+) -> dict[str, ContactWrenchTrajectory]:
+    by_phase: dict[str, list[tuple[float, ContactWrenchTrajectory]]] = {}
+    phase_start: dict[str, float] = {}
+    for phase, global_start, trajectory in windows:
+        trajectory.validate()
+        by_phase.setdefault(phase, []).append((global_start, trajectory))
+        phase_start.setdefault(phase, global_start)
     phase_trajectories: dict[str, ContactWrenchTrajectory] = {}
     for phase, windows in by_phase.items():
         origin = phase_start[phase]
@@ -1147,6 +1903,9 @@ def _join_nominal_phase_trajectories(
     offset = 0.0
     dt_s = math.inf
     contract_version = None
+    # The deployable active-knot encoder consumes one representative schedule
+    # template, not the phase clock.  Preserve its accepted approach/contact
+    # scale while the complete per-phase tensors are replayed separately.
     for phase in _PHASES_TO_GRASP:
         trajectory = phases[phase]
         contract_version = contract_version or trajectory.contract_version
@@ -1161,10 +1920,10 @@ def _join_nominal_phase_trajectories(
             knots.append(InteractionKnot.from_dict(payload))
         offset += float(trajectory.horizon_s)
     value = ContactWrenchTrajectory(
-        horizon_s=float(artifact.duration_s),
+        horizon_s=float(offset),
         dt_s=float(dt_s),
         knots=knots,
-        derived_mode_label="order9_c3_accepted_nominal_replay_v1",
+        derived_mode_label="order9_c3_accepted_active_knot_replay_v2",
         contract_version=contract_version,
     )
     value.validate()
@@ -1407,12 +2166,14 @@ __all__ = [
     "Order9C3AcceptedNominalBundle",
     "Order9C3NominalTrajectory",
     "Order9C3NominalTrajectoryArtifact",
+    "Order9C3NominalPhaseArtifact",
     "Order9C3NominalTrajectorySetEntry",
     "Order9C3NominalTrajectorySetManifest",
     "Order9C3NominalWindow",
     "Order9C3NominalWindowArtifact",
     "generate_order9_c3_nominal_grasp_trajectory",
     "load_order9_c3_accepted_nominal_bundle",
+    "materialize_order9_c3_complete_task_phases",
     "validate_order9_c3_nominal_trajectory_artifact_bytes",
     "validate_order9_c3_nominal_trajectory_set_bytes",
     "write_order9_c3_nominal_trajectory_artifact",

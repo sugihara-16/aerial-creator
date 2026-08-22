@@ -16,6 +16,10 @@ from amsrr.policies.order9_design_policy import (
     Order9AutoregressiveDesignPolicy,
     Order9DesignPolicyConfig,
 )
+from amsrr.policies.order9_low_level_policy import (
+    Order9ContactResidualPhaseConditionedActorCritic,
+    Order9MorphologyInvariantCompressionActorCritic,
+)
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.datasets import (
@@ -40,11 +44,95 @@ from amsrr.training.order9_offline_training import (
     reconstruct_order9_pi_d_teacher_trace,
 )
 from amsrr.training.order9_online_dataset import write_order9_on_policy_dataset
-from amsrr.training.order9_online_training import train_order9_ppo_update
+from amsrr.training.order9_online_training import (
+    _order9_c3_action_contract_trainable_prefixes,
+    _validate_parent,
+    train_order9_ppo_update,
+)
+from amsrr.training.order9_c3_action_contract import (
+    order9_c3_action_contract_global_dimension,
+    order9_c3_action_contract_uses_full_policy,
+)
 from amsrr.training.order9_pipeline import order9_schedule_hash, order9_stage_by_id
 from amsrr.training.order9_ppo import order9_pi_d_behavior_trace
 from amsrr.training.order9_randomization import Order9ExpandedObjectRandomizer
 from amsrr.training.p2_inspection_context import default_grasp_carry_task_spec
+
+
+def test_explicit_c3_contract_trains_the_v6_common_compression_head() -> None:
+    v5 = Order9ContactResidualPhaseConditionedActorCritic()
+    v6 = Order9MorphologyInvariantCompressionActorCritic()
+
+    assert _order9_c3_action_contract_trainable_prefixes(
+        v5, global_dimension=0
+    ) == ("contact_residual_decoder.", "critic.")
+    assert _order9_c3_action_contract_trainable_prefixes(
+        v6, global_dimension=0
+    ) == (
+        "contact_compression_actor_mean.",
+        "contact_compression_actor_log_std",
+        "contact_compression_module_count_bias",
+        "critic.",
+    )
+    assert "contact_residual_decoder." not in (
+        _order9_c3_action_contract_trainable_prefixes(
+            v6, global_dimension=0
+        )
+    )
+
+
+def test_v6_c3_contract_adds_only_the_requested_global_head() -> None:
+    v6 = Order9MorphologyInvariantCompressionActorCritic()
+
+    prefixes = _order9_c3_action_contract_trainable_prefixes(
+        v6, global_dimension=12
+    )
+
+    assert prefixes[-2:] == ("actor_mean.", "actor_log_std")
+    assert "contact_residual_decoder." not in prefixes
+
+
+def test_full_c3_contract_declares_complete_policy_command() -> None:
+    contract = "full_policy_command_plus_independent_compression"
+
+    assert order9_c3_action_contract_global_dimension(contract) == 18
+    assert order9_c3_action_contract_uses_full_policy(contract)
+
+
+def test_same_stage_warm_start_initializer_must_restart_at_update_zero() -> None:
+    config = load_order9_learning_config()
+    stage = order9_stage_by_id(config, "c3_pi_l_ppo_arbitrary_morphology")
+    physical_model = build_physical_model_from_config(
+        "configs/robot/robot_model.yaml"
+    )
+    policy = Order9AutoregressiveDesignPolicy(
+        Order9DesignPolicyConfig(d_model=16, maximum_design_steps=64)
+    )
+    metadata = build_order9_checkpoint_metadata(
+        policy,
+        stage=stage,
+        schedule_hash=order9_schedule_hash(config),
+        physical_model_hash=physical_model.stable_hash(),
+        git_revision="unit-test",
+        random_seed=1,
+        input_artifact_hashes={"unit": "a" * 64},
+        parent_checkpoint_sha256="b" * 64,
+        source_order3_checkpoint_sha256=None,
+        metrics={"loss": 1.0},
+        trainer_version="unit_test_warm_start",
+        extra_metadata={
+            "ppo_update_index": 21,
+            "warm_start_only": True,
+            "warm_start_requires_fresh_on_policy_ppo": True,
+        },
+    )
+
+    _validate_parent(metadata, stage, 0, physical_model)
+    with pytest.raises(
+        SchemaValidationError,
+        match="warm-start initializer must begin at PPO update zero",
+    ):
+        _validate_parent(metadata, stage, 1, physical_model)
 
 
 def test_one_generation_one_pi_d_ppo_update_is_hash_bound(

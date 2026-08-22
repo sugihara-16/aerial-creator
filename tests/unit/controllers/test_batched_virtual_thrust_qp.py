@@ -5,8 +5,10 @@ import math
 import pytest
 import torch
 
+import amsrr.controllers.batched_virtual_thrust_qp as batched_qp_module
 from amsrr.controllers.batched_virtual_thrust_qp import (
     BatchedVirtualThrustQPConfig,
+    _project_virtual_channels,
     solve_batched_virtual_thrust_qp,
 )
 from amsrr.controllers.qp_allocator_interface import (
@@ -137,6 +139,138 @@ def test_batched_qp_recovers_unconstrained_virtual_channels() -> None:
     assert result.residual_norm.item() == pytest.approx(0.0, abs=1.0e-7)
 
 
+def test_batched_qp_physical_feasibility_does_not_require_admm_optimality() -> None:
+    """A projected command inside the wrench tolerance is physically feasible."""
+
+    desired = torch.tensor(
+        [[0.1, 0.0, 0.1, 0.0, 0.0, 0.0]], dtype=torch.float64
+    )
+    x_column, z_column = _columns()
+    scalar = torch.zeros((1, 1), dtype=desired.dtype)
+    result = solve_batched_virtual_thrust_qp(
+        desired_wrench_body=desired,
+        virtual_x_wrench_columns=x_column,
+        virtual_z_wrench_columns=z_column,
+        current_vectoring_angles_rad=scalar,
+        previous_rotor_thrusts_n=scalar,
+        previous_vectoring_targets_rad=scalar,
+        thrust_min_n=scalar,
+        thrust_max_n=torch.full_like(scalar, 10.0),
+        vectoring_lower_rad=torch.full_like(scalar, -1.0),
+        vectoring_upper_rad=torch.full_like(scalar, 1.0),
+        vectoring_velocity_limit_radps=torch.full_like(scalar, 100.0),
+        control_dt_s=0.1,
+        unsupported_wrench_tolerance=1.0,
+        config=BatchedVirtualThrustQPConfig(
+            regularization_weight=0.0,
+            previous_command_weight=0.0,
+            max_iterations=1,
+            projection_iterations=1,
+            absolute_tolerance=1.0e-12,
+            relative_tolerance=1.0e-12,
+        ),
+    )
+
+    assert result.solver_converged.tolist() == [False]
+    assert result.residual_norm.item() < 1.0
+    assert result.feasible.tolist() == [True]
+
+
+def test_batched_qp_runs_configured_admm_iterations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not treat small ADMM iterate deltas as wrench-objective convergence."""
+
+    projection_calls = 0
+    original_projection = batched_qp_module._project_virtual_channels
+
+    def counting_projection(*args, **kwargs):
+        nonlocal projection_calls
+        projection_calls += 1
+        return original_projection(*args, **kwargs)
+
+    monkeypatch.setattr(
+        batched_qp_module, "_project_virtual_channels", counting_projection
+    )
+    desired = torch.zeros((1, 6), dtype=torch.float64)
+    x_column, z_column = _columns()
+    scalar = torch.zeros((1, 1), dtype=desired.dtype)
+    result = solve_batched_virtual_thrust_qp(
+        desired_wrench_body=desired,
+        virtual_x_wrench_columns=x_column,
+        virtual_z_wrench_columns=z_column,
+        current_vectoring_angles_rad=scalar,
+        previous_rotor_thrusts_n=scalar,
+        previous_vectoring_targets_rad=scalar,
+        thrust_min_n=scalar,
+        thrust_max_n=torch.full_like(scalar, 10.0),
+        vectoring_lower_rad=torch.full_like(scalar, -1.0),
+        vectoring_upper_rad=torch.full_like(scalar, 1.0),
+        vectoring_velocity_limit_radps=torch.full_like(scalar, 100.0),
+        control_dt_s=0.1,
+        unsupported_wrench_tolerance=1.0,
+        config=BatchedVirtualThrustQPConfig(
+            regularization_weight=0.0,
+            previous_command_weight=0.0,
+            max_iterations=17,
+            projection_iterations=1,
+        ),
+    )
+
+    # One projection initializes z, followed by exactly max_iterations ADMM
+    # projections.  The former early-exit implementation stopped at iteration 8
+    # for this already-stationary input.
+    assert projection_calls == 18
+    assert result.solver_converged.tolist() == [True]
+
+
+def test_exact_virtual_channel_projection_matches_converged_dykstra_reference() -> None:
+    generator = torch.Generator().manual_seed(147)
+    values = 8.0 * torch.randn((3, 7, 2), generator=generator, dtype=torch.float64)
+    minimum_z = torch.rand((3, 7), generator=generator, dtype=torch.float64)
+    maximum_z = minimum_z + 2.0 + 5.0 * torch.rand(
+        (3, 7), generator=generator, dtype=torch.float64
+    )
+    maximum_x = maximum_z.clone()
+    angle_lower = -1.2 + 0.8 * torch.rand(
+        (3, 7), generator=generator, dtype=torch.float64
+    )
+    angle_upper = 0.4 + 0.8 * torch.rand(
+        (3, 7), generator=generator, dtype=torch.float64
+    )
+    pair_i = torch.tensor(
+        (0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 3, 3, 4),
+        dtype=torch.long,
+    )
+    pair_j = torch.tensor(
+        (1, 2, 3, 4, 5, 2, 3, 4, 5, 3, 4, 5, 4, 5, 5),
+        dtype=torch.long,
+    )
+
+    projected = _project_virtual_channels(
+        values,
+        minimum_virtual_z=minimum_z,
+        maximum_virtual_z=maximum_z,
+        maximum_virtual_x=maximum_x,
+        angle_lower=angle_lower,
+        angle_upper=angle_upper,
+        iterations=12,
+        pair_i=pair_i,
+        pair_j=pair_j,
+    )
+    reference = _dykstra_projection_reference(
+        values,
+        minimum_z=minimum_z,
+        maximum_z=maximum_z,
+        maximum_x=maximum_x,
+        angle_lower=angle_lower,
+        angle_upper=angle_upper,
+        iterations=512,
+    )
+
+    torch.testing.assert_close(projected, reference, rtol=0.0, atol=2.0e-9)
+
+
 def test_batched_qp_matches_scalar_qp_at_rate_and_thrust_limits() -> None:
     desired = torch.tensor(
         [[10.0, 0.0, 10.0, 0.0, 0.0, 0.0]], dtype=torch.float64
@@ -203,3 +337,61 @@ def test_batched_qp_rejects_mismatched_shapes() -> None:
             control_dt_s=0.02,
             unsupported_wrench_tolerance=1.0,
         )
+
+
+def _dykstra_projection_reference(
+    values: torch.Tensor,
+    *,
+    minimum_z: torch.Tensor,
+    maximum_z: torch.Tensor,
+    maximum_x: torch.Tensor,
+    angle_lower: torch.Tensor,
+    angle_upper: torch.Tensor,
+    iterations: int,
+) -> torch.Tensor:
+    tangent_upper = torch.tan(angle_upper)
+    tangent_lower = torch.tan(angle_lower)
+    value = values.clone()
+    box_correction = torch.zeros_like(value)
+    upper_correction = torch.zeros_like(value)
+    lower_correction = torch.zeros_like(value)
+    for _ in range(iterations):
+        candidate = value + box_correction
+        box = torch.stack(
+            (
+                candidate[..., 0].clamp(-maximum_x, maximum_x),
+                candidate[..., 1].clamp(minimum_z, maximum_z),
+            ),
+            dim=-1,
+        )
+        box_correction = candidate - box
+        value = box
+        candidate = value + upper_correction
+        violation = (
+            candidate[..., 0] - tangent_upper * candidate[..., 1]
+        ).clamp_min(0.0)
+        multiplier = violation / (1.0 + tangent_upper.square())
+        upper = torch.stack(
+            (
+                candidate[..., 0] - multiplier,
+                candidate[..., 1] + multiplier * tangent_upper,
+            ),
+            dim=-1,
+        )
+        upper_correction = candidate - upper
+        value = upper
+        candidate = value + lower_correction
+        violation = (
+            -candidate[..., 0] + tangent_lower * candidate[..., 1]
+        ).clamp_min(0.0)
+        multiplier = violation / (1.0 + tangent_lower.square())
+        lower = torch.stack(
+            (
+                candidate[..., 0] + multiplier,
+                candidate[..., 1] - multiplier * tangent_lower,
+            ),
+            dim=-1,
+        )
+        lower_correction = candidate - lower
+        value = lower
+    return value

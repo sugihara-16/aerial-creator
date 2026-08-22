@@ -16,6 +16,8 @@ from amsrr.simulation.order9_tensor_object_task import (
     ORDER9_CONTACT_SCHEDULE_MAINTAIN,
     ORDER9_CONTACT_SCHEDULE_RELEASE,
     Order9TensorObjectTaskRuntime,
+    order9_payload_feedforward_active,
+    order9_payload_feedforward_scale,
 )
 
 
@@ -171,3 +173,44 @@ def test_successor_phase_references_follow_planned_endpoints_without_error_drift
     assert final_object_reference[0, :3].tolist() == pytest.approx(
         [0.20, 0.0, 0.225]
     )
+
+
+def test_payload_feedforward_stops_before_release() -> None:
+    phases = torch.arange(len(ORDER9_OBJECT_TASK_PHASES), dtype=torch.long)
+    active = order9_payload_feedforward_active(phases)
+    expected = [
+        phase
+        in {
+            Order9ObjectTaskPhase.LIFT,
+            Order9ObjectTaskPhase.TRANSPORT,
+            Order9ObjectTaskPhase.PLACE,
+        }
+        for phase in ORDER9_OBJECT_TASK_PHASES
+    ]
+    assert active.tolist() == expected
+
+
+def test_payload_feedforward_hands_off_smoothly_during_release() -> None:
+    release = ORDER9_OBJECT_TASK_PHASES.index(Order9ObjectTaskPhase.RELEASE)
+    phase = torch.tensor([release, release, release, release], dtype=torch.long)
+    progress = torch.tensor([0.0, 0.25, 0.50, 1.0])
+
+    scale = order9_payload_feedforward_scale(phase, progress)
+
+    assert scale.tolist() == pytest.approx([1.0, 0.5, 0.0, 0.0])
+
+
+def test_payload_feedforward_scale_preserves_owned_phases() -> None:
+    phase = torch.tensor(
+        [
+            ORDER9_OBJECT_TASK_PHASES.index(Order9ObjectTaskPhase.APPROACH),
+            ORDER9_OBJECT_TASK_PHASES.index(Order9ObjectTaskPhase.LIFT),
+            ORDER9_OBJECT_TASK_PHASES.index(Order9ObjectTaskPhase.PLACE),
+            ORDER9_OBJECT_TASK_PHASES.index(Order9ObjectTaskPhase.RETREAT),
+        ],
+        dtype=torch.long,
+    )
+
+    scale = order9_payload_feedforward_scale(phase, torch.zeros(4))
+
+    assert scale.tolist() == pytest.approx([0.0, 1.0, 1.0, 0.0])

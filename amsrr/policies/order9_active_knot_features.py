@@ -32,7 +32,7 @@ from amsrr.schemas.runtime import RuntimeObservation
 
 
 ORDER9_ACTIVE_KNOT_FEATURE_CONTRACT_VERSION = (
-    "order9_deployable_active_contact_wrench_knot_features_v1"
+    "order9_deployable_active_contact_wrench_and_joint_load_knot_features_v2"
 )
 _SCHEDULE_LABELS = ("approach", "attach", "maintain", "slide", "release")
 _MODE_LABELS = tuple(mode.value for mode in ContactMode)
@@ -113,6 +113,9 @@ ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES: tuple[str, ...] = (
     *(f"wrench.signed_log_width_mean.{axis}" for axis in _WRENCH_AXES),
     *(f"posture.position_error.{name}" for name in _SUMMARY_NAMES),
     *(f"posture.velocity_error.{name}" for name in _SUMMARY_NAMES),
+    # Motor-current/effort estimates are ordinary proprioception on hardware.
+    # They deliberately expose no PhysX contact-force or collision tensor.
+    *(f"hardware.signed_log_abs_joint_load_nm.{slot}" for slot in range(4)),
     "free_anchor.present",
     *(f"free_anchor.position_error_world.{axis}" for axis in ("x", "y", "z")),
     *(f"free_anchor.orientation_error_body.{axis}" for axis in ("rx", "ry", "rz")),
@@ -353,8 +356,13 @@ class Order9ActiveKnotTensorTemplate:
         controller_qp_feasible: torch.Tensor,
         controller_status_one_hot: torch.Tensor,
         allocation_residual_norm: torch.Tensor,
+        hardware_joint_load_nm: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         batch = self.batch_size
+        if hardware_joint_load_nm is None:
+            hardware_joint_load_nm = torch.zeros_like(
+                current_joint_positions_rad
+            )
         expected = {
             "time_s": (batch,),
             "phase_progress": (batch,),
@@ -383,6 +391,7 @@ class Order9ActiveKnotTensorTemplate:
             or current_joint_velocities_radps.shape != node_joint_shape
             or desired_joint_positions_rad.shape != node_joint_shape
             or desired_joint_velocities_radps.shape != node_joint_shape
+            or hardware_joint_load_nm.shape != node_joint_shape
         ):
             raise ValueError("Order9 tensor active-knot joint shapes differ")
         schedule = contact_schedule_index.to(device=self.device, dtype=torch.long)
@@ -410,6 +419,7 @@ class Order9ActiveKnotTensorTemplate:
             controller_qp_feasible=controller_qp_feasible,
             controller_status_one_hot=controller_status_one_hot,
             allocation_residual_norm=allocation_residual_norm,
+            hardware_joint_load_nm=hardware_joint_load_nm,
         )
         if not bool(torch.isfinite(global_values).all()) or not bool(
             torch.isfinite(node_values).all()
@@ -557,6 +567,13 @@ class Order9ActiveKnotTensorTemplate:
         ) - values["current_joint_velocities_radps"].to(
             device=self.device, dtype=self.dtype
         )
+        hardware_load = values["hardware_joint_load_nm"].to(
+            device=self.device, dtype=self.dtype
+        ).abs()
+        if hardware_load.shape[-1] != 4:
+            raise ValueError(
+                "Order9 active-knot hardware load requires four Dock joints"
+            )
         global_values[:, _GLOBAL_INDEX["posture.position_present"]] = 1.0
         global_values[:, _GLOBAL_INDEX["posture.velocity_present"]] = 1.0
         _set_tensor_summary(
@@ -572,6 +589,12 @@ class Order9ActiveKnotTensorTemplate:
                 "posture.position_error",
                 _NODE_INDEX,
             )
+            for slot in range(4):
+                node_values[
+                    :, module_index, _NODE_INDEX[
+                        f"hardware.signed_log_abs_joint_load_nm.{slot}"
+                    ]
+                ] = torch.log1p(hardware_load[:, module_index, slot])
             _set_tensor_summary(
                 node_values[:, module_index],
                 qdot_error[:, module_index],

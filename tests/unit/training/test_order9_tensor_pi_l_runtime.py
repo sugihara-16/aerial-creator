@@ -7,9 +7,13 @@ import torch
 
 from amsrr.encoders.morphology_graph_encoder import MORPHOLOGY_NODE_FEATURE_NAMES
 from amsrr.policies.order9_low_level_policy import (
+    ORDER9_CONTACT_FEEDBACK_FEATURE_NAMES,
+    ORDER9_CONTACT_SPACE_FEATURE_NAMES,
     ORDER9_GLOBAL_ACTION_SIZE,
     Order9ActiveKnotLowLevelPolicyConfig,
     Order9ActiveKnotPhaseConditionedActorCritic,
+    Order9ContactFeedbackLowLevelPolicyConfig,
+    Order9ContactFeedbackPhaseConditionedActorCritic,
     Order9LowLevelPolicyConfig,
     Order9PhaseConditionedActorCritic,
 )
@@ -29,6 +33,9 @@ from amsrr.schemas.policies import (
     InteractionKnot,
 )
 from amsrr.training.order9_tensor_pi_l_runtime import Order9TensorPiLRuntime
+from amsrr.training.order9_contact_space_action import (
+    Order9ContactSpaceActionBasis,
+)
 
 
 def _runtime_fixture(
@@ -123,6 +130,10 @@ def _runtime_fixture(
 
 def test_tensor_pi_l_runtime_supplies_complete_active_knot_actor_context() -> None:
     runtime, state, target = _runtime_fixture(active_knot=True)
+    hardware_load = torch.zeros(
+        2, runtime.builder.module_count, len(runtime.decoder.local_joint_ids)
+    )
+    hardware_load[0, 0] = torch.tensor([0.1, 0.2, 0.3, 0.4])
     result = runtime.compute(
         time_s=torch.tensor([0.0, 0.2]),
         phase_index=torch.tensor([0, 3], dtype=torch.long),
@@ -131,6 +142,7 @@ def test_tensor_pi_l_runtime_supplies_complete_active_knot_actor_context() -> No
         estimated_payload_mass_kg=torch.tensor([0.1, 0.2]),
         estimated_payload_inertia_body=torch.zeros((2, 6)),
         payload_active=torch.tensor([False, True]),
+        hardware_joint_load_nm=hardware_load,
         deterministic=True,
     )
     assert result.active_knot_features is not None
@@ -146,6 +158,100 @@ def test_tensor_pi_l_runtime_supplies_complete_active_knot_actor_context() -> No
     )
     assert torch.isfinite(result.active_knot_features).all()
     assert torch.isfinite(result.active_assignment_features).all()
+    for slot in range(4):
+        feature_index = ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES.index(
+            f"hardware.signed_log_abs_joint_load_nm.{slot}"
+        )
+        assert torch.isclose(
+            result.active_assignment_features[0, 0, feature_index],
+            torch.log1p(hardware_load[0, 0, slot]),
+        )
+        assert result.active_assignment_features[1, 0, feature_index] == 0.0
+
+
+def test_tensor_pi_l_runtime_requires_and_appends_v8_contact_feedback() -> None:
+    legacy_runtime, state, target = _runtime_fixture(active_knot=True)
+    trajectory = ContactWrenchTrajectory(
+        horizon_s=1.0,
+        dt_s=0.1,
+        knots=[
+            InteractionKnot(
+                t_rel_s=0.0,
+                contact_assignments=[],
+                centroidal_target=CentroidalTarget(
+                    centroidal_wrench_preference=[0.0] * 6
+                ),
+            )
+        ],
+    )
+    slot_count = 16
+    flat_joint_count = (
+        legacy_runtime.builder.module_count
+        * len(legacy_runtime.decoder.local_joint_ids)
+    )
+    basis = Order9ContactSpaceActionBasis(
+        module_ids=legacy_runtime.builder.module_ids,
+        local_joint_ids=legacy_runtime.decoder.local_joint_ids,
+        contact_slot_features=torch.zeros(
+            slot_count, len(ORDER9_CONTACT_SPACE_FEATURE_NAMES)
+        ),
+        contact_slot_owner_module_indices=torch.full(
+            (slot_count,), -1, dtype=torch.long
+        ),
+        contact_slot_mask=torch.zeros(slot_count, dtype=torch.bool),
+        contact_to_joint_position=torch.zeros(
+            flat_joint_count, slot_count * 6
+        ),
+        joint_nullspace_projector=torch.eye(flat_joint_count),
+        centroidal_pose_projector=torch.eye(6),
+        centroidal_joint_compensation=torch.zeros(flat_joint_count, 6),
+        contact_action_scale=torch.tensor(
+            [0.01, 0.002, 0.002, 0.02, 0.02, 0.02]
+        ),
+        selected_anchor_ids=(),
+        selected_candidate_ids=(),
+    )
+    runtime = Order9TensorPiLRuntime(
+        morphology_graph=legacy_runtime.morphology_graph,
+        physical_model=legacy_runtime.physical_model,
+        policy=Order9ContactFeedbackPhaseConditionedActorCritic(
+            Order9ContactFeedbackLowLevelPolicyConfig()
+        ),
+        batch_size=2,
+        device="cpu",
+        active_knot_trajectory=trajectory,
+        contact_space_action_basis=basis,
+    )
+    common = {
+        "time_s": torch.tensor([0.0, 0.2]),
+        "phase_index": torch.tensor([1, 3], dtype=torch.long),
+        "task_target": target,
+        "state": state,
+        "estimated_payload_mass_kg": torch.tensor([0.1, 0.2]),
+        "estimated_payload_inertia_body": torch.zeros((2, 6)),
+        "payload_active": torch.tensor([False, True]),
+        "deterministic": True,
+        "c3_action_contract": "contact_space_projected_policy_command",
+    }
+    with pytest.raises(ValueError, match="requires complete deployable"):
+        runtime.compute(**common)
+
+    feedback = torch.randn(
+        2, slot_count, len(ORDER9_CONTACT_FEEDBACK_FEATURE_NAMES)
+    )
+    result = runtime.compute(
+        **common,
+        contact_feedback_features=feedback,
+    )
+    assert result.contact_slot_features is not None
+    assert result.contact_slot_features.shape[-1] == (
+        len(ORDER9_CONTACT_SPACE_FEATURE_NAMES)
+        + len(ORDER9_CONTACT_FEEDBACK_FEATURE_NAMES)
+    )
+    assert torch.equal(
+        result.contact_slot_features[..., -len(ORDER9_CONTACT_FEEDBACK_FEATURE_NAMES) :],
+        feedback,
+    )
 
 
 def test_tensor_pi_l_runtime_matches_c0_graph_observation_contract() -> None:
@@ -277,6 +383,320 @@ def test_tensor_pi_l_runtime_preserves_policy_command_controller_boundary() -> N
     assert result.phase_features[1, phase_offset + 3].item() == 1.0
     assert torch.isfinite(result.controller_result.desired_wrench_body).all()
     assert torch.equal(runtime.previous_action, result.policy_step.action)
+
+
+@pytest.mark.parametrize(
+    ("mode", "global_contract", "zero_joint"),
+    (
+        ("zero_global", "zero", False),
+        ("zero_joint", "full", True),
+        ("contact_compression_only", "zero", False),
+        ("contact_compression_plus_centroidal", "centroidal", False),
+        ("contact_compression_plus_global", "full", False),
+    ),
+)
+def test_tensor_pi_l_runtime_diagnostic_action_ablation(
+    mode: str, global_contract: str, zero_joint: bool
+) -> None:
+    torch.manual_seed(19)
+    runtime, state, target = _runtime_fixture()
+    direction = torch.zeros(
+        runtime.builder.module_count, len(runtime.decoder.local_joint_ids)
+    )
+    direction[0, 0] = 0.05
+    result = runtime.compute(
+        time_s=torch.tensor([0.0, 0.2]),
+        phase_index=torch.tensor([1, 3], dtype=torch.long),
+        task_target=target,
+        state=state,
+        estimated_payload_mass_kg=torch.tensor([0.1, 0.2]),
+        estimated_payload_inertia_body=torch.zeros((2, 6)),
+        payload_active=torch.tensor([False, True]),
+        contact_compression_joint_direction_rad=direction,
+        deterministic=True,
+        diagnostic_action_ablation=mode,
+    )
+    if global_contract == "zero":
+        assert torch.count_nonzero(result.policy_step.action) == 0
+    elif global_contract == "centroidal":
+        assert torch.count_nonzero(result.policy_step.action[:, :12]) > 0
+        assert torch.count_nonzero(result.policy_step.action[:, 12:18]) == 0
+    else:
+        assert torch.count_nonzero(result.policy_step.action) > 0
+    if zero_joint:
+        assert torch.count_nonzero(result.policy_step.joint_action) == 0
+    elif mode.startswith("contact_compression"):
+        nonzero = torch.nonzero(result.policy_step.joint_action)
+        assert all(int(row[1]) == 0 and int(row[2]) == 0 for row in nonzero)
+    else:
+        assert torch.count_nonzero(result.policy_step.joint_action) > 0
+
+
+@pytest.mark.parametrize(
+    "contract",
+    (
+        "contact_compression_only",
+        "contact_compression_plus_centroidal",
+        "contact_compression_plus_global",
+    ),
+)
+def test_tensor_pi_l_runtime_c3_action_contract_matches_applied_diagnostic(
+    contract: str,
+) -> None:
+    torch.manual_seed(41)
+    runtime, state, target = _runtime_fixture()
+    direction = torch.zeros(
+        runtime.builder.module_count, len(runtime.decoder.local_joint_ids)
+    )
+    direction[0, 0] = 0.05
+    contracted = runtime.compute(
+        time_s=torch.tensor([0.0, 0.2]),
+        phase_index=torch.tensor([1, 3], dtype=torch.long),
+        task_target=target,
+        state=state,
+        estimated_payload_mass_kg=torch.tensor([0.1, 0.2]),
+        estimated_payload_inertia_body=torch.zeros((2, 6)),
+        payload_active=torch.tensor([False, True]),
+        contact_compression_joint_direction_rad=direction,
+        deterministic=True,
+        c3_action_contract=contract,
+    )
+
+    torch.manual_seed(41)
+    comparison, state2, target2 = _runtime_fixture()
+    diagnostic = comparison.compute(
+        time_s=torch.tensor([0.0, 0.2]),
+        phase_index=torch.tensor([1, 3], dtype=torch.long),
+        task_target=target2,
+        state=state2,
+        estimated_payload_mass_kg=torch.tensor([0.1, 0.2]),
+        estimated_payload_inertia_body=torch.zeros((2, 6)),
+        payload_active=torch.tensor([False, True]),
+        contact_compression_joint_direction_rad=direction,
+        deterministic=True,
+        diagnostic_action_ablation=contract,
+    )
+
+    # Exact replay retains the full sampled behavior action.
+    assert torch.count_nonzero(contracted.policy_step.action) > 0
+    assert torch.count_nonzero(contracted.policy_step.joint_action) > 0
+    # The command and the next previous-action observation use only the
+    # coordinates declared by the explicit contract.
+    assert torch.equal(
+        contracted.policy_command.desired_body_pose_world,
+        diagnostic.policy_command.desired_body_pose_world,
+    )
+    assert torch.equal(
+        contracted.policy_command.residual_wrench_body,
+        diagnostic.policy_command.residual_wrench_body,
+    )
+    assert torch.equal(
+        contracted.policy_command.joint_position_targets_rad,
+        diagnostic.policy_command.joint_position_targets_rad,
+    )
+    assert torch.equal(runtime.previous_action, comparison.previous_action)
+
+
+def test_tensor_pi_l_runtime_full_contract_preserves_every_actor_coordinate() -> None:
+    torch.manual_seed(43)
+    runtime, state, target = _runtime_fixture()
+    direction = torch.zeros(
+        runtime.builder.module_count, len(runtime.decoder.local_joint_ids)
+    )
+    direction[0, 0] = 0.05
+    result = runtime.compute(
+        time_s=torch.tensor([0.0, 0.2]),
+        phase_index=torch.tensor([1, 3], dtype=torch.long),
+        task_target=target,
+        state=state,
+        estimated_payload_mass_kg=torch.tensor([0.1, 0.2]),
+        estimated_payload_inertia_body=torch.zeros((2, 6)),
+        payload_active=torch.tensor([False, True]),
+        contact_compression_joint_direction_rad=direction,
+        deterministic=True,
+        c3_action_contract="full_policy_command_plus_independent_compression",
+    )
+
+    assert torch.count_nonzero(result.policy_step.action) > 0
+    assert torch.count_nonzero(result.policy_step.joint_action) > 0
+    assert torch.equal(runtime.previous_action, result.policy_step.action)
+    assert torch.count_nonzero(result.policy_command.residual_wrench_body) > 0
+    assert torch.count_nonzero(result.policy_command.joint_torque_bias_nm) > 0
+
+
+def test_tensor_pi_l_runtime_production_compression_only_masks_applied_command() -> None:
+    torch.manual_seed(23)
+    runtime, state, target = _runtime_fixture()
+    direction = torch.zeros(
+        runtime.builder.module_count, len(runtime.decoder.local_joint_ids)
+    )
+    direction[0, 0] = 0.05
+    restricted = runtime.compute(
+        time_s=torch.tensor([0.0, 0.2]),
+        phase_index=torch.tensor([1, 3], dtype=torch.long),
+        task_target=target,
+        state=state,
+        estimated_payload_mass_kg=torch.tensor([0.1, 0.2]),
+        estimated_payload_inertia_body=torch.zeros((2, 6)),
+        payload_active=torch.tensor([False, True]),
+        contact_compression_joint_direction_rad=direction,
+        contact_compression_only_action=True,
+        deterministic=True,
+    )
+
+    torch.manual_seed(23)
+    comparison, state2, target2 = _runtime_fixture()
+    diagnostic = comparison.compute(
+        time_s=torch.tensor([0.0, 0.2]),
+        phase_index=torch.tensor([1, 3], dtype=torch.long),
+        task_target=target2,
+        state=state2,
+        estimated_payload_mass_kg=torch.tensor([0.1, 0.2]),
+        estimated_payload_inertia_body=torch.zeros((2, 6)),
+        payload_active=torch.tensor([False, True]),
+        contact_compression_joint_direction_rad=direction,
+        deterministic=True,
+        diagnostic_action_ablation="contact_compression_only",
+    )
+
+    assert torch.count_nonzero(restricted.policy_step.action) > 0
+    assert torch.count_nonzero(restricted.policy_step.joint_action) > 0
+    assert torch.count_nonzero(diagnostic.policy_step.action) == 0
+    assert torch.equal(
+        restricted.policy_command.desired_body_pose_world,
+        diagnostic.policy_command.desired_body_pose_world,
+    )
+    assert torch.equal(
+        restricted.policy_command.joint_position_targets_rad,
+        diagnostic.policy_command.joint_position_targets_rad,
+    )
+
+
+def test_tensor_pi_l_runtime_production_joint_only_masks_global_command() -> None:
+    torch.manual_seed(29)
+    runtime, state, target = _runtime_fixture()
+    direction = torch.zeros(
+        runtime.builder.module_count, len(runtime.decoder.local_joint_ids)
+    )
+    direction[0, 0] = 0.05
+    restricted = runtime.compute(
+        time_s=torch.tensor([0.0, 0.2]),
+        phase_index=torch.tensor([1, 3], dtype=torch.long),
+        task_target=target,
+        state=state,
+        estimated_payload_mass_kg=torch.tensor([0.1, 0.2]),
+        estimated_payload_inertia_body=torch.zeros((2, 6)),
+        payload_active=torch.tensor([False, True]),
+        contact_compression_joint_direction_rad=direction,
+        joint_only_action=True,
+        deterministic=True,
+    )
+
+    torch.manual_seed(29)
+    comparison, state2, target2 = _runtime_fixture()
+    diagnostic = comparison.compute(
+        time_s=torch.tensor([0.0, 0.2]),
+        phase_index=torch.tensor([1, 3], dtype=torch.long),
+        task_target=target2,
+        state=state2,
+        estimated_payload_mass_kg=torch.tensor([0.1, 0.2]),
+        estimated_payload_inertia_body=torch.zeros((2, 6)),
+        payload_active=torch.tensor([False, True]),
+        contact_compression_joint_direction_rad=direction,
+        deterministic=True,
+        diagnostic_action_ablation="zero_global",
+    )
+
+    assert torch.count_nonzero(restricted.policy_step.action) > 0
+    assert torch.count_nonzero(restricted.policy_step.joint_action) > 0
+    assert torch.equal(
+        restricted.policy_command.desired_body_pose_world,
+        diagnostic.policy_command.desired_body_pose_world,
+    )
+    assert torch.equal(
+        restricted.policy_command.joint_position_targets_rad,
+        diagnostic.policy_command.joint_position_targets_rad,
+    )
+
+
+def test_tensor_pi_l_runtime_nominal_only_mask_preserves_actor_state() -> None:
+    torch.manual_seed(31)
+    runtime, state, target = _runtime_fixture()
+    masked = runtime.compute(
+        time_s=torch.tensor([0.0, 0.2]),
+        phase_index=torch.tensor([3, 3], dtype=torch.long),
+        task_target=target,
+        state=state,
+        estimated_payload_mass_kg=torch.tensor([0.1, 0.2]),
+        estimated_payload_inertia_body=torch.zeros((2, 6)),
+        payload_active=torch.tensor([False, False]),
+        nominal_only_action_mask=torch.tensor([True, False]),
+        deterministic=True,
+    )
+
+    assert torch.count_nonzero(masked.policy_step.action[0]) > 0
+    assert torch.count_nonzero(masked.policy_step.joint_action[0]) > 0
+    assert torch.equal(
+        masked.policy_command.desired_body_pose_world[0],
+        target.desired_robot_root_pose_world[0],
+    )
+    assert torch.equal(
+        masked.policy_command.joint_position_targets_rad[0],
+        target.nominal_joint_positions_rad[0],
+    )
+    assert not torch.equal(
+        masked.policy_command.desired_body_pose_world[1],
+        target.desired_robot_root_pose_world[1],
+    )
+
+
+def test_tensor_pi_l_nominal_qpid_hold_bypasses_actor_and_holds_reference() -> None:
+    runtime, state, target = _runtime_fixture()
+    target = replace(
+        target,
+        desired_robot_root_twist_world=torch.full((2, 6), 0.25),
+        nominal_joint_positions_rad=torch.full_like(
+            target.nominal_joint_positions_rad, 0.15
+        ),
+        nominal_joint_velocities_radps=torch.full_like(
+            target.nominal_joint_velocities_radps, 0.4
+        ),
+    )
+    runtime.previous_action.fill_(0.3)
+    runtime.recurrent_state.fill_(0.4)
+    previous = runtime.previous_action.clone()
+    recurrent = runtime.recurrent_state.clone()
+
+    result = runtime.compute_nominal_qpid_hold(
+        task_target=target,
+        state=state,
+        estimated_payload_mass_kg=torch.tensor([0.0, 1.0]),
+        estimated_payload_inertia_body=torch.zeros((2, 6)),
+        payload_active=torch.tensor([False, True]),
+        estimated_payload_com_object=torch.zeros((2, 3)),
+    )
+
+    assert torch.equal(
+        result.policy_command.desired_body_pose_world,
+        target.desired_robot_root_pose_world,
+    )
+    assert torch.count_nonzero(result.policy_command.desired_body_twist) == 0
+    assert torch.count_nonzero(result.policy_command.residual_wrench_body) == 0
+    assert torch.equal(
+        result.policy_command.joint_position_targets_rad,
+        target.nominal_joint_positions_rad,
+    )
+    assert torch.count_nonzero(
+        result.policy_command.joint_velocity_targets_radps
+    ) == 0
+    assert torch.count_nonzero(result.policy_command.joint_torque_bias_nm) == 0
+    assert torch.equal(runtime.previous_action, previous)
+    assert torch.equal(runtime.recurrent_state, recurrent)
+    payload_wrench_delta = (
+        result.controller_result.desired_wrench_body[1, 2]
+        - result.controller_result.desired_wrench_body[0, 2]
+    )
+    assert payload_wrench_delta > 9.0
 
 
 def test_tensor_pi_l_runtime_accepts_canonical_actor_phase_indices() -> None:

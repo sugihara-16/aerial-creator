@@ -57,7 +57,7 @@ from amsrr.utils.hashing import stable_hash
 
 
 ORDER9_ARTICULATED_TRAJECTORY_TEACHER_VERSION = (
-    "order9_articulated_trajectory_teacher_v17_local_contact_planner"
+    "order9_articulated_trajectory_teacher_v19_mesh_clear_pregrasp"
 )
 
 
@@ -92,7 +92,22 @@ class Order9ArticulatedTeacherConfig:
     # though both endpoint postures were feasible.
     rolling_sparse_knot_count: int = 7
     maximum_base_translation_speed_mps: float = 0.10
+    # The final overhead descent ends close to the support.  Keep its
+    # interpolated vertical speed low enough for the flight QPID to brake
+    # before consuming the collision clearance that was certified by the
+    # kinematic planner.
+    maximum_approach_vertical_speed_mps: float = 0.06
+    # The assembled-body flight response becomes underdamped close to the
+    # supported object, especially for three or more modules.  Enter a slower
+    # terminal descent zone early enough that one rolling-horizon command
+    # cannot jump over it, while retaining the faster rate at transit height.
+    maximum_terminal_approach_vertical_speed_mps: float = 0.03
+    terminal_approach_slowdown_height_m: float = 0.24
     maximum_base_rotation_speed_rad_s: float = 0.50
+    # The trajectory executor uses a zero-slope cubic blend between sparse
+    # knots.  Its peak derivative is 1.5 times the endpoint-average rate, so
+    # account for that peak when limiting each rolling-horizon increment.
+    trajectory_interpolation_peak_rate_scale: float = 1.50
     lift_height_m: float = 0.05
     retreat_distance_m: float = 0.10
     # Mesh-backed anchors are bulkier than their contact-frame point.  Keep
@@ -126,6 +141,7 @@ class Order9ArticulatedTeacherConfig:
     # residuals do not discard an otherwise collision-clear configuration
     # edge.
     posture_anchor_position_tolerance_m: float = 0.011
+    collision_margin_m: float = 0.005
 
     def __post_init__(self) -> None:
         if self.maximum_candidate_group_attempts < 1:
@@ -149,7 +165,11 @@ class Order9ArticulatedTeacherConfig:
         for name in (
             "rolling_horizon_s",
             "maximum_base_translation_speed_mps",
+            "maximum_approach_vertical_speed_mps",
+            "maximum_terminal_approach_vertical_speed_mps",
+            "terminal_approach_slowdown_height_m",
             "maximum_base_rotation_speed_rad_s",
+            "trajectory_interpolation_peak_rate_scale",
             "lift_height_m",
             "retreat_distance_m",
             "pregrasp_clearance_m",
@@ -160,12 +180,25 @@ class Order9ArticulatedTeacherConfig:
             "approach_staging_attitude_tolerance_rad",
             "contact_acquisition_ceiling_margin_m",
             "contact_acquisition_corridor_margin_m",
+            "collision_margin_m",
         ):
             value = float(getattr(self, name))
             if not math.isfinite(value) or value <= 0.0:
                 raise ValueError(f"{name} must be finite and positive")
         if not 1.0 <= float(self.rolling_horizon_s) <= 3.0:
             raise ValueError("rolling_horizon_s must be in [1, 3]")
+        if self.trajectory_interpolation_peak_rate_scale < 1.0:
+            raise ValueError(
+                "trajectory_interpolation_peak_rate_scale must be at least one"
+            )
+        if (
+            self.maximum_terminal_approach_vertical_speed_mps
+            > self.maximum_approach_vertical_speed_mps
+        ):
+            raise ValueError(
+                "maximum_terminal_approach_vertical_speed_mps must not "
+                "exceed maximum_approach_vertical_speed_mps"
+            )
         if self.rolling_sparse_knot_count < 2:
             raise ValueError("rolling_sparse_knot_count must be at least two")
         if (
@@ -443,6 +476,7 @@ class Order9ArticulatedTrajectoryTeacher:
                         anchor_position_tolerance_m=(
                             self.config.posture_anchor_position_tolerance_m
                         ),
+                        collision_margin_m=self.config.collision_margin_m,
                     ),
                     collision_object=self.collision_object,
                 )
@@ -644,6 +678,7 @@ def _decorate_raw_trajectory(
         )
     object_goal_pose = _baseline_object_goal(baseline, object_id=object_id)
     configuration_space_plan = None
+    approach_terminal_base_z: float | None = None
     if phase == "approach":
         # Resolve a genuine pregrasp configuration whose selected contact
         # frames remain outside the object.  The approach phase reaches this
@@ -675,6 +710,9 @@ def _decorate_raw_trajectory(
                 "articulated teacher could not resolve its collision-clear "
                 "pregrasp configuration"
             )
+        approach_terminal_base_z = float(
+            pregrasp_solution.base_pose_world[2]
+        )
         if (
             collision_object is None
             or configuration_space_planner is None
@@ -797,6 +835,21 @@ def _decorate_raw_trajectory(
             velocity_limit,
             config.approach_joint_speed_limit_rad_s,
         )
+    approach_vertical_speed_limit = None
+    if phase == "approach":
+        if approach_terminal_base_z is None:
+            raise SchemaValidationError(
+                "approach terminal height was not resolved"
+            )
+        approach_vertical_speed_limit = (
+            _approach_vertical_speed_limit_mps(
+                start_base_z=float(start_base_pose[2]),
+                target_base_z=float(target_base_pose[2]),
+                terminal_base_z=approach_terminal_base_z,
+                horizon_s=config.rolling_horizon_s,
+                config=config,
+            )
+        )
     progress = _rolling_progress_fraction(
         start_q=start_q,
         target_q=target_q,
@@ -809,8 +862,12 @@ def _decorate_raw_trajectory(
         base_translation_speed_limit_mps=(
             config.maximum_base_translation_speed_mps
         ),
+        base_vertical_speed_limit_mps=approach_vertical_speed_limit,
         base_rotation_speed_limit_rad_s=(
             config.maximum_base_rotation_speed_rad_s
+        ),
+        interpolation_peak_rate_scale=(
+            config.trajectory_interpolation_peak_rate_scale
         ),
     )
     end_q = _interpolate_mapping(start_q, target_q, progress)
@@ -1980,8 +2037,11 @@ def _rolling_progress_fraction(
     horizon_s: float,
     joint_velocity_limit_rad_s: float,
     base_translation_speed_limit_mps: float,
+    base_vertical_speed_limit_mps: float | None,
     base_rotation_speed_limit_rad_s: float,
+    interpolation_peak_rate_scale: float,
 ) -> float:
+    peak_scale = float(interpolation_peak_rate_scale)
     requirements = [
         max(
             (
@@ -1991,7 +2051,8 @@ def _rolling_progress_fraction(
             ),
             default=0.0,
         ),
-        math.sqrt(
+        peak_scale
+        * math.sqrt(
             sum(
                 (
                     float(target_base_pose[index])
@@ -2002,16 +2063,62 @@ def _rolling_progress_fraction(
             )
         )
         / (base_translation_speed_limit_mps * horizon_s),
-        _quaternion_distance(
+        peak_scale
+        * _quaternion_distance(
             start_base_pose[3:],
             target_base_pose[3:],
         )
         / (base_rotation_speed_limit_rad_s * horizon_s),
     ]
+    if base_vertical_speed_limit_mps is not None:
+        requirements.append(
+            peak_scale
+            * abs(float(target_base_pose[2]) - float(start_base_pose[2]))
+            / (float(base_vertical_speed_limit_mps) * horizon_s)
+        )
     required_windows = max(requirements, default=0.0)
     if required_windows <= 1.0:
         return 1.0
     return 1.0 / required_windows
+
+
+def _approach_vertical_speed_limit_mps(
+    *,
+    start_base_z: float,
+    target_base_z: float,
+    terminal_base_z: float,
+    horizon_s: float,
+    config: Order9ArticulatedTeacherConfig,
+) -> float:
+    """Return a cruise-to-terminal descent limit for one rolling window.
+
+    Sparse knots are executed with a zero-slope cubic blend.  Limiting only
+    the rate after the measured base has entered the terminal zone can still
+    skip most of that zone in the preceding three-second window.  Bound that
+    crossing window by the distance remaining above the zone plus one slow
+    endpoint increment.
+    """
+
+    cruise = float(config.maximum_approach_vertical_speed_mps)
+    if target_base_z >= start_base_z - 1.0e-9:
+        return cruise
+    peak = float(config.trajectory_interpolation_peak_rate_scale)
+    zone_top_z = (
+        float(terminal_base_z)
+        + float(config.terminal_approach_slowdown_height_m)
+    )
+    distance_above_zone = max(0.0, float(start_base_z) - zone_top_z)
+    cruise_endpoint_delta = cruise * float(horizon_s) / peak
+    slow_endpoint_delta = (
+        float(config.maximum_terminal_approach_vertical_speed_mps)
+        * float(horizon_s)
+        / peak
+    )
+    allowed_endpoint_delta = min(
+        cruise_endpoint_delta,
+        distance_above_zone + slow_endpoint_delta,
+    )
+    return allowed_endpoint_delta * peak / float(horizon_s)
 
 
 def _phase_assignment_states(
@@ -2265,6 +2372,7 @@ def _resolve_teacher_posture_trajectory(
             anchor_position_tolerance_m=(
                 config.posture_anchor_position_tolerance_m
             ),
+            collision_margin_m=config.collision_margin_m,
         ),
         collision_object=collision_object,
     )

@@ -15,7 +15,7 @@ import os
 import random
 import tempfile
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -24,7 +24,12 @@ from torch import nn
 
 from amsrr.policies.order9_design_policy import Order9AutoregressiveDesignPolicy
 from amsrr.policies.order9_high_level_policy import Order9AutoregressiveHighLevelPolicy
-from amsrr.policies.order9_low_level_policy import Order9PhaseConditionedActorCritic
+from amsrr.policies.order9_low_level_policy import (
+    Order9ContactResidualPhaseConditionedActorCritic,
+    Order9ContactSpacePhaseConditionedActorCritic,
+    Order9MorphologyInvariantCompressionActorCritic,
+    Order9PhaseConditionedActorCritic,
+)
 from amsrr.schemas.common import SchemaBase, SchemaValidationError, require_non_empty
 from amsrr.schemas.datasets import (
     DatasetSplit,
@@ -50,6 +55,15 @@ from amsrr.training.order9_curriculum import (
 from amsrr.training.order9_curriculum_lineage import (
     load_order9_stage_parent_checkpoint,
 )
+from amsrr.training.order9_factorized_actor_credit import (
+    ORDER9_FACTORIZED_ACTOR_CREDIT_CHANNELS,
+    ORDER9_FACTORIZED_ACTOR_CREDIT_VERSION,
+)
+from amsrr.training.order9_c3_action_contract import (
+    ORDER9_C3_ACTION_CONTRACTS,
+    order9_c3_action_contract_global_dimension,
+    order9_c3_action_contract_uses_full_policy,
+)
 from amsrr.training.order9_runtime_load import Order9RuntimeLoadMonitor
 from amsrr.training.order9_dataset import (
     Order9DatasetBundle,
@@ -67,10 +81,46 @@ from amsrr.training.order9_ppo import (
     update_order9_pi_h_ppo,
     update_order9_pi_l_ppo,
 )
+from amsrr.training.order9_tensor_on_policy_dataset import (
+    Order9TensorPiLDatasetBundle,
+    validate_order9_tensor_pi_l_dataset_for_stage,
+)
+from amsrr.training.order9_tensor_pi_l_ppo import (
+    ORDER9_CONTACT_HEAD_EXTRA_OPTIMIZER_CONTRACT,
+    update_order9_tensor_pi_l_ppo,
+)
 from amsrr.utils.hashing import hash_file
 
 
 ORDER9_ONLINE_TRAINING_VERSION = "order9_one_generation_one_ppo_update_v2_preloaded"
+
+
+def _order9_c3_action_contract_trainable_prefixes(
+    model: Order9ContactResidualPhaseConditionedActorCritic,
+    *,
+    global_dimension: int,
+) -> tuple[str, ...]:
+    """Return the actor/critic parameters owned by an explicit C3 contract.
+
+    The v5 compatibility actor encodes coordinated compression in a selected
+    joint coordinate.  The approved v6 actor instead owns a dedicated
+    morphology-invariant scalar head; training the inherited v5 decoder would
+    silently restore topology-dependent action semantics.
+    """
+
+    compression_prefixes = (
+        (
+            "contact_compression_actor_mean.",
+            "contact_compression_actor_log_std",
+            "contact_compression_module_count_bias",
+        )
+        if isinstance(model, Order9MorphologyInvariantCompressionActorCritic)
+        else ("contact_residual_decoder.",)
+    )
+    global_prefixes = (
+        ("actor_mean.", "actor_log_std") if global_dimension else ()
+    )
+    return (*compression_prefixes, "critic.", *global_prefixes)
 
 
 @dataclass
@@ -366,6 +416,386 @@ def train_order9_ppo_update(
         metadata={
             "result_path": str(result_path),
             "device": str(resolved_device),
+            "promotion_evaluation_completed": False,
+        },
+    )
+    result.validate()
+    _atomic_write_text(result_path, result.to_json(indent=2) + "\n")
+    return result
+
+
+def train_order9_tensor_pi_l_ppo_update(
+    config: Order9LearningConfig,
+    *,
+    stage_id: str,
+    rollout_manifest_path: str | Path,
+    rollout_bundle: Order9TensorPiLDatasetBundle,
+    parent_checkpoint_path: str | Path,
+    physical_model: PhysicalModel,
+    output_dir: str | Path,
+    git_revision: str,
+    update_index: int,
+    device: str | torch.device | None = None,
+    additional_input_artifact_paths: Mapping[str, str | Path] | None = None,
+    progress_callback: (
+        Callable[[int, Mapping[str, float], Mapping[str, Any]], None] | None
+    ) = None,
+    c3_action_contract: str | None = None,
+) -> Order9OnlineTrainingResult:
+    """Consume one immutable tensor generation without record/JSONL conversion."""
+
+    config.validate()
+    stage = order9_stage_by_id(config, stage_id)
+    require_order9_stage_execution_allowed(config, stage)
+    if (
+        stage.learning_mode != Order9LearningMode.PPO
+        or stage.learning_target != Order9LearningTarget.PI_L
+    ):
+        raise SchemaValidationError(
+            "Order9 tensor-native trainer accepts pi_L PPO stages only"
+        )
+    if update_index < 0:
+        raise SchemaValidationError("Order9 PPO update_index must be non-negative")
+    if c3_action_contract is not None and stage.stage_id != (
+        "c3_pi_l_ppo_arbitrary_morphology"
+    ):
+        raise SchemaValidationError("explicit C3 action contract requires C3")
+    require_non_empty(git_revision, "git_revision")
+    manifest_path = Path(rollout_manifest_path).resolve()
+    if manifest_path.is_dir():
+        manifest_path = manifest_path / "manifest.json"
+    if (
+        Path(rollout_bundle.manifest_path).resolve() != manifest_path
+        or hash_file(manifest_path) != rollout_bundle.manifest_sha256
+    ):
+        raise SchemaValidationError(
+            "Order9 tensor rollout bundle does not match its manifest"
+        )
+    resolved_device = _resolve_device(device or config.production_runtime.device)
+    parent = load_order9_stage_parent_checkpoint(
+        config,
+        stage,
+        parent_checkpoint_path,
+        device=resolved_device,
+        expected_family=Order9PolicyFamily.PI_L,
+        update_index=update_index,
+    )
+    _validate_parent(parent.metadata, stage, update_index, physical_model)
+    validation = validate_order9_tensor_pi_l_dataset_for_stage(
+        rollout_bundle,
+        config=config,
+        stage_id=stage_id,
+        behavior_checkpoint_sha256=parent.sha256,
+    )
+    if not validation.valid:
+        raise SchemaValidationError(
+            "Order9 tensor PPO dataset failed behavior contract: "
+            + ",".join(validation.failures)
+        )
+    if c3_action_contract is not None and any(
+        artifact.metadata.get("c3_action_contract") != c3_action_contract
+        for artifact in (
+            *rollout_bundle.train_artifacts,
+            *rollout_bundle.validation_artifacts,
+        )
+    ):
+        raise SchemaValidationError(
+            "Order9 tensor PPO rollout action contract differs"
+        )
+    rollout_sha = rollout_bundle.manifest_sha256
+    prior_rollouts = _prior_rollout_lineage(parent.metadata.metadata)
+    if rollout_sha in prior_rollouts:
+        raise SchemaValidationError(
+            "Order9 PPO rollout generation was already consumed in this lineage"
+        )
+    environment_steps = rollout_bundle.manifest.environment_step_count
+    optimization = order9_ppo_optimization(config, stage)
+    boundary_fine_tune = None
+    if (
+        stage.stage_id == "c3_pi_l_ppo_arbitrary_morphology"
+        and config.optimization.c3_boundary_fine_tune.enabled
+    ):
+        boundary_fine_tune = config.optimization.c3_boundary_fine_tune
+        optimization = replace(
+            optimization,
+            epochs_per_update=boundary_fine_tune.epochs_per_update,
+            learning_rate=(
+                optimization.learning_rate
+                * boundary_fine_tune.learning_rate_scale
+            ),
+        )
+    seed = config.production_runtime.seed + stage.stage_index * 100_000 + update_index
+    _seed_everything(seed)
+    model = parent.model.to(resolved_device)
+    if not isinstance(model, Order9PhaseConditionedActorCritic):
+        raise TypeError("Order9 tensor-native checkpoint model type mismatch")
+    model.train()
+    compression_only_actor_objective = bool(
+        boundary_fine_tune is not None
+        and boundary_fine_tune.compression_only_actor_objective
+    )
+    joint_head_only_actor_update = bool(
+        boundary_fine_tune is not None
+        and boundary_fine_tune.joint_head_only_actor_update
+    )
+    contact_residual_only_actor_update = bool(
+        boundary_fine_tune is not None
+        and boundary_fine_tune.contact_residual_only_actor_update
+    )
+    if c3_action_contract is not None:
+        if c3_action_contract not in ORDER9_C3_ACTION_CONTRACTS:
+            raise SchemaValidationError("Order9 C3 PPO action contract is invalid")
+        if not isinstance(
+            model,
+            (
+                Order9ContactResidualPhaseConditionedActorCritic,
+                Order9ContactSpacePhaseConditionedActorCritic,
+            ),
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 action-contract update requires a v5/v6/v7 actor"
+            )
+        if order9_c3_action_contract_uses_full_policy(c3_action_contract):
+            # The full contract trains one shared actor without module-count
+            # switches: graph/recurrent trunk, all global and joint heads, the
+            # independent compression head, and the critic are all live.
+            compression_only_actor_objective = False
+            joint_head_only_actor_update = False
+            contact_residual_only_actor_update = False
+            for parameter in model.parameters():
+                parameter.requires_grad = True
+        else:
+            global_dimension = order9_c3_action_contract_global_dimension(
+                c3_action_contract
+            )
+            contact_residual_only_actor_update = global_dimension == 0
+            trainable_prefixes = _order9_c3_action_contract_trainable_prefixes(
+                model,
+                global_dimension=global_dimension,
+            )
+            for parameter_name, parameter in model.named_parameters():
+                parameter.requires_grad = parameter_name.startswith(
+                    trainable_prefixes
+                )
+    elif contact_residual_only_actor_update:
+        if not isinstance(
+            model, Order9ContactResidualPhaseConditionedActorCritic
+        ):
+            raise SchemaValidationError(
+                "Order9 contact-residual-only update requires a v5/v6 actor"
+            )
+        for parameter_name, parameter in model.named_parameters():
+            trainable_prefixes = (
+                (
+                    "contact_compression_actor_mean.",
+                    "contact_compression_actor_log_std",
+                    "contact_compression_module_count_bias",
+                    "critic.",
+                )
+                if isinstance(
+                    model, Order9MorphologyInvariantCompressionActorCritic
+                )
+                else ("contact_residual_decoder.", "critic.")
+            )
+            parameter.requires_grad = parameter_name.startswith(trainable_prefixes)
+    elif joint_head_only_actor_update:
+        for parameter_name, parameter in model.named_parameters():
+            parameter.requires_grad = parameter_name.startswith(
+                ("joint_decoder.", "critic.")
+            )
+    trainable_parameters = [
+        parameter for parameter in model.parameters() if parameter.requires_grad
+    ]
+    if not trainable_parameters:
+        raise SchemaValidationError("Order9 tensor PPO has no trainable parameters")
+    optimizer = torch.optim.Adam(
+        trainable_parameters, lr=optimization.learning_rate
+    )
+    load_monitor = Order9RuntimeLoadMonitor(
+        sample_interval_s=config.production_runtime.runtime_load_sample_interval_s,
+        device=str(resolved_device),
+    )
+    load_monitor.start(torch_module=torch)
+    update_started = time.perf_counter()
+    live_callback = None
+    if progress_callback is not None:
+        live_callback = lambda step, metrics: progress_callback(
+            step, metrics, load_monitor.latest_sample()
+        )
+    try:
+        # PyTorch 2.10's CUDA autograd worker repeatedly faulted inside the
+        # host libcuda driver during long topology-stratified updates on this
+        # workstation.  Backward remains mathematically identical when the
+        # autograd engine executes its ready queue on one thread; only
+        # independent backward nodes are no longer scheduled concurrently.
+        # Scope the setting to this update and record it in PPO provenance.
+        with torch.autograd.set_multithreading_enabled(False):
+            update = update_order9_tensor_pi_l_ppo(
+                model,
+                rollout_bundle.train_artifacts,
+                physical_model=physical_model,
+                optimizer=optimizer,
+                config=optimization,
+                behavior_checkpoint_sha256=parent.sha256,
+                seed=seed,
+                boundary_fine_tune=boundary_fine_tune,
+                compression_only_actor_objective=(
+                    compression_only_actor_objective
+                ),
+                joint_head_only_actor_update=(
+                    joint_head_only_actor_update
+                ),
+                contact_residual_only_actor_update=(
+                    contact_residual_only_actor_update
+                ),
+                c3_action_contract=c3_action_contract,
+                progress_callback=live_callback,
+            )
+        if resolved_device.type == "cuda":
+            torch.cuda.synchronize(resolved_device)
+    finally:
+        update_wall_elapsed_s = time.perf_counter() - update_started
+        runtime_load = load_monitor.stop(torch_module=torch)
+
+    output = Path(output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    checkpoint_path = output / f"checkpoint_update_{update_index:06d}.pt"
+    metrics_path = output / f"ppo_update_{update_index:06d}.json"
+    result_path = output / f"training_result_update_{update_index:06d}.json"
+    for path in (checkpoint_path, metrics_path, result_path):
+        if path.exists():
+            raise FileExistsError(f"Order9 PPO output already exists: {path}")
+    input_hashes = order9_checkpoint_input_hashes(
+        rollout_bundle,
+        parent_checkpoint_path=parent_checkpoint_path,
+        source_order3_checkpoint_path=None,
+        additional_paths=additional_input_artifact_paths or {},
+    )
+    metrics = _checkpoint_metrics(update, environment_steps, update_index)
+    rollout_lineage = [*prior_rollouts, rollout_sha]
+    metadata = build_order9_checkpoint_metadata(
+        model,
+        stage=stage,
+        schedule_hash=order9_schedule_hash(config),
+        physical_model_hash=physical_model.stable_hash(),
+        git_revision=git_revision,
+        random_seed=seed,
+        input_artifact_hashes=input_hashes,
+        parent_checkpoint_sha256=parent.sha256,
+        source_order3_checkpoint_sha256=(
+            parent.metadata.source_order3_checkpoint_sha256
+        ),
+        metrics=metrics,
+        trainer_version=ORDER9_ONLINE_TRAINING_VERSION,
+        extra_metadata={
+            "ppo_update_index": update_index,
+            "rollout_dataset_manifest_sha256": rollout_sha,
+            "consumed_rollout_manifest_sha256s": rollout_lineage,
+            "one_fresh_generation_one_update": True,
+            "on_policy_behavior_checkpoint_sha256": parent.sha256,
+            "tensor_native_ppo": True,
+            "topology_stratified_update": (
+                rollout_bundle.manifest.metadata.get("topology_stratified_train")
+                is True
+            ),
+            "record_schema_materialization": False,
+            "jsonl_materialization": False,
+            "c3_action_contract": c3_action_contract,
+            "factorized_actor_credit_enabled": bool(
+                boundary_fine_tune is not None
+                and boundary_fine_tune.factorized_actor_credit_enabled
+            ),
+            "factorized_actor_credit_version": (
+                ORDER9_FACTORIZED_ACTOR_CREDIT_VERSION
+                if boundary_fine_tune is not None
+                and boundary_fine_tune.factorized_actor_credit_enabled
+                else None
+            ),
+            "factorized_actor_credit_channels": (
+                list(ORDER9_FACTORIZED_ACTOR_CREDIT_CHANNELS)
+                if boundary_fine_tune is not None
+                and boundary_fine_tune.factorized_actor_credit_enabled
+                else None
+            ),
+            "contact_head_extra_optimizer_contract": (
+                ORDER9_CONTACT_HEAD_EXTRA_OPTIMIZER_CONTRACT
+                if boundary_fine_tune is not None
+                and boundary_fine_tune.contact_head_extra_optimizer_passes > 0
+                else None
+            ),
+            "contact_head_extra_optimizer_passes": (
+                int(boundary_fine_tune.contact_head_extra_optimizer_passes)
+                if boundary_fine_tune is not None
+                else 0
+            ),
+        },
+    )
+    checkpoint_sha = save_order9_policy_checkpoint(
+        checkpoint_path, model=model, metadata=metadata
+    )
+    metrics_payload = {
+        "training_version": ORDER9_ONLINE_TRAINING_VERSION,
+        "stage_id": stage.stage_id,
+        "stage_index": stage.stage_index,
+        "policy_family": Order9PolicyFamily.PI_L.value,
+        "update_index": update_index,
+        "random_seed": seed,
+        "rollout_manifest_path": rollout_bundle.manifest_path,
+        "rollout_manifest_sha256": rollout_sha,
+        "parent_checkpoint_path": str(parent_checkpoint_path),
+        "parent_checkpoint_sha256": parent.sha256,
+        "checkpoint_path": str(checkpoint_path),
+        "checkpoint_sha256": checkpoint_sha,
+        "consumed_environment_steps": environment_steps,
+        "update_wall_elapsed_s": update_wall_elapsed_s,
+        "consumed_environment_steps_per_s": environment_steps
+        / update_wall_elapsed_s,
+        "runtime_load": runtime_load,
+        "optimization": optimization.to_dict(),
+        "ppo_update": update.to_dict(),
+        "one_fresh_generation_one_update": True,
+        "tensor_native_ppo": True,
+        "promotion_evaluation_completed": False,
+        "c3_action_contract": c3_action_contract,
+        "factorized_actor_credit_enabled": bool(
+            boundary_fine_tune is not None
+            and boundary_fine_tune.factorized_actor_credit_enabled
+        ),
+        "factorized_actor_credit_version": (
+            ORDER9_FACTORIZED_ACTOR_CREDIT_VERSION
+            if boundary_fine_tune is not None
+            and boundary_fine_tune.factorized_actor_credit_enabled
+            else None
+        ),
+        "factorized_actor_credit_channels": (
+            list(ORDER9_FACTORIZED_ACTOR_CREDIT_CHANNELS)
+            if boundary_fine_tune is not None
+            and boundary_fine_tune.factorized_actor_credit_enabled
+            else None
+        ),
+    }
+    _atomic_write_text(metrics_path, _json_text(metrics_payload))
+    result = Order9OnlineTrainingResult(
+        training_version=ORDER9_ONLINE_TRAINING_VERSION,
+        stage_id=stage.stage_id,
+        policy_family=Order9PolicyFamily.PI_L,
+        update_index=update_index,
+        rollout_manifest_path=rollout_bundle.manifest_path,
+        rollout_manifest_sha256=rollout_sha,
+        parent_checkpoint_path=str(parent_checkpoint_path),
+        parent_checkpoint_sha256=parent.sha256,
+        checkpoint_path=str(checkpoint_path),
+        checkpoint_sha256=checkpoint_sha,
+        metrics_path=str(metrics_path),
+        metrics_sha256=hash_file(metrics_path),
+        consumed_environment_steps=environment_steps,
+        ppo_update=update,
+        random_seed=seed,
+        consumed_rollout_manifest_sha256s=rollout_lineage,
+        metadata={
+            "result_path": str(result_path),
+            "device": str(resolved_device),
+            "tensor_native_ppo": True,
             "promotion_evaluation_completed": False,
         },
     )
@@ -693,6 +1123,15 @@ def _validate_parent(
         return
     if metadata.curriculum_stage_id != stage.stage_id:
         raise SchemaValidationError("Order9 same-index PPO parent stage identity mismatch")
+    if (
+        metadata.metadata.get("warm_start_only") is True
+        and metadata.metadata.get("warm_start_requires_fresh_on_policy_ppo") is True
+    ):
+        if update_index != 0:
+            raise SchemaValidationError(
+                "Order9 warm-start initializer must begin at PPO update zero"
+            )
+        return
     previous = metadata.metadata.get("ppo_update_index")
     if not isinstance(previous, int) or previous + 1 != update_index:
         raise SchemaValidationError("Order9 PPO parent update lineage is not contiguous")
@@ -836,4 +1275,5 @@ __all__ = [
     "Order9OnlineTrainingResult",
     "train_order9_joint_ppo_update",
     "train_order9_ppo_update",
+    "train_order9_tensor_pi_l_ppo_update",
 ]

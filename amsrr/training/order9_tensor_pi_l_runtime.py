@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import torch
 
@@ -18,8 +18,11 @@ from amsrr.controllers.batched_rigid_body_model import (
     BatchedRigidBodyControlModelBuilder,
 )
 from amsrr.policies.order9_low_level_policy import (
+    ORDER9_CONTACT_FEEDBACK_FEATURE_NAMES,
     ORDER9_GLOBAL_ACTION_SIZE,
     Order9ActiveKnotPhaseConditionedActorCritic,
+    Order9ContactSpacePhaseConditionedActorCritic,
+    Order9ContactFeedbackPhaseConditionedActorCritic,
     Order9LowLevelActorCriticStep,
     Order9LowLevelPolicyConfig,
     Order9PhaseConditionedActorCritic,
@@ -28,6 +31,8 @@ from amsrr.policies.order9_active_knot_features import (
     Order9ActiveKnotTensorTemplate,
 )
 from amsrr.policies.order9_tensor_command_decoder import (
+    ORDER9_INDEPENDENT_COMPRESSION_ACTION_ADAPTER_VERSION,
+    ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_ACTION_ADAPTER_VERSION,
     Order9TensorPolicyCommand,
     Order9TensorPolicyCommandDecoder,
 )
@@ -40,15 +45,43 @@ from amsrr.simulation.order9_object_task_runtime import (
     ORDER9_OBJECT_TASK_ACTOR_PHASE_COUNT,
 )
 from amsrr.simulation.order9_tensor_isaac_io import Order9TensorIsaacState
-from amsrr.simulation.order9_tensor_object_task import Order9TensorObjectTaskTarget
+from amsrr.simulation.order9_tensor_object_task import (
+    ORDER9_CONTACT_SCHEDULE_ATTACH,
+    ORDER9_CONTACT_SCHEDULE_MAINTAIN,
+    Order9TensorObjectTaskTarget,
+)
 from amsrr.training.order9_tensor_runtime import (
     Order9CentroidalTensorObservation,
     Order9TensorizedTopologyBucket,
     order9_low_level_actor_features_from_tensors,
 )
+from amsrr.training.order9_c3_action_contract import (
+    ORDER9_C3_ACTION_CONTRACT_CONTACT_SPACE_PROJECTED,
+    ORDER9_C3_ACTION_CONTRACTS,
+    order9_c3_action_contract_global_dimension,
+    order9_c3_action_contract_uses_full_policy,
+    order9_c3_action_contract_uses_contact_space,
+)
+from amsrr.training.order9_contact_space_action import (
+    Order9ContactSpaceActionBasis,
+    apply_order9_diagnostic_contact_normal_residual,
+    apply_order9_contact_space_action,
+)
 
 
-ORDER9_TENSOR_PI_L_RUNTIME_VERSION = "order9_tensor_complete_pi_l_qpid_runtime_v4"
+ORDER9_TENSOR_PI_L_RUNTIME_VERSION = "order9_tensor_contact_space_pi_l_qpid_runtime_v11"
+ORDER9_NOMINAL_ONLY_ACTION_MASK_CONTRACT = (
+    "order9_place_complete_release_retreat_nominal_only_safety_mask_v2"
+)
+ORDER9_DIAGNOSTIC_ACTION_ABLATION_MODES = frozenset(
+    {
+        "zero_global",
+        "zero_joint",
+        "contact_compression_only",
+        "contact_compression_plus_centroidal",
+        "contact_compression_plus_global",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -58,7 +91,12 @@ class Order9TensorPiLStep:
     phase_features: torch.Tensor
     active_knot_features: torch.Tensor | None
     active_assignment_features: torch.Tensor | None
+    contact_slot_features: torch.Tensor | None
+    contact_slot_owner_module_indices: torch.Tensor | None
+    contact_slot_mask: torch.Tensor | None
+    contact_constraint_weight: torch.Tensor | None
     previous_global_action: torch.Tensor
+    applied_global_action: torch.Tensor
     recurrent_state_in: torch.Tensor
     actor_controller_qp_feasible: torch.Tensor
     actor_controller_status_one_hot: torch.Tensor
@@ -68,6 +106,15 @@ class Order9TensorPiLStep:
     policy_command: Order9TensorPolicyCommand
     controller_result: BatchedQPIDResult
     privileged_disturbance_body: torch.Tensor
+
+
+@dataclass(frozen=True)
+class Order9TensorNominalQPIDStep:
+    """Actor-free nominal hold command evaluated by the production QPID/QP."""
+
+    control_model: BatchedRigidBodyControlModel
+    policy_command: Order9TensorPolicyCommand
+    controller_result: BatchedQPIDResult
 
 
 class Order9TensorPiLRuntime:
@@ -87,6 +134,7 @@ class Order9TensorPiLRuntime:
         controller: BatchedQPIDController | None = None,
         policy_frame_origins_world: torch.Tensor | None = None,
         active_knot_trajectory: ContactWrenchTrajectory | None = None,
+        contact_space_action_basis: Order9ContactSpaceActionBasis | None = None,
     ) -> None:
         if batch_size < 1:
             raise ValueError("Order9 tensor pi_L batch size must be positive")
@@ -193,6 +241,11 @@ class Order9TensorPiLRuntime:
             device=self.device,
             dtype=torch.long,
         )
+        self._decoder_module_ids = torch.tensor(
+            self.builder.module_ids,
+            device=self.device,
+            dtype=torch.long,
+        ).reshape(1, -1).expand(self.batch_size, -1)
         self._phase_feature_template = self._build_phase_feature_template()
         self._active_knot_template = None
         if isinstance(
@@ -211,7 +264,21 @@ class Order9TensorPiLRuntime:
                 device=self.device,
                 dtype=self.dtype,
             )
-
+        self.contact_space_action_basis = None
+        if isinstance(self.policy, Order9ContactSpacePhaseConditionedActorCritic):
+            if contact_space_action_basis is None:
+                raise ValueError(
+                    "Order9 v7 tensor policy requires its contact-space basis"
+                )
+            if contact_space_action_basis.module_ids != self.builder.module_ids:
+                raise ValueError("Order9 contact-space basis module ids differ")
+            if contact_space_action_basis.local_joint_ids != self.decoder.local_joint_ids:
+                raise ValueError("Order9 contact-space basis joint ids differ")
+            self.contact_space_action_basis = contact_space_action_basis.to(
+                device=self.device, dtype=self.dtype
+            )
+        elif contact_space_action_basis is not None:
+            raise ValueError("Order9 legacy tensor policy cannot use a v7 basis")
     @torch.no_grad()
     def compute(
         self,
@@ -223,10 +290,121 @@ class Order9TensorPiLRuntime:
         estimated_payload_mass_kg: torch.Tensor,
         estimated_payload_inertia_body: torch.Tensor,
         payload_active: torch.Tensor,
+        hardware_joint_load_nm: torch.Tensor | None = None,
         estimated_payload_com_object: torch.Tensor | None = None,
         privileged_disturbance_body: torch.Tensor | None = None,
+        contact_compression_joint_direction_rad: torch.Tensor | None = None,
+        contact_compression_action_limit: float | torch.Tensor | None = None,
+        contact_compression_only_action: bool = False,
+        joint_only_action: bool = False,
+        nominal_only_action_mask: torch.Tensor | None = None,
         deterministic: bool = False,
+        diagnostic_action_ablation: str | None = None,
+        diagnostic_contact_normal_residual_m: torch.Tensor | None = None,
+        contact_feedback_features: torch.Tensor | None = None,
+        c3_action_contract: str | None = None,
     ) -> Order9TensorPiLStep:
+        if c3_action_contract is not None and c3_action_contract not in (
+            ORDER9_C3_ACTION_CONTRACTS
+        ):
+            raise ValueError("Order9 C3 action contract is invalid")
+        if (
+            diagnostic_action_ablation is not None
+            and diagnostic_action_ablation
+            not in ORDER9_DIAGNOSTIC_ACTION_ABLATION_MODES
+        ):
+            raise ValueError("Order9 diagnostic action ablation mode is invalid")
+        if diagnostic_action_ablation is not None and not deterministic:
+            raise ValueError(
+                "Order9 diagnostic action ablation requires deterministic inference"
+            )
+        if diagnostic_contact_normal_residual_m is not None and not deterministic:
+            raise ValueError(
+                "Order9 diagnostic contact-normal override requires deterministic inference"
+            )
+        if diagnostic_contact_normal_residual_m is not None and (
+            diagnostic_action_ablation is not None
+            or c3_action_contract
+            != ORDER9_C3_ACTION_CONTRACT_CONTACT_SPACE_PROJECTED
+        ):
+            raise ValueError(
+                "Order9 diagnostic contact-normal override requires only the "
+                "contact-space action contract"
+            )
+        if diagnostic_action_ablation is not None and (
+            contact_compression_only_action
+            or joint_only_action
+            or c3_action_contract is not None
+        ):
+            raise ValueError(
+                "Order9 production action restriction and diagnostic ablation "
+                "are mutually exclusive"
+            )
+        if contact_compression_only_action and joint_only_action:
+            raise ValueError(
+                "Order9 compression-only and joint-only production actions "
+                "are mutually exclusive"
+            )
+        if c3_action_contract is not None and (
+            contact_compression_only_action or joint_only_action
+        ):
+            raise ValueError(
+                "Order9 explicit C3 action contract and production module-count "
+                "restriction are mutually exclusive"
+            )
+        if nominal_only_action_mask is not None and (
+            nominal_only_action_mask.dtype != torch.bool
+            or tuple(nominal_only_action_mask.shape) != (self.batch_size,)
+        ):
+            raise ValueError("Order9 nominal-only action mask shape or dtype differs")
+        contact_space_contract = (
+            c3_action_contract is not None
+            and order9_c3_action_contract_uses_contact_space(c3_action_contract)
+        )
+        if (
+            (contact_compression_only_action or (
+                c3_action_contract is not None and not contact_space_contract
+            ))
+            and contact_compression_joint_direction_rad is None
+        ):
+            raise ValueError(
+                "Order9 contact-compression action contract requires its IK direction"
+            )
+        if hardware_joint_load_nm is not None and tuple(
+            hardware_joint_load_nm.shape
+        ) != (
+            self.batch_size,
+            self.builder.module_count,
+            len(self.decoder.local_joint_ids),
+        ):
+            raise ValueError(
+                "Order9 deployable hardware joint load shape differs"
+            )
+        if hardware_joint_load_nm is not None and not bool(
+            torch.isfinite(hardware_joint_load_nm).all()
+        ):
+            raise ValueError(
+                "Order9 deployable hardware joint load is non-finite"
+            )
+        feedback_policy = isinstance(
+            self.policy, Order9ContactFeedbackPhaseConditionedActorCritic
+        )
+        if feedback_policy:
+            expected_feedback_shape = (
+                self.batch_size,
+                int(self.config.max_contact_slots),
+                len(ORDER9_CONTACT_FEEDBACK_FEATURE_NAMES),
+            )
+            if contact_feedback_features is None or tuple(
+                contact_feedback_features.shape
+            ) != expected_feedback_shape:
+                raise ValueError(
+                    "Order9 v8 pi_L requires complete deployable contact feedback"
+                )
+            if not bool(torch.isfinite(contact_feedback_features).all()):
+                raise ValueError("Order9 v8 contact feedback is non-finite")
+        elif contact_feedback_features is not None:
+            raise ValueError("Order9 v7-or-earlier pi_L cannot consume v8 feedback")
         self._validate_step_inputs(
             time_s=time_s,
             phase_index=phase_index,
@@ -302,7 +480,23 @@ class Order9TensorPiLRuntime:
         )
         active_knot_features = None
         active_assignment_features = None
+        contact_slot_features = None
+        contact_slot_owner_module_indices = None
+        contact_slot_mask = None
         if self._active_knot_template is not None:
+            deployable_joint_load = (
+                torch.zeros(
+                    (
+                        self.batch_size,
+                        self.builder.module_count,
+                        len(self.decoder.local_joint_ids),
+                    ),
+                    device=self.device,
+                    dtype=self.dtype,
+                )
+                if hardware_joint_load_nm is None
+                else hardware_joint_load_nm
+            )
             (
                 active_knot_features,
                 active_assignment_features,
@@ -340,6 +534,33 @@ class Order9TensorPiLRuntime:
                 controller_qp_feasible=actor_qp,
                 controller_status_one_hot=actor_status,
                 allocation_residual_norm=actor_residual,
+                hardware_joint_load_nm=deployable_joint_load,
+            )
+        if self.contact_space_action_basis is not None:
+            contact_slot_features = (
+                self.contact_space_action_basis.contact_slot_features.unsqueeze(0).expand(
+                    self.batch_size, -1, -1
+                )
+            )
+            if feedback_policy:
+                contact_slot_features = torch.cat(
+                    (
+                        contact_slot_features,
+                        contact_feedback_features.to(
+                            device=self.device, dtype=self.dtype
+                        ),
+                    ),
+                    dim=-1,
+                )
+            contact_slot_owner_module_indices = (
+                self.contact_space_action_basis.contact_slot_owner_module_indices.unsqueeze(0).expand(
+                    self.batch_size, -1
+                )
+            )
+            contact_slot_mask = (
+                self.contact_space_action_basis.contact_slot_mask.unsqueeze(0).expand(
+                    self.batch_size, -1
+                )
             )
         active_kwargs = (
             {}
@@ -349,6 +570,16 @@ class Order9TensorPiLRuntime:
                 "active_assignment_features": active_assignment_features,
             }
         )
+        if contact_slot_features is not None:
+            active_kwargs.update(
+                {
+                    "contact_slot_features": contact_slot_features,
+                    "contact_slot_owner_module_indices": (
+                        contact_slot_owner_module_indices
+                    ),
+                    "contact_slot_mask": contact_slot_mask,
+                }
+            )
         policy_step = self.policy.step(
             graph_batch,
             None,
@@ -360,18 +591,291 @@ class Order9TensorPiLRuntime:
             deterministic=deterministic,
             **active_kwargs,
         )
+        if diagnostic_contact_normal_residual_m is not None:
+            if self.contact_space_action_basis is None:
+                raise ValueError(
+                    "Order9 diagnostic contact-normal override lacks its basis"
+                )
+            overridden_contact_action = apply_order9_diagnostic_contact_normal_residual(
+                normalized_contact_action=policy_step.contact_space_residual_action,
+                inward_residual_m=diagnostic_contact_normal_residual_m,
+                basis=self.contact_space_action_basis,
+            )
+            policy_step = replace(
+                policy_step,
+                contact_space_residual_action=overridden_contact_action,
+                contact_space_residual_action_mean=overridden_contact_action,
+            )
+        applied_global_action = policy_step.action
+        applied_joint_action = policy_step.joint_action
+        contact_projection = None
+        if c3_action_contract is not None:
+            if contact_space_contract:
+                if self.contact_space_action_basis is None:
+                    raise ValueError(
+                        "Order9 contact-space contract lacks its basis"
+                    )
+                contact_projection = apply_order9_contact_space_action(
+                    normalized_global_action=policy_step.action,
+                    normalized_joint_action=policy_step.joint_action,
+                    normalized_contact_action=(
+                        policy_step.contact_space_residual_action
+                    ),
+                    phase_index=phase_index,
+                    phase_progress=task_target.phase_progress,
+                    basis=self.contact_space_action_basis,
+                    policy_config=self.config,
+                    maximum_combined_joint_delta_rad=float(
+                        self.config.joint_position_delta_limit_rad
+                    ),
+                )
+                applied_global_action = contact_projection.global_action
+                applied_joint_action = contact_projection.joint_action
+            elif not order9_c3_action_contract_uses_full_policy(
+                c3_action_contract
+            ):
+                _, applied_joint_action = _contact_compression_only_actions(
+                    policy_step,
+                    contact_compression_joint_direction_rad=(
+                        contact_compression_joint_direction_rad
+                    ),
+                    contact_schedule_index=task_target.contact_schedule_index,
+                    local_joint_slot_count=len(self.decoder.local_joint_ids),
+                )
+            if not contact_space_contract:
+                global_dimension = order9_c3_action_contract_global_dimension(
+                    c3_action_contract
+                )
+                applied_global_action = torch.zeros_like(policy_step.action)
+                applied_global_action[:, :global_dimension] = policy_step.action[
+                    :, :global_dimension
+                ]
+        elif contact_compression_only_action:
+            applied_global_action, applied_joint_action = (
+                _contact_compression_only_actions(
+                    policy_step,
+                    contact_compression_joint_direction_rad=(
+                        contact_compression_joint_direction_rad
+                    ),
+                    contact_schedule_index=task_target.contact_schedule_index,
+                    local_joint_slot_count=len(self.decoder.local_joint_ids),
+                )
+            )
+        elif joint_only_action:
+            applied_global_action = torch.zeros_like(applied_global_action)
+        if diagnostic_action_ablation is not None:
+            policy_step = _diagnostic_action_ablation(
+                policy_step,
+                mode=diagnostic_action_ablation,
+                contact_compression_joint_direction_rad=(
+                    contact_compression_joint_direction_rad
+                ),
+                contact_schedule_index=task_target.contact_schedule_index,
+                local_joint_slot_count=len(self.decoder.local_joint_ids),
+            )
+            applied_global_action = policy_step.action
+            applied_joint_action = policy_step.joint_action
+        if nominal_only_action_mask is not None:
+            applied_global_action = torch.where(
+                nominal_only_action_mask[:, None],
+                torch.zeros_like(applied_global_action),
+                applied_global_action,
+            )
+            applied_joint_action = torch.where(
+                nominal_only_action_mask[:, None, None],
+                torch.zeros_like(applied_joint_action),
+                applied_joint_action,
+            )
         command_reference_q = task_target.nominal_joint_positions_rad
         command_reference_qdot = task_target.nominal_joint_velocities_radps
         command_mask = torch.ones_like(command_reference_q, dtype=torch.bool)
         command = self.decoder.decode(
             reference_body_pose_world=task_target.desired_robot_root_pose_world,
             reference_body_twist=task_target.desired_robot_root_twist_world,
-            normalized_global_action=policy_step.action,
-            normalized_joint_action=policy_step.joint_action,
+            normalized_global_action=applied_global_action,
+            normalized_joint_action=applied_joint_action,
             policy_module_ids=policy_step.graph_encoding.module_ids,
             reference_local_joint_positions_rad=command_reference_q,
             reference_local_joint_velocities_radps=command_reference_qdot,
             reference_local_joint_mask=command_mask,
+            total_mass_kg=control_model.total_mass_kg,
+            contact_compression_joint_direction_rad=(
+                None
+                if contact_space_contract
+                else contact_compression_joint_direction_rad
+            ),
+            contact_compression_action_mask=(
+                None
+                if (
+                    contact_compression_joint_direction_rad is None
+                    or contact_space_contract
+                )
+                else (
+                    (
+                        task_target.contact_schedule_index
+                        == ORDER9_CONTACT_SCHEDULE_ATTACH
+                    )
+                    | (
+                        task_target.contact_schedule_index
+                        == ORDER9_CONTACT_SCHEDULE_MAINTAIN
+                    )
+                )
+            ),
+            normalized_contact_compression_residual_action=(
+                None
+                if contact_space_contract
+                else policy_step.contact_compression_residual_action
+            ),
+            contact_compression_action_limit=contact_compression_action_limit,
+            contact_compression_action_adapter_version=(
+                ORDER9_INDEPENDENT_COMPRESSION_ACTION_ADAPTER_VERSION
+                if (
+                    c3_action_contract is not None
+                    and order9_c3_action_contract_uses_full_policy(
+                        c3_action_contract
+                    )
+                )
+                else (
+                    ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_ACTION_ADAPTER_VERSION
+                )
+            ),
+        )
+        payload_offset_body = self._payload_offset_body(
+            control_model.body_pose_world,
+            state.object_pose_world,
+            estimated_payload_com_object=(
+                torch.zeros(
+                    (self.batch_size, 3),
+                    device=self.device,
+                    dtype=self.dtype,
+                )
+                if estimated_payload_com_object is None
+                else estimated_payload_com_object
+            ),
+        )
+        controller_result = self.controller.compute(
+            control_model=control_model,
+            desired_body_pose_world=command.desired_body_pose_world,
+            desired_body_twist=command.desired_body_twist,
+            residual_wrench_body=command.residual_wrench_body,
+            state=self.controller_state,
+            payload_active=payload_active,
+            payload_mass_kg=estimated_payload_mass_kg,
+            payload_inertia_body=estimated_payload_inertia_body,
+            payload_com_offset_body=payload_offset_body,
+        )
+        self.previous_action.copy_(
+            applied_global_action
+            if c3_action_contract is not None
+            else policy_step.action
+        )
+        self.recurrent_state.copy_(policy_step.recurrent_state)
+        self.controller_state = controller_result.next_state
+        self.controller_qp_feasible.copy_(controller_result.allocation.feasible)
+        self.allocation_residual_norm.copy_(
+            controller_result.allocation.residual_norm
+        )
+        self.controller_status_one_hot.zero_()
+        status_index = torch.where(
+            controller_result.allocation.feasible,
+            torch.zeros_like(phase_index),
+            torch.full_like(phase_index, 2),
+        )
+        self.controller_status_one_hot.scatter_(
+            1, status_index.long().unsqueeze(1), 1.0
+        )
+        return Order9TensorPiLStep(
+            control_model=control_model,
+            actor_features=actor_features,
+            phase_features=phase_features,
+            active_knot_features=active_knot_features,
+            active_assignment_features=active_assignment_features,
+            contact_slot_features=contact_slot_features,
+            contact_slot_owner_module_indices=(
+                contact_slot_owner_module_indices
+            ),
+            contact_slot_mask=contact_slot_mask,
+            contact_constraint_weight=(
+                None
+                if contact_projection is None
+                else contact_projection.contact_constraint_weight
+            ),
+            previous_global_action=previous,
+            applied_global_action=applied_global_action,
+            recurrent_state_in=recurrent_in,
+            actor_controller_qp_feasible=actor_qp,
+            actor_controller_status_one_hot=actor_status,
+            actor_allocation_residual_norm=actor_residual,
+            actor_task_success=actor_success,
+            policy_step=policy_step,
+            policy_command=command,
+            controller_result=controller_result,
+            privileged_disturbance_body=privileged,
+        )
+
+
+    @torch.no_grad()
+    def compute_nominal_qpid_hold(
+        self,
+        *,
+        task_target: Order9TensorObjectTaskTarget,
+        state: Order9TensorIsaacState,
+        estimated_payload_mass_kg: torch.Tensor,
+        estimated_payload_inertia_body: torch.Tensor,
+        payload_active: torch.Tensor,
+        estimated_payload_com_object: torch.Tensor | None = None,
+    ) -> Order9TensorNominalQPIDStep:
+        """Hold one nominal target with QPID/QP while bypassing ``pi_L``.
+
+        Reset construction needs a policy-independent physical settling path.
+        The command therefore uses the exact nominal centroidal pose and joint
+        posture, zero desired velocities, zero residual wrench, and zero joint
+        torque bias.  Payload gravity/inertia feedforward and the production
+        QP allocation remain active.  Actor actions and recurrent state are not
+        evaluated or advanced.
+        """
+
+        self._validate_controller_inputs(
+            task_target=task_target,
+            state=state,
+            estimated_payload_mass_kg=estimated_payload_mass_kg,
+            estimated_payload_inertia_body=estimated_payload_inertia_body,
+            estimated_payload_com_object=estimated_payload_com_object,
+            payload_active=payload_active,
+        )
+        control_model = self.builder.build(
+            module_pose_world=state.module_pose_world,
+            module_twist_world=state.module_twist_world,
+            local_joint_positions_rad=state.local_joint_positions_rad,
+        )
+        command_reference_q = task_target.nominal_joint_positions_rad
+        command = self.decoder.decode(
+            reference_body_pose_world=task_target.desired_robot_root_pose_world,
+            reference_body_twist=torch.zeros_like(
+                task_target.desired_robot_root_twist_world
+            ),
+            normalized_global_action=torch.zeros(
+                (self.batch_size, ORDER9_GLOBAL_ACTION_SIZE),
+                device=self.device,
+                dtype=self.dtype,
+            ),
+            normalized_joint_action=torch.zeros(
+                (
+                    self.batch_size,
+                    self.builder.module_count,
+                    3 * self.config.max_local_joint_slots,
+                ),
+                device=self.device,
+                dtype=self.dtype,
+            ),
+            policy_module_ids=self._decoder_module_ids,
+            reference_local_joint_positions_rad=command_reference_q,
+            reference_local_joint_velocities_radps=torch.zeros_like(
+                task_target.nominal_joint_velocities_radps
+            ),
+            reference_local_joint_mask=torch.ones_like(
+                command_reference_q, dtype=torch.bool
+            ),
             total_mass_kg=control_model.total_mass_kg,
         )
         payload_offset_body = self._payload_offset_body(
@@ -398,8 +902,6 @@ class Order9TensorPiLRuntime:
             payload_inertia_body=estimated_payload_inertia_body,
             payload_com_offset_body=payload_offset_body,
         )
-        self.previous_action.copy_(policy_step.action)
-        self.recurrent_state.copy_(policy_step.recurrent_state)
         self.controller_state = controller_result.next_state
         self.controller_qp_feasible.copy_(controller_result.allocation.feasible)
         self.allocation_residual_norm.copy_(
@@ -408,28 +910,20 @@ class Order9TensorPiLRuntime:
         self.controller_status_one_hot.zero_()
         status_index = torch.where(
             controller_result.allocation.feasible,
-            torch.zeros_like(phase_index),
-            torch.full_like(phase_index, 2),
+            torch.zeros(
+                self.batch_size, device=self.device, dtype=torch.long
+            ),
+            torch.full(
+                (self.batch_size,), 2, device=self.device, dtype=torch.long
+            ),
         )
         self.controller_status_one_hot.scatter_(
-            1, status_index.long().unsqueeze(1), 1.0
+            1, status_index.unsqueeze(1), 1.0
         )
-        return Order9TensorPiLStep(
+        return Order9TensorNominalQPIDStep(
             control_model=control_model,
-            actor_features=actor_features,
-            phase_features=phase_features,
-            active_knot_features=active_knot_features,
-            active_assignment_features=active_assignment_features,
-            previous_global_action=previous,
-            recurrent_state_in=recurrent_in,
-            actor_controller_qp_feasible=actor_qp,
-            actor_controller_status_one_hot=actor_status,
-            actor_allocation_residual_norm=actor_residual,
-            actor_task_success=actor_success,
-            policy_step=policy_step,
             policy_command=command,
             controller_result=controller_result,
-            privileged_disturbance_body=privileged,
         )
 
     @torch.no_grad()
@@ -444,6 +938,8 @@ class Order9TensorPiLRuntime:
         estimated_payload_inertia_body: torch.Tensor,
         payload_active: torch.Tensor,
         estimated_payload_com_object: torch.Tensor | None = None,
+        hardware_joint_load_nm: torch.Tensor | None = None,
+        contact_feedback_features: torch.Tensor | None = None,
         privileged_disturbance_body: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Evaluate the next-state critic without advancing runtime state.
@@ -473,6 +969,8 @@ class Order9TensorPiLRuntime:
                 estimated_payload_inertia_body=estimated_payload_inertia_body,
                 estimated_payload_com_object=estimated_payload_com_object,
                 payload_active=payload_active,
+                hardware_joint_load_nm=hardware_joint_load_nm,
+                contact_feedback_features=contact_feedback_features,
                 privileged_disturbance_body=privileged_disturbance_body,
                 deterministic=True,
             )
@@ -575,6 +1073,28 @@ class Order9TensorPiLRuntime:
         expected = {
             "time_s": (batch,),
             "phase_index": (batch,),
+        }
+        for name, shape in expected.items():
+            if tuple(values[name].shape) != shape:
+                raise ValueError(f"Order9 tensor runtime {name} shape differs")
+        if bool((values["phase_index"] < 0).any()) or bool(
+            (
+                values["phase_index"]
+                >= min(
+                    self.config.max_phase_count,
+                    ORDER9_OBJECT_TASK_ACTOR_PHASE_COUNT,
+                )
+            ).any()
+        ):
+            raise ValueError("Order9 tensor runtime phase index is invalid")
+        self._validate_controller_inputs(**values)
+        privileged = values["privileged_disturbance_body"]
+        if privileged is not None and privileged.shape != (batch, 6):
+            raise ValueError("Order9 privileged disturbance shape differs")
+
+    def _validate_controller_inputs(self, **values) -> None:
+        batch = self.batch_size
+        expected = {
             "estimated_payload_mass_kg": (batch,),
             "estimated_payload_inertia_body": (batch, 6),
             "payload_active": (batch,),
@@ -587,16 +1107,6 @@ class Order9TensorPiLRuntime:
             raise ValueError(
                 "Order9 tensor runtime estimated_payload_com_object shape differs"
             )
-        if bool((values["phase_index"] < 0).any()) or bool(
-            (
-                values["phase_index"]
-                >= min(
-                    self.config.max_phase_count,
-                    ORDER9_OBJECT_TASK_ACTOR_PHASE_COUNT,
-                )
-            ).any()
-        ):
-            raise ValueError("Order9 tensor runtime phase index is invalid")
         state = values["state"]
         if state.module_pose_world.shape != (batch, self.builder.module_count, 7):
             raise ValueError("Order9 tensor runtime module pose shape differs")
@@ -623,9 +1133,128 @@ class Order9TensorPiLRuntime:
             raise ValueError(
                 "Order9 tensor runtime target joint posture shape differs"
             )
-        privileged = values["privileged_disturbance_body"]
-        if privileged is not None and privileged.shape != (batch, 6):
-            raise ValueError("Order9 privileged disturbance shape differs")
+
+
+def _diagnostic_action_ablation(
+    policy_step: Order9LowLevelActorCriticStep,
+    *,
+    mode: str,
+    contact_compression_joint_direction_rad: torch.Tensor | None,
+    contact_schedule_index: torch.Tensor,
+    local_joint_slot_count: int,
+) -> Order9LowLevelActorCriticStep:
+    """Ablate applied deterministic actions without bypassing actor state.
+
+    This path is diagnostic-only.  It preserves the policy's recurrent-state
+    evolution while making the command actually applied to QPID explicit in
+    the persisted rollout artifact.
+    """
+
+    global_action = policy_step.action
+    global_mean = policy_step.action_mean
+    joint_action = policy_step.joint_action
+    joint_mean = policy_step.joint_action_mean
+    if mode == "zero_global":
+        global_action = torch.zeros_like(global_action)
+        global_mean = torch.zeros_like(global_mean)
+    elif mode == "zero_joint":
+        joint_action = torch.zeros_like(joint_action)
+        joint_mean = torch.zeros_like(joint_mean)
+    elif mode in {
+        "contact_compression_only",
+        "contact_compression_plus_centroidal",
+        "contact_compression_plus_global",
+    }:
+        _, joint_action = _contact_compression_only_actions(
+            policy_step,
+            contact_compression_joint_direction_rad=(
+                contact_compression_joint_direction_rad
+            ),
+            contact_schedule_index=contact_schedule_index,
+            local_joint_slot_count=local_joint_slot_count,
+        )
+        _, joint_mean = _contact_compression_only_actions(
+            replace(
+                policy_step,
+                action=policy_step.action_mean,
+                joint_action=policy_step.joint_action_mean,
+            ),
+            contact_compression_joint_direction_rad=(
+                contact_compression_joint_direction_rad
+            ),
+            contact_schedule_index=contact_schedule_index,
+            local_joint_slot_count=local_joint_slot_count,
+        )
+        if mode == "contact_compression_only":
+            global_action = torch.zeros_like(policy_step.action)
+            global_mean = torch.zeros_like(policy_step.action_mean)
+        elif mode == "contact_compression_plus_centroidal":
+            global_action = policy_step.action.clone()
+            global_mean = policy_step.action_mean.clone()
+            # Preserve centroidal pose/twist correction while isolating the
+            # separately questioned residual-wrench feed-forward channels.
+            global_action[:, 12:18] = 0.0
+            global_mean[:, 12:18] = 0.0
+        else:
+            global_action = policy_step.action
+            global_mean = policy_step.action_mean
+    else:  # pragma: no cover - validated at the public boundary.
+        raise ValueError("Order9 diagnostic action ablation mode is invalid")
+    return replace(
+        policy_step,
+        action=global_action,
+        action_mean=global_mean,
+        joint_action=joint_action,
+        joint_action_mean=joint_mean,
+    )
+
+
+def _contact_compression_only_actions(
+    policy_step: Order9LowLevelActorCriticStep,
+    *,
+    contact_compression_joint_direction_rad: torch.Tensor | None,
+    contact_schedule_index: torch.Tensor,
+    local_joint_slot_count: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return the command-space subset used by conservative morphology entry.
+
+    The sampled actor action and its log probability remain untouched for
+    exact on-policy replay.  Only the command passed to the decoder is masked.
+    """
+
+    global_action = torch.zeros_like(policy_step.action)
+    joint_action = torch.zeros_like(policy_step.joint_action)
+    if contact_compression_joint_direction_rad is None:
+        return global_action, joint_action
+    direction = contact_compression_joint_direction_rad
+    if direction.ndim == 2:
+        direction = direction.unsqueeze(0).expand(
+            policy_step.joint_action.shape[0], -1, -1
+        )
+    expected = (
+        policy_step.joint_action.shape[0],
+        policy_step.joint_action.shape[1],
+        local_joint_slot_count,
+    )
+    if tuple(direction.shape) != expected:
+        raise ValueError(
+            "Order9 contact-compression-only direction shape differs"
+        )
+    flat_index = direction[0].reshape(-1).abs().argmax()
+    control_module = int(flat_index.item()) // local_joint_slot_count
+    control_joint = int(flat_index.item()) % local_joint_slot_count
+    active = (
+        (contact_schedule_index == ORDER9_CONTACT_SCHEDULE_ATTACH)
+        | (contact_schedule_index == ORDER9_CONTACT_SCHEDULE_MAINTAIN)
+    )
+    joint_action[:, control_module, control_joint] = torch.where(
+        active,
+        policy_step.joint_action[:, control_module, control_joint],
+        torch.zeros_like(
+            policy_step.joint_action[:, control_module, control_joint]
+        ),
+    )
+    return global_action, joint_action
 
 
 def _quaternion_to_matrix(quaternion: torch.Tensor) -> torch.Tensor:
@@ -664,6 +1293,7 @@ def _clone_controller_state(state: BatchedQPIDState) -> BatchedQPIDState:
 
 __all__ = [
     "ORDER9_TENSOR_PI_L_RUNTIME_VERSION",
+    "Order9TensorNominalQPIDStep",
     "Order9TensorPiLRuntime",
     "Order9TensorPiLStep",
 ]

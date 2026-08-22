@@ -480,6 +480,18 @@ curriculum:
       maximum_fallback_rate: 0.05
       held_out_only: true
 
+reward:
+  # The documented 0.5 N value remains a separate contact-existence gate.
+  # Exact per-contact 6D wrench-box membership is retained as pi_H feasibility
+  # information and rollout telemetry, but is neither a C3 success gate nor a
+  # pi_L learning objective.  Contact/task outcome and unchanged safety terms
+  # therefore provide all actor reward credit.
+  w_wrench_range: 0.0
+  # Deployable dense shaping: FK grasp-frame gap, separating motion, and the
+  # motor-current-equivalent load proxy are compared with the actuator-aware
+  # nominal load.  Raw PhysX contact force is not an actor/reward input here.
+  w_normal_contact_quality: 1.0
+
 runtime_benchmark:
   environment_count_candidates: [512, 1024]
   initial_environment_count: 1024
@@ -549,6 +561,69 @@ optimization:
     entropy_bonus_weight: 0.001
     max_grad_norm: 0.5
     target_kl: 0.02
+    phase_balanced_sampling: true
+    phase_normalized_advantages: true
+    phase_local_kl: true
+  c3_boundary_fine_tune:
+    enabled: true
+    target_actor_phase_labels: [establish_contact, lift, transport, place]
+    epochs_per_update: 1
+    learning_rate_scale: 0.25
+    # Same-rollout A/B and the first scale-4 formal update showed that 0.005
+    # rolls back after only four optimizer steps.  0.01 completed the same
+    # generation while remaining well below the 0.04 topology-phase cap.
+    non_target_parent_kl_limit: 0.01
+    non_target_parent_kl_weight: 1.0
+    maximum_topology_phase_kl: 0.04
+    # Exact PhysX wrench remains privileged telemetry only.  Disable the old
+    # auxiliary wrench teacher as well as the scalar reward so no hidden
+    # wrench-range learning signal survives the outcome-only contract.
+    privileged_compression_teacher_weight: 0.0
+    privileged_compression_teacher_action_step: 0.10
+    # Decompression remains controlled by the ordinary wrench-range reward.
+    # A direct privileged target is used only where weak contact otherwise
+    # gives the actor almost no useful action-gradient signal.
+    privileged_compression_teacher_underforce_only: true
+    # Preserve the parent behavior on target-phase samples whose privileged
+    # wrench is already inside the authored range.  This prevents gradients
+    # from other morphologies from needlessly moving a solved morphology.
+    privileged_wrench_satisfied_parent_kl_weight: 0.0
+    # Multi-task PCGrad across the 2--8 module topology losses.  This is a
+    # diagnostic mitigation for destructive shared-policy gradient conflict.
+    topology_gradient_surgery_enabled: false
+    # The six-module diagnostic showed that the learned normal action used
+    # only 0.21 mm of a 10 mm bound and that no on-policy sample exceeded
+    # 3 mm.  A fresh provenance-bound initializer widens only this stochastic
+    # coordinate to sigma=0.30.  Deterministic inference, actor mean, action
+    # bounds, reward, QPID, and every morphology's action semantics are
+    # unchanged.
+    contact_normal_exploration_initial_std: 0.30
+    # The contact-space actor keeps every deployed action path live.  Dense
+    # reward terms are routed to contact, centroidal, and posture action
+    # densities separately, while terminal task outcome is shared equally and
+    # the critic continues to fit the unchanged scalar return.
+    compression_only_actor_objective: false
+    joint_head_only_actor_update: false
+    contact_residual_only_actor_update: false
+    factorized_actor_credit_enabled: true
+    # No extra optimizer pass is used.  In the ordinary PPO pass, contact
+    # reward is split across normal/tangential/rotational action likelihoods.
+    contact_head_extra_optimizer_passes: 0
+    contact_coordinate_credit_enabled: true
+    # Increase only the inward-normal PPO objective.  Scalar reward values,
+    # the critic target, deployed action bounds, and other actor heads remain
+    # unchanged.  This raises the normal coordinate's effective contribution
+    # from 1/9 to 1/3 of the full factorized actor objective.
+    contact_normal_translation_actor_loss_weight: 3.0
+    # The training-only under-preload randomization is known exactly.  Teach
+    # its corresponding 0.5 mm categorical residual directly, while keeping
+    # the deficit out of deployed observations and commands.
+    contact_normal_preload_deficit_teacher_weight: 0.1
+    # Physical inward-normal quantization is implemented as a diagnostic.
+    # The 0.5 mm seven-module trial left the deployed command in the same
+    # 12.0 mm bin and did not solve bucket 40, so the accepted continuation
+    # contract retains the continuous mapping.
+    contact_normal_action_quantization_step_m: null
   pi_h_ppo:
     rollout_steps_per_environment: 64
     epochs_per_update: 4
@@ -607,6 +682,77 @@ production_runtime:
   tensorized_rollout_hot_path: true
   raw_contact_actor_input: false
   full_mesh_acceptance_replaced: false
+  c3_phase_reset_progress_fractions: [0.16666666666666666, 0.5, 0.6666666666666666, 0.9]
+  c3_boundary_tail_phase_labels: [place, release, retreat]
+  c3_boundary_tail_progress_fraction: 0.9
+  c3_contact_reset_preload_steps: 13
+  c3_contact_reset_min_selected_contacts: 2
+  c3_contact_reset_max_object_displacement_m: 0.03
+  c3_contact_reset_max_downward_speed_mps: 0.25
+  # The 2 mm value is a lower bound, not a morphology-independent target.
+  # At plan installation a common actuator/leverage/contact-compliance model
+  # raises it only as far as required by the reviewed contact geometry and
+  # estimated object load.  No module-count or bucket-specific switch is used.
+  c3_virtual_contact_inward_lead_m: 0.002
+  c3_actuator_aware_nominal_preload_enabled: true
+  # Global safety cap.  The resolver still selects the smallest quantified
+  # physical requirement and collision-clamps it; this cap only accommodates
+  # the 41.4 mm train-calibrated request of the most compliant reviewed bucket.
+  c3_actuator_aware_nominal_preload_maximum_m: 0.050
+  c3_actuator_aware_nominal_preload_quantization_m: 0.001
+  c3_actuator_aware_nominal_preload_support_safety_factor: 1.25
+  c3_actuator_aware_nominal_preload_maximum_peak_utilization: 0.80
+  c3_actuator_aware_nominal_preload_minimum_anchor_fraction: 0.50
+  # The deterministic nominal contains only the quantified quasi-static
+  # requirement.  Articulated/contact-model error is handled by the bounded
+  # learned contact-normal residual instead of a fixed additive lead.
+  c3_actuator_aware_nominal_preload_model_error_margin_m: 0.0
+  # The nominal 2 mm target remains the neutral command.  During
+  # attach/maintain one existing pi_L joint-position coordinate controls a
+  # signed local-IK displacement over a 20 mm span, allowing each morphology
+  # to learn its own compression without raw contact-force input.
+  c3_contact_compression_action_adapter_enabled: true
+  c3_contact_compression_action_span_m: 0.020
+  # The first common arbitrary-morphology C3 contract uses the same
+  # morphology-conditioned coordinated-compression scalar for every module
+  # count.  No module-count-dependent global/joint action mode is permitted in
+  # this lineage.  CoM/global residuals are introduced only after this common
+  # contract passes C3 promotion.
+  c3_contact_compression_only_module_counts: [2, 3, 4, 5, 6, 7, 8]
+  c3_joint_only_module_counts: []
+  # Deployable contact evidence: current link Jacobian and motor-current-
+  # equivalent joint torque estimate anchor normal force.  Raw PhysX contact
+  # remains reward/evaluation-only.  The support factor is exactly 1.0 for the
+  # first C3 validation, adding no unrequested force margin above m*g/(mu*N).
+  c3_force_estimator_baseline_update_alpha: 0.10
+  c3_force_estimator_filter_alpha: 0.25
+  c3_force_estimator_ridge_damping_m2: 0.00001
+  c3_force_estimator_minimum_jacobian_norm_m: 0.001
+  c3_force_estimator_fit_residual_scale_nm: 0.25
+  c3_force_estimator_minimum_confidence: 0.25
+  c3_force_estimator_support_safety_factor: 1.0
+  # Outcome-only C3 keeps wrench-box membership as diagnostic telemetry only.
+  # Keep the diagnostic range exact in training, evaluation, and deployment;
+  # it is neither a phase-admission gate nor a pi_L learning objective.
+  c3_wrench_gate_curriculum_start_update_index: 0
+  c3_wrench_gate_curriculum_scales: [1.0]
+  c3_topology_stratified_updates: true
+  c3_topologies_per_module_count_per_update: 2
+  c3_topology_shard_parallel_process_count: 2
+  # Common transition-targeted backward curriculum for morphology expansion.
+  # Every module-count stratum receives the same two topology-complete shards.
+  # Each shard starts from the persisted 90% state of contact acquisition or
+  # lift and runs for 5.12 s, preserving physical and recurrent state across
+  # the real boundary.  This removes the phase-reset/continuous-evaluation gap
+  # without changing policy, action, reward, QPID, or formal validation.
+  c3_state_inheritance_rollouts_enabled: true
+  c3_state_inheritance_rollout_steps: 256
+  c3_state_inheritance_environment_count_per_module: 48
+  c3_state_inheritance_topologies_per_module_count: 2
+  c3_state_inheritance_focus_module_counts: []
+  c3_state_inheritance_focus_topology_count: 2
+  c3_state_inheritance_initial_phase_indices: [1, 2]
+  c3_state_inheritance_fixed_reset_progress_fraction: 0.9
 
 hard_checker:
   backend: hybrid_lightweight_qp_persistent_isaac_shadow

@@ -23,6 +23,11 @@ class P4_3RewardConfig:
     w_progress: float = 1.0
     w_pose: float = 1.0
     w_grasp: float = 1.0
+    w_wrench_range: float = 1.0
+    # Deployable contact-quality shaping for the tensor C3 runtime.  The
+    # non-tensor bootstrap reward has no grasp-frame/load-proxy evidence, so
+    # this weight is consumed only by ``Order9TensorRewardEngine``.
+    w_normal_contact_quality: float = 1.0
     w_stable: float = 1.0
     w_energy: float = 1.0
     w_qp: float = 1.0
@@ -40,6 +45,10 @@ class P4_3RewardConfig:
     joint_torque_scale_nm: float = 5.0
     qp_residual_scale: float = 10.0
     slip_speed_scale_mps: float = 0.10
+    normal_contact_gap_scale_m: float = 0.004
+    normal_contact_separation_speed_scale_mps: float = 0.02
+    normal_contact_load_lower_ratio: float = 0.80
+    normal_contact_load_upper_ratio: float = 1.50
     default_goal_tolerance_pos_m: float = 0.05
     default_goal_tolerance_rot_rad: float = 0.20
 
@@ -48,6 +57,8 @@ class P4_3RewardConfig:
             "w_progress",
             "w_pose",
             "w_grasp",
+            "w_wrench_range",
+            "w_normal_contact_quality",
             "w_stable",
             "w_energy",
             "w_qp",

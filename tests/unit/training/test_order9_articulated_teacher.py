@@ -29,10 +29,12 @@ from amsrr.training.order9_articulated_teacher import (
     Order9ArticulatedTeacherConfig,
     Order9ArticulatedTrajectoryTeacher,
     _ConfigurationRouteCache,
+    _approach_vertical_speed_limit_mps,
     _candidate_group_attempts,
     _point_to_segment_distance,
     _phase_assignment_states,
     _resume_configuration_route,
+    _rolling_progress_fraction,
     _validated_contact_goal_joint_seed,
 )
 from amsrr.training.order9_configuration_space_planner import (
@@ -61,6 +63,83 @@ def test_contact_configuration_corridor_distance_uses_finite_segment() -> None:
         (0.0, 0.0, 0.0),
         (1.0, 0.0, 0.0),
     ) == pytest.approx(0.2)
+
+
+def test_rolling_progress_accounts_for_cubic_peak_and_vertical_limit() -> None:
+    progress = _rolling_progress_fraction(
+        start_q={"module_0:yaw": 0.0},
+        target_q={"module_0:yaw": 0.0},
+        start_base_pose=(0.0, 0.0, 0.6, 0.0, 0.0, 0.0, 1.0),
+        target_base_pose=(0.0, 0.0, 0.3, 0.0, 0.0, 0.0, 1.0),
+        horizon_s=3.0,
+        joint_velocity_limit_rad_s=1.0,
+        base_translation_speed_limit_mps=1.0,
+        base_vertical_speed_limit_mps=0.06,
+        base_rotation_speed_limit_rad_s=1.0,
+        interpolation_peak_rate_scale=1.5,
+    )
+
+    # Limit the sparse endpoint delta to 0.12 m so the cubic blend's 1.5x
+    # derivative peak remains at 0.06 m/s.
+    assert progress == pytest.approx(0.4)
+
+
+def test_articulated_teacher_rejects_subunit_interpolation_peak_scale() -> None:
+    with pytest.raises(ValueError, match="peak_rate_scale"):
+        Order9ArticulatedTeacherConfig(
+            trajectory_interpolation_peak_rate_scale=0.99
+        )
+
+
+def test_approach_vertical_speed_transitions_into_terminal_zone() -> None:
+    config = Order9ArticulatedTeacherConfig(
+        maximum_approach_vertical_speed_mps=0.06,
+        maximum_terminal_approach_vertical_speed_mps=0.03,
+        terminal_approach_slowdown_height_m=0.24,
+        rolling_horizon_s=3.0,
+        trajectory_interpolation_peak_rate_scale=1.5,
+    )
+
+    assert _approach_vertical_speed_limit_mps(
+        start_base_z=0.80,
+        target_base_z=0.22,
+        terminal_base_z=0.22,
+        horizon_s=3.0,
+        config=config,
+    ) == pytest.approx(0.06)
+    assert _approach_vertical_speed_limit_mps(
+        start_base_z=0.50,
+        target_base_z=0.22,
+        terminal_base_z=0.22,
+        horizon_s=3.0,
+        config=config,
+    ) == pytest.approx(0.05)
+    assert _approach_vertical_speed_limit_mps(
+        start_base_z=0.46,
+        target_base_z=0.22,
+        terminal_base_z=0.22,
+        horizon_s=3.0,
+        config=config,
+    ) == pytest.approx(0.03)
+
+
+def test_approach_vertical_speed_keeps_cruise_for_ascent() -> None:
+    config = Order9ArticulatedTeacherConfig()
+    assert _approach_vertical_speed_limit_mps(
+        start_base_z=0.22,
+        target_base_z=0.50,
+        terminal_base_z=0.22,
+        horizon_s=3.0,
+        config=config,
+    ) == pytest.approx(0.06)
+
+
+def test_articulated_teacher_rejects_terminal_speed_above_cruise() -> None:
+    with pytest.raises(ValueError, match="terminal_approach"):
+        Order9ArticulatedTeacherConfig(
+            maximum_approach_vertical_speed_mps=0.06,
+            maximum_terminal_approach_vertical_speed_mps=0.07,
+        )
 
 
 def _system(grasp_carry_dict: dict):

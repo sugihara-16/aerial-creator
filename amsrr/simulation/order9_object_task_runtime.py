@@ -89,6 +89,7 @@ def order9_rollout_initial_phase_indices(
     evaluation_mode: bool,
     canonical_resets: bool,
     diagnostic_initial_phase_index: int | None = None,
+    allow_evaluation_diagnostic_phase: bool = False,
 ) -> tuple[int, ...]:
     """Resolve initial phases without weakening phase-zero promotion evidence.
 
@@ -107,7 +108,7 @@ def order9_rollout_initial_phase_indices(
             raise SchemaValidationError(
                 "Order9 diagnostic initial phase index is invalid"
             )
-        if evaluation_mode:
+        if evaluation_mode and not allow_evaluation_diagnostic_phase:
             raise SchemaValidationError(
                 "Order9 promotion evaluation must begin at phase zero"
             )
@@ -120,6 +121,39 @@ def order9_rollout_initial_phase_indices(
         return (0,) * environment_count
     phase_count = len(ORDER9_OBJECT_TASK_PHASES)
     return tuple(index % phase_count for index in range(environment_count))
+
+
+def order9_rollout_initial_stratum_indices(
+    *,
+    phase_indices: tuple[int, ...],
+    phase_count: int,
+    reset_stratum_indices_by_phase: tuple[tuple[int, ...], ...],
+    formal_phase_zero_start: bool = False,
+) -> tuple[int, ...]:
+    """Resolve phase-reset strata while preserving the formal task start.
+
+    Training and paired phase-reset comparisons distribute environments across
+    each phase's selectable progress strata.  Formal end-to-end promotion is a
+    different contract: every episode starts at the exact beginning of
+    approach.  ``-1`` is a sentinel for that dedicated nominal ``t=0`` state;
+    it is not an index into the intra-phase reset bank.
+    """
+
+    if phase_count < 1 or len(reset_stratum_indices_by_phase) != phase_count:
+        raise SchemaValidationError("Order9 reset-stratum schedule is invalid")
+    if formal_phase_zero_start:
+        if any(int(phase) != 0 for phase in phase_indices):
+            raise SchemaValidationError(
+                "Order9 formal evaluation must begin at phase zero"
+            )
+        return (-1,) * len(phase_indices)
+    return tuple(
+        reset_stratum_indices_by_phase[int(phase)][
+            (environment // phase_count)
+            % len(reset_stratum_indices_by_phase[int(phase)])
+        ]
+        for environment, phase in enumerate(phase_indices)
+    )
 
 
 @dataclass

@@ -26,7 +26,6 @@ from amsrr.training.order9_dataset import (
 from amsrr.training.order9_online_dataset import write_order9_on_policy_dataset
 from amsrr.training.order9_pipeline import order9_schedule_hash, order9_stage_by_id
 from amsrr.training.order9_tensor_rollout_artifact import (
-    ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION,
     load_order9_tensor_rollout_artifact,
     order9_pi_l_records_from_tensor_artifact,
 )
@@ -234,6 +233,11 @@ def build_order9_pi_l_on_policy_dataset(
         artifact.environment_step_count for artifact in artifacts
     )
     collection_runtime_complete = runtime_metric_source_count == len(artifacts)
+    artifact_versions = {artifact.artifact_version for artifact in artifacts}
+    if len(artifact_versions) != 1:
+        raise SchemaValidationError(
+            "Order9 raw artifacts use different tensor contracts"
+        )
     manifest = write_order9_on_policy_dataset(
         target,
         generation_id=generation_id,
@@ -254,7 +258,7 @@ def build_order9_pi_l_on_policy_dataset(
         metadata={
             "builder_version": ORDER9_TENSOR_DATASET_BUILDER_VERSION,
             "tensor_rollout_artifact_version": (
-                ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION
+                next(iter(artifact_versions))
             ),
             "stage_id": stage.stage_id,
             "stage_config_hash": expected["stage_config_hash"],

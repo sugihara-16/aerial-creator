@@ -11,6 +11,7 @@ from amsrr.training.order9_curriculum import load_order9_learning_config
 from amsrr.training.order9_evaluation import (
     Order9EvaluationEpisode,
     build_order9_stage_evaluation_report,
+    order9_evaluation_horizon_timeout_outcome,
     validate_order9_stage_evaluation_report,
 )
 from amsrr.training.order9_pipeline import order9_schedule_hash, order9_stage_by_id
@@ -83,6 +84,45 @@ def test_stage_evaluation_rejects_tampered_raw_artifact(tmp_path: Path) -> None:
             schedule_hash=order9_schedule_hash(config),
             runtime=config.production_runtime,
         )
+
+
+def test_evaluation_horizon_exhaustion_is_a_task_failure_not_missing_evidence() -> None:
+    outcome = order9_evaluation_horizon_timeout_outcome(
+        environment=3,
+        environment_step_count=15000,
+        episode_return=123.5,
+        terminal_phase_index=6,
+    )
+
+    assert outcome["environment"] == 3
+    assert outcome["task_success"] is False
+    assert outcome["safety_failure"] is False
+    assert outcome["failure_reason"] == "evaluation_horizon_timeout"
+    assert outcome["timeout"] is True
+    assert outcome["evaluation_horizon_timeout"] is True
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"environment": -1}, "environment"),
+        ({"environment_step_count": 0}, "positive steps"),
+        ({"episode_return": float("nan")}, "finite"),
+        ({"terminal_phase_index": -1}, "phase index"),
+    ],
+)
+def test_evaluation_horizon_timeout_rejects_invalid_inputs(
+    kwargs: dict[str, object], message: str
+) -> None:
+    values: dict[str, object] = {
+        "environment": 0,
+        "environment_step_count": 10,
+        "episode_return": 1.0,
+        "terminal_phase_index": 2,
+    }
+    values.update(kwargs)
+    with pytest.raises(ValueError, match=message):
+        order9_evaluation_horizon_timeout_outcome(**values)
 
 
 def _episode(

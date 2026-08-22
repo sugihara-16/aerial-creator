@@ -100,6 +100,7 @@ def preflight_order9_stage(
     prior_stage_manifests: Iterable[Order9StageRunManifest] = (),
     dataset_manifest_path: str | Path | None = None,
     dataset_bundle: Order9DatasetBundle | None = None,
+    verified_dataset_validation: Order9DatasetStageValidation | None = None,
     behavior_checkpoint_sha256: str | None = None,
     behavior_checkpoint_sha256_by_family: Mapping[str, str] | None = None,
     lineage_import_path: str | Path = (
@@ -150,6 +151,20 @@ def preflight_order9_stage(
         raise SchemaValidationError(
             "Order9 preflight dataset bundle requires its manifest path"
         )
+    if verified_dataset_validation is not None:
+        verified_dataset_validation.validate()
+        if dataset_manifest_path is None:
+            raise SchemaValidationError(
+                "Order9 preflight verified dataset requires its manifest path"
+            )
+        if dataset_bundle is not None:
+            raise SchemaValidationError(
+                "Order9 preflight verified dataset cannot also supply a record bundle"
+            )
+        if verified_dataset_validation.stage_id != stage.stage_id:
+            raise SchemaValidationError(
+                "Order9 preflight verified dataset stage identity differs"
+            )
     if dataset_manifest_path is not None:
         if (
             behavior_checkpoint_sha256 is not None
@@ -158,7 +173,10 @@ def preflight_order9_stage(
             raise SchemaValidationError(
                 "Order9 preflight accepts either one behavior hash or a family map"
             )
-        if (
+        if verified_dataset_validation is not None:
+            dataset_validation = verified_dataset_validation
+            dataset_manifest = str(Path(dataset_manifest_path))
+        elif (
             stage.learning_target == Order9LearningTarget.PI_L
             and stage.learning_mode == Order9LearningMode.BEHAVIOR_CLONING
         ):

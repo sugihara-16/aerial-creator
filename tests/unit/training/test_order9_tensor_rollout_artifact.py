@@ -7,6 +7,7 @@ import torch
 from amsrr.policies.order9_low_level_policy import (
     ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION,
     ORDER9_GLOBAL_ACTION_SIZE,
+    ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_PI_L_POLICY_VERSION,
 )
 from amsrr.policies.order9_active_knot_features import (
     ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES,
@@ -38,6 +39,9 @@ from amsrr.training.order9_curriculum import (
     Order9RuntimeBenchmarkConfig,
     load_order9_learning_config,
 )
+from amsrr.training.order9_contact_wrench_reward import (
+    ORDER9_CONTACT_WRENCH_REWARD_CONTRACT_VERSION,
+)
 from amsrr.training.order9_dataset import (
     load_order9_dataset,
     validate_order9_dataset_for_stage,
@@ -52,16 +56,31 @@ from amsrr.training.order9_tensor_dataset_builder import (
 )
 from amsrr.training.order9_tensor_rollout_artifact import (
     ORDER9_PRODUCTION_COLLECTOR_VERSION,
+    ORDER9_MORPHOLOGY_INVARIANT_TENSOR_ROLLOUT_ARTIFACT_VERSION,
     Order9TensorRolloutArtifact,
     Order9TensorRolloutBuffer,
     load_order9_tensor_rollout_artifact,
     order9_pi_l_records_from_tensor_artifact,
     write_order9_tensor_rollout_artifact,
 )
+from amsrr.training.order9_tensor_pi_l_ppo import (
+    _tensor_gae,
+    _validate_stored_recurrence_continuity,
+)
 from amsrr.utils.hashing import hash_file, stable_hash
 
 
-def _artifact(*, active_knot: bool = False) -> Order9TensorRolloutArtifact:
+def _artifact(
+    *,
+    active_knot: bool = False,
+    privileged_wrench: bool = False,
+    morphology_invariant_compression: bool = False,
+) -> Order9TensorRolloutArtifact:
+    if morphology_invariant_compression:
+        active_knot = True
+        privileged_wrench = True
+    if privileged_wrench and not active_knot:
+        raise ValueError("privileged wrench fixture requires active-knot policy")
     physical = build_physical_model_from_config("configs/robot/robot_model.yaml")
     morphology = build_representative_order8_morphology(physical)
     modules = tuple(sorted(module.module_id for module in morphology.modules))
@@ -143,6 +162,7 @@ def _artifact(*, active_knot: bool = False) -> Order9TensorRolloutArtifact:
         "reward_term_names": ["weighted_energy"],
         "control_dt_s": 0.02,
         "raw_contact_actor_input": False,
+        "phase_progress_semantics": "exact_policy_actor_input",
         "runtime_phase_labels": [
             phase.value for phase in ORDER9_OBJECT_TASK_PHASES
         ],
@@ -182,7 +202,9 @@ def _artifact(*, active_knot: bool = False) -> Order9TensorRolloutArtifact:
         metadata.update(
             {
                 "pi_l_policy_version": (
-                    ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION
+                    ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_PI_L_POLICY_VERSION
+                    if morphology_invariant_compression
+                    else ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION
                 ),
                 "active_knot_trajectory_template": trajectory.to_dict(),
                 "active_knot_feature_contract_version": (
@@ -195,6 +217,10 @@ def _artifact(*, active_knot: bool = False) -> Order9TensorRolloutArtifact:
                     ORDER9_ACTIVE_ASSIGNMENT_FEATURE_NAMES
                 ),
             }
+        )
+    if privileged_wrench:
+        metadata["privileged_contact_wrench_reward_contract_version"] = (
+            ORDER9_CONTACT_WRENCH_REWARD_CONTRACT_VERSION
         )
     batch = 1
     module_count = len(modules)
@@ -327,8 +353,43 @@ def _artifact(*, active_knot: bool = False) -> Order9TensorRolloutArtifact:
                     ),
                 }
             )
+        if privileged_wrench:
+            values.update(
+                {
+                    "selected_contact_wrenches_contact": torch.zeros(
+                        (batch, anchor_count, 6)
+                    ),
+                    "wrench_lower_contact": torch.full(
+                        (batch, anchor_count, 6), -1.0
+                    ),
+                    "wrench_upper_contact": torch.full(
+                        (batch, anchor_count, 6), 1.0
+                    ),
+                    "wrench_bound_mask": torch.ones(
+                        (batch, anchor_count), dtype=torch.bool
+                    ),
+                }
+            )
+        if morphology_invariant_compression:
+            values["contact_compression_residual_action"] = torch.full(
+                (batch,), 0.25
+            )
         buffer.append(values)
     return buffer.finalize()
+
+
+def test_morphology_invariant_rollout_persists_common_scalar_action() -> None:
+    artifact = _artifact(morphology_invariant_compression=True)
+
+    assert (
+        artifact.artifact_version
+        == ORDER9_MORPHOLOGY_INVARIANT_TENSOR_ROLLOUT_ARTIFACT_VERSION
+    )
+    assert artifact.tensors["contact_compression_residual_action"].shape == (2, 1)
+    assert artifact.tensors["contact_compression_residual_action"].tolist() == [
+        [0.25],
+        [0.25],
+    ]
 
 
 def test_tensor_rollout_roundtrip_and_existing_record_conversion(tmp_path: Path) -> None:
@@ -374,6 +435,63 @@ def test_active_knot_tensor_rollout_archives_exact_actor_context() -> None:
     )
     assert records[1].episode_id == records[0].episode_id
     assert records[1].step_index == 1
+
+
+def test_privileged_wrench_tensor_rollout_archives_recomputable_evidence() -> None:
+    artifact = _artifact(active_knot=True, privileged_wrench=True)
+
+    assert artifact.metadata[
+        "privileged_contact_wrench_reward_contract_version"
+    ] == ORDER9_CONTACT_WRENCH_REWARD_CONTRACT_VERSION
+    assert artifact.tensors["selected_contact_wrenches_contact"].shape[-1] == 6
+    assert artifact.tensors["wrench_bound_mask"].dtype == torch.bool
+    artifact.validate()
+
+
+def test_current_tensor_rollout_requires_exact_actor_phase_progress_semantics() -> None:
+    artifact = _artifact(active_knot=True, privileged_wrench=True)
+    artifact.metadata.pop("phase_progress_semantics")
+
+    with pytest.raises(
+        SchemaValidationError, match="phase-progress semantics differ"
+    ):
+        artifact.validate()
+
+
+def test_tensor_native_gae_matches_truncation_bootstrap_contract() -> None:
+    artifact = _artifact(active_knot=True, privileged_wrench=True)
+
+    advantages, returns = _tensor_gae(
+        artifact,
+        type("GAEConfig", (), {"gamma": 0.9, "gae_lambda": 0.8})(),
+    )
+
+    final_delta = 1.0 + 0.9 * 0.5 - 0.25
+    first_delta = 1.0 + 0.9 * 0.25 - 0.25
+    expected_final = final_delta
+    expected_first = first_delta + 0.9 * 0.8 * expected_final
+    assert advantages[:, 0].tolist() == pytest.approx(
+        [expected_first, expected_final]
+    )
+    assert returns[:, 0].tolist() == pytest.approx(
+        [expected_first + 0.25, expected_final + 0.25]
+    )
+
+
+def test_tensor_native_recurrence_continuity_is_fail_closed() -> None:
+    artifact = _artifact(active_knot=True, privileged_wrench=True)
+    assert _validate_stored_recurrence_continuity(
+        artifact, tolerance=2.0e-5
+    ) == {"recurrent": 0.0, "previous_action": 0.0}
+    tensors = {name: value.clone() for name, value in artifact.tensors.items()}
+    tensors["recurrent_state_in"][1, 0, 0] = 0.1
+    invalid = Order9TensorRolloutArtifact(
+        metadata=artifact.metadata,
+        tensors=tensors,
+        artifact_version=artifact.artifact_version,
+    )
+    with pytest.raises(SchemaValidationError, match="continuity mismatch"):
+        _validate_stored_recurrence_continuity(invalid, tolerance=2.0e-5)
 
 
 def test_tensor_rollout_rejects_nonfinal_episode_boundary() -> None:

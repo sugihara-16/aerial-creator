@@ -279,3 +279,132 @@ def test_curation_viewer_rejects_ascii_stl(tmp_path: Path) -> None:
 
     with pytest.raises(SchemaValidationError, match="STL"):
         build_order9_c3_urdf_mesh_scene(urdf_path)
+
+
+def test_curation_viewer_accepts_compact_urdf_fk_animation(
+    tmp_path: Path,
+) -> None:
+    mesh_path = tmp_path / "triangle.STL"
+    mesh_path.write_bytes(_binary_triangle_stl())
+    urdf_path = tmp_path / "robot.urdf"
+    urdf_path.write_text(_urdf(mesh_path), encoding="utf-8")
+    original = build_order9_c3_urdf_mesh_scene(urdf_path)
+    scene = type(original)(
+        urdf_path=original.urdf_path,
+        root_link_id=original.root_link_id,
+        link_poses_world=original.link_poses_world,
+        instances=tuple(
+            {
+                **value,
+                "link_index": (0 if value["link_id"] == "module_0__root" else 2),
+                "local_matrix": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                ],
+            }
+            for value in original.instances
+        ),
+        module_labels=original.module_labels,
+        mesh_paths=original.mesh_paths,
+    )
+    library = write_order9_c3_stl_mesh_library(
+        scene.mesh_paths, tmp_path / "shared/mesh_library.js"
+    )
+    viewer_js = write_order9_c3_viewer_javascript(tmp_path / "shared/viewer.js")
+    identity = [
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ]
+    animation = {
+        "animation_version": "unit-fk-v1",
+        "frame_encoding": "urdf_fk_v1",
+        "frames_per_second": 10,
+        "frame_count": 2,
+        "duration_s": 0.1,
+        "bounds": {"min": [-1.0, -1.0, -1.0], "max": [2.0, 2.0, 2.0]},
+        "urdf_fk": {
+            "links": [
+                "module_0__root",
+                "module_0__fc",
+                "module_0__tip",
+            ],
+            "root_link_index": 0,
+            "coordinate_joint_ids": ["module_0__yaw_dock_mech_joint1"],
+            "joints": [
+                {
+                    "joint_id": "module_0__fc_joint",
+                    "joint_type": "fixed",
+                    "parent_link_index": 0,
+                    "child_link_index": 1,
+                    "origin_matrix": identity,
+                    "axis_xyz": [0.0, 0.0, 1.0],
+                    "coordinate_index": -1,
+                },
+                {
+                    "joint_id": "module_0__yaw_dock_mech_joint1",
+                    "joint_type": "revolute",
+                    "parent_link_index": 0,
+                    "child_link_index": 2,
+                    "origin_matrix": identity,
+                    "axis_xyz": [0.0, 0.0, 1.0],
+                    "coordinate_index": 0,
+                },
+            ],
+        },
+        "frames": [
+            {
+                "frame_index": index,
+                "time_s": 0.1 * index,
+                "phase": "approach",
+                "status_text": "recorded state",
+                "root_pose_world": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                "joint_positions": [0.2 * index],
+                "box_poses": [],
+            }
+            for index in range(2)
+        ],
+    }
+
+    artifacts = render_order9_c3_mesh_viewer(
+        urdf_scene=scene,
+        html_path=tmp_path / "fk/playback.html",
+        mesh_library_path=library,
+        viewer_javascript_path=viewer_js,
+        title="saved rollout",
+        subtitle="no resimulation",
+        animation=animation,
+    )
+
+    archived = json.loads(artifacts.scene_path.read_text(encoding="utf-8"))
+    assert archived["animation"]["frame_encoding"] == "urdf_fk_v1"
+    javascript = viewer_js.read_text(encoding="utf-8")
+    assert "activeUrdfLinkMatrices" in javascript
+    assert "frame.status_text" in javascript

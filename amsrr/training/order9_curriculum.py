@@ -8,6 +8,11 @@ from pathlib import Path
 
 from amsrr.schemas.common import SchemaBase, SchemaValidationError, StrEnum, require_non_empty
 from amsrr.schemas.policies import CONTACT_WRENCH_CONTRACT_CONTACT_FRAME
+from amsrr.training.p4_3_reward import P4_3RewardConfig
+from amsrr.training.order9_c3_boundary_sampling import (
+    order9_c3_fixed_reset_stratum_index,
+    order9_c3_reset_strata_by_phase,
+)
 from amsrr.training.order9_randomization import (
     Order9ConservativeRandomizationConfig,
     Order9ExpandedObjectRandomizationConfig,
@@ -372,6 +377,9 @@ class Order9PPOOptimizationConfig(SchemaBase):
     max_grad_norm: float = 0.5
     target_kl: float = 0.02
     hard_checker_rejection_penalty: float = 1.0
+    phase_balanced_sampling: bool = False
+    phase_normalized_advantages: bool = False
+    phase_local_kl: bool = False
 
     def validate(self) -> None:
         for name in (
@@ -405,6 +413,229 @@ class Order9PPOOptimizationConfig(SchemaBase):
 
 
 @dataclass
+class Order9C3BoundaryFineTuneConfig(SchemaBase):
+    enabled: bool = False
+    target_actor_phase_labels: list[str] = field(
+        default_factory=lambda: ["release", "retreat", "settle"]
+    )
+    epochs_per_update: int = 1
+    learning_rate_scale: float = 0.25
+    non_target_parent_kl_limit: float = 0.01
+    non_target_parent_kl_weight: float = 1.0
+    maximum_topology_phase_kl: float = 0.04
+    # Training-only proportional teacher for the deployable compression
+    # scalar.  Exact simulator wrench is used only to construct the loss
+    # target; it never enters actor observation or the deployed command path.
+    privileged_compression_teacher_weight: float = 0.0
+    privileged_compression_teacher_action_step: float = 0.10
+    privileged_compression_teacher_underforce_only: bool = True
+    privileged_wrench_satisfied_parent_kl_weight: float = 0.0
+    topology_gradient_surgery_enabled: bool = False
+    # Assign the contact/lift actor advantage only to the morphology-specific
+    # compression scalar, instead of every PolicyCommand coordinate.
+    compression_only_actor_objective: bool = False
+    # Freeze the global/shared actor and train only the node-wise joint decoder
+    # (plus the detached critic) during the boundary update.
+    joint_head_only_actor_update: bool = False
+    # Freeze the complete inherited actor and train only the exactly
+    # phase-gated contact residual decoder (plus the detached critic).
+    contact_residual_only_actor_update: bool = False
+    # Training-initializer-only exploration width for the contact-space
+    # inward-normal coordinate.  It changes stochastic rollout collection but
+    # not the deterministic actor mean, deployed command, or action bound.
+    contact_normal_exploration_initial_std: float | None = None
+    # Route the existing scalar reward through the contact, centroidal, and
+    # posture action densities according to their physical responsibilities.
+    # The critic continues to fit the unchanged total return.
+    factorized_actor_credit_enabled: bool = False
+    # After the ordinary all-head PPO epoch, replay the same on-policy data
+    # through the contact density only.  During these extra passes only the
+    # contact-specific feature/slot/mean/std parameters may change; the shared
+    # trunk, centroidal head, posture head, and critic remain fixed.
+    contact_head_extra_optimizer_passes: int = 0
+    # Refine contact credit in the ordinary PPO pass into normal-translation,
+    # tangential-translation, and rotation likelihoods.  The three reward
+    # channels reconstruct the existing contact reward exactly; this is
+    # training-only credit routing, not a new deployed action or reward.
+    contact_coordinate_credit_enabled: bool = False
+    # Relative multiplier for the inward-normal coordinate in the ordinary
+    # contact-coordinate PPO objective.  A value of one preserves the equal
+    # normal/tangential/rotational weighting used by the original contract.
+    contact_normal_translation_actor_loss_weight: float = 1.0
+    # Training-only negative-log-likelihood weight that maps an authored
+    # nominal-preload deficit to the corresponding categorical inward-normal
+    # residual.  The deficit is never added to deployed observations.
+    contact_normal_preload_deficit_teacher_weight: float = 0.0
+    # Optional physical quantization of the deployed inward-normal contact
+    # residual.  PPO retains its exact continuous latent action likelihood;
+    # only the deterministic environment command is quantized.
+    contact_normal_action_quantization_step_m: float | None = None
+
+    def validate(self) -> None:
+        labels = [str(value) for value in self.target_actor_phase_labels]
+        if (
+            not labels
+            or len(set(labels)) != len(labels)
+            or any(not value for value in labels)
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 boundary fine-tune phase labels must be unique"
+            )
+        if self.epochs_per_update != 1:
+            raise SchemaValidationError(
+                "Order9 C3 boundary fine-tune is restricted to one epoch"
+            )
+        for name in (
+            "learning_rate_scale",
+            "non_target_parent_kl_limit",
+            "non_target_parent_kl_weight",
+            "maximum_topology_phase_kl",
+        ):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value <= 0.0:
+                raise SchemaValidationError(
+                    f"Order9 C3 boundary fine-tune {name} must be positive"
+                )
+        teacher_weight = float(
+            self.privileged_compression_teacher_weight
+        )
+        if not math.isfinite(teacher_weight) or teacher_weight < 0.0:
+            raise SchemaValidationError(
+                "Order9 C3 privileged compression teacher weight must be "
+                "finite and non-negative"
+            )
+        teacher_step = float(
+            self.privileged_compression_teacher_action_step
+        )
+        if not math.isfinite(teacher_step) or not 0.0 < teacher_step <= 1.0:
+            raise SchemaValidationError(
+                "Order9 C3 privileged compression teacher action step must "
+                "lie in (0, 1]"
+            )
+        satisfied_kl_weight = float(
+            self.privileged_wrench_satisfied_parent_kl_weight
+        )
+        if not math.isfinite(satisfied_kl_weight) or satisfied_kl_weight < 0.0:
+            raise SchemaValidationError(
+                "Order9 C3 privileged wrench-satisfied parent KL weight "
+                "must be finite and non-negative"
+            )
+        if self.learning_rate_scale > 1.0:
+            raise SchemaValidationError(
+                "Order9 C3 boundary fine-tune learning-rate scale must not exceed one"
+            )
+        if self.non_target_parent_kl_limit >= self.maximum_topology_phase_kl:
+            raise SchemaValidationError(
+                "Order9 C3 non-target KL limit must be below the topology-phase cap"
+            )
+        if (
+            self.joint_head_only_actor_update
+            and not self.compression_only_actor_objective
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 joint-head-only update requires the compression-only "
+                "actor objective"
+            )
+        if (
+            self.contact_residual_only_actor_update
+            and not self.compression_only_actor_objective
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 contact-residual-only update requires the "
+                "compression-only actor objective"
+            )
+        if (
+            self.joint_head_only_actor_update
+            and self.contact_residual_only_actor_update
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 joint-head-only and contact-residual-only updates "
+                "are mutually exclusive"
+            )
+        if self.factorized_actor_credit_enabled and (
+            self.compression_only_actor_objective
+            or self.joint_head_only_actor_update
+            or self.contact_residual_only_actor_update
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 factorized actor credit is incompatible with legacy "
+                "single-head actor objectives"
+            )
+        if (
+            isinstance(self.contact_head_extra_optimizer_passes, bool)
+            or not isinstance(self.contact_head_extra_optimizer_passes, int)
+            or not 0 <= self.contact_head_extra_optimizer_passes <= 4
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 contact-head extra optimizer passes must lie in "
+                "[0, 4]"
+            )
+        if (
+            self.contact_head_extra_optimizer_passes > 0
+            and not self.factorized_actor_credit_enabled
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 contact-head extra optimizer passes require "
+                "factorized actor credit"
+            )
+        if self.contact_coordinate_credit_enabled and not self.factorized_actor_credit_enabled:
+            raise SchemaValidationError(
+                "Order9 C3 contact-coordinate credit requires factorized actor credit"
+            )
+        normal_actor_weight = float(
+            self.contact_normal_translation_actor_loss_weight
+        )
+        if not math.isfinite(normal_actor_weight) or normal_actor_weight <= 0.0:
+            raise SchemaValidationError(
+                "Order9 C3 contact normal-translation actor-loss weight must "
+                "be finite and positive"
+            )
+        preload_teacher_weight = float(
+            self.contact_normal_preload_deficit_teacher_weight
+        )
+        if (
+            not math.isfinite(preload_teacher_weight)
+            or preload_teacher_weight < 0.0
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 contact normal preload-deficit teacher weight must "
+                "be finite and non-negative"
+            )
+        if (
+            preload_teacher_weight > 0.0
+            and not self.contact_coordinate_credit_enabled
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 contact normal preload-deficit teacher requires "
+                "contact-coordinate credit"
+            )
+        if self.contact_normal_exploration_initial_std is not None:
+            exploration_std = float(
+                self.contact_normal_exploration_initial_std
+            )
+            if (
+                not math.isfinite(exploration_std)
+                or not 0.0 < exploration_std <= 1.0
+            ):
+                raise SchemaValidationError(
+                    "Order9 C3 contact-normal exploration initial std must "
+                    "lie in (0, 1]"
+                )
+        if self.contact_normal_action_quantization_step_m is not None:
+            quantization_step = float(
+                self.contact_normal_action_quantization_step_m
+            )
+            if (
+                not math.isfinite(quantization_step)
+                or not 0.0 < quantization_step <= 0.020
+            ):
+                raise SchemaValidationError(
+                    "Order9 C3 contact-normal action quantization step must "
+                    "lie in (0, 0.020] m"
+                )
+
+
+@dataclass
 class Order9OptimizationConfig(SchemaBase):
     pi_l_bc: Order9BCOptimizationConfig = field(
         default_factory=Order9BCOptimizationConfig
@@ -420,6 +651,9 @@ class Order9OptimizationConfig(SchemaBase):
     )
     pi_l_ppo: Order9PPOOptimizationConfig = field(
         default_factory=Order9PPOOptimizationConfig
+    )
+    c3_boundary_fine_tune: Order9C3BoundaryFineTuneConfig = field(
+        default_factory=Order9C3BoundaryFineTuneConfig
     )
     pi_h_ppo: Order9PPOOptimizationConfig = field(
         default_factory=lambda: Order9PPOOptimizationConfig(
@@ -470,6 +704,104 @@ class Order9ProductionRuntimeConfig(SchemaBase):
     tensorized_rollout_hot_path: bool = True
     raw_contact_actor_input: bool = False
     full_mesh_acceptance_replaced: bool = False
+    c3_phase_reset_progress_fractions: list[float] = field(
+        default_factory=lambda: [
+            1.0 / 6.0,
+            1.0 / 2.0,
+            2.0 / 3.0,
+            9.0 / 10.0,
+        ]
+    )
+    c3_boundary_tail_phase_labels: list[str] = field(
+        default_factory=lambda: ["place", "release", "retreat"]
+    )
+    c3_boundary_tail_progress_fraction: float = 0.9
+    c3_contact_reset_preload_steps: int = 13
+    c3_contact_reset_min_selected_contacts: int = 2
+    c3_contact_reset_max_object_displacement_m: float = 0.03
+    c3_contact_reset_max_downward_speed_mps: float = 0.25
+    # Execution-side servo lead.  pi_H contact poses remain on the physical
+    # object surface; the IK resolver alone offsets its bounded joint target.
+    c3_virtual_contact_inward_lead_m: float = 0.0
+    # Replace the fixed lead by a common actuator/compliance calculation at
+    # nominal-plan installation time.  The calculation uses only the reviewed
+    # contact geometry, object estimate, friction, actuator provenance, and
+    # authored contact stiffness; it is deployable and module-count agnostic.
+    c3_actuator_aware_nominal_preload_enabled: bool = False
+    c3_actuator_aware_nominal_preload_maximum_m: float = 0.040
+    c3_actuator_aware_nominal_preload_quantization_m: float = 0.001
+    c3_actuator_aware_nominal_preload_support_safety_factor: float = 1.25
+    c3_actuator_aware_nominal_preload_maximum_peak_utilization: float = 0.80
+    c3_actuator_aware_nominal_preload_minimum_anchor_fraction: float = 0.50
+    # Common additive uncertainty margin calibrated from train-split
+    # late-contact rollout geometry.  This covers the systematic difference
+    # between the linear compliance model and the realized articulated/mesh
+    # contact geometry; it must never be fitted on held-out validation data.
+    c3_actuator_aware_nominal_preload_model_error_margin_m: float = 0.0
+    # One existing normalized joint-position action is repurposed during
+    # attach/maintain as a morphology-conditioned scalar along a local
+    # task-space compression IK direction.  This changes no actor input and
+    # consumes no contact-force measurement.
+    c3_contact_compression_action_adapter_enabled: bool = False
+    c3_contact_compression_action_span_m: float = 0.0
+    # Newly introduced morphology sizes may initially execute only the
+    # morphology-conditioned contact-compression scalar on top of the
+    # accepted nominal IK trajectory.  Other pi_L action coordinates remain
+    # sampled for exact on-policy replay but are not applied to QPID.
+    c3_contact_compression_only_module_counts: list[int] = field(
+        default_factory=list
+    )
+    # A morphology may graduate from scalar-only entry to the complete joint
+    # residual head while retaining the conservative nominal centroidal
+    # command.  This masks pose/twist/residual-wrench corrections but applies
+    # all bounded joint outputs plus the compression adapter.
+    c3_joint_only_module_counts: list[int] = field(default_factory=list)
+    c3_force_estimator_baseline_update_alpha: float = 0.10
+    c3_force_estimator_filter_alpha: float = 0.25
+    c3_force_estimator_ridge_damping_m2: float = 1.0e-5
+    c3_force_estimator_minimum_jacobian_norm_m: float = 1.0e-3
+    c3_force_estimator_fit_residual_scale_nm: float = 0.25
+    c3_force_estimator_minimum_confidence: float = 0.25
+    c3_force_estimator_support_safety_factor: float = 1.0
+    c3_wrench_gate_curriculum_start_update_index: int = 4
+    c3_wrench_gate_curriculum_scales: list[float] = field(
+        default_factory=lambda: [4.0, 3.0, 2.0, 1.5, 1.25, 1.0]
+    )
+    c3_topology_stratified_updates: bool = True
+    c3_topologies_per_module_count_per_update: int = 1
+    c3_topology_shard_parallel_process_count: int = 2
+    c3_state_inheritance_rollouts_enabled: bool = False
+    c3_state_inheritance_rollout_steps: int = 1280
+    c3_state_inheritance_environment_count_per_module: int = 12
+    # Number of topology-homogeneous continuous shards collected for each
+    # module-count stratum.  A focused stratum may temporarily receive wider
+    # topology coverage during incremental morphology expansion; this changes
+    # only the training distribution, never the policy/action contract.
+    c3_state_inheritance_topologies_per_module_count: int = 1
+    c3_state_inheritance_focus_module_counts: list[int] = field(
+        default_factory=list
+    )
+    c3_state_inheritance_focus_topology_count: int = 1
+    c3_state_inheritance_initial_phase_indices: list[int] = field(
+        default_factory=lambda: [1, 3]
+    )
+    # Optional exact reset-bank fraction for a transition-targeted backward
+    # curriculum.  When set, every inherited-state episode starts from this
+    # same persisted intra-phase state; evidence-gated later stages may move
+    # this value earlier without changing policy, reward, or controller
+    # semantics.
+    c3_state_inheritance_fixed_reset_progress_fraction: float | None = None
+
+    def c3_state_inheritance_topology_count(self, module_count: int) -> int:
+        """Resolve continuous topology coverage for one morphology stratum."""
+
+        return (
+            int(self.c3_state_inheritance_focus_topology_count)
+            if int(module_count) in {
+                int(value) for value in self.c3_state_inheritance_focus_module_counts
+            }
+            else int(self.c3_state_inheritance_topologies_per_module_count)
+        )
 
     def validate(self) -> None:
         if self.seed < 0:
@@ -505,6 +837,26 @@ class Order9ProductionRuntimeConfig(SchemaBase):
                 raise SchemaValidationError(
                     f"Order9ProductionRuntimeConfig.{name} must be positive"
                 )
+        if self.c3_wrench_gate_curriculum_start_update_index < 0:
+            raise SchemaValidationError(
+                "Order9 C3 wrench-gate curriculum start must be non-negative"
+            )
+        wrench_gate_scales = [
+            float(value) for value in self.c3_wrench_gate_curriculum_scales
+        ]
+        if (
+            not wrench_gate_scales
+            or any(not math.isfinite(value) or value < 1.0 for value in wrench_gate_scales)
+            or any(
+                later > earlier
+                for earlier, later in zip(wrench_gate_scales, wrench_gate_scales[1:])
+            )
+            or wrench_gate_scales[-1] != 1.0
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 wrench-gate curriculum must be finite, non-increasing, "
+                "at least one, and terminate at exactly one"
+            )
         for name in (
             "runtime_benchmark_report_sha256",
             "canonical_order8_report_sha256",
@@ -525,6 +877,236 @@ class Order9ProductionRuntimeConfig(SchemaBase):
             raise SchemaValidationError(
                 "Order9 training approximation cannot replace full-mesh acceptance"
             )
+        fractions = [
+            float(value) for value in self.c3_phase_reset_progress_fractions
+        ]
+        if (
+            len(fractions) < 4
+            or fractions != sorted(set(fractions))
+            or any(
+                not math.isfinite(value) or not 0.0 < value < 1.0
+                for value in fractions
+            )
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 reset progress must be unique ordered values strictly "
+                "inside (0, 1)"
+            )
+        try:
+            order9_c3_reset_strata_by_phase(
+                phase_labels=(
+                    "approach",
+                    "contact_acquisition",
+                    "lift",
+                    "transport",
+                    "place",
+                    "release",
+                    "retreat",
+                    "settle",
+                ),
+                progress_fractions=fractions,
+                boundary_tail_phase_labels=(
+                    self.c3_boundary_tail_phase_labels
+                ),
+                boundary_tail_progress_fraction=(
+                    self.c3_boundary_tail_progress_fraction
+                ),
+            )
+        except ValueError as exc:
+            raise SchemaValidationError(str(exc)) from exc
+        if self.c3_contact_reset_preload_steps < 1:
+            raise SchemaValidationError(
+                "Order9 C3 contact reset preload must be positive"
+            )
+        if self.c3_contact_reset_min_selected_contacts < 2:
+            raise SchemaValidationError(
+                "Order9 C3 contact reset requires at least two contacts"
+            )
+        for name in (
+            "c3_contact_reset_max_object_displacement_m",
+            "c3_contact_reset_max_downward_speed_mps",
+        ):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value <= 0.0:
+                raise SchemaValidationError(
+                    f"Order9ProductionRuntimeConfig.{name} must be positive"
+                )
+        if (
+            not math.isfinite(self.c3_virtual_contact_inward_lead_m)
+            or not 0.0 <= self.c3_virtual_contact_inward_lead_m <= 0.02
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 virtual contact lead must be in [0, 0.02] m"
+            )
+        for name in (
+            "c3_actuator_aware_nominal_preload_maximum_m",
+            "c3_actuator_aware_nominal_preload_quantization_m",
+            "c3_actuator_aware_nominal_preload_support_safety_factor",
+            "c3_actuator_aware_nominal_preload_maximum_peak_utilization",
+            "c3_actuator_aware_nominal_preload_minimum_anchor_fraction",
+        ):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value <= 0.0:
+                raise SchemaValidationError(
+                    f"Order9ProductionRuntimeConfig.{name} must be positive"
+                )
+        if (
+            not math.isfinite(
+                self.c3_actuator_aware_nominal_preload_model_error_margin_m
+            )
+            or self.c3_actuator_aware_nominal_preload_model_error_margin_m < 0.0
+        ):
+            raise SchemaValidationError(
+                "Order9 actuator-aware nominal preload model-error margin "
+                "must be non-negative"
+            )
+        if (
+            self.c3_actuator_aware_nominal_preload_maximum_m
+            < self.c3_virtual_contact_inward_lead_m
+            or self.c3_actuator_aware_nominal_preload_maximum_m > 0.05
+            or self.c3_actuator_aware_nominal_preload_quantization_m
+            > self.c3_actuator_aware_nominal_preload_maximum_m
+            or self.c3_actuator_aware_nominal_preload_model_error_margin_m
+            > self.c3_actuator_aware_nominal_preload_maximum_m
+            or not 0.0
+            < self.c3_actuator_aware_nominal_preload_maximum_peak_utilization
+            <= 1.0
+            or not 0.0
+            < self.c3_actuator_aware_nominal_preload_minimum_anchor_fraction
+            <= 1.0
+        ):
+            raise SchemaValidationError(
+                "Order9 actuator-aware nominal preload bounds are invalid"
+            )
+        if (
+            not math.isfinite(self.c3_contact_compression_action_span_m)
+            or not 0.0 <= self.c3_contact_compression_action_span_m <= 0.02
+            or (
+                self.c3_contact_compression_action_adapter_enabled
+                and self.c3_contact_compression_action_span_m <= 0.0
+            )
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 contact-compression action span must be in "
+                "(0, 0.02] m when enabled"
+            )
+        compression_only_counts = [
+            int(value)
+            for value in self.c3_contact_compression_only_module_counts
+        ]
+        if (
+            compression_only_counts != sorted(set(compression_only_counts))
+            or any(not 2 <= value <= 8 for value in compression_only_counts)
+            or (
+                compression_only_counts
+                and not self.c3_contact_compression_action_adapter_enabled
+            )
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 contact-compression-only module counts must be "
+                "unique, ordered, lie in [2, 8], and require the adapter"
+            )
+        joint_only_counts = [
+            int(value) for value in self.c3_joint_only_module_counts
+        ]
+        if (
+            joint_only_counts != sorted(set(joint_only_counts))
+            or any(not 2 <= value <= 8 for value in joint_only_counts)
+            or set(joint_only_counts).intersection(compression_only_counts)
+        ):
+            raise SchemaValidationError(
+                "Order9 C3 joint-only module counts must be unique, ordered, "
+                "lie in [2, 8], and not overlap compression-only counts"
+            )
+        for name in (
+            "c3_force_estimator_baseline_update_alpha",
+            "c3_force_estimator_filter_alpha",
+            "c3_force_estimator_minimum_confidence",
+        ):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or not 0.0 < value <= 1.0:
+                raise SchemaValidationError(
+                    f"Order9ProductionRuntimeConfig.{name} must be in (0, 1]"
+                )
+        for name in (
+            "c3_force_estimator_ridge_damping_m2",
+            "c3_force_estimator_minimum_jacobian_norm_m",
+            "c3_force_estimator_fit_residual_scale_nm",
+            "c3_force_estimator_support_safety_factor",
+        ):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value <= 0.0:
+                raise SchemaValidationError(
+                    f"Order9ProductionRuntimeConfig.{name} must be positive"
+                )
+        if not self.c3_topology_stratified_updates:
+            raise SchemaValidationError(
+                "Order9 C3 production PPO requires topology-stratified updates"
+            )
+        if self.c3_topologies_per_module_count_per_update < 1:
+            raise SchemaValidationError(
+                "Order9 C3 topologies per module count must be positive"
+            )
+        if self.c3_topology_shard_parallel_process_count < 1:
+            raise SchemaValidationError(
+                "Order9 C3 topology shard parallel process count must be positive"
+            )
+        inheritance_phases = [
+            int(value) for value in self.c3_state_inheritance_initial_phase_indices
+        ]
+        inheritance_focus_modules = [
+            int(value) for value in self.c3_state_inheritance_focus_module_counts
+        ]
+        if self.c3_state_inheritance_rollouts_enabled:
+            topology_counts = [
+                self.c3_state_inheritance_topology_count(module_count)
+                for module_count in range(2, 9)
+            ]
+            fixed_progress = (
+                None
+                if self.c3_state_inheritance_fixed_reset_progress_fraction is None
+                else float(
+                    self.c3_state_inheritance_fixed_reset_progress_fraction
+                )
+            )
+            common_invalid = (
+                self.c3_state_inheritance_rollout_steps < 1
+                or self.c3_state_inheritance_environment_count_per_module < 1
+                or self.c3_state_inheritance_topologies_per_module_count < 0
+                or self.c3_state_inheritance_focus_topology_count < 1
+                or self.c3_state_inheritance_focus_topology_count
+                < self.c3_state_inheritance_topologies_per_module_count
+                or not any(value > 0 for value in topology_counts)
+                or len(inheritance_focus_modules)
+                != len(set(inheritance_focus_modules))
+                or any(value < 2 or value > 8 for value in inheritance_focus_modules)
+                or self.c3_state_inheritance_environment_count_per_module
+                < len(inheritance_phases)
+                or len(inheritance_phases) != len(set(inheritance_phases))
+                or any(value not in {1, 2, 3} for value in inheritance_phases)
+            )
+            phase_invalid = (
+                set(inheritance_phases) != {1, 2}
+                if fixed_progress is not None
+                else not {1, 3}.issubset(inheritance_phases)
+            )
+            fixed_progress_invalid = False
+            if fixed_progress is not None:
+                try:
+                    order9_c3_fixed_reset_stratum_index(
+                        progress_fractions=fractions,
+                        reset_progress_fraction=fixed_progress,
+                    )
+                except ValueError:
+                    fixed_progress_invalid = True
+            if common_invalid or phase_invalid or fixed_progress_invalid:
+                raise SchemaValidationError(
+                    "Order9 C3 state-inheritance rollout requires a positive "
+                    "runtime, non-negative base topology coverage with at least "
+                    "one selected topology, valid focus coverage, unique seed "
+                    "phases, and an exact reset-bank stratum. A fixed-progress "
+                    "backward curriculum must seed contact acquisition and lift."
+                )
 
 
 @dataclass
@@ -608,6 +1190,7 @@ class Order9LearningConfig(SchemaBase):
     optimization: Order9OptimizationConfig = field(
         default_factory=Order9OptimizationConfig
     )
+    reward: P4_3RewardConfig = field(default_factory=P4_3RewardConfig)
     production_runtime: Order9ProductionRuntimeConfig = field(
         default_factory=Order9ProductionRuntimeConfig
     )
@@ -617,6 +1200,7 @@ class Order9LearningConfig(SchemaBase):
 
     def validate(self) -> None:
         self.teacher_collection.validate()
+        self.optimization.c3_boundary_fine_tune.validate()
         c0 = self.curriculum.stages[0]
         if c0.minimum_episodes != self.teacher_collection.episode_count:
             raise SchemaValidationError(

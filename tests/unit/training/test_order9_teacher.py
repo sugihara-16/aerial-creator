@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import torch
+
 from amsrr.feasibility.contact_wrench_trajectory import (
     ContactWrenchTrajectoryCheckerConfig,
     ContactWrenchTrajectoryFeasibilityChecker,
@@ -38,6 +40,13 @@ from amsrr.training.order9_teacher_windows import (
     ORDER9_TEACHER_WINDOW_VERSION,
     Order9TeacherWindowConfig,
     compose_order9_teacher_windows,
+)
+from amsrr.training.order9_contact_wrench_reward import (
+    Order9TensorWrenchRangeReference,
+)
+from amsrr.simulation.order9_tensor_object_task import (
+    ORDER9_CONTACT_SCHEDULE_ATTACH,
+    ORDER9_CONTACT_SCHEDULE_RELEASE,
 )
 
 
@@ -101,6 +110,56 @@ def test_teacher_ranges_expose_a_payload_support_witness_at_order8_friction() ->
     assert evaluations[0].qp_residual < 1.0e-4
     assert evaluations[0].wrench_residual is not None
     assert evaluations[0].wrench_residual < 1.0e-3
+
+
+def test_privileged_wrench_reference_follows_measured_object_pose() -> None:
+    task = _task()
+    candidates = _candidate_set()
+    context = compile_high_level_context(task, _morphology(), candidates)
+    converted = upgrade_teacher_trajectory_to_v2(_legacy_trajectory(), context)
+    reference = Order9TensorWrenchRangeReference(
+        trajectory=converted,
+        contact_candidate_set=candidates,
+        selected_anchor_ids=(0, 1),
+        object_id="order8_object",
+        authored_object_pose_world=task.scene.objects[0].pose_world,
+        batch_size=1,
+        device="cpu",
+    )
+    moved_object = torch.tensor(
+        [[1.5, 0.0, 0.225, 0.0, 0.0, 0.0, 1.0]]
+    )
+
+    active = reference.resolve(
+        contact_schedule_index=torch.tensor(
+            [ORDER9_CONTACT_SCHEDULE_ATTACH]
+        ),
+        object_pose_world=moved_object,
+    )
+    released = reference.resolve(
+        contact_schedule_index=torch.tensor(
+            [ORDER9_CONTACT_SCHEDULE_RELEASE]
+        ),
+        object_pose_world=moved_object,
+    )
+
+    assert active.bound_mask.tolist() == [[True, True]]
+    torch.testing.assert_close(
+        active.contact_frame_pose_world[0, :, 0], torch.tensor([1.5, 1.5])
+    )
+    torch.testing.assert_close(
+        active.contact_normal_world[0],
+        torch.tensor([[1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]]),
+    )
+    assert released.bound_mask.tolist() == [[False, False]]
+    torch.testing.assert_close(
+        released.contact_frame_pose_world,
+        active.contact_frame_pose_world,
+    )
+    torch.testing.assert_close(
+        released.contact_normal_world,
+        active.contact_normal_world,
+    )
 
 
 def test_teacher_record_archives_provenance_and_trajectory_check() -> None:

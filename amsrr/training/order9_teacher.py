@@ -57,7 +57,12 @@ from amsrr.schemas.task_spec import (
 )
 
 
-ORDER9_NATURAL_CONTACT_TEACHER_VERSION = "order9_natural_contact_teacher_v3_qp_ranges"
+ORDER9_NATURAL_CONTACT_TEACHER_VERSION = (
+    "order9_natural_contact_teacher_v4_patch_moment_ranges"
+)
+ORDER9_PATCH_MOMENT_ENVELOPE_VERSION = (
+    "order9_contact_patch_moment_envelope_v1"
+)
 ORDER9_NATURAL_CONTACT_FALLBACK_VERSION = (
     "order9_natural_contact_fallback_v1_checked_v2_contract"
 )
@@ -70,6 +75,7 @@ class TeacherWrenchEnvelopeConfig:
     friction_capacity_window_fraction: float = 0.80
     torque_window_fraction: float = 0.20
     minimum_torque_window_nm: float = 0.05
+    minimum_patch_radius_m: float = 1.0e-3
     default_max_force_n: float = 30.0
     default_max_torque_nm: float = 5.0
     cone_tolerance_n: float = 1.0e-9
@@ -82,6 +88,7 @@ class TeacherWrenchEnvelopeConfig:
             "friction_capacity_window_fraction",
             "torque_window_fraction",
             "minimum_torque_window_nm",
+            "minimum_patch_radius_m",
             "default_max_force_n",
             "default_max_torque_nm",
             "cone_tolerance_n",
@@ -195,11 +202,13 @@ def upgrade_teacher_trajectory_to_v2(
                 max_force_n=max_force_n,
                 config=envelope_config,
             )
-            torque_lower, torque_upper = _bounded_axis_window(
-                target[3:],
-                maximum=max_torque_nm,
-                fraction=envelope_config.torque_window_fraction,
-                minimum_window=envelope_config.minimum_torque_window_nm,
+            torque_lower, torque_upper = _patch_moment_window(
+                target_torque=target[3:],
+                force_lower=force_lower,
+                force_upper=force_upper,
+                candidate=candidate,
+                max_torque_nm=max_torque_nm,
+                config=envelope_config,
             )
             assignment.wrench_target = target
             assignment.wrench_lower = [*force_lower, *torque_lower]
@@ -209,6 +218,71 @@ def upgrade_teacher_trajectory_to_v2(
     converted.derived_mode_label = (
         f"{ORDER9_NATURAL_CONTACT_TEACHER_VERSION}:"
         f"source={trajectory.derived_mode_label or ORDER8_DETERMINISTIC_PI_H_VERSION}"
+    )
+    return ContactWrenchTrajectory.from_dict(converted.to_dict())
+
+
+def calibrate_order9_contact_wrench_moment_envelopes(
+    trajectory: ContactWrenchTrajectory,
+    contact_candidate_set: ContactCandidateSet,
+    *,
+    config: TeacherWrenchEnvelopeConfig | None = None,
+) -> ContactWrenchTrajectory:
+    """Rebind active contact-frame moments to the candidate patch physics.
+
+    Accepted C3 geometry is immutable, but its historical torque box used only
+    a fixed numerical floor.  This deterministic adapter preserves every
+    candidate, force bound, target, schedule, and trajectory knot while
+    deriving moment ranges from the same patch/friction model used by C_H.
+    """
+
+    envelope_config = config or TeacherWrenchEnvelopeConfig()
+    converted = ContactWrenchTrajectory.from_dict(trajectory.to_dict())
+    candidates = {
+        candidate.candidate_id: candidate
+        for candidate in contact_candidate_set.candidates
+    }
+    for knot in converted.knots:
+        for assignment in knot.contact_assignments:
+            if assignment.schedule_state not in {"attach", "maintain", "slide"}:
+                continue
+            if (
+                assignment.wrench_frame != "contact"
+                or assignment.wrench_target is None
+                or assignment.wrench_lower is None
+                or assignment.wrench_upper is None
+            ):
+                raise SchemaValidationError(
+                    "patch-moment calibration requires complete contact-frame bounds"
+                )
+            candidate = candidates.get(assignment.candidate_id)
+            if candidate is None:
+                raise SchemaValidationError(
+                    "patch-moment calibration candidate is missing"
+                )
+            maximum = max(
+                max(abs(float(value)) for value in assignment.wrench_lower[3:]),
+                max(abs(float(value)) for value in assignment.wrench_upper[3:]),
+                envelope_config.default_max_torque_nm,
+            )
+            lower, upper = _patch_moment_window(
+                target_torque=[
+                    float(value) for value in assignment.wrench_target[3:]
+                ],
+                force_lower=[
+                    float(value) for value in assignment.wrench_lower[:3]
+                ],
+                force_upper=[
+                    float(value) for value in assignment.wrench_upper[:3]
+                ],
+                candidate=candidate,
+                max_torque_nm=maximum,
+                config=envelope_config,
+            )
+            assignment.wrench_lower[3:] = lower
+            assignment.wrench_upper[3:] = upper
+    converted.derived_mode_label = (
+        f"{converted.derived_mode_label}:{ORDER9_PATCH_MOMENT_ENVELOPE_VERSION}"
     )
     return ContactWrenchTrajectory.from_dict(converted.to_dict())
 
@@ -600,6 +674,74 @@ def _force_box_is_safe(
         ):
             return False
     return True
+
+
+def _patch_moment_window(
+    *,
+    target_torque: list[float],
+    force_lower: list[float],
+    force_upper: list[float],
+    candidate: ContactCandidate,
+    max_torque_nm: float,
+    config: TeacherWrenchEnvelopeConfig,
+) -> tuple[list[float], list[float]]:
+    if not (
+        len(target_torque) == len(force_lower) == len(force_upper) == 3
+    ):
+        raise SchemaValidationError(
+            "teacher patch moment inputs must have three axes"
+        )
+    if candidate.friction is None:
+        raise SchemaValidationError(
+            "teacher patch moment range requires resolved friction"
+        )
+    radius = max(
+        config.minimum_patch_radius_m,
+        math.sqrt(max(float(candidate.patch_area_m2), 0.0) / math.pi),
+    )
+    inward_world = tuple(-float(value) for value in candidate.normal_world)
+    inward_contact = world_wrench_to_contact(
+        [*inward_world, 0.0, 0.0, 0.0], candidate
+    )[:3]
+    max_normal_load = max(
+        0.0,
+        *(
+            sum(
+                float(corner[axis]) * float(inward_contact[axis])
+                for axis in range(3)
+            )
+            for corner in itertools.product(*zip(force_lower, force_upper))
+        ),
+    )
+    tilt_capacity = radius * max_normal_load
+    torsion_capacity = (
+        float(candidate.friction) * radius * max_normal_load
+    )
+    lower: list[float] = []
+    upper: list[float] = []
+    for axis, target in enumerate(target_torque):
+        value = float(target)
+        if abs(value) > max_torque_nm:
+            raise SchemaValidationError(
+                "teacher torque target exceeds anchor capability"
+            )
+        along_normal = min(1.0, abs(float(inward_contact[axis])))
+        across_normal = math.sqrt(max(0.0, 1.0 - along_normal**2))
+        patch_capacity = math.hypot(
+            along_normal * torsion_capacity,
+            across_normal * tilt_capacity,
+        )
+        width = min(
+            max(
+                config.minimum_torque_window_nm,
+                abs(value) * config.torque_window_fraction,
+                patch_capacity,
+            ),
+            max_torque_nm - abs(value),
+        )
+        lower.append(value - max(0.0, width))
+        upper.append(value + max(0.0, width))
+    return lower, upper
 
 
 def _bounded_axis_window(

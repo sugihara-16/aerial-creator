@@ -370,19 +370,65 @@ def render_order9_c3_mesh_viewer(
             raise SchemaValidationError(
                 "mesh viewer animation requires non-empty frames"
             )
+        frame_encoding = str(animation.get("frame_encoding", "model_matrices_v1"))
+        if frame_encoding not in {"model_matrices_v1", "urdf_fk_v1"}:
+            raise SchemaValidationError(
+                "mesh viewer animation frame encoding is unsupported"
+            )
+        urdf_fk = animation.get("urdf_fk")
+        coordinate_count = 0
+        if frame_encoding == "urdf_fk_v1":
+            if not isinstance(urdf_fk, dict):
+                raise SchemaValidationError(
+                    "URDF-FK animation requires a kinematic payload"
+                )
+            links = urdf_fk.get("links")
+            joints = urdf_fk.get("joints")
+            coordinate_joint_ids = urdf_fk.get("coordinate_joint_ids")
+            if (
+                not isinstance(links, list)
+                or not links
+                or not isinstance(joints, list)
+                or not isinstance(coordinate_joint_ids, list)
+            ):
+                raise SchemaValidationError(
+                    "URDF-FK animation kinematic payload is invalid"
+                )
+            coordinate_count = len(coordinate_joint_ids)
+            for instance in urdf_scene.instances:
+                if (
+                    not isinstance(instance.get("link_index"), int)
+                    or not isinstance(instance.get("local_matrix"), list)
+                    or len(instance["local_matrix"]) != 16
+                ):
+                    raise SchemaValidationError(
+                        "URDF-FK animation mesh binding is incomplete"
+                    )
         for index, frame in enumerate(frames):
             if not isinstance(frame, dict):
                 raise SchemaValidationError(
                     f"mesh viewer animation frame {index} is invalid"
                 )
-            matrices = frame.get("model_matrices")
-            if (
-                not isinstance(matrices, list)
-                or len(matrices) != len(urdf_scene.instances)
-            ):
-                raise SchemaValidationError(
-                    "mesh viewer animation frame instance identity differs"
-                )
+            if frame_encoding == "urdf_fk_v1":
+                root_pose = frame.get("root_pose_world")
+                joint_positions = frame.get("joint_positions")
+                if (
+                    not isinstance(root_pose, list)
+                    or len(root_pose) != 7
+                    or not isinstance(joint_positions, list)
+                    or len(joint_positions) != coordinate_count
+                ):
+                    raise SchemaValidationError(
+                        "URDF-FK animation frame state shape differs"
+                    )
+            else:
+                matrices = frame.get("model_matrices")
+                if not isinstance(matrices, list) or len(matrices) != len(
+                    urdf_scene.instances
+                ):
+                    raise SchemaValidationError(
+                        "mesh viewer animation frame instance identity differs"
+                    )
     scene_path = destination.with_suffix(".scene.json")
     payload = {
         "viewer_version": ORDER9_C3_CURATION_VIEWER_VERSION,
@@ -700,8 +746,10 @@ def _viewer_html(
     #review-controls .row{{display:flex;gap:6px;align-items:center;flex-wrap:wrap}} #review-note{{min-width:18em;flex:1;padding:5px 7px;border:1px solid #aeb6bf;border-radius:5px}} #review-status{{font:12px ui-monospace,monospace;margin-top:6px;color:#39434d}}
     #animation-controls{{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);display:flex;gap:7px;align-items:center;min-width:min(60vw,760px);padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.94);box-shadow:0 2px 10px #0002}}
     #animation-controls[hidden]{{display:none}} #animation-slider{{flex:1;min-width:180px}} #animation-time{{font:12px ui-monospace,monospace;min-width:13em;text-align:right}} #animation-speed{{font:13px system-ui,sans-serif;padding:4px}}
+    #diagnostics{{position:absolute;left:12px;bottom:64px;width:min(520px,calc(100vw - 24px));padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.93);box-shadow:0 2px 10px #0002}}
+    #diagnostics[hidden]{{display:none}} #diagnostic-chart{{display:block;width:100%;height:210px}} #diagnostic-live{{font:12px ui-monospace,monospace;color:#263441;margin-top:4px;white-space:pre-wrap}}
     #status{{position:absolute;left:12px;bottom:12px;padding:6px 9px;border-radius:5px;background:rgba(0,0,0,.66);color:white;font:12px ui-monospace,monospace}}
-    body.capture #toolbar,body.capture #review-controls,body.capture #animation-controls{{display:none!important}} body.capture #info{{max-width:42em}}
+    body.capture #toolbar,body.capture #review-controls,body.capture #animation-controls,body.capture #diagnostics{{display:none!important}} body.capture #info{{max-width:42em}}
   </style>
 </head>
 <body>
@@ -734,6 +782,10 @@ def _viewer_html(
       <option value="4">4×</option>
     </select>
     <span id="animation-time">t=0.00 s</span>
+  </div>
+  <div id="diagnostics" hidden>
+    <canvas id="diagnostic-chart"></canvas>
+    <div id="diagnostic-live"></div>
   </div>
   <div id="status">loading exact STL geometry…</div>
   <script>window.AMSRR_ORDER9_SCENE={encoded_scene};</script>

@@ -14,6 +14,7 @@ from amsrr.simulation.order9_object_task_runtime import (
     Order9ObjectTaskRuntime,
     order9_object_task_actor_phase_index,
     order9_rollout_initial_phase_indices,
+    order9_rollout_initial_stratum_indices,
 )
 from amsrr.simulation.order9_object_task_state import (
     Order9IsaacStateSnapshot,
@@ -134,12 +135,42 @@ def test_rollout_initial_phase_selection_keeps_promotion_at_phase_zero() -> None
         canonical_resets=True,
         diagnostic_initial_phase_index=3,
     ) == (3, 3, 3)
+    assert order9_rollout_initial_phase_indices(
+        environment_count=3,
+        evaluation_mode=True,
+        canonical_resets=True,
+        diagnostic_initial_phase_index=6,
+        allow_evaluation_diagnostic_phase=True,
+    ) == (6, 6, 6)
     with pytest.raises(Exception, match="phase zero"):
         order9_rollout_initial_phase_indices(
             environment_count=1,
             evaluation_mode=True,
             canonical_resets=True,
             diagnostic_initial_phase_index=3,
+        )
+
+
+def test_rollout_initial_strata_keep_formal_promotion_at_approach_start() -> None:
+    selectable = tuple((0, 1, 2) for _ in ORDER9_OBJECT_TASK_PHASES)
+    phases = (0,) * 32
+    assert order9_rollout_initial_stratum_indices(
+        phase_indices=phases,
+        phase_count=len(ORDER9_OBJECT_TASK_PHASES),
+        reset_stratum_indices_by_phase=selectable,
+    ) == (0,) * 8 + (1,) * 8 + (2,) * 8 + (0,) * 8
+    assert order9_rollout_initial_stratum_indices(
+        phase_indices=phases,
+        phase_count=len(ORDER9_OBJECT_TASK_PHASES),
+        reset_stratum_indices_by_phase=selectable,
+        formal_phase_zero_start=True,
+    ) == (-1,) * 32
+    with pytest.raises(Exception, match="phase zero"):
+        order9_rollout_initial_stratum_indices(
+            phase_indices=(1,),
+            phase_count=len(ORDER9_OBJECT_TASK_PHASES),
+            reset_stratum_indices_by_phase=selectable,
+            formal_phase_zero_start=True,
         )
     with pytest.raises(Exception, match="canonical resets"):
         order9_rollout_initial_phase_indices(

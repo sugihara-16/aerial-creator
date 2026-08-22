@@ -355,6 +355,105 @@ class Order9TensorIsaacIO:
             prohibited_collision=prohibited_object | prohibited_environment,
         )
 
+    def reduce_contact_wrenches(
+        self,
+        *,
+        normal_force_magnitudes_n: torch.Tensor,
+        normal_points_world: torch.Tensor,
+        normal_vectors_world: torch.Tensor,
+        normal_contact_counts: torch.Tensor,
+        normal_contact_starts: torch.Tensor,
+        friction_forces_world: torch.Tensor,
+        friction_points_world: torch.Tensor,
+        friction_contact_counts: torch.Tensor,
+        friction_contact_starts: torch.Tensor,
+        contact_frame_pose_world: torch.Tensor,
+        selected_assignment_mask: torch.Tensor,
+    ) -> torch.Tensor:
+        """Aggregate raw contact patches into assignment-frame 6D wrenches.
+
+        The result is the wrench exerted by each selected robot anchor on the
+        object, expressed about the corresponding ``ContactCandidate`` frame.
+        This raw PhysX path is privileged reward/critic evidence only.
+        """
+
+        batch_size = contact_frame_pose_world.shape[0]
+        selected_count = len(self.selected_anchor_filter_indices)
+        filter_count = len(self.object_filter_body_names)
+        if contact_frame_pose_world.shape != (batch_size, selected_count, 7):
+            raise ValueError("Order9 contact-frame pose shape differs")
+        if selected_assignment_mask.shape != (batch_size, selected_count):
+            raise ValueError("Order9 selected wrench mask shape differs")
+        for name, value in (
+            ("normal_contact_counts", normal_contact_counts),
+            ("normal_contact_starts", normal_contact_starts),
+            ("friction_contact_counts", friction_contact_counts),
+            ("friction_contact_starts", friction_contact_starts),
+        ):
+            if value.shape != (batch_size, filter_count):
+                raise ValueError(f"Order9 {name} shape differs")
+        normal_force = normal_force_magnitudes_n.reshape(-1)
+        if normal_points_world.shape != (normal_force.shape[0], 3) or (
+            normal_vectors_world.shape != normal_points_world.shape
+        ):
+            raise ValueError("Order9 raw normal-contact buffer shape differs")
+        if friction_forces_world.ndim != 2 or friction_forces_world.shape[-1] != 3 or (
+            friction_points_world.shape != friction_forces_world.shape
+        ):
+            raise ValueError("Order9 raw friction-contact buffer shape differs")
+        # PhysX may leave unused raw-buffer rows as NaN.  Finiteness is checked
+        # after the active start/count ranges have been gathered below.
+        if not bool(torch.isfinite(contact_frame_pose_world).all()):
+            raise ValueError("Order9 contact-frame evidence is non-finite")
+        device = contact_frame_pose_world.device
+        dtype = contact_frame_pose_world.dtype
+        selected_filter = torch.tensor(
+            self.selected_anchor_filter_indices,
+            device=device,
+            dtype=torch.long,
+        )
+        origins = contact_frame_pose_world[..., :3]
+        normal_world = _aggregate_selected_patch_wrenches(
+            forces_world=(
+                normal_force.to(device=device, dtype=dtype).unsqueeze(-1)
+                * normal_vectors_world.to(device=device, dtype=dtype)
+            ),
+            points_world=normal_points_world.to(device=device, dtype=dtype),
+            counts=normal_contact_counts.to(device=device),
+            starts=normal_contact_starts.to(device=device),
+            selected_filter_indices=selected_filter,
+            reference_origins_world=origins,
+        )
+        friction_world = _aggregate_selected_patch_wrenches(
+            forces_world=friction_forces_world.to(device=device, dtype=dtype),
+            points_world=friction_points_world.to(device=device, dtype=dtype),
+            counts=friction_contact_counts.to(device=device),
+            starts=friction_contact_starts.to(device=device),
+            selected_filter_indices=selected_filter,
+            reference_origins_world=origins,
+        )
+        wrench_world = normal_world + friction_world
+        world_from_contact = _normalized_quaternion(
+            contact_frame_pose_world[..., 3:7]
+        )
+        contact_from_world = world_from_contact.clone()
+        contact_from_world[..., :3].neg_()
+        wrench_contact = torch.cat(
+            (
+                _quaternion_rotate(contact_from_world, wrench_world[..., :3]),
+                _quaternion_rotate(contact_from_world, wrench_world[..., 3:6]),
+            ),
+            dim=-1,
+        )
+        wrench_contact = torch.where(
+            selected_assignment_mask.unsqueeze(-1),
+            wrench_contact,
+            torch.zeros_like(wrench_contact),
+        )
+        if not bool(torch.isfinite(wrench_contact).all()):
+            raise ValueError("Order9 reduced contact wrench is non-finite")
+        return wrench_contact
+
     def apply(
         self,
         *,
@@ -448,6 +547,62 @@ class Order9TensorIsaacIO:
 
 def _torch(value: Any) -> torch.Tensor:
     return value.torch if hasattr(value, "torch") else value
+
+
+def _aggregate_selected_patch_wrenches(
+    *,
+    forces_world: torch.Tensor,
+    points_world: torch.Tensor,
+    counts: torch.Tensor,
+    starts: torch.Tensor,
+    selected_filter_indices: torch.Tensor,
+    reference_origins_world: torch.Tensor,
+) -> torch.Tensor:
+    batch_size, selected_count, _ = reference_origins_world.shape
+    selected_counts = counts.index_select(1, selected_filter_indices).reshape(-1).long()
+    selected_starts = starts.index_select(1, selected_filter_indices).reshape(-1).long()
+    if bool((selected_counts < 0).any()) or bool((selected_starts < 0).any()):
+        raise ValueError("Order9 raw contact offsets must be non-negative")
+    pair_count = batch_size * selected_count
+    pair_ids = torch.repeat_interleave(
+        torch.arange(pair_count, device=counts.device, dtype=torch.long),
+        selected_counts,
+    )
+    output = torch.zeros(
+        (pair_count, 6), device=forces_world.device, dtype=forces_world.dtype
+    )
+    if pair_ids.numel() == 0:
+        return output.reshape(batch_size, selected_count, 6)
+    repeated_starts = torch.repeat_interleave(selected_starts, selected_counts)
+    repeated_offsets = torch.repeat_interleave(
+        torch.cumsum(selected_counts, dim=0) - selected_counts,
+        selected_counts,
+    )
+    patch_indices = repeated_starts + (
+        torch.arange(pair_ids.numel(), device=counts.device, dtype=torch.long)
+        - repeated_offsets
+    )
+    if bool((patch_indices >= forces_world.shape[0]).any()):
+        raise ValueError("Order9 raw contact buffer range is invalid")
+    force = forces_world.index_select(0, patch_indices)
+    point = points_world.index_select(0, patch_indices)
+    if not bool(torch.isfinite(force).all()) or not bool(torch.isfinite(point).all()):
+        raise ValueError("Order9 active raw contact patch is non-finite")
+    origin = reference_origins_world.reshape(pair_count, 3).index_select(0, pair_ids)
+    moment = torch.cross(point - origin, force, dim=-1)
+    output.index_add_(0, pair_ids, torch.cat((force, moment), dim=-1))
+    return output.reshape(batch_size, selected_count, 6)
+
+
+def _quaternion_rotate(quaternion: torch.Tensor, vector: torch.Tensor) -> torch.Tensor:
+    q_xyz = quaternion[..., :3]
+    q_w = quaternion[..., 3:4]
+    first = torch.cross(q_xyz, vector, dim=-1)
+    return vector + 2.0 * torch.cross(q_xyz, first + q_w * vector, dim=-1)
+
+
+def _normalized_quaternion(value: torch.Tensor) -> torch.Tensor:
+    return value / value.norm(dim=-1, keepdim=True).clamp_min(1.0e-12)
 
 
 def _combined_name(module_id: int, local_id: str) -> str:

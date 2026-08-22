@@ -8,6 +8,7 @@ from amsrr.policies.order9_low_level_policy import (
     Order9LowLevelPolicyConfig,
 )
 from amsrr.policies.order9_tensor_command_decoder import (
+    ORDER9_INDEPENDENT_COMPRESSION_ACTION_ADAPTER_VERSION,
     Order9TensorPolicyCommandDecoder,
 )
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
@@ -107,3 +108,216 @@ def test_tensor_command_decoder_rejects_policy_module_identity_mismatch() -> Non
             ),
             total_mass_kg=torch.ones((1,)),
         )
+
+
+def test_tensor_command_decoder_hard_clamps_joint_position_to_physical_limits() -> None:
+    decoder, config = _decoder()
+    slot_count = len(decoder.local_joint_ids)
+    upper = torch.tensor(decoder._position_upper_limits).reshape(1, 1, -1)
+    reference = upper.expand(1, 2, -1) - 0.01
+    joint_action = torch.zeros((1, 2, 3 * config.max_local_joint_slots))
+    joint_action[..., :slot_count] = 1.0
+    command = decoder.decode(
+        reference_body_pose_world=torch.tensor(
+            [[0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]]
+        ),
+        reference_body_twist=torch.zeros((1, 6)),
+        normalized_global_action=torch.zeros((1, ORDER9_GLOBAL_ACTION_SIZE)),
+        normalized_joint_action=joint_action,
+        policy_module_ids=torch.tensor([[0, 2]]),
+        reference_local_joint_positions_rad=reference,
+        reference_local_joint_velocities_radps=torch.zeros_like(reference),
+        reference_local_joint_mask=torch.ones_like(reference, dtype=torch.bool),
+        total_mass_kg=torch.ones((1,)),
+    )
+    assert torch.equal(
+        command.joint_position_targets_rad,
+        upper.expand_as(command.joint_position_targets_rad),
+    )
+
+
+def test_tensor_command_decoder_maps_one_existing_action_to_compression() -> None:
+    decoder, config = _decoder()
+    batch_size = 2
+    module_count = 2
+    slot_count = len(decoder.local_joint_ids)
+    reference = torch.zeros((batch_size, module_count, slot_count))
+    joint_action = torch.zeros(
+        (batch_size, module_count, 3 * config.max_local_joint_slots)
+    )
+    direction = torch.zeros((module_count, slot_count))
+    direction[0, 0] = 0.10
+    direction[1, 0] = -0.20
+    # The largest direction coordinate is repurposed as the scalar action.
+    joint_action[:, 1, 0] = 0.5
+    joint_action[:, 0, 1] = 0.25
+    command = decoder.decode(
+        reference_body_pose_world=torch.tensor(
+            [[0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]] * batch_size
+        ),
+        reference_body_twist=torch.zeros((batch_size, 6)),
+        normalized_global_action=torch.zeros(
+            (batch_size, ORDER9_GLOBAL_ACTION_SIZE)
+        ),
+        normalized_joint_action=joint_action,
+        policy_module_ids=torch.tensor([[0, 2], [0, 2]]),
+        reference_local_joint_positions_rad=reference,
+        reference_local_joint_velocities_radps=torch.zeros_like(reference),
+        reference_local_joint_mask=torch.ones_like(reference, dtype=torch.bool),
+        total_mass_kg=torch.ones((batch_size,)),
+        contact_compression_joint_direction_rad=direction,
+        contact_compression_action_mask=torch.tensor([True, False]),
+    )
+
+    assert command.contact_compression_action.tolist() == pytest.approx(
+        [0.5, 0.0]
+    )
+    assert command.joint_position_targets_rad[0, 0, 0].item() == pytest.approx(
+        0.05
+    )
+    assert command.joint_position_targets_rad[0, 1, 0].item() == pytest.approx(
+        -0.10
+    )
+    assert command.joint_position_targets_rad[0, 0, 1].item() == pytest.approx(
+        0.25 * config.joint_position_delta_limit_rad
+    )
+    # Outside attach/maintain, the same coordinate retains its original
+    # per-joint action meaning.
+    assert command.joint_position_targets_rad[1, 1, 0].item() == pytest.approx(
+        0.5 * config.joint_position_delta_limit_rad
+    )
+    assert torch.count_nonzero(
+        command.contact_compression_joint_delta_rad[1]
+    ).item() == 0
+
+
+def test_tensor_command_decoder_adds_common_compression_residual() -> None:
+    decoder, config = _decoder()
+    batch_size = 2
+    module_count = 2
+    slot_count = len(decoder.local_joint_ids)
+    reference = torch.zeros((batch_size, module_count, slot_count))
+    joint_action = torch.zeros(
+        (batch_size, module_count, 3 * config.max_local_joint_slots)
+    )
+    direction = torch.zeros((module_count, slot_count))
+    direction[0, 0] = 0.10
+    direction[1, 0] = -0.20
+    joint_action[:, 1, 0] = 0.2
+    command = decoder.decode(
+        reference_body_pose_world=torch.tensor(
+            [[0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]] * batch_size
+        ),
+        reference_body_twist=torch.zeros((batch_size, 6)),
+        normalized_global_action=torch.zeros(
+            (batch_size, ORDER9_GLOBAL_ACTION_SIZE)
+        ),
+        normalized_joint_action=joint_action,
+        policy_module_ids=torch.tensor([[0, 2], [0, 2]]),
+        reference_local_joint_positions_rad=reference,
+        reference_local_joint_velocities_radps=torch.zeros_like(reference),
+        reference_local_joint_mask=torch.ones_like(reference, dtype=torch.bool),
+        total_mass_kg=torch.ones((batch_size,)),
+        contact_compression_joint_direction_rad=direction,
+        contact_compression_action_mask=torch.tensor([True, False]),
+        normalized_contact_compression_residual_action=torch.tensor([0.3, 0.7]),
+    )
+
+    assert command.contact_compression_legacy_joint_action.tolist() == pytest.approx(
+        [0.2, 0.0]
+    )
+    assert command.contact_compression_residual_action.tolist() == pytest.approx(
+        [0.3, 0.0]
+    )
+    assert command.contact_compression_action.tolist() == pytest.approx([0.5, 0.0])
+    assert command.joint_position_targets_rad[0, 0, 0].item() == pytest.approx(
+        0.05
+    )
+    assert command.joint_position_targets_rad[0, 1, 0].item() == pytest.approx(
+        -0.10
+    )
+    assert command.joint_position_targets_rad[1, 1, 0].item() == pytest.approx(
+        0.2 * config.joint_position_delta_limit_rad
+    )
+
+
+def test_tensor_command_decoder_keeps_joint_and_compression_actions_independent() -> None:
+    decoder, config = _decoder()
+    slot_count = len(decoder.local_joint_ids)
+    reference = torch.zeros((1, 2, slot_count))
+    joint_action = torch.zeros((1, 2, 3 * config.max_local_joint_slots))
+    direction = torch.zeros((2, slot_count))
+    direction[0, 0] = 0.10
+    direction[1, 0] = -0.20
+    # This is the largest-direction coordinate historically repurposed by v2.
+    # In v3 it remains an ordinary, independent per-joint correction.
+    joint_action[:, 1, 0] = 0.2
+
+    command = decoder.decode(
+        reference_body_pose_world=torch.tensor(
+            [[0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]]
+        ),
+        reference_body_twist=torch.zeros((1, 6)),
+        normalized_global_action=torch.zeros((1, ORDER9_GLOBAL_ACTION_SIZE)),
+        normalized_joint_action=joint_action,
+        policy_module_ids=torch.tensor([[0, 2]]),
+        reference_local_joint_positions_rad=reference,
+        reference_local_joint_velocities_radps=torch.zeros_like(reference),
+        reference_local_joint_mask=torch.ones_like(reference, dtype=torch.bool),
+        total_mass_kg=torch.ones((1,)),
+        contact_compression_joint_direction_rad=direction,
+        contact_compression_action_mask=torch.tensor([True]),
+        normalized_contact_compression_residual_action=torch.tensor([0.3]),
+        contact_compression_action_adapter_version=(
+            ORDER9_INDEPENDENT_COMPRESSION_ACTION_ADAPTER_VERSION
+        ),
+    )
+
+    assert command.contact_compression_legacy_joint_action.item() == 0.0
+    assert command.contact_compression_action.item() == pytest.approx(0.3)
+    assert command.joint_position_targets_rad[0, 0, 0].item() == pytest.approx(
+        0.03
+    )
+    assert command.joint_position_targets_rad[0, 1, 0].item() == pytest.approx(
+        0.2 * config.joint_position_delta_limit_rad - 0.06
+    )
+
+
+def test_tensor_command_decoder_clamps_complete_compression_action() -> None:
+    decoder, config = _decoder()
+    batch_size = 2
+    module_count = 2
+    slot_count = len(decoder.local_joint_ids)
+    reference = torch.zeros((batch_size, module_count, slot_count))
+    joint_action = torch.zeros(
+        (batch_size, module_count, 3 * config.max_local_joint_slots)
+    )
+    direction = torch.zeros((module_count, slot_count))
+    direction[0, 0] = 0.10
+    joint_action[:, 0, 0] = torch.tensor([0.8, -0.8])
+    command = decoder.decode(
+        reference_body_pose_world=torch.tensor(
+            [[0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]] * batch_size
+        ),
+        reference_body_twist=torch.zeros((batch_size, 6)),
+        normalized_global_action=torch.zeros(
+            (batch_size, ORDER9_GLOBAL_ACTION_SIZE)
+        ),
+        normalized_joint_action=joint_action,
+        policy_module_ids=torch.tensor([[0, 2], [0, 2]]),
+        reference_local_joint_positions_rad=reference,
+        reference_local_joint_velocities_radps=torch.zeros_like(reference),
+        reference_local_joint_mask=torch.ones_like(reference, dtype=torch.bool),
+        total_mass_kg=torch.ones((batch_size,)),
+        contact_compression_joint_direction_rad=direction,
+        contact_compression_action_mask=torch.tensor([True, True]),
+        normalized_contact_compression_residual_action=torch.tensor([0.3, -0.3]),
+        contact_compression_action_limit=0.35,
+    )
+
+    assert command.contact_compression_action.tolist() == pytest.approx(
+        [0.35, -0.35]
+    )
+    assert command.contact_compression_joint_delta_rad[:, 0, 0].tolist() == (
+        pytest.approx([0.035, -0.035])
+    )

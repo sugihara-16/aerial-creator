@@ -22,6 +22,56 @@ from amsrr.utils.hashing import hash_file
 
 
 ORDER9_STAGE_EVALUATION_VERSION = "order9_stage_episode_evaluation_v1"
+ORDER9_EVALUATION_HORIZON_TIMEOUT_CONTRACT = (
+    "order9_evaluation_horizon_exhaustion_failed_episode_v1"
+)
+
+
+def order9_evaluation_horizon_timeout_outcome(
+    *,
+    environment: int,
+    environment_step_count: int,
+    episode_return: float,
+    terminal_phase_index: int,
+) -> dict[str, object]:
+    """Return the fail-closed outcome for a complete horizon without terminal.
+
+    Formal evaluation stops on the first task/safety terminal.  Exhausting the
+    requested horizon is therefore a task failure episode, not missing
+    evidence and not a safety failure.  Keeping this classification explicit
+    prevents a non-terminating policy from escaping the promotion denominator.
+    """
+
+    if environment < 0:
+        raise ValueError("evaluation environment must be non-negative")
+    if environment_step_count < 1:
+        raise ValueError("evaluation horizon timeout requires positive steps")
+    if not math.isfinite(float(episode_return)):
+        raise ValueError("evaluation horizon timeout return must be finite")
+    if terminal_phase_index < 0:
+        raise ValueError("evaluation phase index must be non-negative")
+    return {
+        "environment": int(environment),
+        "task_success": False,
+        "safety_failure": False,
+        "failure_reason": "evaluation_horizon_timeout",
+        "environment_step_count": int(environment_step_count),
+        "episode_return": float(episode_return),
+        "terminal_phase_index": int(terminal_phase_index),
+        "hard_collision": False,
+        "object_dropped": False,
+        "qp_infeasible_terminal": False,
+        "timeout": True,
+        # The retired preload controller is deliberately absent.  These
+        # compatibility metrics remain finite for the v1 episode schema.
+        "contact_preload_initialized": True,
+        "contact_preload_complete": True,
+        "contact_preload_frozen_anchor_count": 0.0,
+        "contact_preload_minimum_load_nm": 0.0,
+        "contact_preload_minimum_signed_normal_force_n": 0.0,
+        "contact_preload_minimum_required_normal_force_n": 0.0,
+        "evaluation_horizon_timeout": True,
+    }
 
 
 @dataclass

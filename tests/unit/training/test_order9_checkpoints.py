@@ -10,7 +10,14 @@ from amsrr.policies.order9_high_level_policy import Order9AutoregressiveHighLeve
 from amsrr.policies.order9_low_level_policy import (
     Order9ActiveKnotLowLevelPolicyConfig,
     Order9ActiveKnotPhaseConditionedActorCritic,
+    Order9ContactFeedbackLowLevelPolicyConfig,
+    Order9ContactFeedbackPhaseConditionedActorCritic,
+    Order9CategoricalContactNormalLowLevelPolicyConfig,
+    Order9CategoricalContactNormalPhaseConditionedActorCritic,
+    Order9ContactResidualPhaseConditionedActorCritic,
+    Order9ContactSpacePhaseConditionedActorCritic,
     Order9LowLevelPolicyConfig,
+    Order9MorphologyInvariantCompressionActorCritic,
     Order9PhaseConditionedActorCritic,
 )
 from amsrr.schemas.common import SchemaValidationError
@@ -45,6 +52,46 @@ from amsrr.utils.hashing import hash_file, stable_hash
         ),
         Order9ActiveKnotPhaseConditionedActorCritic(
             Order9ActiveKnotLowLevelPolicyConfig(
+                graph_hidden_dim=16,
+                graph_message_layers=1,
+                recurrent_hidden_dim=24,
+                max_local_joint_slots=4,
+            )
+        ),
+        Order9ContactResidualPhaseConditionedActorCritic(
+            Order9ActiveKnotLowLevelPolicyConfig(
+                graph_hidden_dim=16,
+                graph_message_layers=1,
+                recurrent_hidden_dim=24,
+                max_local_joint_slots=4,
+            )
+        ),
+        Order9MorphologyInvariantCompressionActorCritic(
+            Order9ActiveKnotLowLevelPolicyConfig(
+                graph_hidden_dim=16,
+                graph_message_layers=1,
+                recurrent_hidden_dim=24,
+                max_local_joint_slots=4,
+            )
+        ),
+        Order9ContactSpacePhaseConditionedActorCritic(
+            Order9ActiveKnotLowLevelPolicyConfig(
+                graph_hidden_dim=16,
+                graph_message_layers=1,
+                recurrent_hidden_dim=24,
+                max_local_joint_slots=4,
+            )
+        ),
+        Order9ContactFeedbackPhaseConditionedActorCritic(
+            Order9ContactFeedbackLowLevelPolicyConfig(
+                graph_hidden_dim=16,
+                graph_message_layers=1,
+                recurrent_hidden_dim=24,
+                max_local_joint_slots=4,
+            )
+        ),
+        Order9CategoricalContactNormalPhaseConditionedActorCritic(
+            Order9CategoricalContactNormalLowLevelPolicyConfig(
                 graph_hidden_dim=16,
                 graph_message_layers=1,
                 recurrent_hidden_dim=24,

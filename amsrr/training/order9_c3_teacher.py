@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import combinations
+import math
 from typing import Mapping
 
 from amsrr.feasibility.articulated_reachability import (
@@ -18,7 +19,7 @@ from amsrr.robot_model.gripper_surfaces import (
     GripperSurface,
     resolve_unoccupied_gripper_surfaces,
 )
-from amsrr.schemas.common import SchemaValidationError
+from amsrr.schemas.common import ContactMode, SchemaValidationError
 from amsrr.schemas.contact_candidates import ContactCandidateSet
 from amsrr.schemas.feasibility import FeasibilityResult
 from amsrr.schemas.morphology import DesignOutput, MorphologyGraph
@@ -48,7 +49,7 @@ from amsrr.utils.hashing import stable_hash
 
 
 ORDER9_C3_ARTICULATED_TEACHER_VERSION = (
-    "order9_c3_articulated_teacher_v7_bucket_support_ground"
+    "order9_c3_articulated_teacher_v8_mesh_clear_pregrasp"
 )
 ORDER9_C3_OVERHEAD_START_CLEARANCE_M = 0.35
 ORDER9_C3_GROUND_PLANE_Z_M = 0.0
@@ -63,6 +64,9 @@ class Order9C3TeacherConfig:
     preferred_candidate_group_id: str | None = None
     excluded_surface_port_id_pairs: tuple[tuple[int, int], ...] = ()
     require_full_trajectory_recheck: bool = True
+    collision_margin_m: float = 0.005
+    grasp_contact_height_offset_m: float = 0.0
+    pregrasp_clearance_m: float = 0.08
 
     def __post_init__(self) -> None:
         if self.maximum_surface_pair_attempts < 1:
@@ -105,6 +109,26 @@ class Order9C3TeacherConfig:
         if not isinstance(self.require_full_trajectory_recheck, bool):
             raise ValueError(
                 "require_full_trajectory_recheck must be boolean"
+            )
+        if (
+            not math.isfinite(float(self.collision_margin_m))
+            or self.collision_margin_m <= 0.0
+        ):
+            raise ValueError("collision_margin_m must be finite and positive")
+        if (
+            not math.isfinite(float(self.grasp_contact_height_offset_m))
+            or not 0.0 <= self.grasp_contact_height_offset_m <= 0.10
+        ):
+            raise ValueError(
+                "grasp_contact_height_offset_m must be finite and in "
+                "[0, 0.10]"
+            )
+        if (
+            not math.isfinite(float(self.pregrasp_clearance_m))
+            or not 0.05 <= self.pregrasp_clearance_m <= 0.30
+        ):
+            raise ValueError(
+                "pregrasp_clearance_m must be finite and in [0.05, 0.30]"
             )
 
 
@@ -294,6 +318,10 @@ def build_order9_c3_articulated_teacher(
                 morphology_graph=design.target_morphology,
                 geometry_descriptors=built.scene_graph.geometry_descriptors,
             )
+            candidates = _offset_horizontal_grasp_candidates(
+                candidates,
+                height_offset_m=cfg.grasp_contact_height_offset_m,
+            )
             teacher_observation = (
                 build_order9_c3_neutral_runtime_observation(
                     design.target_morphology,
@@ -324,7 +352,9 @@ def build_order9_c3_articulated_teacher(
                 config=Order9ArticulatedTeacherConfig(
                     preferred_candidate_group_id=(
                         cfg.preferred_candidate_group_id
-                    )
+                    ),
+                    collision_margin_m=cfg.collision_margin_m,
+                    pregrasp_clearance_m=cfg.pregrasp_clearance_m,
                 ),
                 collision_object=collision_object,
             ).plan(
@@ -386,6 +416,53 @@ def build_order9_c3_articulated_teacher(
         "C3 articulated teacher exhausted surface-pair search; "
         + "; ".join(failures[:8])
     )
+
+
+def _offset_horizontal_grasp_candidates(
+    candidate_set: ContactCandidateSet,
+    *,
+    height_offset_m: float,
+) -> ContactCandidateSet:
+    """Move supported-box side contacts upward without changing identity.
+
+    C3 contact regions are sampled at each face centre.  A centre-height side
+    contact can be kinematically valid while the real docking mesh below its
+    contact frame intersects the payload support.  The offset remains tangent
+    to a vertical face, so it changes neither its normal nor its wrench model.
+    """
+
+    if height_offset_m == 0.0:
+        return candidate_set
+    result = ContactCandidateSet.from_dict(candidate_set.to_dict())
+    shifted = 0
+    for candidate in result.candidates:
+        if (
+            candidate.contact_mode != ContactMode.GRASP
+            or abs(float(candidate.normal_world[2])) > 0.25
+        ):
+            continue
+        pose = list(candidate.contact_pose_world)
+        frame = list(candidate.contact_frame_world)
+        pose[2] += float(height_offset_m)
+        frame[2] += float(height_offset_m)
+        candidate.contact_pose_world = tuple(pose)  # type: ignore[assignment]
+        candidate.contact_frame_world = tuple(frame)  # type: ignore[assignment]
+        candidate.candidate_scores = {
+            **candidate.candidate_scores,
+            "c3_grasp_contact_height_offset_m": float(height_offset_m),
+        }
+        candidate.validate()
+        shifted += 1
+    if shifted == 0:
+        raise SchemaValidationError(
+            "C3 grasp contact height offset found no horizontal grasp face"
+        )
+    result.sampler_version = (
+        f"{result.sampler_version}+c3_side_height_"
+        f"{1.0e3 * float(height_offset_m):.3f}mm"
+    )
+    result.validate()
+    return result
 
 
 def _rank_surface_pairs(

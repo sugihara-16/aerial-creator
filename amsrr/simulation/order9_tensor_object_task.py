@@ -19,6 +19,69 @@ ORDER9_CONTACT_SCHEDULE_ATTACH = 2
 ORDER9_CONTACT_SCHEDULE_MAINTAIN = 3
 ORDER9_CONTACT_SCHEDULE_RELEASE = 4
 ORDER9_PHASE_SUCCESSOR_REFERENCE_SEMANTICS = "planned_phase_goal_v1"
+ORDER9_PAYLOAD_FEEDFORWARD_PHASE_CONTRACT = (
+    "order9_payload_feedforward_lift_transport_place_release_handoff_v2"
+)
+ORDER9_RELEASE_PAYLOAD_HANDOFF_FRACTION = 0.50
+
+
+def order9_payload_feedforward_active(
+    phase_index: torch.Tensor,
+) -> torch.Tensor:
+    """Enable payload compensation only while the robot owns its weight."""
+
+    if phase_index.ndim != 1 or phase_index.dtype not in {
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+    }:
+        raise ValueError("Order9 payload phase indices must be integral [batch]")
+    lift = ORDER9_OBJECT_TASK_PHASES.index(Order9ObjectTaskPhase.LIFT)
+    place = ORDER9_OBJECT_TASK_PHASES.index(Order9ObjectTaskPhase.PLACE)
+    return (phase_index >= lift) & (phase_index <= place)
+
+
+def order9_payload_feedforward_scale(
+    phase_index: torch.Tensor,
+    phase_progress: torch.Tensor,
+    *,
+    release_handoff_fraction: float = ORDER9_RELEASE_PAYLOAD_HANDOFF_FRACTION,
+) -> torch.Tensor:
+    """Return a deployable phase-scheduled payload-ownership fraction.
+
+    Full compensation is retained through place. During release it is handed
+    off smoothly as the nominal anchors open, avoiding a discontinuous loss
+    of gravity feedforward while the payload is still mechanically coupled.
+    """
+
+    if phase_index.ndim != 1 or phase_index.dtype not in {
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+    }:
+        raise ValueError("Order9 payload phase indices must be integral [batch]")
+    if (
+        phase_progress.shape != phase_index.shape
+        or not phase_progress.dtype.is_floating_point
+        or not bool(torch.isfinite(phase_progress).all())
+    ):
+        raise ValueError(
+            "Order9 payload phase progress must be finite floating [batch]"
+        )
+    if not 0.0 < float(release_handoff_fraction) <= 1.0:
+        raise ValueError("release payload handoff fraction must be in (0, 1]")
+    scale = order9_payload_feedforward_active(phase_index).to(
+        dtype=phase_progress.dtype
+    )
+    release = ORDER9_OBJECT_TASK_PHASES.index(Order9ObjectTaskPhase.RELEASE)
+    release_mask = phase_index == release
+    normalized = (
+        phase_progress / float(release_handoff_fraction)
+    ).clamp(min=0.0, max=1.0)
+    smooth = normalized * normalized * (3.0 - 2.0 * normalized)
+    return torch.where(release_mask, 1.0 - smooth, scale)
 
 
 @dataclass(frozen=True)
@@ -328,6 +391,10 @@ __all__ = [
     "ORDER9_CONTACT_SCHEDULE_MAINTAIN",
     "ORDER9_CONTACT_SCHEDULE_RELEASE",
     "ORDER9_PHASE_SUCCESSOR_REFERENCE_SEMANTICS",
+    "ORDER9_PAYLOAD_FEEDFORWARD_PHASE_CONTRACT",
     "Order9TensorObjectTaskRuntime",
     "Order9TensorObjectTaskTarget",
+    "order9_payload_feedforward_active",
+    "order9_payload_feedforward_scale",
+    "ORDER9_RELEASE_PAYLOAD_HANDOFF_FRACTION",
 ]

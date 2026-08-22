@@ -112,6 +112,7 @@ class Order9PostureResolverConfig:
     enforce_joint_rate: bool = True
     require_external_validation: bool = False
     anchor_position_tolerance_m: float = 0.005
+    collision_margin_m: float = 0.005
 
     def __post_init__(self) -> None:
         if (
@@ -130,6 +131,11 @@ class Order9PostureResolverConfig:
             raise ValueError(
                 "anchor_position_tolerance_m must be finite and positive"
             )
+        if (
+            not math.isfinite(float(self.collision_margin_m))
+            or self.collision_margin_m <= 0.0
+        ):
+            raise ValueError("collision_margin_m must be finite and positive")
         if not isinstance(self.enforce_joint_rate, bool):
             raise ValueError("enforce_joint_rate must be boolean")
 
@@ -301,6 +307,7 @@ class Order9PostureTrajectoryResolver:
                 # can jump branches and create a discontinuous nominal path.
                 use_relaxed_seed=False,
             ),
+            collision_margin_m=self.config.collision_margin_m,
         )
         collision_methods = (
             hasattr(self.ik_solver, "set_collision_scene"),
@@ -762,6 +769,7 @@ def _default_posture_ik_solver(
     require_native: bool,
     nominal_collision_pair_manifest: str | Path | None,
     ik_config: CentroidalPostureIKConfig,
+    collision_margin_m: float,
 ) -> CentroidalPostureIKSolver:
     if not prefer_native:
         return CentroidalPostureIKSolver(
@@ -800,6 +808,7 @@ def _default_posture_ik_solver(
         )
 
     from amsrr.feasibility.order9_posture_collision import (
+        CollisionAwareIKConfig,
         CollisionAwareNativeCentroidalPostureIKSolver,
     )
 
@@ -827,6 +836,12 @@ def _default_posture_ik_solver(
         physical_model,
         kinematics=kinematics,
         config=ik_config,
+        collision_config=CollisionAwareIKConfig(
+            collision_margin_m=float(collision_margin_m),
+            collision_activation_distance_m=max(
+                0.020, float(collision_margin_m)
+            ),
+        ),
     )
 
 

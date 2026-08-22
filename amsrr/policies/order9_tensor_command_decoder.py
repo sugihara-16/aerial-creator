@@ -13,6 +13,17 @@ from amsrr.policies.order9_low_level_policy import (
 from amsrr.schemas.physical_model import PhysicalModel
 
 
+ORDER9_CONTACT_COMPRESSION_ACTION_ADAPTER_VERSION = (
+    "order9_contact_compression_scalar_action_adapter_v1"
+)
+ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_ACTION_ADAPTER_VERSION = (
+    "order9_morphology_invariant_compression_action_adapter_v2"
+)
+ORDER9_INDEPENDENT_COMPRESSION_ACTION_ADAPTER_VERSION = (
+    "order9_independent_compression_action_adapter_v3"
+)
+
+
 @dataclass(frozen=True)
 class Order9TensorPolicyCommand:
     desired_body_pose_world: torch.Tensor
@@ -24,6 +35,10 @@ class Order9TensorPolicyCommand:
     joint_target_mask: torch.Tensor
     module_ids: tuple[int, ...]
     local_joint_ids: tuple[str, ...]
+    contact_compression_legacy_joint_action: torch.Tensor
+    contact_compression_residual_action: torch.Tensor
+    contact_compression_action: torch.Tensor
+    contact_compression_joint_delta_rad: torch.Tensor
 
 
 class Order9TensorPolicyCommandDecoder:
@@ -59,6 +74,14 @@ class Order9TensorPolicyCommandDecoder:
             abs(float(joints_by_id[joint_id].effort_limit or 0.0))
             for joint_id in self.local_joint_ids
         )
+        self._position_lower_limits = tuple(
+            float(joints_by_id[joint_id].limit_lower)
+            for joint_id in self.local_joint_ids
+        )
+        self._position_upper_limits = tuple(
+            float(joints_by_id[joint_id].limit_upper)
+            for joint_id in self.local_joint_ids
+        )
         self._policy_identity_validated = False
 
     def decode(
@@ -73,6 +96,13 @@ class Order9TensorPolicyCommandDecoder:
         reference_local_joint_velocities_radps: torch.Tensor,
         reference_local_joint_mask: torch.Tensor,
         total_mass_kg: torch.Tensor,
+        contact_compression_joint_direction_rad: torch.Tensor | None = None,
+        contact_compression_action_mask: torch.Tensor | None = None,
+        normalized_contact_compression_residual_action: torch.Tensor | None = None,
+        contact_compression_action_limit: float | torch.Tensor | None = None,
+        contact_compression_action_adapter_version: str = (
+            ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_ACTION_ADAPTER_VERSION
+        ),
     ) -> Order9TensorPolicyCommand:
         batch_size = reference_body_pose_world.shape[0]
         module_count = len(self.module_ids)
@@ -178,11 +208,51 @@ class Order9TensorPolicyCommandDecoder:
             device=reference_body_pose_world.device,
             dtype=reference_body_pose_world.dtype,
         )
-        q_delta = (
-            normalized_joint_action[:, :, :slot_count]
-            * float(self.config.joint_position_delta_limit_rad)
+        (
+            q_delta,
+            legacy_compression_action,
+            residual_compression_action,
+            compression_action,
+            compression_joint_delta,
+        ) = _joint_position_delta_with_contact_compression_adapter(
+            normalized_position_action=(
+                normalized_joint_action[:, :, :slot_count]
+            ),
+            joint_position_delta_limit_rad=float(
+                self.config.joint_position_delta_limit_rad
+            ),
+            contact_compression_joint_direction_rad=(
+                contact_compression_joint_direction_rad
+            ),
+            contact_compression_action_mask=(
+                contact_compression_action_mask
+            ),
+            normalized_contact_compression_residual_action=(
+                normalized_contact_compression_residual_action
+            ),
+            contact_compression_action_limit=contact_compression_action_limit,
+            reference_local_joint_mask=reference_local_joint_mask,
+            contact_compression_action_adapter_version=(
+                contact_compression_action_adapter_version
+            ),
         )
-        output_q = reference_local_joint_positions_rad + q_delta
+        lower = torch.tensor(
+            self._position_lower_limits,
+            device=reference_body_pose_world.device,
+            dtype=reference_body_pose_world.dtype,
+        ).reshape(1, 1, -1)
+        upper = torch.tensor(
+            self._position_upper_limits,
+            device=reference_body_pose_world.device,
+            dtype=reference_body_pose_world.dtype,
+        ).reshape(1, 1, -1)
+        # Deployable hard shield: learned residuals and the virtual nominal
+        # compression may approach a mechanism bound, but the command passed
+        # to the actuator may never cross the PhysicalModel joint interval.
+        output_q = torch.maximum(
+            torch.minimum(reference_local_joint_positions_rad + q_delta, upper),
+            lower,
+        )
         output_qdot = (
             reference_local_joint_velocities_radps
             + normalized_joint_action[
@@ -216,7 +286,181 @@ class Order9TensorPolicyCommandDecoder:
             joint_target_mask=output_mask,
             module_ids=self.module_ids,
             local_joint_ids=self.local_joint_ids,
+            contact_compression_legacy_joint_action=legacy_compression_action,
+            contact_compression_residual_action=residual_compression_action,
+            contact_compression_action=compression_action,
+            contact_compression_joint_delta_rad=compression_joint_delta,
         )
+
+
+def _joint_position_delta_with_contact_compression_adapter(
+    *,
+    normalized_position_action: torch.Tensor,
+    joint_position_delta_limit_rad: float,
+    contact_compression_joint_direction_rad: torch.Tensor | None,
+    contact_compression_action_mask: torch.Tensor | None,
+    normalized_contact_compression_residual_action: torch.Tensor | None,
+    contact_compression_action_limit: float | torch.Tensor | None,
+    reference_local_joint_mask: torch.Tensor,
+    contact_compression_action_adapter_version: str,
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+]:
+    """Decode direct joint residuals and coherent grasp compression.
+
+    Adapter v2 preserves the historical selected-coordinate behavior for old
+    checkpoints.  Adapter v3 keeps every per-joint position action independent
+    and uses only the dedicated scalar head for the morphology-specific IK
+    compression direction.
+    """
+
+    if normalized_position_action.ndim != 3:
+        raise ValueError("Order9 normalized position action must be [B, M, J]")
+    batch_size, module_count, slot_count = normalized_position_action.shape
+    if reference_local_joint_mask.shape != normalized_position_action.shape:
+        raise ValueError("Order9 contact adapter joint mask shape differs")
+    if contact_compression_action_adapter_version not in {
+        ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_ACTION_ADAPTER_VERSION,
+        ORDER9_INDEPENDENT_COMPRESSION_ACTION_ADAPTER_VERSION,
+    }:
+        raise ValueError("Order9 contact-compression adapter version differs")
+    zero_action = torch.zeros(
+        (batch_size,),
+        device=normalized_position_action.device,
+        dtype=normalized_position_action.dtype,
+    )
+    zero_delta = torch.zeros_like(normalized_position_action)
+    residual_action = (
+        zero_action
+        if normalized_contact_compression_residual_action is None
+        else normalized_contact_compression_residual_action.to(
+            device=normalized_position_action.device,
+            dtype=normalized_position_action.dtype,
+        )
+    )
+    if residual_action.shape != (batch_size,):
+        raise ValueError(
+            "Order9 contact-compression residual action shape differs"
+        )
+    if not bool(torch.isfinite(residual_action).all()) or bool(
+        (residual_action.abs() > 1.0 + 1.0e-6).any()
+    ):
+        raise ValueError(
+            "Order9 contact-compression residual action must be finite in [-1, 1]"
+        )
+    if contact_compression_joint_direction_rad is None:
+        if contact_compression_action_mask is not None:
+            raise ValueError("Order9 contact adapter mask lacks a direction")
+        return (
+            normalized_position_action * float(joint_position_delta_limit_rad),
+            zero_action,
+            zero_action,
+            zero_action,
+            zero_delta,
+        )
+    if contact_compression_action_mask is None:
+        raise ValueError("Order9 contact adapter direction lacks an active mask")
+    direction = contact_compression_joint_direction_rad.to(
+        device=normalized_position_action.device,
+        dtype=normalized_position_action.dtype,
+    )
+    if direction.ndim == 2:
+        direction = direction.unsqueeze(0).expand(batch_size, -1, -1)
+    if direction.shape != (batch_size, module_count, slot_count):
+        raise ValueError("Order9 contact adapter direction shape differs")
+    if contact_compression_action_mask.shape != (batch_size,):
+        raise ValueError("Order9 contact adapter active-mask shape differs")
+    if not bool(torch.isfinite(direction).all()):
+        raise ValueError("Order9 contact adapter direction is non-finite")
+    active = contact_compression_action_mask.to(
+        device=normalized_position_action.device, dtype=torch.bool
+    )
+    if not bool(active.any()):
+        return (
+            normalized_position_action * float(joint_position_delta_limit_rad),
+            zero_action,
+            zero_action,
+            zero_action,
+            zero_delta,
+        )
+    # Every environment in one topology bucket shares this local IK direction.
+    if not bool(torch.allclose(direction, direction[:1].expand_as(direction))):
+        raise ValueError("Order9 contact adapter direction differs within bucket")
+    flat_direction = direction[0].reshape(-1)
+    control_index = int(flat_direction.abs().argmax().item())
+    if float(flat_direction[control_index].abs().item()) <= 1.0e-9:
+        raise ValueError("Order9 contact adapter direction is zero")
+    flat_joint_mask = reference_local_joint_mask.reshape(batch_size, -1)
+    if not bool(flat_joint_mask[:, control_index].all()):
+        raise ValueError("Order9 contact adapter control coordinate is masked")
+    independent = (
+        contact_compression_action_adapter_version
+        == ORDER9_INDEPENDENT_COMPRESSION_ACTION_ADAPTER_VERSION
+    )
+    direct_action = normalized_position_action.clone().reshape(batch_size, -1)
+    if independent:
+        # The dedicated scalar must not steal or suppress any per-joint action.
+        active_legacy_action = zero_action
+    else:
+        legacy_action = direct_action[:, control_index].clone()
+        direct_action[:, control_index] = torch.where(
+            active,
+            torch.zeros_like(legacy_action),
+            legacy_action,
+        )
+        active_legacy_action = torch.where(
+            active, legacy_action, torch.zeros_like(legacy_action)
+        )
+    direct_delta = direct_action.reshape_as(normalized_position_action) * float(
+        joint_position_delta_limit_rad
+    )
+    active_residual_action = torch.where(
+        active, residual_action, torch.zeros_like(residual_action)
+    )
+    compression_action = torch.clamp(
+        active_residual_action
+        if independent
+        else active_legacy_action + active_residual_action,
+        min=-1.0,
+        max=1.0,
+    )
+    if contact_compression_action_limit is not None:
+        action_limit = torch.as_tensor(
+            contact_compression_action_limit,
+            device=compression_action.device,
+            dtype=compression_action.dtype,
+        )
+        if action_limit.ndim == 0:
+            action_limit = action_limit.expand(batch_size)
+        if action_limit.shape != (batch_size,):
+            raise ValueError(
+                "Order9 contact-compression action limit shape differs"
+            )
+        if not bool(torch.isfinite(action_limit).all()) or bool(
+            ((action_limit <= 0.0) | (action_limit > 1.0)).any()
+        ):
+            raise ValueError(
+                "Order9 contact-compression action limit must be finite in (0, 1]"
+            )
+        compression_action = torch.maximum(
+            torch.minimum(compression_action, action_limit), -action_limit
+        )
+    compression_joint_delta = (
+        compression_action[:, None, None]
+        * direction
+        * active[:, None, None].to(direction.dtype)
+    )
+    return (
+        direct_delta + compression_joint_delta,
+        active_legacy_action,
+        active_residual_action,
+        compression_action,
+        compression_joint_delta,
+    )
 
 
 def _apply_centroidal_pose_action(
@@ -267,6 +511,9 @@ def _normalize_quaternion(value: torch.Tensor) -> torch.Tensor:
 
 
 __all__ = [
+    "ORDER9_CONTACT_COMPRESSION_ACTION_ADAPTER_VERSION",
+    "ORDER9_INDEPENDENT_COMPRESSION_ACTION_ADAPTER_VERSION",
+    "ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_ACTION_ADAPTER_VERSION",
     "Order9TensorPolicyCommand",
     "Order9TensorPolicyCommandDecoder",
 ]

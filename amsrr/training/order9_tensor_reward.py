@@ -17,6 +17,8 @@ ORDER9_TENSOR_REWARD_TERM_NAMES = (
     "weighted_object_goal_progress",
     "weighted_object_pose_accuracy",
     "weighted_grasp_maintenance",
+    "weighted_wrench_range_violation_penalty",
+    "weighted_normal_contact_quality_penalty",
     "weighted_centroidal_stability",
     "weighted_energy_penalty",
     "weighted_qp_residual_penalty",
@@ -26,6 +28,23 @@ ORDER9_TENSOR_REWARD_TERM_NAMES = (
     "terminal_success_bonus",
     "terminal_failure_penalty",
 )
+ORDER9_DEPLOYABLE_NORMAL_CONTACT_QUALITY_REWARD_CONTRACT = (
+    "order9_fk_motor_load_normal_contact_quality_v1"
+)
+ORDER9_RELEASE_SUCCESS_CONTRACT = (
+    "order9_release_success_contact_free_object_pose_v2"
+)
+ORDER9_OBJECT_POSE_SUCCESS_CONTRACT = (
+    "order9_object_pose_success_50mm_plus_2mm_numeric_margin_v1"
+)
+ORDER9_CONTACT_ACQUISITION_SUCCESS_CONTRACT = (
+    "order9_c3_privileged_two_physx_contacts_qp_dwell_v7"
+)
+ORDER9_C3_PRIVILEGED_PHASE_SUPERVISION_CONTRACT = (
+    "order9_c3_privileged_physx_contact_outcome_phase_supervisor_v2"
+)
+ORDER9_RELEASE_JOINT_POSITION_TOLERANCE_RAD = 0.05
+ORDER9_OBJECT_POSITION_TOLERANCE_M = 0.052
 
 
 @dataclass(frozen=True)
@@ -34,11 +53,24 @@ class Order9TensorRewardGateConfig:
     contact_force_threshold_n: float = 0.5
     contact_dwell_s: float = 0.25
     contact_break_grace_s: float = 0.05
+    # Training-only continuation curriculum.  The reward penalty always uses
+    # the exact teacher box; deterministic evaluation must set this to 1.0.
+    wrench_range_gate_scale: float = 1.0
     release_contact_free_dwell_s: float = 0.10
+    # Retained in artifact metadata for lineage compatibility; not a success
+    # gate under ORDER9_RELEASE_SUCCESS_CONTRACT v2.
+    release_joint_position_tolerance_rad: float = (
+        ORDER9_RELEASE_JOINT_POSITION_TOLERANCE_RAD
+    )
     approach_position_tolerance_m: float = 0.08
     approach_orientation_tolerance_rad: float = 0.20
     approach_linear_speed_tolerance_mps: float = 0.02
-    object_position_tolerance_m: float = 0.05
+    # The task-level precision remains 50 mm.  The additional 2 mm is a
+    # deterministic comparison margin for PhysX/contact-equilibrium variation;
+    # without it, otherwise identical rollouts toggle at 49.997--51.8 mm.
+    object_position_tolerance_m: float = (
+        ORDER9_OBJECT_POSITION_TOLERANCE_M
+    )
     object_orientation_tolerance_rad: float = 0.20
     lift_off_clearance_m: float = 0.001
     downward_drop_velocity_threshold_mps: float = 0.25
@@ -56,6 +88,8 @@ class Order9TensorRewardGateConfig:
                 continue
             if not float(value) > 0.0:
                 raise ValueError(f"{name} must be positive")
+        if self.wrench_range_gate_scale < 1.0:
+            raise ValueError("wrench_range_gate_scale must be at least one")
 
 
 @dataclass(frozen=True)
@@ -81,9 +115,23 @@ class Order9TensorRewardInput:
     object_twist_world: torch.Tensor
     desired_robot_pose_world: torch.Tensor
     desired_object_pose_world: torch.Tensor
+    local_joint_positions_rad: torch.Tensor
+    phase_goal_joint_positions_rad: torch.Tensor
     selected_contact_forces_world: torch.Tensor
+    selected_contact_wrenches_contact: torch.Tensor
+    wrench_lower_contact: torch.Tensor
+    wrench_upper_contact: torch.Tensor
+    wrench_bound_mask: torch.Tensor
     selected_link_twist_world: torch.Tensor
     selected_contact_mask: torch.Tensor
+    # Deployable evidence only: FK grasp-frame error, relative normal speed,
+    # and motor-current-equivalent joint-load projection.  No PhysX contact
+    # force or F/T sensor value enters this shaping term.
+    selected_grasp_frame_normal_error_m: torch.Tensor
+    selected_relative_normal_velocity_mps: torch.Tensor
+    selected_motor_load_proxy: torch.Tensor
+    target_motor_load_proxy: torch.Tensor
+    contact_preload_complete: torch.Tensor
     prohibited_collision: torch.Tensor
     support_top_z_m: torch.Tensor
     object_half_height_m: torch.Tensor
@@ -105,7 +153,9 @@ class Order9TensorRewardResult:
     qp_infeasible_terminal: torch.Tensor
     release_valid: torch.Tensor
     active_contact_count: torch.Tensor
+    wrench_range_satisfied: torch.Tensor
     slip_speed_mps: torch.Tensor
+    wrench_range_violation: torch.Tensor
     terms: dict[str, torch.Tensor]
     next_state: Order9TensorRewardState
 
@@ -168,8 +218,94 @@ class Order9TensorRewardEngine:
         ) & evidence.selected_contact_mask
         active_count = active_contact.sum(dim=-1)
         enough_contact = active_count >= gate.required_contact_count
+        wrench_bound = evidence.wrench_bound_mask
+        lower_violation = torch.relu(
+            evidence.wrench_lower_contact
+            - evidence.selected_contact_wrenches_contact
+        )
+        upper_violation = torch.relu(
+            evidence.selected_contact_wrenches_contact
+            - evidence.wrench_upper_contact
+        )
+        # Normalize by the teacher-proposed interval itself.  This introduces
+        # no task-specific force/torque threshold and does not prefer an
+        # arbitrary pointwise decomposition while the realized wrench remains
+        # in range.
+        wrench_width = (
+            evidence.wrench_upper_contact - evidence.wrench_lower_contact
+        ).clamp_min(1.0e-6)
+        normalized_axis_violation = (
+            (lower_violation + upper_violation) / wrench_width
+        )
+        # A 6D wrench belongs to the proposed box only when every component is
+        # inside.  L-infinity aggregation preserves that feasibility meaning;
+        # averaging six axes would dilute a missing grasp-normal force.
+        per_assignment_normalized_wrench_violation = (
+            normalized_axis_violation.amax(dim=-1)
+        )
+        # Preserve the former linear penalty exactly through one interval
+        # width, but retain ordering beyond it.  A hard clamp made 79--98% of
+        # measured C3 contact samples indistinguishable once the wrench was
+        # more than one interval width outside the teacher box.  The
+        # logarithmic tail keeps severe PhysX impulses bounded in influence
+        # without creating that reward plateau.
+        per_assignment_wrench_penalty = torch.where(
+            per_assignment_normalized_wrench_violation <= 1.0,
+            per_assignment_normalized_wrench_violation,
+            1.0
+            + torch.log(
+                per_assignment_normalized_wrench_violation.clamp_min(1.0)
+            ),
+        )
+        bound_count = wrench_bound.sum(dim=-1)
+        wrench_range_violation = (
+            (
+                per_assignment_wrench_penalty
+                * wrench_bound.to(per_assignment_wrench_penalty.dtype)
+            ).sum(dim=-1)
+            / bound_count.clamp_min(1).to(per_assignment_wrench_penalty.dtype)
+        )
+        wrench_range_violation = torch.where(
+            bound_count > 0,
+            wrench_range_violation,
+            torch.zeros_like(wrench_range_violation),
+        )
+        wrench_midpoint = 0.5 * (
+            evidence.wrench_lower_contact + evidence.wrench_upper_contact
+        )
+        gate_half_width = (
+            0.5
+            * gate.wrench_range_gate_scale
+            * (
+                evidence.wrench_upper_contact
+                - evidence.wrench_lower_contact
+            )
+        )
+        gate_lower = wrench_midpoint - gate_half_width
+        gate_upper = wrench_midpoint + gate_half_width
+        gate_axis_satisfied = (
+            evidence.selected_contact_wrenches_contact >= gate_lower
+        ) & (
+            evidence.selected_contact_wrenches_contact <= gate_upper
+        )
+        wrench_range_satisfied = (
+            bound_count >= gate.required_contact_count
+        ) & torch.all(
+            torch.all(gate_axis_satisfied, dim=-1) | ~wrench_bound,
+            dim=-1,
+        )
+        # C3 uses PhysX contact truth only as privileged training/evaluation
+        # supervision.  Exact membership in the teacher's per-contact 6D
+        # wrench box remains a dense reward/diagnostic signal, but is not a
+        # grasp-success gate: stable grasp outcome and controller constraints
+        # are the task authority.  Neither raw contact truth nor the retired
+        # controller-side preload flag enters the actor/controller path.
+        grasp_ready = (
+            enough_contact
+            & evidence.qp_feasible
+        )
         contact_dwell = torch.where(
-            enough_contact,
+            grasp_ready,
             state.contact_dwell_s + dt,
             torch.zeros_like(state.contact_dwell_s),
         )
@@ -256,20 +392,26 @@ class Order9TensorRewardEngine:
             & (robot_position_error <= gate.approach_position_tolerance_m)
             & (robot_orientation_error <= gate.approach_orientation_tolerance_rad)
             & (robot_speed <= gate.approach_linear_speed_tolerance_mps)
+            & evidence.qp_feasible
         )
         phase_success |= contact & (contact_dwell >= gate.contact_dwell_s)
         phase_success |= (
             lift
             & object_pose_ok
             & (support_clearance >= gate.lift_off_clearance_m)
-            & enough_contact
+            & grasp_ready
         )
-        phase_success |= (transport | place) & object_pose_ok & enough_contact
+        phase_success |= (transport | place) & object_pose_ok & grasp_ready
+        # Release is a physical task outcome: the payload is contact-free and
+        # remains at its commanded pose.  Exact agreement with one nominal IK
+        # posture is neither necessary for release nor morphology invariant;
+        # joint tracking remains part of the controller/reward diagnostics.
         phase_success |= release & release_valid
         phase_success |= (
             retreat
             & (robot_position_error <= gate.retreat_position_tolerance_m)
             & no_contact
+            & evidence.qp_feasible
         )
         phase_success |= settle & (settle_dwell >= gate.settle_dwell_s)
 
@@ -338,11 +480,59 @@ class Order9TensorRewardEngine:
             torch.zeros_like(relative_linear_speed),
         ).max(dim=-1).values
         slip_penalty = (slip / cfg.slip_speed_scale_mps).clamp(max=1.0)
+        # Dense, direction-specific contact credit.  The old contact-count
+        # reward saturates as soon as both anchors touch and the generic slip
+        # norm cannot say whether the normal, tangent, or rotation coordinate
+        # caused the motion.  These quantities are available on hardware from
+        # FK, object-state estimation, and motor current.  The target load is
+        # resolved once from the same actuator/leverage model that generates
+        # nominal preload.
+        selected = evidence.selected_contact_mask
+        selected_count = selected.sum(dim=-1).clamp_min(1).to(
+            evidence.object_pose_world.dtype
+        )
+        gap_penalty = (
+            torch.relu(evidence.selected_grasp_frame_normal_error_m)
+            / cfg.normal_contact_gap_scale_m
+        ).clamp(max=1.0)
+        separating_penalty = (
+            torch.relu(evidence.selected_relative_normal_velocity_mps)
+            / cfg.normal_contact_separation_speed_scale_mps
+        ).clamp(max=1.0)
+        target_load = evidence.target_motor_load_proxy.clamp_min(1.0e-6)
+        load_ratio = evidence.selected_motor_load_proxy / target_load
+        load_target_available = evidence.target_motor_load_proxy > 1.0e-6
+        load_deficit_penalty = torch.where(
+            load_target_available,
+            (
+                torch.relu(cfg.normal_contact_load_lower_ratio - load_ratio)
+                / cfg.normal_contact_load_lower_ratio
+            ).clamp(max=1.0),
+            torch.zeros_like(load_ratio),
+        )
+        load_excess_penalty = torch.where(
+            load_target_available,
+            (
+                torch.relu(load_ratio - cfg.normal_contact_load_upper_ratio)
+                / cfg.normal_contact_load_upper_ratio
+            ).clamp(max=1.0),
+            torch.zeros_like(load_ratio),
+        )
+        per_contact_normal_quality_penalty = (
+            0.50 * gap_penalty
+            + 0.35 * load_deficit_penalty
+            + 0.10 * load_excess_penalty
+            + 0.05 * separating_penalty
+        )
+        normal_contact_quality_penalty = (
+            per_contact_normal_quality_penalty * selected.to(
+                per_contact_normal_quality_penalty.dtype
+            )
+        ).sum(dim=-1) / selected_count
         saturation = evidence.rotor_saturation.to(
             evidence.object_pose_world.dtype
         ).mean(dim=-1)
         collision_penalty = hard_collision.to(evidence.object_pose_world.dtype)
-
         active_progress = lift | transport | place
         active_pose = transport | place | release | retreat | settle
         active_grasp = contact | lift | transport | place
@@ -352,6 +542,14 @@ class Order9TensorRewardEngine:
         weighted_progress = cfg.w_progress * progress * active_progress
         weighted_pose = cfg.w_pose * pose_accuracy * active_pose
         weighted_grasp = cfg.w_grasp * grasp_score * active_grasp
+        weighted_wrench_range = (
+            -cfg.w_wrench_range * wrench_range_violation * active_grasp
+        )
+        weighted_normal_contact_quality = (
+            -cfg.w_normal_contact_quality
+            * normal_contact_quality_penalty
+            * active_grasp
+        )
         weighted_stability = cfg.w_stable * stability * active_stability
         weighted_energy = -cfg.w_energy * energy
         weighted_qp = -cfg.w_qp * qp_penalty
@@ -362,6 +560,8 @@ class Order9TensorRewardEngine:
             weighted_progress
             + weighted_pose
             + weighted_grasp
+            + weighted_wrench_range
+            + weighted_normal_contact_quality
             + weighted_stability
             + weighted_energy
             + weighted_qp
@@ -375,6 +575,10 @@ class Order9TensorRewardEngine:
             "weighted_object_goal_progress": weighted_progress,
             "weighted_object_pose_accuracy": weighted_pose,
             "weighted_grasp_maintenance": weighted_grasp,
+            "weighted_wrench_range_violation_penalty": weighted_wrench_range,
+            "weighted_normal_contact_quality_penalty": (
+                weighted_normal_contact_quality
+            ),
             "weighted_centroidal_stability": weighted_stability,
             "weighted_energy_penalty": weighted_energy,
             "weighted_qp_residual_penalty": weighted_qp,
@@ -394,7 +598,9 @@ class Order9TensorRewardEngine:
             qp_infeasible_terminal=qp_terminal,
             release_valid=release_valid,
             active_contact_count=active_count,
+            wrench_range_satisfied=wrench_range_satisfied,
             slip_speed_mps=slip,
+            wrench_range_violation=wrench_range_violation,
             terms=terms,
             next_state=Order9TensorRewardState(
                 contact_dwell_s=contact_dwell,
@@ -440,6 +646,19 @@ class Order9TensorRewardEngine:
             raise ValueError("Order9 tensor reward phase shape differs")
         if evidence.object_pose_world.shape != (batch, 7):
             raise ValueError("Order9 tensor reward object pose shape differs")
+        if (
+            evidence.local_joint_positions_rad.ndim != 3
+            or evidence.local_joint_positions_rad.shape
+            != evidence.phase_goal_joint_positions_rad.shape
+            or evidence.local_joint_positions_rad.shape[0] != batch
+        ):
+            raise ValueError("Order9 release joint posture shape differs")
+        if not bool(
+            torch.isfinite(evidence.local_joint_positions_rad).all()
+        ) or not bool(
+            torch.isfinite(evidence.phase_goal_joint_positions_rad).all()
+        ):
+            raise ValueError("Order9 release joint posture is non-finite")
         if evidence.selected_contact_forces_world.ndim != 3 or (
             evidence.selected_contact_forces_world.shape[0] != batch
             or evidence.selected_contact_forces_world.shape[-1] != 3
@@ -450,6 +669,46 @@ class Order9TensorRewardEngine:
             evidence.selected_link_twist_world.shape != (*selected_shape, 6)
         ):
             raise ValueError("Order9 selected contact evidence shape differs")
+        for name in (
+            "selected_grasp_frame_normal_error_m",
+            "selected_relative_normal_velocity_mps",
+            "selected_motor_load_proxy",
+            "target_motor_load_proxy",
+        ):
+            value = getattr(evidence, name)
+            if value.shape != selected_shape or not bool(torch.isfinite(value).all()):
+                raise ValueError(f"Order9 {name} shape or finiteness differs")
+        if evidence.contact_preload_complete.shape != (batch,):
+            raise ValueError("Order9 contact preload completion shape differs")
+        wrench_shape = (*selected_shape, 6)
+        if (
+            evidence.selected_contact_wrenches_contact.shape != wrench_shape
+            or evidence.wrench_lower_contact.shape != wrench_shape
+            or evidence.wrench_upper_contact.shape != wrench_shape
+            or evidence.wrench_bound_mask.shape != selected_shape
+        ):
+            raise ValueError("Order9 selected contact-wrench range shape differs")
+        if not bool(
+            torch.isfinite(evidence.selected_contact_wrenches_contact).all()
+        ):
+            raise ValueError("Order9 selected contact wrench is non-finite")
+        if not bool(
+            torch.isfinite(
+                evidence.wrench_lower_contact[evidence.wrench_bound_mask]
+            ).all()
+        ) or not bool(
+            torch.isfinite(
+                evidence.wrench_upper_contact[evidence.wrench_bound_mask]
+            ).all()
+        ):
+            raise ValueError("Order9 contact-wrench bound is non-finite")
+        if bool(
+            (
+                evidence.wrench_lower_contact
+                > evidence.wrench_upper_contact
+            )[evidence.wrench_bound_mask].any()
+        ):
+            raise ValueError("Order9 contact-wrench lower bound exceeds upper")
         if state.contact_dwell_s.shape != (batch,):
             raise ValueError("Order9 tensor reward state batch differs")
 
@@ -466,6 +725,7 @@ def _quaternion_distance(left: torch.Tensor, right: torch.Tensor) -> torch.Tenso
 
 
 __all__ = [
+    "ORDER9_DEPLOYABLE_NORMAL_CONTACT_QUALITY_REWARD_CONTRACT",
     "Order9TensorRewardEngine",
     "Order9TensorRewardGateConfig",
     "Order9TensorRewardInput",

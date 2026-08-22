@@ -24,11 +24,23 @@ from amsrr.policies.order9_high_level_policy import (
 )
 from amsrr.policies.order9_low_level_policy import (
     ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION,
+    ORDER9_CONTACT_RESIDUAL_PI_L_POLICY_VERSION,
+    ORDER9_CONTACT_SPACE_PI_L_POLICY_VERSION,
+    ORDER9_CONTACT_FEEDBACK_PI_L_POLICY_VERSION,
+    ORDER9_CATEGORICAL_CONTACT_NORMAL_PI_L_POLICY_VERSION,
+    ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_PI_L_POLICY_VERSION,
     ORDER9_PI_L_POLICY_VERSION,
     Order9ActiveKnotLowLevelPolicyConfig,
     Order9ActiveKnotPhaseConditionedActorCritic,
+    Order9ContactResidualPhaseConditionedActorCritic,
+    Order9ContactSpacePhaseConditionedActorCritic,
+    Order9ContactFeedbackLowLevelPolicyConfig,
+    Order9ContactFeedbackPhaseConditionedActorCritic,
+    Order9CategoricalContactNormalLowLevelPolicyConfig,
+    Order9CategoricalContactNormalPhaseConditionedActorCritic,
     Order9LowLevelPolicyConfig,
     Order9PhaseConditionedActorCritic,
+    Order9MorphologyInvariantCompressionActorCritic,
 )
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.order9 import (
@@ -62,6 +74,33 @@ def order9_model_config_dict(model: nn.Module) -> dict[str, Any]:
 
 
 def order9_policy_identity(model: nn.Module) -> tuple[Order9PolicyFamily, str]:
+    if isinstance(
+        model, Order9CategoricalContactNormalPhaseConditionedActorCritic
+    ):
+        return (
+            Order9PolicyFamily.PI_L,
+            ORDER9_CATEGORICAL_CONTACT_NORMAL_PI_L_POLICY_VERSION,
+        )
+    if isinstance(model, Order9ContactFeedbackPhaseConditionedActorCritic):
+        return (
+            Order9PolicyFamily.PI_L,
+            ORDER9_CONTACT_FEEDBACK_PI_L_POLICY_VERSION,
+        )
+    if isinstance(model, Order9ContactSpacePhaseConditionedActorCritic):
+        return (
+            Order9PolicyFamily.PI_L,
+            ORDER9_CONTACT_SPACE_PI_L_POLICY_VERSION,
+        )
+    if isinstance(model, Order9MorphologyInvariantCompressionActorCritic):
+        return (
+            Order9PolicyFamily.PI_L,
+            ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_PI_L_POLICY_VERSION,
+        )
+    if isinstance(model, Order9ContactResidualPhaseConditionedActorCritic):
+        return (
+            Order9PolicyFamily.PI_L,
+            ORDER9_CONTACT_RESIDUAL_PI_L_POLICY_VERSION,
+        )
     if isinstance(model, Order9ActiveKnotPhaseConditionedActorCritic):
         return (
             Order9PolicyFamily.PI_L,
@@ -215,6 +254,45 @@ def _construct_model(
                     raw_config
                 )
                 model = Order9ActiveKnotPhaseConditionedActorCritic(config)
+            elif policy_version == ORDER9_CONTACT_RESIDUAL_PI_L_POLICY_VERSION:
+                config = Order9ActiveKnotLowLevelPolicyConfig.from_dict(
+                    raw_config
+                )
+                model = Order9ContactResidualPhaseConditionedActorCritic(
+                    config
+                )
+            elif (
+                policy_version
+                == ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_PI_L_POLICY_VERSION
+            ):
+                config = Order9ActiveKnotLowLevelPolicyConfig.from_dict(
+                    raw_config
+                )
+                model = Order9MorphologyInvariantCompressionActorCritic(
+                    config
+                )
+            elif policy_version == ORDER9_CONTACT_SPACE_PI_L_POLICY_VERSION:
+                config = Order9ActiveKnotLowLevelPolicyConfig.from_dict(
+                    raw_config
+                )
+                model = Order9ContactSpacePhaseConditionedActorCritic(config)
+            elif policy_version == ORDER9_CONTACT_FEEDBACK_PI_L_POLICY_VERSION:
+                config = Order9ContactFeedbackLowLevelPolicyConfig.from_dict(
+                    raw_config
+                )
+                model = Order9ContactFeedbackPhaseConditionedActorCritic(
+                    config
+                )
+            elif (
+                policy_version
+                == ORDER9_CATEGORICAL_CONTACT_NORMAL_PI_L_POLICY_VERSION
+            ):
+                config = Order9CategoricalContactNormalLowLevelPolicyConfig.from_dict(
+                    raw_config
+                )
+                model = Order9CategoricalContactNormalPhaseConditionedActorCritic(
+                    config
+                )
             else:
                 raise SchemaValidationError(
                     f"unsupported Order9 pi_L policy version {policy_version!r}"
@@ -251,7 +329,30 @@ def _validate_runtime_contract(
     metadata.validate()
     if metadata.policy_family != family or metadata.policy_version != policy_version:
         raise SchemaValidationError("Order9 checkpoint policy identity mismatch")
-    if metadata.model_config_hash != stable_hash(config):
-        raise SchemaValidationError("Order9 checkpoint model config hash mismatch")
+    config_hash = stable_hash(config)
+    if metadata.model_config_hash != config_hash:
+        # v7 adds policy-configuration fields to the shared active-knot
+        # dataclass.  Historical v4-v6 checkpoints were hashed before those
+        # fields existed; accept only the exact legacy projection for those
+        # immutable policy versions.
+        legacy_config = dict(config)
+        for name in (
+            "max_contact_slots",
+            "contact_space_feature_dim",
+            "contact_space_action_log_std_init",
+        ):
+            legacy_config.pop(name, None)
+        if (
+            family != Order9PolicyFamily.PI_L
+            or policy_version in {
+                ORDER9_CONTACT_SPACE_PI_L_POLICY_VERSION,
+                ORDER9_CONTACT_FEEDBACK_PI_L_POLICY_VERSION,
+                ORDER9_CATEGORICAL_CONTACT_NORMAL_PI_L_POLICY_VERSION,
+            }
+            or metadata.model_config_hash != stable_hash(legacy_config)
+        ):
+            raise SchemaValidationError(
+                "Order9 checkpoint model config hash mismatch"
+            )
     if metadata.state_dict_hash != order9_state_dict_hash(state_dict):
         raise SchemaValidationError("Order9 checkpoint state_dict hash mismatch")

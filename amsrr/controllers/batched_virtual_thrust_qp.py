@@ -17,6 +17,11 @@ from dataclasses import dataclass
 import torch
 
 
+_SMALL_BATCH_COMPILE_LIMIT = 8
+_compiled_small_batch_projection = None
+_small_batch_compilation_disabled = False
+
+
 @dataclass(frozen=True)
 class BatchedVirtualThrustQPConfig:
     regularization_weight: float = 1.0e-8
@@ -206,8 +211,23 @@ def solve_batched_virtual_thrust_qp(
         "angle_lower": angle_lower,
         "angle_upper": angle_upper,
         "iterations": resolved.projection_iterations,
+        "pair_i": torch.tensor(
+            (0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 3, 3, 4),
+            device=device,
+            dtype=torch.long,
+        ),
+        "pair_j": torch.tensor(
+            (1, 2, 3, 4, 5, 2, 3, 4, 5, 3, 4, 5, 4, 5, 5),
+            device=device,
+            dtype=torch.long,
+        ),
     }
-    z_value = _project_virtual_channels(
+    projection = (
+        _project_virtual_channels_compiled_small_batch
+        if device.type == "cuda" and batch_size <= _SMALL_BATCH_COMPILE_LIMIT
+        else _project_virtual_channels
+    )
+    z_value = projection(
         previous_virtual, **projection_kwargs
     ).reshape(batch_size, rotor_count * 2)
     x_value = z_value.clone()
@@ -219,25 +239,27 @@ def solve_batched_virtual_thrust_qp(
             solve_rhs.unsqueeze(-1), factored
         ).squeeze(-1)
         previous_z = z_value
-        projected = _project_virtual_channels(
+        projected = projection(
             (x_value + dual).reshape(batch_size, rotor_count, 2),
             **projection_kwargs,
         )
         z_value = projected.reshape(batch_size, rotor_count * 2)
         dual = dual + x_value - z_value
 
-    primal_norm = torch.linalg.vector_norm(x_value - z_value, dim=-1)
-    dual_norm = resolved.admm_penalty * torch.linalg.vector_norm(
-        z_value - previous_z, dim=-1
+    # The primal/dual stopping test is intentionally diagnostic-only.  For this
+    # ill-conditioned wrench allocator, small iterate deltas do not imply that
+    # the wrench objective has reached the physical-feasibility tolerance.  A
+    # data-dependent early exit therefore changes controller semantics and has
+    # produced false QPID-infeasible terminals in continuous validation.
+    primal_norm, dual_norm, solver_converged = _admm_convergence(
+        x_value=x_value,
+        z_value=z_value,
+        previous_z=previous_z,
+        penalty=resolved.admm_penalty,
+        rotor_count=rotor_count,
+        absolute_tolerance=resolved.absolute_tolerance,
+        relative_tolerance=resolved.relative_tolerance,
     )
-    scale = torch.maximum(
-        torch.linalg.vector_norm(x_value, dim=-1),
-        torch.linalg.vector_norm(z_value, dim=-1),
-    )
-    tolerance = resolved.absolute_tolerance * math.sqrt(rotor_count * 2) + (
-        resolved.relative_tolerance * scale
-    )
-    solver_converged = (primal_norm <= tolerance) & (dual_norm <= tolerance)
 
     channels = z_value.reshape(batch_size, rotor_count, 2)
     raw_fx = channels[..., 0]
@@ -270,10 +292,17 @@ def solve_batched_virtual_thrust_qp(
     ).squeeze(-1)
     residual = desired_wrench_body - achieved
     residual_norm = torch.linalg.vector_norm(residual, dim=-1)
-    feasible = (
-        solver_converged
-        & torch.isfinite(residual_norm)
-        & (residual_norm <= float(unsupported_wrench_tolerance))
+    # ``channels`` has already been projected onto every hard thrust,
+    # vectoring-angle, vectoring-rate, and rotor-mask constraint, and
+    # ``residual_norm`` is recomputed from the commands that will actually be
+    # sent to the actuators.  Therefore physical allocation feasibility is
+    # exactly the finite applied-wrench residual test below.  ADMM convergence
+    # is an optimizer-health/optimality diagnostic; treating its tighter
+    # internal stopping criterion as physical infeasibility produced false
+    # QPID terminals even when the applied command was inside all constraints
+    # and below the controller's supported-wrench tolerance.
+    feasible = torch.isfinite(residual_norm) & (
+        residual_norm <= float(unsupported_wrench_tolerance)
     )
     qp_residual = allocation_matrix @ z_value.unsqueeze(-1)
     qp_residual = qp_residual.squeeze(-1) - desired_wrench_body
@@ -311,68 +340,164 @@ def _project_virtual_channels(
     angle_lower: torch.Tensor,
     angle_upper: torch.Tensor,
     iterations: int,
+    pair_i: torch.Tensor,
+    pair_j: torch.Tensor,
 ) -> torch.Tensor:
-    """Project onto the scalar allocator's rectangle/angle polytope.
+    """Project exactly onto the scalar allocator's 2-D convex polytope.
 
-    Dykstra projections converge to the Euclidean projection onto the
-    intersection.  Each constituent set is either a box or one linear
-    half-space, so the operation remains entirely tensorized.
+    The former implementation ran ``iterations`` Dykstra sweeps for every
+    ADMM iteration.  That is efficient for a very large CUDA batch, but its
+    thousands of tiny kernels dominate one-to-eight-environment validation.
+    In two dimensions the closest point is either the input itself, a
+    perpendicular projection onto one feasible edge, or a feasible vertex.
+    Enumerating those fixed candidates gives the same Euclidean projection in
+    one tensor pass.  ``iterations`` remains an accepted argument so existing
+    configuration hashes and callers do not change; it is validated upstream
+    but no longer controls approximation quality.
     """
 
+    del iterations
     tangent_upper = torch.tan(angle_upper)
     tangent_lower = torch.tan(angle_lower)
-    value = values
-    box_correction = torch.zeros_like(value)
-    upper_correction = torch.zeros_like(value)
-    lower_correction = torch.zeros_like(value)
-    for _ in range(iterations):
-        candidate = value + box_correction
-        box = torch.stack(
-            (
-                torch.minimum(
-                    torch.maximum(candidate[..., 0], -maximum_virtual_x),
-                    maximum_virtual_x,
-                ),
-                torch.minimum(
-                    torch.maximum(candidate[..., 1], minimum_virtual_z),
-                    maximum_virtual_z,
-                ),
-            ),
-            dim=-1,
-        )
-        box_correction = candidate - box
-        value = box
+    zero = torch.zeros_like(maximum_virtual_x)
+    one = torch.ones_like(maximum_virtual_x)
+    constraints = torch.stack(
+        (
+            torch.stack((one, zero), dim=-1),
+            torch.stack((-one, zero), dim=-1),
+            torch.stack((zero, one), dim=-1),
+            torch.stack((zero, -one), dim=-1),
+            torch.stack((one, -tangent_upper), dim=-1),
+            torch.stack((-one, tangent_lower), dim=-1),
+        ),
+        dim=-2,
+    )
+    bounds = torch.stack(
+        (
+            maximum_virtual_x,
+            maximum_virtual_x,
+            maximum_virtual_z,
+            -minimum_virtual_z,
+            zero,
+            zero,
+        ),
+        dim=-1,
+    )
+    dtype_epsilon = torch.finfo(values.dtype).eps
+    feasibility_tolerance = 64.0 * dtype_epsilon * (
+        1.0 + bounds.abs().amax(dim=-1, keepdim=True)
+    )
 
-        candidate = value + upper_correction
-        violation = (
-            candidate[..., 0] - tangent_upper * candidate[..., 1]
-        ).clamp_min(0.0)
-        multiplier = violation / (1.0 + tangent_upper.square())
-        upper = torch.stack(
-            (
-                candidate[..., 0] - multiplier,
-                candidate[..., 1] + multiplier * tangent_upper,
-            ),
-            dim=-1,
-        )
-        upper_correction = candidate - upper
-        value = upper
+    # Candidate zero is the original point.  The next six candidates are its
+    # orthogonal projections onto each supporting line.
+    line_value = torch.einsum("...id,...d->...i", constraints, values)
+    line_norm_squared = constraints.square().sum(dim=-1).clamp_min(dtype_epsilon)
+    line_offset = (line_value - bounds) / line_norm_squared
+    edge_candidates = values.unsqueeze(-2) - line_offset.unsqueeze(-1) * constraints
 
-        candidate = value + lower_correction
-        violation = (
-            -candidate[..., 0] + tangent_lower * candidate[..., 1]
-        ).clamp_min(0.0)
-        multiplier = violation / (1.0 + tangent_lower.square())
-        lower = torch.stack(
+    # The remaining candidates are all 15 pairwise line intersections.  A
+    # parallel pair is marked invalid before the common feasibility test.
+    first = constraints.index_select(-2, pair_i)
+    second = constraints.index_select(-2, pair_j)
+    first_bound = bounds.index_select(-1, pair_i)
+    second_bound = bounds.index_select(-1, pair_j)
+    determinant = first[..., 0] * second[..., 1] - first[..., 1] * second[..., 0]
+    determinant_valid = determinant.abs() > (32.0 * dtype_epsilon)
+    safe_determinant = torch.where(determinant_valid, determinant, one.unsqueeze(-1))
+    vertices = torch.stack(
+        (
             (
-                candidate[..., 0] + multiplier,
-                candidate[..., 1] - multiplier * tangent_lower,
-            ),
-            dim=-1,
-        )
-        lower_correction = candidate - lower
-        value = lower
-    return value
+                first_bound * second[..., 1]
+                - first[..., 1] * second_bound
+            )
+            / safe_determinant,
+            (
+                first[..., 0] * second_bound
+                - first_bound * second[..., 0]
+            )
+            / safe_determinant,
+        ),
+        dim=-1,
+    )
+    candidates = torch.cat(
+        (values.unsqueeze(-2), edge_candidates, vertices), dim=-2
+    )
+    constraint_values = torch.einsum(
+        "...jd,...id->...ji", candidates, constraints
+    )
+    feasible = (
+        constraint_values
+        <= bounds.unsqueeze(-2) + feasibility_tolerance.unsqueeze(-2)
+    ).all(dim=-1)
+    feasible[..., 7:] &= determinant_valid
+    distances = (candidates - values.unsqueeze(-2)).square().sum(dim=-1)
+    distances = torch.where(
+        feasible,
+        distances,
+        torch.full_like(distances, torch.inf),
+    )
+    selected = distances.argmin(dim=-1)
+    projected = torch.gather(
+        candidates,
+        -2,
+        selected[..., None, None].expand(*selected.shape, 1, 2),
+    ).squeeze(-2)
+    return projected
+
+
+def _admm_convergence(
+    *,
+    x_value: torch.Tensor,
+    z_value: torch.Tensor,
+    previous_z: torch.Tensor,
+    penalty: float,
+    rotor_count: int,
+    absolute_tolerance: float,
+    relative_tolerance: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    primal_norm = torch.linalg.vector_norm(x_value - z_value, dim=-1)
+    dual_norm = penalty * torch.linalg.vector_norm(z_value - previous_z, dim=-1)
+    scale = torch.maximum(
+        torch.linalg.vector_norm(x_value, dim=-1),
+        torch.linalg.vector_norm(z_value, dim=-1),
+    )
+    tolerance = absolute_tolerance * math.sqrt(rotor_count * 2) + (
+        relative_tolerance * scale
+    )
+    return primal_norm, dual_norm, (primal_norm <= tolerance) & (
+        dual_norm <= tolerance
+    )
+
+
+def _project_virtual_channels_compiled_small_batch(
+    values: torch.Tensor,
+    **kwargs: torch.Tensor | int,
+) -> torch.Tensor:
+    """Run the exact projection as one fused graph for tiny CUDA batches."""
+
+    global _compiled_small_batch_projection
+    global _small_batch_compilation_disabled
+    if _small_batch_compilation_disabled:
+        return _project_virtual_channels(values, **kwargs)
+    if _compiled_small_batch_projection is None:
+        try:
+            _compiled_small_batch_projection = torch.compile(
+                _project_virtual_channels,
+                fullgraph=True,
+                dynamic=False,
+                mode="reduce-overhead",
+            )
+        except Exception:
+            _small_batch_compilation_disabled = True
+            return _project_virtual_channels(values, **kwargs)
+    try:
+        return _compiled_small_batch_projection(values, **kwargs)
+    except Exception:
+        # Exact eager projection is the semantic reference and safe fallback.
+        # Retry it so genuine input/geometry errors still propagate rather
+        # than being mistaken for a compilation availability problem.
+        _small_batch_compilation_disabled = True
+        return _project_virtual_channels(values, **kwargs)
 
 
 def _validate_inputs(**values: torch.Tensor | None) -> None:

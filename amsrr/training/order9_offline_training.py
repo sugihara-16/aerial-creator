@@ -44,6 +44,11 @@ from amsrr.policies.order9_high_level_policy import (
 )
 from amsrr.policies.order9_low_level_policy import (
     ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION,
+    ORDER9_CONTACT_RESIDUAL_PI_L_POLICY_VERSION,
+    ORDER9_CONTACT_FEEDBACK_PI_L_POLICY_VERSION,
+    ORDER9_CATEGORICAL_CONTACT_NORMAL_PI_L_POLICY_VERSION,
+    ORDER9_CONTACT_SPACE_PI_L_POLICY_VERSION,
+    ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_PI_L_POLICY_VERSION,
     Order9LowLevelPolicyConfig,
     Order9PhaseConditionedActorCritic,
 )
@@ -1271,14 +1276,39 @@ def build_order9_checkpoint_metadata(
     family, policy_version = order9_policy_identity(model)
     pi_l_actor_contract = (
         "task_phase_complete_active_knot_morphology_controller_no_raw_contact_v2"
-        if policy_version == ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION
+        if policy_version
+        in {
+            ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION,
+            ORDER9_CONTACT_RESIDUAL_PI_L_POLICY_VERSION,
+            ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_PI_L_POLICY_VERSION,
+            ORDER9_CONTACT_SPACE_PI_L_POLICY_VERSION,
+            ORDER9_CONTACT_FEEDBACK_PI_L_POLICY_VERSION,
+            ORDER9_CATEGORICAL_CONTACT_NORMAL_PI_L_POLICY_VERSION,
+        }
         else "task_phase_morphology_centroidal_no_raw_contact_v1"
     )
+    if policy_version in {
+        ORDER9_CONTACT_SPACE_PI_L_POLICY_VERSION,
+        ORDER9_CONTACT_FEEDBACK_PI_L_POLICY_VERSION,
+        ORDER9_CATEGORICAL_CONTACT_NORMAL_PI_L_POLICY_VERSION,
+    }:
+        pi_l_action_contract = (
+            "contact_space_centroidal_compatible_joint_nullspace_v4"
+        )
+    elif policy_version == ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_PI_L_POLICY_VERSION:
+        pi_l_action_contract = (
+            "bounded_complete_centroidal_absolute_local_joint_and_"
+            "morphology_invariant_compression_residual_v3"
+        )
+    else:
+        pi_l_action_contract = (
+            "bounded_complete_centroidal_and_absolute_local_joint_command_v2"
+        )
     contracts = {
         Order9PolicyFamily.PI_L: (
             pi_l_actor_contract,
             "actor_plus_privileged_disturbance_v1",
-            "bounded_complete_centroidal_and_absolute_local_joint_command_v2",
+            pi_l_action_contract,
         ),
         Order9PolicyFamily.PI_H: (
             "irg_envelope_morphology_candidates_runtime_object_no_raw_contact_v1",

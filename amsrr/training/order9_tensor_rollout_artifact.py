@@ -19,7 +19,16 @@ import torch
 
 from amsrr.policies.order9_low_level_policy import (
     ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION,
+    ORDER9_CONTACT_RESIDUAL_PI_L_POLICY_VERSION,
+    ORDER9_CONTACT_SPACE_ACTION_NAMES,
+    ORDER9_CONTACT_FEEDBACK_SPACE_FEATURE_NAMES,
+    ORDER9_CONTACT_SPACE_FEATURE_NAMES,
+    ORDER9_CONTACT_FEEDBACK_PI_L_POLICY_VERSION,
+    ORDER9_CATEGORICAL_CONTACT_NORMAL_PI_L_POLICY_VERSION,
+    ORDER9_CONTACT_SPACE_PI_L_POLICY_VERSION,
+    ORDER9_CONTACT_SPACE_PI_L_POLICY_VERSIONS,
     ORDER9_GLOBAL_ACTION_SIZE,
+    ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_PI_L_POLICY_VERSION,
     ORDER9_PI_L_POLICY_VERSION,
 )
 from amsrr.policies.order9_active_knot_features import (
@@ -64,17 +73,51 @@ from amsrr.training.order9_ppo import ORDER9_PI_L_ACTION_SEMANTICS
 from amsrr.training.order9_ppo import (
     ORDER9_PI_L_GRAPH_JOINT_SUMMARY_NON_FIXED,
 )
+from amsrr.training.order9_contact_wrench_reward import (
+    ORDER9_CONTACT_WRENCH_REWARD_CONTRACT_VERSION,
+)
 from amsrr.utils.hashing import hash_file
 
 
 ORDER9_LEGACY_TENSOR_ROLLOUT_ARTIFACT_VERSION = (
     "order9_tensor_isaac_complete_pi_l_rollout_v7_command_body_pose"
 )
-ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION = (
+ORDER9_ACTIVE_KNOT_TENSOR_ROLLOUT_ARTIFACT_VERSION = (
     "order9_tensor_isaac_complete_pi_l_rollout_v8_active_knot_actor"
 )
+ORDER9_PRIVILEGED_WRENCH_TENSOR_ROLLOUT_ARTIFACT_VERSION = (
+    "order9_tensor_isaac_complete_pi_l_rollout_v9_privileged_wrench_range"
+)
+ORDER9_PHASE_RESET_TENSOR_ROLLOUT_ARTIFACT_VERSION = (
+    "order9_tensor_isaac_complete_pi_l_rollout_v10_phase_specific_resets"
+)
+ORDER9_EXACT_PHASE_PROGRESS_TENSOR_ROLLOUT_ARTIFACT_VERSION = (
+    "order9_tensor_isaac_complete_pi_l_rollout_v11_exact_actor_phase_progress"
+)
+ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION = (
+    "order9_tensor_isaac_complete_pi_l_rollout_v17_accepted_nominal_reset_bank"
+)
+ORDER9_MORPHOLOGY_INVARIANT_TENSOR_ROLLOUT_ARTIFACT_VERSION = (
+    "order9_tensor_isaac_complete_pi_l_rollout_v18_morphology_invariant_compression"
+)
+ORDER9_CONTACT_SPACE_TENSOR_ROLLOUT_ARTIFACT_VERSION = (
+    "order9_tensor_isaac_complete_pi_l_rollout_v19_contact_space_projected"
+)
 ORDER9_PRODUCTION_COLLECTOR_VERSION = (
-    "order9_vectorized_isaac_complete_pi_l_collector_v9_active_knot_actor"
+    "order9_vectorized_isaac_complete_pi_l_collector_v45_normal_contact_quality"
+)
+_LEGACY_CONTACT_WRENCH_REWARD_CONTRACT_VERSION = (
+    "order9_privileged_contact_wrench_range_reward_v1"
+)
+_ACTIVE_KNOT_POLICY_VERSIONS = frozenset(
+    {
+        ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION,
+        ORDER9_CONTACT_RESIDUAL_PI_L_POLICY_VERSION,
+        ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_PI_L_POLICY_VERSION,
+        ORDER9_CONTACT_SPACE_PI_L_POLICY_VERSION,
+        ORDER9_CONTACT_FEEDBACK_PI_L_POLICY_VERSION,
+        ORDER9_CATEGORICAL_CONTACT_NORMAL_PI_L_POLICY_VERSION,
+    }
 )
 
 
@@ -141,9 +184,43 @@ _LEGACY_REQUIRED_TENSORS = {
     "post_object_pose_world",
     "post_object_twist_world",
 }
-_REQUIRED_TENSORS = _LEGACY_REQUIRED_TENSORS | {
+_ACTIVE_KNOT_REQUIRED_TENSORS = _LEGACY_REQUIRED_TENSORS | {
     "actor_active_knot_features",
     "actor_active_assignment_features",
+}
+_REQUIRED_TENSORS = _ACTIVE_KNOT_REQUIRED_TENSORS | {
+    "selected_contact_wrenches_contact",
+    "wrench_lower_contact",
+    "wrench_upper_contact",
+    "wrench_bound_mask",
+}
+_MORPHOLOGY_INVARIANT_REQUIRED_TENSORS = _REQUIRED_TENSORS | {
+    "contact_compression_residual_action",
+}
+_CONTACT_SPACE_REQUIRED_TENSORS = _REQUIRED_TENSORS | {
+    "applied_global_action",
+    "contact_space_residual_action",
+    "actor_contact_slot_features",
+    "actor_contact_slot_owner_indices",
+    "actor_contact_slot_mask",
+    "contact_constraint_weight",
+}
+_ACTIVE_KNOT_VERSIONS = {
+    ORDER9_ACTIVE_KNOT_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+    ORDER9_PRIVILEGED_WRENCH_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+    ORDER9_PHASE_RESET_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+    ORDER9_EXACT_PHASE_PROGRESS_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+    ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+    ORDER9_MORPHOLOGY_INVARIANT_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+    ORDER9_CONTACT_SPACE_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+}
+_PRIVILEGED_WRENCH_VERSIONS = {
+    ORDER9_PRIVILEGED_WRENCH_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+    ORDER9_PHASE_RESET_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+    ORDER9_EXACT_PHASE_PROGRESS_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+    ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+    ORDER9_MORPHOLOGY_INVARIANT_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+    ORDER9_CONTACT_SPACE_TENSOR_ROLLOUT_ARTIFACT_VERSION,
 }
 
 
@@ -166,8 +243,23 @@ class Order9TensorRolloutArtifact:
         return int(self.tensors["valid"].sum().item())
 
     def validate(self) -> None:
-        if self.artifact_version == ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION:
+        if (
+            self.artifact_version
+            == ORDER9_CONTACT_SPACE_TENSOR_ROLLOUT_ARTIFACT_VERSION
+        ):
+            required_tensors = _CONTACT_SPACE_REQUIRED_TENSORS
+        elif (
+            self.artifact_version
+            == ORDER9_MORPHOLOGY_INVARIANT_TENSOR_ROLLOUT_ARTIFACT_VERSION
+        ):
+            required_tensors = _MORPHOLOGY_INVARIANT_REQUIRED_TENSORS
+        elif self.artifact_version in _PRIVILEGED_WRENCH_VERSIONS:
             required_tensors = _REQUIRED_TENSORS
+        elif (
+            self.artifact_version
+            == ORDER9_ACTIVE_KNOT_TENSOR_ROLLOUT_ARTIFACT_VERSION
+        ):
+            required_tensors = _ACTIVE_KNOT_REQUIRED_TENSORS
         elif (
             self.artifact_version
             == ORDER9_LEGACY_TENSOR_ROLLOUT_ARTIFACT_VERSION
@@ -211,6 +303,13 @@ class Order9TensorRolloutArtifact:
         ):
             if self.tensors[name].dtype != torch.bool:
                 raise SchemaValidationError(f"Order9 tensor rollout {name} must be bool")
+        if (
+            self.artifact_version in _PRIVILEGED_WRENCH_VERSIONS
+            and self.tensors["wrench_bound_mask"].dtype != torch.bool
+        ):
+            raise SchemaValidationError(
+                "Order9 tensor rollout wrench_bound_mask must be bool"
+            )
         if bool((self.tensors["terminal"] & self.tensors["truncated"]).any()):
             raise SchemaValidationError(
                 "Order9 tensor rollout transition cannot be terminal and truncated"
@@ -257,7 +356,7 @@ class Order9TensorRolloutArtifact:
             raise SchemaValidationError(
                 f"Order9 tensor rollout metadata is missing {missing_metadata}"
             )
-        if self.artifact_version == ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION:
+        if self.artifact_version in _ACTIVE_KNOT_VERSIONS:
             active_metadata = {
                 "pi_l_policy_version",
                 "active_knot_trajectory_template",
@@ -273,7 +372,7 @@ class Order9TensorRolloutArtifact:
                 )
             if (
                 self.metadata["pi_l_policy_version"]
-                != ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION
+                not in _ACTIVE_KNOT_POLICY_VERSIONS
                 or self.metadata["active_knot_feature_contract_version"]
                 != ORDER9_ACTIVE_KNOT_FEATURE_CONTRACT_VERSION
                 or tuple(self.metadata["active_knot_global_feature_names"])
@@ -287,6 +386,81 @@ class Order9TensorRolloutArtifact:
             ContactWrenchTrajectory.from_dict(
                 self.metadata["active_knot_trajectory_template"]
             ).validate()
+            policy_version = self.metadata["pi_l_policy_version"]
+            if (
+                self.artifact_version
+                == ORDER9_MORPHOLOGY_INVARIANT_TENSOR_ROLLOUT_ARTIFACT_VERSION
+            ) != (
+                policy_version
+                == ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_PI_L_POLICY_VERSION
+            ):
+                raise SchemaValidationError(
+                    "Order9 rollout compression-action policy/version pairing differs"
+                )
+            if self.artifact_version == ORDER9_CONTACT_SPACE_TENSOR_ROLLOUT_ARTIFACT_VERSION:
+                if policy_version not in ORDER9_CONTACT_SPACE_PI_L_POLICY_VERSIONS:
+                    raise SchemaValidationError(
+                        "Order9 rollout contact-space policy/version pairing differs"
+                    )
+                if tuple(self.metadata.get("contact_space_feature_names", ())) != (
+                    ORDER9_CONTACT_FEEDBACK_SPACE_FEATURE_NAMES
+                    if policy_version
+                    in {
+                        ORDER9_CONTACT_FEEDBACK_PI_L_POLICY_VERSION,
+                        ORDER9_CATEGORICAL_CONTACT_NORMAL_PI_L_POLICY_VERSION,
+                    }
+                    else ORDER9_CONTACT_SPACE_FEATURE_NAMES
+                ) or tuple(self.metadata.get("contact_space_action_names", ())) != (
+                    ORDER9_CONTACT_SPACE_ACTION_NAMES
+                ):
+                    raise SchemaValidationError(
+                        "Order9 rollout contact-space feature/action contract differs"
+                    )
+                if policy_version == ORDER9_CATEGORICAL_CONTACT_NORMAL_PI_L_POLICY_VERSION:
+                    if (
+                        self.metadata.get("contact_normal_action_distribution")
+                        != "categorical_81_bins_-20mm_to_20mm"
+                        or self.metadata.get("contact_normal_action_category_count")
+                        != 81
+                        or self.metadata.get("contact_normal_action_category_step_m")
+                        != 0.0005
+                    ):
+                        raise SchemaValidationError(
+                            "Order9 categorical contact-normal rollout contract differs"
+                        )
+        if self.artifact_version in _PRIVILEGED_WRENCH_VERSIONS:
+            expected_wrench_contract = (
+                ORDER9_CONTACT_WRENCH_REWARD_CONTRACT_VERSION
+                if self.artifact_version
+                in {
+                    ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+                    ORDER9_MORPHOLOGY_INVARIANT_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+                    ORDER9_CONTACT_SPACE_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+                }
+                else _LEGACY_CONTACT_WRENCH_REWARD_CONTRACT_VERSION
+            )
+            if (
+                self.metadata.get(
+                    "privileged_contact_wrench_reward_contract_version"
+                )
+                != expected_wrench_contract
+            ):
+                raise SchemaValidationError(
+                    "Order9 privileged contact-wrench reward contract differs"
+                )
+        if (
+            self.artifact_version
+            in {
+                ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+                ORDER9_MORPHOLOGY_INVARIANT_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+                ORDER9_CONTACT_SPACE_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+            }
+            and self.metadata.get("phase_progress_semantics")
+            != "exact_policy_actor_input"
+        ):
+            raise SchemaValidationError(
+                "Order9 tensor rollout phase-progress semantics differ"
+            )
         if self.metadata["raw_contact_actor_input"] is not False:
             raise SchemaValidationError(
                 "Order9 tensor rollout actor must exclude raw contact"
@@ -501,7 +675,7 @@ class Order9TensorRolloutArtifact:
                 3,
             ),
         }
-        if self.artifact_version == ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION:
+        if self.artifact_version in _ACTIVE_KNOT_VERSIONS:
             expected.update(
                 {
                     "actor_active_knot_features": (
@@ -517,6 +691,84 @@ class Order9TensorRolloutArtifact:
                     ),
                 }
             )
+        if self.artifact_version in _PRIVILEGED_WRENCH_VERSIONS:
+            expected.update(
+                {
+                    "selected_contact_wrenches_contact": (
+                        steps,
+                        environments,
+                        anchor_count,
+                        6,
+                    ),
+                    "wrench_lower_contact": (
+                        steps,
+                        environments,
+                        anchor_count,
+                        6,
+                    ),
+                    "wrench_upper_contact": (
+                        steps,
+                        environments,
+                        anchor_count,
+                        6,
+                    ),
+                    "wrench_bound_mask": (
+                        steps,
+                        environments,
+                        anchor_count,
+                    ),
+                }
+            )
+        if (
+            self.artifact_version
+            == ORDER9_MORPHOLOGY_INVARIANT_TENSOR_ROLLOUT_ARTIFACT_VERSION
+        ):
+            expected["contact_compression_residual_action"] = (
+                steps,
+                environments,
+            )
+        if self.artifact_version == ORDER9_CONTACT_SPACE_TENSOR_ROLLOUT_ARTIFACT_VERSION:
+            max_slots = int(self.metadata.get("max_contact_slots", 0))
+            expected.update(
+                {
+                    "contact_space_residual_action": (
+                        steps,
+                        environments,
+                        max_slots,
+                        len(ORDER9_CONTACT_SPACE_ACTION_NAMES),
+                    ),
+                    "applied_global_action": (
+                        steps,
+                        environments,
+                        ORDER9_GLOBAL_ACTION_SIZE,
+                    ),
+                    "actor_contact_slot_features": (
+                        steps,
+                        environments,
+                        max_slots,
+                        len(self.metadata.get("contact_space_feature_names", ())),
+                    ),
+                    "actor_contact_slot_owner_indices": (
+                        steps,
+                        environments,
+                        max_slots,
+                    ),
+                    "actor_contact_slot_mask": (
+                        steps,
+                        environments,
+                        max_slots,
+                    ),
+                    "contact_constraint_weight": (steps, environments),
+                }
+            )
+            if tensors["actor_contact_slot_mask"].dtype != torch.bool:
+                raise SchemaValidationError(
+                    "Order9 contact-slot mask must be bool"
+                )
+            if tensors["actor_contact_slot_owner_indices"].dtype != torch.long:
+                raise SchemaValidationError(
+                    "Order9 contact-slot owner indices must be int64"
+                )
         for name, shape in expected.items():
             if tuple(tensors[name].shape) != shape:
                 raise SchemaValidationError(
@@ -562,16 +814,46 @@ class Order9TensorRolloutBuffer:
     def __init__(self, metadata: Mapping[str, Any]) -> None:
         self.metadata = dict(metadata)
         self.artifact_version = (
-            ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION
+            ORDER9_CONTACT_SPACE_TENSOR_ROLLOUT_ARTIFACT_VERSION
             if self.metadata.get("pi_l_policy_version")
-            == ORDER9_ACTIVE_KNOT_PI_L_POLICY_VERSION
-            else ORDER9_LEGACY_TENSOR_ROLLOUT_ARTIFACT_VERSION
+            in ORDER9_CONTACT_SPACE_PI_L_POLICY_VERSIONS
+            else (
+            ORDER9_MORPHOLOGY_INVARIANT_TENSOR_ROLLOUT_ARTIFACT_VERSION
+            if self.metadata.get("pi_l_policy_version")
+            == ORDER9_MORPHOLOGY_INVARIANT_COMPRESSION_PI_L_POLICY_VERSION
+            else (
+                ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION
+                if self.metadata.get(
+                "privileged_contact_wrench_reward_contract_version"
+                )
+                == ORDER9_CONTACT_WRENCH_REWARD_CONTRACT_VERSION
+                else (
+                    ORDER9_ACTIVE_KNOT_TENSOR_ROLLOUT_ARTIFACT_VERSION
+                    if self.metadata.get("pi_l_policy_version")
+                    in _ACTIVE_KNOT_POLICY_VERSIONS
+                    else ORDER9_LEGACY_TENSOR_ROLLOUT_ARTIFACT_VERSION
+                )
+            ))
         )
         self._required_tensors = (
-            _REQUIRED_TENSORS
+            _CONTACT_SPACE_REQUIRED_TENSORS
             if self.artifact_version
-            == ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION
-            else _LEGACY_REQUIRED_TENSORS
+            == ORDER9_CONTACT_SPACE_TENSOR_ROLLOUT_ARTIFACT_VERSION
+            else (
+            _MORPHOLOGY_INVARIANT_REQUIRED_TENSORS
+            if self.artifact_version
+            == ORDER9_MORPHOLOGY_INVARIANT_TENSOR_ROLLOUT_ARTIFACT_VERSION
+            else (
+                _REQUIRED_TENSORS
+                if self.artifact_version
+                == ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION
+                else (
+                    _ACTIVE_KNOT_REQUIRED_TENSORS
+                    if self.artifact_version
+                    == ORDER9_ACTIVE_KNOT_TENSOR_ROLLOUT_ARTIFACT_VERSION
+                    else _LEGACY_REQUIRED_TENSORS
+                )
+            ))
         )
         self._steps: list[dict[str, torch.Tensor]] = []
 
@@ -770,8 +1052,7 @@ def order9_pi_l_records_from_tensor_artifact(
                         metadata,
                         schedule_index=schedule_index,
                     )
-                    if artifact.artifact_version
-                    == ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION
+                    if artifact.artifact_version in _ACTIVE_KNOT_VERSIONS
                     else _float_list(
                         tensors["controller_desired_wrench_body"][
                             time_index, environment
@@ -843,8 +1124,7 @@ def order9_pi_l_records_from_tensor_artifact(
         )
         policy_version = (
             str(metadata["pi_l_policy_version"])
-            if artifact.artifact_version
-            == ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION
+            if artifact.artifact_version in _ACTIVE_KNOT_VERSIONS
             else ORDER9_PI_L_POLICY_VERSION
         )
         action_payload = {
@@ -870,10 +1150,13 @@ def order9_pi_l_records_from_tensor_artifact(
                 ORDER9_PI_L_GRAPH_JOINT_SUMMARY_NON_FIXED
             ),
         }
-        if (
-            artifact.artifact_version
-            == ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION
-        ):
+        if "contact_compression_residual_action" in tensors:
+            action_payload["contact_compression_residual_action"] = float(
+                tensors["contact_compression_residual_action"][
+                    time_index, environment
+                ]
+            )
+        if artifact.artifact_version in _ACTIVE_KNOT_VERSIONS:
             action_payload.update(
                 {
                     "active_knot_features": _float_list(
@@ -917,7 +1200,7 @@ def order9_pi_l_records_from_tensor_artifact(
             policy_command=policy_command,
             controller_command=controller_command,
             actuator_target_record={
-                "source": ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION,
+                "source": artifact.artifact_version,
                 "rotor_thrusts_n": dict(controller_command.rotor_thrusts_n),
                 "vectoring_joint_targets": dict(
                     controller_command.vectoring_joint_targets
@@ -1242,6 +1525,8 @@ def _require_sha256(value: str, name: str) -> None:
 
 __all__ = [
     "ORDER9_PRODUCTION_COLLECTOR_VERSION",
+    "ORDER9_CONTACT_SPACE_TENSOR_ROLLOUT_ARTIFACT_VERSION",
+    "ORDER9_MORPHOLOGY_INVARIANT_TENSOR_ROLLOUT_ARTIFACT_VERSION",
     "ORDER9_TENSOR_ROLLOUT_ARTIFACT_VERSION",
     "Order9TensorRolloutArtifact",
     "Order9TensorRolloutBuffer",

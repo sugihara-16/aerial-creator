@@ -91,6 +91,229 @@ def test_order9_config_loads_complete_pi_l_pi_h_pi_d_curriculum() -> None:
         ObjectDistributionLevel.CONSERVATIVE_ORDER8_ANCHOR
     )
     assert config.optimization.pi_l_bc.phase_balanced_sampling is True
+    assert config.reward.w_wrench_range == pytest.approx(0.0)
+    assert config.production_runtime.c3_phase_reset_progress_fractions == pytest.approx(
+        [1.0 / 6.0, 1.0 / 2.0, 2.0 / 3.0, 0.9]
+    )
+    assert config.production_runtime.c3_boundary_tail_phase_labels == [
+        "place",
+        "release",
+        "retreat",
+    ]
+    assert config.production_runtime.c3_boundary_tail_progress_fraction == 0.9
+    assert (
+        config.production_runtime.c3_force_estimator_minimum_confidence
+        == pytest.approx(0.25)
+    )
+    assert (
+        config.production_runtime.c3_force_estimator_support_safety_factor
+        == pytest.approx(1.0)
+    )
+    boundary = config.optimization.c3_boundary_fine_tune
+    assert boundary.enabled is True
+    assert boundary.target_actor_phase_labels == [
+        "establish_contact",
+        "lift",
+        "transport",
+        "place",
+    ]
+    assert boundary.epochs_per_update == 1
+    assert boundary.learning_rate_scale == pytest.approx(0.25)
+    assert boundary.non_target_parent_kl_limit == pytest.approx(0.01)
+    assert boundary.non_target_parent_kl_weight == pytest.approx(1.0)
+    assert boundary.maximum_topology_phase_kl == pytest.approx(0.04)
+    assert boundary.privileged_compression_teacher_weight == pytest.approx(0.0)
+    assert boundary.privileged_compression_teacher_action_step == pytest.approx(0.10)
+    assert boundary.privileged_compression_teacher_underforce_only is True
+    assert boundary.privileged_wrench_satisfied_parent_kl_weight == pytest.approx(0.0)
+    assert boundary.topology_gradient_surgery_enabled is False
+    assert boundary.compression_only_actor_objective is False
+    assert boundary.joint_head_only_actor_update is False
+    assert boundary.contact_residual_only_actor_update is False
+    assert boundary.factorized_actor_credit_enabled is True
+    assert boundary.contact_head_extra_optimizer_passes == 0
+    assert boundary.contact_coordinate_credit_enabled is True
+    assert boundary.contact_normal_translation_actor_loss_weight == pytest.approx(
+        3.0
+    )
+    assert boundary.contact_normal_preload_deficit_teacher_weight == pytest.approx(0.1)
+    assert boundary.contact_normal_action_quantization_step_m is None
+    assert boundary.contact_normal_exploration_initial_std == pytest.approx(
+        0.30
+    )
+
+
+def test_c3_boundary_fine_tune_requires_stricter_non_target_kl() -> None:
+    config = load_order9_learning_config()
+    config.optimization.c3_boundary_fine_tune.non_target_parent_kl_limit = 0.04
+    with pytest.raises(SchemaValidationError, match="below the topology-phase cap"):
+        config.validate()
+
+    config = load_order9_learning_config()
+    config.optimization.c3_boundary_fine_tune.learning_rate_scale = 1.01
+    with pytest.raises(SchemaValidationError, match="must not exceed one"):
+        config.validate()
+
+    config = load_order9_learning_config()
+    config.optimization.c3_boundary_fine_tune.privileged_compression_teacher_weight = -0.1
+    with pytest.raises(SchemaValidationError, match="teacher weight"):
+        config.validate()
+
+    config = load_order9_learning_config()
+    config.optimization.c3_boundary_fine_tune.privileged_compression_teacher_action_step = 0.0
+    with pytest.raises(SchemaValidationError, match="action step"):
+        config.validate()
+
+    config = load_order9_learning_config()
+    config.optimization.c3_boundary_fine_tune.privileged_wrench_satisfied_parent_kl_weight = -0.1
+    with pytest.raises(SchemaValidationError, match="wrench-satisfied"):
+        config.validate()
+
+    config = load_order9_learning_config()
+    config.optimization.c3_boundary_fine_tune.compression_only_actor_objective = True
+    with pytest.raises(SchemaValidationError, match="factorized actor credit"):
+        config.validate()
+
+    config = load_order9_learning_config()
+    config.optimization.c3_boundary_fine_tune.contact_normal_exploration_initial_std = 0.0
+    with pytest.raises(SchemaValidationError, match="exploration initial std"):
+        config.validate()
+
+    config = load_order9_learning_config()
+    config.optimization.c3_boundary_fine_tune.contact_normal_action_quantization_step_m = 0.0
+    with pytest.raises(SchemaValidationError, match="quantization step"):
+        config.validate()
+
+    config = load_order9_learning_config()
+    config.optimization.c3_boundary_fine_tune.contact_head_extra_optimizer_passes = 5
+    with pytest.raises(SchemaValidationError, match="extra optimizer passes"):
+        config.validate()
+
+    config = load_order9_learning_config()
+    config.optimization.c3_boundary_fine_tune.contact_normal_translation_actor_loss_weight = 0.0
+    with pytest.raises(SchemaValidationError, match="normal-translation"):
+        config.validate()
+
+    config = load_order9_learning_config()
+    config.optimization.c3_boundary_fine_tune.contact_normal_preload_deficit_teacher_weight = -0.1
+    with pytest.raises(SchemaValidationError, match="preload-deficit teacher"):
+        config.validate()
+
+    config = load_order9_learning_config()
+    config.optimization.c3_boundary_fine_tune.contact_normal_preload_deficit_teacher_weight = 0.1
+    config.optimization.c3_boundary_fine_tune.contact_coordinate_credit_enabled = False
+    with pytest.raises(SchemaValidationError, match="preload-deficit teacher"):
+        config.validate()
+
+    config = load_order9_learning_config()
+    config.optimization.c3_boundary_fine_tune.contact_head_extra_optimizer_passes = 1
+    config.optimization.c3_boundary_fine_tune.factorized_actor_credit_enabled = False
+    with pytest.raises(SchemaValidationError, match="require factorized actor credit"):
+        config.validate()
+
+    config.optimization.c3_boundary_fine_tune.factorized_actor_credit_enabled = True
+    config.optimization.c3_boundary_fine_tune.contact_head_extra_optimizer_passes = 0
+    config.optimization.c3_boundary_fine_tune.contact_coordinate_credit_enabled = True
+    config.validate()
+
+    config.optimization.c3_boundary_fine_tune.factorized_actor_credit_enabled = False
+    with pytest.raises(SchemaValidationError, match="contact-coordinate"):
+        config.validate()
+
+
+def test_c3_phase_resets_exclude_phase_boundaries() -> None:
+    config = load_order9_learning_config()
+    config.production_runtime.c3_phase_reset_progress_fractions = [
+        0.0,
+        0.5,
+        0.75,
+    ]
+    with pytest.raises(SchemaValidationError, match="strictly inside"):
+        config.production_runtime.validate()
+
+
+def test_c3_boundary_tail_fraction_must_identify_one_reset_stratum() -> None:
+    config = load_order9_learning_config()
+    config.production_runtime.c3_boundary_tail_progress_fraction = 0.85
+    with pytest.raises(SchemaValidationError, match="identify one reset stratum"):
+        config.production_runtime.validate()
+
+
+def test_c3_topology_stratified_runtime_is_required() -> None:
+    config = load_order9_learning_config()
+    assert config.production_runtime.c3_topology_stratified_updates is True
+    assert config.production_runtime.c3_topologies_per_module_count_per_update == 2
+    assert config.production_runtime.c3_topology_shard_parallel_process_count == 2
+    assert config.production_runtime.c3_contact_compression_only_module_counts == [
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+    ]
+    assert config.production_runtime.c3_joint_only_module_counts == []
+    assert config.production_runtime.c3_state_inheritance_rollouts_enabled is True
+    assert config.production_runtime.c3_state_inheritance_rollout_steps == 256
+    assert (
+        config.production_runtime.c3_state_inheritance_environment_count_per_module
+        == 48
+    )
+    assert (
+        config.production_runtime.c3_state_inheritance_topologies_per_module_count
+        == 2
+    )
+    assert config.production_runtime.c3_state_inheritance_focus_module_counts == []
+    assert config.production_runtime.c3_state_inheritance_focus_topology_count == 2
+    assert config.production_runtime.c3_state_inheritance_initial_phase_indices == [
+        1,
+        2,
+    ]
+    assert (
+        config.production_runtime
+        .c3_state_inheritance_fixed_reset_progress_fraction
+        == 0.9
+    )
+
+    config.production_runtime.c3_topology_stratified_updates = False
+    with pytest.raises(SchemaValidationError, match="topology-stratified"):
+        config.production_runtime.validate()
+
+
+def test_c3_contact_compression_only_module_counts_require_adapter() -> None:
+    config = load_order9_learning_config()
+    config.production_runtime.c3_contact_compression_action_adapter_enabled = False
+    with pytest.raises(SchemaValidationError, match="compression-only module"):
+        config.production_runtime.validate()
+
+
+def test_c3_joint_only_module_counts_must_not_overlap_compression_only() -> None:
+    config = load_order9_learning_config()
+    config.production_runtime.c3_joint_only_module_counts = [7, 8]
+    with pytest.raises(SchemaValidationError, match="joint-only module"):
+        config.production_runtime.validate()
+
+    config = load_order9_learning_config()
+    config.production_runtime.c3_contact_compression_only_module_counts = [4, 4]
+    with pytest.raises(SchemaValidationError, match="compression-only module"):
+        config.production_runtime.validate()
+
+def test_c3_backward_curriculum_requires_both_predecessor_phase_seeds() -> None:
+    config = load_order9_learning_config()
+    config.production_runtime.c3_state_inheritance_initial_phase_indices = [1]
+    with pytest.raises(SchemaValidationError, match="state-inheritance"):
+        config.production_runtime.validate()
+
+    config = load_order9_learning_config()
+    config.production_runtime.c3_state_inheritance_focus_topology_count = 0
+    with pytest.raises(SchemaValidationError, match="state-inheritance"):
+        config.production_runtime.validate()
+
+    config = load_order9_learning_config()
+    config.production_runtime.c3_state_inheritance_fixed_reset_progress_fraction = 0.85
+    with pytest.raises(SchemaValidationError, match="state-inheritance"):
+        config.production_runtime.validate()
 
 
 def test_c2_override_and_measured_c3_production_runtime() -> None:

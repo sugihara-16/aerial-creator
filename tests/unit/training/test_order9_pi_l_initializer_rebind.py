@@ -1,5 +1,9 @@
 from pathlib import Path
 
+import pytest
+import torch
+
+from amsrr.schemas.common import SchemaValidationError
 from amsrr.training.order9_checkpoints import load_order9_policy_checkpoint
 from amsrr.training.order9_pi_l_initializer_rebind import (
     prepare_order9_pi_l_initializer_physical_rebind,
@@ -12,10 +16,9 @@ from amsrr.training.order9_pi_l_stage_runner import resolve_order9_pi_l_stage_pl
 REPOSITORY = Path(__file__).resolve().parents[3]
 SOURCE = (
     REPOSITORY
-    / "artifacts/p4_full/order9/c3_preparation/pi_l_active_knot_initializer.pt"
+    / "artifacts/p4_full/order9/c3_preparation/"
+    "pi_l_active_knot_joint_load_initializer_v2.pt"
 )
-
-
 def test_initializer_physical_rebind_preserves_every_policy_tensor(tmp_path: Path) -> None:
     target_physical_hash = "f" * 64
     prepared = prepare_order9_pi_l_initializer_physical_rebind(
@@ -64,3 +67,31 @@ def test_rebound_initializer_passes_current_physical_stage_preflight(
     )
     assert plan.next_update_index == 0
     assert plan.parent_checkpoint_sha256 == prepared.checkpoint_sha256
+
+
+def test_old_force_preload_c3_checkpoint_cannot_continue_new_lineage(
+    tmp_path: Path,
+) -> None:
+    # Keep this rejection test independent of retained experiment artifacts.
+    # Old training lineages are intentionally removable once their provenance
+    # and conclusions have been summarized.
+    payload = torch.load(SOURCE, map_location="cpu", weights_only=False)
+    payload["metadata"] = dict(payload["metadata"])
+    payload["metadata"]["policy_version"] = (
+        "order9_obsolete_force_preload_pi_l_v0"
+    )
+    obsolete_checkpoint = tmp_path / "obsolete_force_preload.pt"
+    torch.save(payload, obsolete_checkpoint)
+    config = load_order9_learning_config(
+        REPOSITORY / "configs/training/order9_learning_curriculum.yaml"
+    )
+    with pytest.raises(SchemaValidationError, match="unsupported Order9 pi_L"):
+        resolve_order9_pi_l_stage_plan(
+            config,
+            stage_id="c3_pi_l_ppo_arbitrary_morphology",
+            stage_root=tmp_path / "virtual-contact-joint-load-lineage",
+            initial_checkpoint_path=obsolete_checkpoint,
+            repository_root=REPOSITORY,
+            additional_update_count=1,
+            branch_parent_update_index=13,
+        )

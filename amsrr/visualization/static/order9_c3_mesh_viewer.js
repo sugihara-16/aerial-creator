@@ -26,8 +26,62 @@
   function activeAnimationFrame() {
     return animation ? animation.frames[animationFrameIndex] : null;
   }
+  const urdfFk = animation && animation.frame_encoding === "urdf_fk_v1"
+    ? animation.urdf_fk : null;
+  const diagnosticsPanel = document.getElementById("diagnostics");
+  const diagnosticsCanvas = document.getElementById("diagnostic-chart");
+  const diagnosticsLive = document.getElementById("diagnostic-live");
+  const diagnosticFrames = animation
+    ? animation.frames.filter(frame => frame.diagnostics) : [];
+  if (diagnosticFrames.length) diagnosticsPanel.hidden = false;
+  let fkCacheFrameIndex = -1, fkCacheLinkMatrices = null;
+  function jointMotionMatrix(joint, coordinate) {
+    if (joint.joint_type === "fixed") return identity();
+    const axis = normalize(joint.axis_xyz || [0, 0, 1]);
+    if (joint.joint_type === "prismatic") {
+      const value = identity();
+      value[12] = axis[0] * coordinate;
+      value[13] = axis[1] * coordinate;
+      value[14] = axis[2] * coordinate;
+      return value;
+    }
+    const half = 0.5 * coordinate, sine = Math.sin(half);
+    return poseMatrix([
+      0, 0, 0,
+      axis[0] * sine, axis[1] * sine, axis[2] * sine, Math.cos(half)
+    ]);
+  }
+  function activeUrdfLinkMatrices() {
+    if (!urdfFk) return null;
+    if (fkCacheFrameIndex === animationFrameIndex && fkCacheLinkMatrices)
+      return fkCacheLinkMatrices;
+    const frame = activeAnimationFrame();
+    const matrices = new Array(urdfFk.links.length);
+    matrices[urdfFk.root_link_index] = poseMatrix(frame.root_pose_world);
+    for (const joint of urdfFk.joints) {
+      const coordinate = joint.coordinate_index >= 0
+        ? Number(frame.joint_positions[joint.coordinate_index]) : 0;
+      matrices[joint.child_link_index] = multiply(
+        multiply(
+          matrices[joint.parent_link_index],
+          new Float32Array(joint.origin_matrix),
+        ),
+        jointMotionMatrix(joint, coordinate),
+      );
+    }
+    fkCacheFrameIndex = animationFrameIndex;
+    fkCacheLinkMatrices = matrices;
+    return matrices;
+  }
   function activeModelMatrix(instance, index) {
     const frame = activeAnimationFrame();
+    if (urdfFk && Number.isInteger(instance.link_index)) {
+      const links = activeUrdfLinkMatrices();
+      return multiply(
+        links[instance.link_index],
+        new Float32Array(instance.local_matrix),
+      );
+    }
     return frame && frame.model_matrices
       ? frame.model_matrices[index] : instance.model_matrix;
   }
@@ -272,30 +326,37 @@
   gl.enableVertexAttribArray(0);gl.vertexAttribPointer(0,3,gl.FLOAT,false,0,0);
   gl.bindVertexArray(null);
 
-  const bounds={min:[Infinity,Infinity,Infinity],max:[-Infinity,-Infinity,-Infinity]};
+  const suppliedBounds = animation && animation.bounds;
+  const bounds = suppliedBounds
+    && Array.isArray(suppliedBounds.min) && suppliedBounds.min.length === 3
+    && Array.isArray(suppliedBounds.max) && suppliedBounds.max.length === 3
+    ? {min:[...suppliedBounds.min], max:[...suppliedBounds.max]}
+    : {min:[Infinity,Infinity,Infinity],max:[-Infinity,-Infinity,-Infinity]};
   function include(point) {
     for(let a=0;a<3;++a){bounds.min[a]=Math.min(bounds.min[a],point[a]);bounds.max[a]=Math.max(bounds.max[a],point[a]);}
   }
   const boundsFrames = animation ? animation.frames : [null];
-  for(const frame of boundsFrames) {
-    for(let index=0; index<scene.instances.length; ++index) {
-      const instance=scene.instances[index];
-      if(instance.layer!=="visual" || instance.detail_class!=="shape")continue;
-      const mesh=meshes.get(instance.mesh_key);
-      const matrix=frame && frame.model_matrices
-        ? frame.model_matrices[index] : instance.model_matrix;
-      for(const x of [mesh.min[0],mesh.max[0]])for(const y of [mesh.min[1],mesh.max[1]])for(const z of [mesh.min[2],mesh.max[2]])
-        include(transformPoint(matrix,[x,y,z]));
+  if (!suppliedBounds) {
+    for(const frame of boundsFrames) {
+      for(let index=0; index<scene.instances.length; ++index) {
+        const instance=scene.instances[index];
+        if(instance.layer!=="visual" || instance.detail_class!=="shape")continue;
+        const mesh=meshes.get(instance.mesh_key);
+        const matrix=frame && frame.model_matrices
+          ? frame.model_matrices[index] : instance.model_matrix;
+        for(const x of [mesh.min[0],mesh.max[0]])for(const y of [mesh.min[1],mesh.max[1]])for(const z of [mesh.min[2],mesh.max[2]])
+          include(transformPoint(matrix,[x,y,z]));
+      }
     }
-  }
-  for(const marker of scene.markers) include(marker.position_world);
-  for(const frame of boundsFrames) {
-    for(let index=0; index<scene.boxes.length; ++index) {
-      const box=scene.boxes[index];
-      const pose=frame && frame.box_poses && frame.box_poses[index]
-        ? frame.box_poses[index] : box.pose_world;
-      const matrix=poseMatrix(pose,box.size_m.map(x=>x/2));
-      for(const x of [-1,1])for(const y of [-1,1])for(const z of [-1,1])include(transformPoint(matrix,[x,y,z]));
+    for(const marker of scene.markers) include(marker.position_world);
+    for(const frame of boundsFrames) {
+      for(let index=0; index<scene.boxes.length; ++index) {
+        const box=scene.boxes[index];
+        const pose=frame && frame.box_poses && frame.box_poses[index]
+          ? frame.box_poses[index] : box.pose_world;
+        const matrix=poseMatrix(pose,box.size_m.map(x=>x/2));
+        for(const x of [-1,1])for(const y of [-1,1])for(const z of [-1,1])include(transformPoint(matrix,[x,y,z]));
+      }
     }
   }
   if(!Number.isFinite(bounds.min[0])){bounds.min=[-1,-1,-1];bounds.max=[1,1,1];}
@@ -379,19 +440,68 @@
     const frame=activeAnimationFrame();
     for(let labelIndex=0;labelIndex<labelElements.length;++labelIndex) {
       const [item,element]=labelElements[labelIndex];
-      const position=frame && frame.label_positions
+      let position=frame && frame.label_positions
         && labelIndex<scene.labels.length
         && frame.label_positions[labelIndex]
         ? frame.label_positions[labelIndex] : item.position_world;
+      if (
+        frame && !frame.label_positions && urdfFk
+        && labelIndex < scene.labels.length
+        && Number.isInteger(item.link_index)
+      ) {
+        const matrix = activeUrdfLinkMatrices()[item.link_index];
+        position = [matrix[12], matrix[13], matrix[14]];
+      }
       const projected=project(position,vp);
       const visible=showLabels&&projected&&projected[2]>=-1&&projected[2]<=1;
       element.style.display=visible?"block":"none";
       if(visible){element.style.left=`${projected[0]}px`;element.style.top=`${projected[1]}px`;}
     }
     const animationText=frame
-      ? ` | t=${Number(frame.time_s).toFixed(2)} s | ${frame.phase || ""} | window ${frame.window_index}`
+      ? ` | t=${Number(frame.time_s).toFixed(2)} s | ${frame.status_text || frame.phase || ""}`
       : "";
     status.textContent=`exact STL | ${scene.instances.filter(x=>x.layer===layer&& (fullDetail||x.detail_class!=="full")).length} mesh instances${animationText} | drag: orbit, wheel: zoom`;
+    drawDiagnostics();
+  }
+
+  function diagnosticSeries(key, arrayIndex=null) {
+    return animation.frames.map(frame => {
+      const value=frame.diagnostics&&frame.diagnostics[key];
+      if(arrayIndex===null)return Number(value);
+      return Array.isArray(value)&&arrayIndex<value.length?Number(value[arrayIndex]):NaN;
+    });
+  }
+  function drawDiagnostics() {
+    if(!diagnosticFrames.length)return;
+    const dpr=Math.min(2,window.devicePixelRatio||1);
+    const width=Math.max(320,Math.round(diagnosticsCanvas.clientWidth*dpr));
+    const height=Math.max(180,Math.round(diagnosticsCanvas.clientHeight*dpr));
+    if(diagnosticsCanvas.width!==width||diagnosticsCanvas.height!==height){diagnosticsCanvas.width=width;diagnosticsCanvas.height=height;}
+    const ctx=diagnosticsCanvas.getContext("2d"),scale=dpr;
+    ctx.clearRect(0,0,width,height);ctx.save();ctx.scale(scale,scale);
+    const w=width/scale,h=height/scale,left=42,right=8,top=14,gap=24,plotH=(h-top-gap-18)/2;
+    const times=animation.frames.map(frame=>Number(frame.time_s));
+    const t0=times[0],t1=Math.max(t0+1e-6,times[times.length-1]);
+    const root=diagnosticSeries("robot_root_height_m"),object=diagnosticSeries("object_height_m"),command=diagnosticSeries("command_body_height_m");
+    const baseRoot=root.find(Number.isFinite)||0,baseObject=object.find(Number.isFinite)||0;
+    const heights=[root.map(v=>(v-baseRoot)*1000),object.map(v=>(v-baseObject)*1000),command.map(v=>(v-baseRoot)*1000)];
+    const f0=diagnosticSeries("selected_contact_force_n",0),f1=diagnosticSeries("selected_contact_force_n",1),support=diagnosticSeries("vertical_support_force_n"),weight=diagnosticSeries("payload_weight_n"),threshold=diagnosticSeries("contact_force_threshold_n");
+    function plot(y,series,colors,labels,unit,zeroFloor=false){
+      const finite=series.flat().filter(Number.isFinite);let lo=finite.length?Math.min(...finite):0,hi=finite.length?Math.max(...finite):1;
+      if(zeroFloor)lo=0;if(Math.abs(hi-lo)<1e-6){hi+=1;lo-=zeroFloor?0:1;}
+      const pad=(hi-lo)*.08;hi+=pad;if(!zeroFloor)lo-=pad;
+      const xOf=i=>left+(times[i]-t0)/(t1-t0)*(w-left-right),yOf=v=>y+plotH-(v-lo)/(hi-lo)*plotH;
+      ctx.strokeStyle="#c5ccd3";ctx.lineWidth=1;ctx.strokeRect(left,y,w-left-right,plotH);
+      ctx.fillStyle="#52606d";ctx.font="11px ui-monospace,monospace";ctx.fillText(`${hi.toFixed(1)} ${unit}`,2,y+10);ctx.fillText(lo.toFixed(1),12,y+plotH);
+      series.forEach((values,s)=>{ctx.beginPath();let started=false;values.forEach((v,i)=>{if(!Number.isFinite(v))return;const x=xOf(i),py=yOf(v);if(!started){ctx.moveTo(x,py);started=true;}else ctx.lineTo(x,py);});ctx.strokeStyle=colors[s];ctx.lineWidth=1.8;ctx.stroke();});
+      let lx=left;labels.forEach((label,i)=>{ctx.fillStyle=colors[i];ctx.fillRect(lx,y-11,10,3);ctx.fillStyle="#263441";ctx.fillText(label,lx+14,y-6);lx+=14+ctx.measureText(label).width+14;});
+      const cursor=left+(times[animationFrameIndex]-t0)/(t1-t0)*(w-left-right);ctx.strokeStyle="#111827";ctx.lineWidth=1;ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(cursor,y);ctx.lineTo(cursor,y+plotH);ctx.stroke();ctx.setLineDash([]);
+    }
+    plot(top,heights,["#1769aa","#dc7c12","#2f9e44"],["robot Δz","object Δz","body cmd Δz"],"mm",false);
+    plot(top+plotH+gap,[f0,f1,support,weight,threshold],["#7b2cbf","#d6336c","#087f5b","#343a40","#e03131"],["contact 0","contact 1","vertical support","weight","contact gate"],"N",true);
+    const frame=activeAnimationFrame(),d=frame.diagnostics,forces=d.selected_contact_force_n||[],slip=d.contact_relative_vertical_speed_mps||[];
+    diagnosticsLive.textContent=`phase=${frame.phase} | root=${(d.robot_root_height_m*1000).toFixed(1)} mm | object=${(d.object_height_m*1000).toFixed(1)} mm\ncontact=[${forces.map(v=>Number(v).toFixed(2)).join(", ")}] N | vertical support=${Number(d.vertical_support_force_n).toFixed(2)} / weight=${Number(d.payload_weight_n).toFixed(2)} N | relative vz=[${slip.map(v=>(Number(v)*1000).toFixed(1)).join(", ")}] mm/s`;
+    ctx.restore();
   }
 
   let dragging=false,last=[0,0];
@@ -421,7 +531,7 @@
     const frame=activeAnimationFrame();
     animationSlider.value=String(animationFrameIndex);
     animationPlay.textContent=animationPlaying?"Pause":"Play";
-    animationTime.textContent=`t=${Number(frame.time_s).toFixed(2)} s | ${frame.phase || ""} | window ${frame.window_index}`;
+    animationTime.textContent=`t=${Number(frame.time_s).toFixed(2)} s | ${frame.status_text || frame.phase || ""}`;
   }
   function setAnimationFrame(index) {
     if(!animation)return;

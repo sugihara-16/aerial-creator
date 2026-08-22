@@ -135,6 +135,64 @@ def test_tensor_contact_reducer_separates_allowed_object_and_environment_contact
     assert evidence.prohibited_collision.tolist() == [True, True]
 
 
+def test_tensor_contact_wrench_reducer_uses_raw_patch_points_and_friction() -> None:
+    physical, morphology, full = _fixture()
+    selected = (full.selected_anchor_ids[0], full.selected_anchor_ids[1])
+    io = Order9TensorIsaacIO(
+        morphology_graph=morphology,
+        physical_model=physical,
+        robot_body_names=full.robot_body_names,
+        robot_joint_names=full.robot_joint_names,
+        selected_anchor_ids=selected,
+    )
+    filter_count = len(io.object_filter_body_names)
+    normal_counts = torch.zeros((1, filter_count), dtype=torch.long)
+    normal_starts = torch.zeros_like(normal_counts)
+    first_filter, second_filter = io.selected_anchor_filter_indices
+    normal_counts[0, first_filter] = 1
+    normal_counts[0, second_filter] = 1
+    normal_starts[0, first_filter] = 0
+    normal_starts[0, second_filter] = 1
+    friction_counts = torch.zeros_like(normal_counts)
+    friction_starts = torch.zeros_like(normal_counts)
+    friction_counts[0, first_filter] = 1
+    contact_frames = torch.tensor(
+        [
+            [
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+            ]
+        ]
+    )
+
+    wrench = io.reduce_contact_wrenches(
+        normal_force_magnitudes_n=torch.tensor([1.0, 2.0]),
+        normal_points_world=torch.tensor(
+            [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]
+        ),
+        normal_vectors_world=torch.tensor(
+            [[1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+        ),
+        normal_contact_counts=normal_counts,
+        normal_contact_starts=normal_starts,
+        friction_forces_world=torch.tensor([[0.0, 1.0, 0.0]]),
+        friction_points_world=torch.tensor([[0.0, 0.0, 1.0]]),
+        friction_contact_counts=friction_counts,
+        friction_contact_starts=friction_starts,
+        contact_frame_pose_world=contact_frames,
+        selected_assignment_mask=torch.ones((1, 2), dtype=torch.bool),
+    )
+
+    torch.testing.assert_close(
+        wrench[0, 0],
+        torch.tensor([1.0, 1.0, 0.0, -1.0, 0.0, -1.0]),
+    )
+    torch.testing.assert_close(
+        wrench[0, 1],
+        torch.tensor([0.0, 0.0, 2.0, 0.0, -2.0, 0.0]),
+    )
+
+
 class _Composer:
     def __init__(self) -> None:
         self.kwargs = None
@@ -185,6 +243,10 @@ def test_tensor_isaac_io_applies_qp_rotors_gimbals_and_policy_dock_intent() -> N
         joint_target_mask=torch.ones(shape, dtype=torch.bool),
         module_ids=io.module_ids,
         local_joint_ids=dock_ids,
+        contact_compression_legacy_joint_action=torch.zeros((batch,)),
+        contact_compression_residual_action=torch.zeros((batch,)),
+        contact_compression_action=torch.zeros((batch,)),
+        contact_compression_joint_delta_rad=torch.zeros(shape),
     )
     allocation = SimpleNamespace(
         rotor_thrusts_n=torch.full((batch, rotors), 2.0),
