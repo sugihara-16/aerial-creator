@@ -25,6 +25,12 @@ from amsrr.robot_model.physical_model_builder import (
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.morphology import MorphologyGraph
 from amsrr.schemas.task_spec import TaskSpec
+from amsrr.simulation.order9_object_task_runtime import (
+    Order9ObjectTaskRuntimeConfig,
+)
+from amsrr.simulation.order9_object_task_state import (
+    load_order9_canonical_reset,
+)
 from amsrr.simulation.order9_morphology_assets import (
     Order9MorphologyAssetManifest,
     validate_order9_morphology_asset_manifest_bytes,
@@ -79,6 +85,25 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", default=DEFAULT_OUTPUT)
     parser.add_argument("--frames-per-second", type=int, default=10)
     parser.add_argument("--maximum-windows-per-phase", type=int, default=32)
+    parser.add_argument("--collision-margin-mm", type=float, default=5.0)
+    parser.add_argument(
+        "--grasp-contact-height-offset-mm",
+        type=float,
+        default=0.0,
+        help=(
+            "Move horizontal grasp-face targets upward within the object "
+            "face before IK/configuration-space planning."
+        ),
+    )
+    parser.add_argument(
+        "--pregrasp-clearance-mm",
+        type=float,
+        default=80.0,
+        help=(
+            "Keep selected grasp frames this far outside the object during "
+            "approach; contact acquisition closes the remaining distance."
+        ),
+    )
     parser.add_argument(
         "--limit",
         type=int,
@@ -104,6 +129,13 @@ def _parser() -> argparse.ArgumentParser:
         help=(
             "Force one unordered pair of surface port ids as A,B while "
             "still searching contact groups and the complete trajectory."
+        ),
+    )
+    parser.add_argument(
+        "--preferred-candidate-group-id",
+        help=(
+            "Force one contact-candidate group within the selected surface "
+            "pair. Intended for hash-bound diagnostic trajectory repair."
         ),
     )
     parser.add_argument(
@@ -134,11 +166,32 @@ def main() -> int:
     args = _parser().parse_args()
     if args.workers < 1:
         raise ValueError("--workers must be positive")
+    if args.collision_margin_mm <= 0.0:
+        raise ValueError("--collision-margin-mm must be positive")
+    if not 0.0 <= args.grasp_contact_height_offset_mm <= 100.0:
+        raise ValueError(
+            "--grasp-contact-height-offset-mm must be in [0, 100]"
+        )
+    if not 50.0 <= args.pregrasp_clearance_mm <= 300.0:
+        raise ValueError("--pregrasp-clearance-mm must be in [50, 300]")
     preferred_surface_port_ids = (
         None
         if args.preferred_surface_port_ids is None
         else _parse_surface_port_pair(args.preferred_surface_port_ids)
     )
+    preferred_candidate_group_id = args.preferred_candidate_group_id
+    if (
+        preferred_candidate_group_id is not None
+        and not preferred_candidate_group_id.strip()
+    ):
+        raise ValueError("--preferred-candidate-group-id must be non-empty")
+    if preferred_candidate_group_id is not None and (
+        args.reviewed_contact_overrides or args.posture_rejection_overrides
+    ):
+        raise ValueError(
+            "--preferred-candidate-group-id is mutually exclusive with "
+            "reviewed and posture-rejection overrides"
+        )
     if preferred_surface_port_ids is not None and (
         args.reselect_contacts
         or args.reviewed_contact_overrides
@@ -202,6 +255,12 @@ def main() -> int:
         raise SchemaValidationError(
             "C3 nominal PhysicalModel differs from the bucket lineage"
         )
+    canonical = load_order9_canonical_reset(
+        _resolve(curriculum.production_runtime.canonical_order8_report_path),
+        expected_sha256=(
+            curriculum.production_runtime.canonical_order8_report_sha256
+        ),
+    )
     buckets = list(bucket_manifest.buckets)
     selected_source_indices = list(range(len(buckets)))
     if args.bucket_indices is not None and args.limit is not None:
@@ -298,11 +357,16 @@ def main() -> int:
                 args.enforce_proxy_collision,
                 args.reselect_contacts,
                 preferred_surface_port_ids,
+                preferred_candidate_group_id,
                 reviewed_overrides.get(bucket.bucket_id),
                 posture_rejections.get(bucket.bucket_id),
                 bucket_manifest_path,
                 hash_file(bucket_manifest_path),
                 bucket_manifest.physical_model_hash,
+                float(canonical.lift_clearance_m),
+                1.0e-3 * float(args.collision_margin_mm),
+                1.0e-3 * float(args.grasp_contact_height_offset_mm),
+                1.0e-3 * float(args.pregrasp_clearance_mm),
             )
             for index, (bucket, task, graph, urdf_path) in enumerate(
                 bucket_inputs
@@ -361,6 +425,12 @@ def main() -> int:
                 "maximum_windows_per_phase": (
                     args.maximum_windows_per_phase
                 ),
+                "collision_margin_m": 1.0e-3
+                * float(args.collision_margin_mm),
+                "grasp_contact_height_offset_m": 1.0e-3
+                * float(args.grasp_contact_height_offset_mm),
+                "pregrasp_clearance_m": 1.0e-3
+                * float(args.pregrasp_clearance_mm),
                 "worker_process_count": args.workers,
                 "source_bucket_indices": selected_source_indices,
                 "contact_assignment_reselected": bool(
@@ -371,6 +441,9 @@ def main() -> int:
                     None
                     if preferred_surface_port_ids is None
                     else list(preferred_surface_port_ids)
+                ),
+                "preferred_candidate_group_id": (
+                    preferred_candidate_group_id
                 ),
                 "reviewed_contact_override_path": (
                     None
@@ -460,11 +533,16 @@ def _prepare_bucket(
         enforce_proxy_collision,
         reselect_contacts,
         preferred_surface_port_ids,
+        preferred_candidate_group_id,
         reviewed_contact_override,
         posture_rejection_override,
         bucket_manifest_path,
         bucket_manifest_sha256,
         physical_model_hash,
+        lift_clearance_m,
+        collision_margin_m,
+        grasp_contact_height_offset_m,
+        pregrasp_clearance_m,
     ) = job
     reviewed_surface_ids = (
         None
@@ -526,6 +604,9 @@ def _prepare_bucket(
         physical_model=physical_model,
         maximum_windows_per_phase=maximum_windows_per_phase,
         enforce_proxy_collision_during_generation=enforce_proxy_collision,
+        collision_margin_m=collision_margin_m,
+        grasp_contact_height_offset_m=grasp_contact_height_offset_m,
+        pregrasp_clearance_m=pregrasp_clearance_m,
         preferred_surface_port_ids=(
             preferred_surface_port_ids
             if preferred_surface_port_ids is not None
@@ -540,15 +621,19 @@ def _prepare_bucket(
             )
         ),
         preferred_candidate_group_id=(
-            None
-            if preferred_surface_port_ids is not None
+            preferred_candidate_group_id
+            if preferred_candidate_group_id is not None
             else (
-                reviewed_group_id
-                if reviewed_group_id is not None
+                None
+                if preferred_surface_port_ids is not None
                 else (
-                    None
-                    if reselect_contacts
-                    else _prechecked_group_id(task)
+                    reviewed_group_id
+                    if reviewed_group_id is not None
+                    else (
+                        None
+                        if reselect_contacts
+                        else _prechecked_group_id(task)
+                    )
                 )
             )
         ),
@@ -573,10 +658,13 @@ def _prepare_bucket(
         output_dir=artifact_dir,
         bucket_id=bucket.bucket_id,
         split=bucket.split,
+        task_spec=task,
+        lift_clearance_m=float(lift_clearance_m),
         task_spec_sha256=bucket.task_spec_sha256,
         structural_hash=bucket.structural_hash,
         physical_model_hash=physical_model_hash,
         robot_urdf_path=urdf_path,
+        retreat_offset_m=Order9ObjectTaskRuntimeConfig().retreat_offset_m,
     )
     viewer_path = (
         temporary

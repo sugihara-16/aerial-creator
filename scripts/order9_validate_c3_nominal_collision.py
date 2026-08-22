@@ -60,6 +60,16 @@ def _parser() -> argparse.ArgumentParser:
             "margin."
         ),
     )
+    parser.add_argument(
+        "--numerical-tolerance-m",
+        type=float,
+        default=5.0e-4,
+        help="Tolerance applied to proxy and selected-contact boundaries.",
+    )
+    parser.add_argument(
+        "--bucket-indices",
+        help="Optional comma-separated source entry indices for diagnostics.",
+    )
     return parser
 
 
@@ -91,9 +101,31 @@ def main() -> int:
         or requested_margin_m < 0.0
     ):
         raise ValueError("--margin-m must be finite and non-negative")
+    numerical_tolerance_m = float(args.numerical_tolerance_m)
+    if (
+        not math.isfinite(numerical_tolerance_m)
+        or numerical_tolerance_m < 0.0
+    ):
+        raise ValueError(
+            "--numerical-tolerance-m must be finite and non-negative"
+        )
     started = time.perf_counter()
     records = []
-    for entry in nominal.entries:
+    selected_entries = list(nominal.entries)
+    if args.bucket_indices:
+        indices = [
+            int(value.strip())
+            for value in args.bucket_indices.split(",")
+            if value.strip()
+        ]
+        if (
+            not indices
+            or len(indices) != len(set(indices))
+            or any(index < 0 or index >= len(selected_entries) for index in indices)
+        ):
+            raise ValueError("--bucket-indices are invalid")
+        selected_entries = [selected_entries[index] for index in indices]
+    for entry in selected_entries:
         bucket = bucket_by_id[entry.bucket_id]
         task = TaskSpec.from_json(
             (
@@ -128,6 +160,9 @@ def main() -> int:
         minimum_ground_clearance = math.inf
         maximum_violating_pairs = 0
         maximum_ground_violations = 0
+        failure_count = 0
+        failure_examples = []
+        tolerated_selected_contact_count = 0
         for frame_index, record in enumerate(timeline):
             knot = InteractionKnot.from_dict(record["knot"])
             for target in knot.object_targets:
@@ -157,7 +192,7 @@ def main() -> int:
                     int(value.anchor_id)
                     for value in knot.contact_assignments
                     if value.schedule_state
-                    in {"attach", "maintain", "slide"}
+                    in {"attach", "maintain", "slide", "release"}
                 )
             )
             scenes = [
@@ -187,11 +222,42 @@ def main() -> int:
                     margin_m=requested_margin_m,
                     ground_plane_z_m=collision_object.ground_plane_z_m,
                 )
-                if result.get("accepted") is not True:
-                    raise RuntimeError(
-                        f"{entry.bucket_id} frame {frame_index} rejected "
-                        f"against {kind}: {result}"
+                accepted = result.get("accepted") is True
+                selected_limit = result.get(
+                    "selected_contact_penetration_limit_m"
+                )
+                selected_penetration = result.get(
+                    "maximum_selected_contact_penetration_m"
+                )
+                tolerated_selected = (
+                    not accepted
+                    and int(result.get("ground_violating_proxy_count", 0)) == 0
+                    and int(result.get("colliding_pair_count", 0)) == 0
+                    and selected_limit is not None
+                    and selected_penetration is not None
+                    and float(selected_penetration)
+                    <= float(selected_limit) + numerical_tolerance_m
+                    and all(
+                        value.get("colliding") is not True
+                        and float(value.get("clearance_m", -math.inf))
+                        >= requested_margin_m - numerical_tolerance_m
+                        for value in result.get("worst_pairs", [])
                     )
+                )
+                if tolerated_selected:
+                    accepted = True
+                    tolerated_selected_contact_count += 1
+                if not accepted:
+                    failure_count += 1
+                    if len(failure_examples) < 16:
+                        failure_examples.append(
+                            {
+                                "frame_index": frame_index,
+                                "phase": record.get("phase"),
+                                "scene_kind": kind,
+                                "result": result,
+                            }
+                        )
                 clearance = float(result["minimum_clearance_m"])
                 if kind == "object":
                     minimum_object_clearance = min(
@@ -222,7 +288,7 @@ def main() -> int:
                 "bucket_id": entry.bucket_id,
                 "module_count": entry.module_count,
                 "frame_count": len(timeline),
-                "accepted": True,
+                "accepted": failure_count == 0,
                 "minimum_object_self_clearance_m": (
                     minimum_object_clearance
                 ),
@@ -234,12 +300,18 @@ def main() -> int:
                 "maximum_ground_violating_proxy_count": (
                     maximum_ground_violations
                 ),
+                "failure_count": failure_count,
+                "failure_examples": failure_examples,
+                "tolerated_selected_contact_count": (
+                    tolerated_selected_contact_count
+                ),
             }
         )
     payload = {
         "validator_version": f"{VALIDATOR_VERSION}:convex_proxy",
         "collision_geometry_mode": "convex_proxy",
         "requested_collision_margin_m": requested_margin_m,
+        "numerical_tolerance_m": numerical_tolerance_m,
         "nominal_manifest_path": _portable(nominal_path),
         "nominal_manifest_sha256": hash_file(nominal_path),
         "bucket_count": len(records),

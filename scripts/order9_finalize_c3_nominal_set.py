@@ -26,9 +26,9 @@ from amsrr.training.order9_rollout_buckets import (
 from amsrr.utils.hashing import hash_file
 
 
-FINALIZER_VERSION = "order9_c3_nominal_human_acceptance_finalizer_v1"
-HUMAN_REVIEW_VERSION = "order9_c3_nominal_human_review_v1"
-BINDING_VERSION = "order9_c3_accepted_nominal_binding_v1"
+FINALIZER_VERSION = "order9_c3_nominal_complete_task_finalizer_v2"
+HUMAN_REVIEW_VERSION = "order9_c3_nominal_complete_task_review_v2"
+BINDING_VERSION = "order9_c3_accepted_complete_nominal_binding_v2"
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -76,7 +76,11 @@ def main() -> int:
         artifact = validate_order9_c3_nominal_trajectory_artifact_bytes(
             artifact_path
         )
-        scene_path = nominal_path.parent / str(entry.animation_scene_path)
+        scene_path = (
+            None
+            if entry.animation_scene_path is None
+            else nominal_path.parent / entry.animation_scene_path
+        )
         collision_path = artifact_path.parent.parent.parent / "collision_validation.json"
         binding = {
             "binding_version": BINDING_VERSION,
@@ -87,7 +91,9 @@ def main() -> int:
             "artifact_sha256": entry.artifact_sha256,
             "timeline_path": _portable(artifact_path.parent / artifact.timeline_path),
             "timeline_sha256": artifact.timeline_sha256,
-            "animation_scene_path": _portable(scene_path),
+            "animation_scene_path": (
+                None if scene_path is None else _portable(scene_path)
+            ),
             "animation_scene_sha256": entry.animation_scene_sha256,
             "collision_validation_path": _portable(collision_path),
             "collision_validation_sha256": hash_file(collision_path),
@@ -127,13 +133,17 @@ def main() -> int:
 
     review = {
         "review_version": HUMAN_REVIEW_VERSION,
-        "review_authority": "repository_user",
+        "review_authority": (
+            "repository_user_prior_geometry_plus_automated_complete_phase_admission"
+        ),
         "review_assertion": (
-            "all final mesh animations were visually inspected and accepted"
+            "accepted approach/contact geometry is inherited unchanged from "
+            "the repository-user-reviewed lineage; all complete task phases "
+            "pass the hash-bound offline collision admission"
         ),
         "decision_scope": (
-            "ideal-tracking nominal approach/contact trajectory geometry; "
-            "not learned-policy or dynamics success"
+            "ideal-tracking complete eight-phase nominal geometry; not "
+            "learned-policy or dynamics success"
         ),
         "nominal_set_manifest_path": _portable(nominal_path),
         "nominal_set_manifest_sha256": hash_file(nominal_path),

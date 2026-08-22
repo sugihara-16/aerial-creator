@@ -97,7 +97,7 @@ def _parser() -> argparse.ArgumentParser:
         "--initializer-manifest",
         default=(
             "artifacts/p4_full/order9/c3_preparation/"
-            "pi_l_active_knot_initializer_current_physical_v1_manifest.json"
+            "pi_l_active_knot_joint_load_initializer_current_physical_v2_manifest.json"
         ),
     )
     parser.add_argument(

@@ -20,6 +20,7 @@ from amsrr.training.order9_dataset import Order9DatasetBundle, load_order9_datas
 from amsrr.training.order9_online_training import (
     Order9OnlineTrainingResult,
     train_order9_ppo_update,
+    train_order9_tensor_pi_l_ppo_update,
 )
 from amsrr.training.order9_pipeline import (
     load_order9_stage_manifest,
@@ -28,6 +29,10 @@ from amsrr.training.order9_pipeline import (
     record_order9_stage_training_outputs,
 )
 from amsrr.training.order9_tensor_reward import ORDER9_TENSOR_REWARD_TERM_NAMES
+from amsrr.training.order9_tensor_on_policy_dataset import (
+    Order9TensorPiLDatasetBundle,
+    validate_order9_tensor_pi_l_dataset_for_stage,
+)
 from amsrr.training.order9_tensorboard import Order9TensorBoardLogger
 
 
@@ -107,6 +112,7 @@ def run_order9_ppo_training(
         config,
         stage,
         parent_checkpoint_path,
+        expected_family="pi_l",
         update_index=update_index,
     )
     prior = [
@@ -209,6 +215,147 @@ def run_order9_ppo_training(
         checkpoint_paths_by_family={
             result.policy_family: result.checkpoint_path
         },
+        output_path=running_path,
+    )
+    return result, running_path, resolved_tensorboard_log_dir
+
+
+def run_order9_tensor_pi_l_ppo_training(
+    *,
+    config_path: str | Path,
+    stage_id: str,
+    rollout_dataset_path: str | Path,
+    rollout_bundle: Order9TensorPiLDatasetBundle,
+    parent_checkpoint_path: str | Path,
+    update_index: int,
+    prior_stage_manifest_paths: Sequence[str | Path] = (),
+    device: str | None = None,
+    output_dir: str | Path | None = None,
+    git_revision: str | None = None,
+    tensorboard_log_dir: str | Path | None = None,
+    tensorboard_enabled: bool = True,
+    c3_action_contract: str | None = None,
+) -> tuple[Order9OnlineTrainingResult, Path, Path | None]:
+    """Execute one tensor-native pi_L PPO update with standard stage ledgers."""
+
+    config = load_order9_learning_config(config_path)
+    stage = order9_stage_by_id(config, stage_id)
+    stage_runtime = resolve_order9_stage_runtime(config, stage)
+    stage_root = Path(
+        output_dir
+        or Path(config.production_runtime.artifact_root) / "stages" / stage_id
+    )
+    output = stage_root / f"update_{update_index:06d}"
+    output.mkdir(parents=True, exist_ok=True)
+    physical_model_path = config.production_runtime.robot_model_config_path
+    physical_model = build_physical_model_from_config(physical_model_path)
+    parent = load_order9_stage_parent_checkpoint(
+        config,
+        stage,
+        parent_checkpoint_path,
+        expected_family="pi_l",
+        update_index=update_index,
+    )
+    prior = [
+        load_order9_stage_manifest(path) for path in prior_stage_manifest_paths
+    ]
+    validation = validate_order9_tensor_pi_l_dataset_for_stage(
+        rollout_bundle,
+        config=config,
+        stage_id=stage_id,
+        behavior_checkpoint_sha256=parent.sha256,
+    )
+    inputs = {
+        "curriculum_config": str(config_path),
+        "robot_model_config": physical_model_path,
+        "parent_checkpoint": str(parent_checkpoint_path),
+    }
+    prepared_path = output / "stage_prepared.json"
+    prepared, _ = preflight_order9_stage(
+        config,
+        stage_id=stage_id,
+        input_artifact_paths=inputs,
+        prior_stage_manifests=prior,
+        dataset_manifest_path=rollout_dataset_path,
+        verified_dataset_validation=validation,
+        behavior_checkpoint_sha256=parent.sha256,
+        output_path=prepared_path,
+    )
+    tensorboard_logger = None
+    resolved_tensorboard_log_dir = None
+    if tensorboard_enabled:
+        generation_environment_steps = stage_runtime.generation_environment_steps
+        if generation_environment_steps is None:
+            raise ValueError("Order9 TensorBoard PPO generation size is missing")
+        resolved_tensorboard_log_dir = _tensorboard_log_dir(
+            Path.cwd(),
+            artifact_root=config.production_runtime.artifact_root,
+            stage_id=stage.stage_id,
+            override=None if tensorboard_log_dir is None else str(tensorboard_log_dir),
+        ) / "train"
+        tensorboard_logger = Order9TensorBoardLogger(
+            resolved_tensorboard_log_dir,
+            stage_id=stage.stage_id,
+            generation_id=f"{stage.stage_id}:update:{update_index:06d}",
+            split="train",
+            update_index=update_index,
+            generation_environment_steps=generation_environment_steps,
+            phase_labels=tuple(phase.value for phase in ORDER9_OBJECT_TASK_PHASES),
+            reward_term_names=ORDER9_TENSOR_REWARD_TERM_NAMES,
+        )
+
+    def _progress(step, metrics, runtime_sample):
+        if tensorboard_logger is not None:
+            tensorboard_logger.log_ppo_minibatch(
+                optimizer_step=step,
+                metrics=metrics,
+                runtime_sample=runtime_sample,
+            )
+
+    try:
+        result = train_order9_tensor_pi_l_ppo_update(
+            config,
+            stage_id=stage_id,
+            rollout_manifest_path=rollout_dataset_path,
+            rollout_bundle=rollout_bundle,
+            parent_checkpoint_path=parent_checkpoint_path,
+            physical_model=physical_model,
+            output_dir=output,
+            git_revision=git_revision or _git_revision(),
+            update_index=update_index,
+            device=device,
+            additional_input_artifact_paths={
+                "curriculum_config": str(config_path),
+                "robot_model_config": physical_model_path,
+            },
+            progress_callback=_progress if tensorboard_logger is not None else None,
+            c3_action_contract=c3_action_contract,
+        )
+    except BaseException:
+        if tensorboard_logger is not None:
+            tensorboard_logger.close()
+        raise
+    if tensorboard_logger is not None:
+        metrics_payload = json.loads(Path(result.metrics_path).read_text(encoding="utf-8"))
+        tensorboard_logger.log_ppo_update(
+            metrics=result.ppo_update.to_dict(),
+            environment_steps=result.consumed_environment_steps,
+            wall_elapsed_s=float(metrics_payload["update_wall_elapsed_s"]),
+            runtime_load=metrics_payload["runtime_load"],
+        )
+        tensorboard_logger.close()
+    result_path = output / f"training_result_update_{update_index:06d}.json"
+    output_artifacts = {
+        "policy_checkpoint": result.checkpoint_path,
+        "training_metrics": result.metrics_path,
+        "training_result": result_path,
+    }
+    running_path = output / "stage_training_complete.json"
+    record_order9_stage_training_outputs(
+        prepared,
+        config,
+        output_artifact_paths=output_artifacts,
+        checkpoint_paths_by_family={result.policy_family: result.checkpoint_path},
         output_path=running_path,
     )
     return result, running_path, resolved_tensorboard_log_dir

@@ -9,6 +9,7 @@ from amsrr.training.order9_c3_teacher import (
     Order9C3TeacherConfig,
     build_order9_c3_neutral_runtime_observation,
     build_order9_c3_posture_collision_object,
+    _offset_horizontal_grasp_candidates,
 )
 from amsrr.training.order9_rollout_buckets import (
     load_order9_pi_l_rollout_bucket_manifest,
@@ -16,6 +17,7 @@ from amsrr.training.order9_rollout_buckets import (
 from scripts.order9_prepare_c3_nominal_trajectories import (
     _load_posture_rejection_overrides,
     _parse_bucket_indices,
+    _parser as nominal_trajectory_parser,
 )
 from scripts.order9_prepare_c3a_curation_pilot import _load_config
 from tests.unit.training.test_order9_articulated_teacher import _system
@@ -30,6 +32,17 @@ def test_c3_teacher_config_accepts_pinned_surface_pair_and_group() -> None:
 
     assert config.preferred_surface_port_ids == (3, 7)
     assert config.preferred_candidate_group_id == "slot_0:grasp_pair:0"
+
+
+def test_nominal_trajectory_cli_accepts_pinned_candidate_group() -> None:
+    arguments = nominal_trajectory_parser().parse_args(
+        [
+            "--preferred-candidate-group-id",
+            "slot_0:grasp_pair:2",
+        ]
+    )
+
+    assert arguments.preferred_candidate_group_id == "slot_0:grasp_pair:2"
 
 
 def test_c3_teacher_config_accepts_unique_excluded_surface_pairs() -> None:
@@ -61,6 +74,64 @@ def test_c3_teacher_config_can_skip_full_recheck_for_static_curation() -> None:
     )
 
     assert config.require_full_trajectory_recheck is False
+
+
+def test_c3_teacher_config_accepts_bounded_grasp_height_offset() -> None:
+    config = Order9C3TeacherConfig(grasp_contact_height_offset_m=0.04)
+
+    assert config.grasp_contact_height_offset_m == pytest.approx(0.04)
+
+
+def test_c3_teacher_config_accepts_mesh_clear_pregrasp() -> None:
+    config = Order9C3TeacherConfig(pregrasp_clearance_m=0.15)
+
+    assert config.pregrasp_clearance_m == pytest.approx(0.15)
+
+
+@pytest.mark.parametrize("value", [-0.001, 0.101, float("nan")])
+def test_c3_teacher_config_rejects_invalid_grasp_height_offset(
+    value: float,
+) -> None:
+    with pytest.raises(ValueError, match="grasp_contact_height_offset_m"):
+        Order9C3TeacherConfig(grasp_contact_height_offset_m=value)
+
+
+@pytest.mark.parametrize("value", [0.049, 0.301, float("nan")])
+def test_c3_teacher_config_rejects_invalid_pregrasp_clearance(
+    value: float,
+) -> None:
+    with pytest.raises(ValueError, match="pregrasp_clearance_m"):
+        Order9C3TeacherConfig(pregrasp_clearance_m=value)
+
+
+def test_c3_grasp_height_offset_moves_side_contacts_only(
+    grasp_carry_dict: dict,
+) -> None:
+    task, physical, context = _system(grasp_carry_dict)
+    del task, physical
+    original = context.contact_candidate_set
+    shifted = _offset_horizontal_grasp_candidates(
+        original,
+        height_offset_m=0.04,
+    )
+
+    original_by_id = {
+        candidate.candidate_id: candidate for candidate in original.candidates
+    }
+    shifted_count = 0
+    for candidate in shifted.candidates:
+        source = original_by_id[candidate.candidate_id]
+        expected = (
+            0.04
+            if candidate.contact_mode.value == "grasp"
+            and abs(float(candidate.normal_world[2])) <= 0.25
+            else 0.0
+        )
+        assert candidate.contact_pose_world[2] == pytest.approx(
+            source.contact_pose_world[2] + expected
+        )
+        shifted_count += int(expected > 0.0)
+    assert shifted_count > 0
 
 
 @pytest.mark.parametrize(

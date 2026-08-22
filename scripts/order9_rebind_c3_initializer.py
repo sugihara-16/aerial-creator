@@ -30,21 +30,21 @@ def _parser() -> argparse.ArgumentParser:
         "--source-checkpoint",
         default=(
             "artifacts/p4_full/order9/c3_preparation/"
-            "pi_l_active_knot_initializer.pt"
+            "pi_l_active_knot_joint_load_initializer_v2.pt"
         ),
     )
     parser.add_argument(
         "--output-checkpoint",
         default=(
             "artifacts/p4_full/order9/c3_preparation/"
-            "pi_l_active_knot_initializer_current_physical_v1.pt"
+            "pi_l_active_knot_joint_load_initializer_current_physical_v2.pt"
         ),
     )
     parser.add_argument(
         "--output-manifest",
         default=(
             "artifacts/p4_full/order9/c3_preparation/"
-            "pi_l_active_knot_initializer_current_physical_v1_manifest.json"
+            "pi_l_active_knot_joint_load_initializer_current_physical_v2_manifest.json"
         ),
     )
     parser.add_argument("--device", default="cpu")
