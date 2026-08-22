@@ -2,7 +2,793 @@
 
 This file records implementation-time supplements or deviations from `A-MSRR_codex_ready_spec_v0_4_ja.md`.
 
+## 2026-08-07
+
+### Order 9 C3 Morphology-Invariant Contact-Compression Action
+
+- The user approved replacing the topology-dependent compression action
+  coordinate with one dedicated scalar
+  `contact_compression_residual_action` in `pi_L`.  The prior v5 adapter used
+  whichever local joint happened to contribute most to the current IK
+  compression direction as the scalar coordinate.  That coordinate changed
+  with morphology and posture, so the same learned action did not have stable
+  physical meaning across module counts.
+- The v6 scalar always means additional grasp closure.  The command decoder
+  adds it to the preserved v5 compression scalar, clamps the combined value,
+  and distributes it over all local joints along the morphology-specific IK
+  compression direction.  The old selected joint coordinate is removed from
+  the ordinary per-joint residual before that distribution; applying it both
+  directly and through the IK direction would double-count one joint and
+  would not preserve the v5 command.
+- The new mean head may condition on recurrent state, graph embedding, and
+  deployable module count.  It does not consume raw PhysX contact or wrench
+  tensors.  Its scalar action, mean, log probability, and entropy are stored
+  explicitly in the v18 tensor-rollout contract so PPO exact replay includes
+  the new stochastic dimension.
+- v5-to-v6 migration copies every existing parameter exactly and initializes
+  the new output to zero.  A training-only privileged warm start may calibrate
+  the zero-initialized scalar for the entering module count.  Per-module-count
+  calibration entries isolate this bootstrap: changing the five-module entry
+  leaves the two--four-module deterministic command exactly unchanged.  Fresh
+  on-policy PPO may subsequently train the graph-conditioned common head and
+  all count entries under the normal C3 objective.
+- The privileged warm-start label is training-only and remains
+  acceptance-ineligible.  Raw contact truth is not added to actor input or to
+  deployment.  Promotion still requires fresh on-policy training evidence and
+  held-out continuous Isaac validation.
+- On the five-module continuous training target, count-5 calibration reduced
+  scalar target RMSE from `0.3982` to `0.0183`, while two--four-module anchor
+  RMSE and maximum error remained exactly `0.0`.  A held-out five-module
+  phase-zero Isaac run then completed all task phases in 6,353 steps with no
+  collision, drop, QP failure, or fallback.
+- The same entry procedure applies when a later module count is unlocked:
+  screen accepted nominal trajectories first, calibrate only that module
+  count from train-only privileged continuous targets, and require a fresh
+  topology-stratified PPO update before evaluating the policy.  For six
+  modules, a train-only `0.6/0.8` compression sweep selected `0.8`; both
+  settings reached place without collision, QP failure, rotor saturation, or
+  object drop, while `0.8` entered place sooner.  The count-6 calibration
+  leaves counts two--five unchanged to numerical precision.  This is an
+  extension of the approved morphology-entry bootstrap, not a new actor
+  observation or deployment-time privileged signal.
+
+## 2026-08-04
+
+### Order 9 C3 Two--Three-Module PPO Subcurriculum
+
+- The user approved beginning the revised C3 learning sequence with the
+  available two- and three-module morphologies before returning to arbitrary
+  two--eight-module training.  This is a staged optimization curriculum, not
+  a change to the canonical C3 morphology range or promotion criteria.
+- Production C3 rollout selection accepts explicit inclusive training module
+  bounds.  The selected train distribution must contain every requested
+  module count, while validation and formal promotion remain held-out and are
+  not narrowed implicitly.  The 2--3-module lineage balances the two module
+  counts in each topology-equal PPO update.
+- Each update retains the approved mixture of phase-reset and continuous
+  state-inheritance rollouts.  Policy observations/actions, recurrent-state
+  semantics, outcome-only reward, nominal IK, `PolicyCommand`, QPID/QP, and
+  safety gates are unchanged.
+- Boundary-preserving PPO packing may merge an incomplete phase-reset tail
+  with an adjacent sequence batch when the tail lacks the required target or
+  anchor phase.  The operation must preserve every transition exactly once
+  and may not relabel phases, cross recurrent episode boundaries, or weaken
+  the existing target/anchor validation.  Continuous target-only shards
+  remain legal only when phase-reset shards provide the corresponding anchor
+  supervision.
+- The bounded subcurriculum budget is 13 updates (indices 0--12), totaling
+  7,215,104 fresh transitions.  Completion of this budget is not C3
+  promotion.  Advancement still requires fixed held-out safety comparison
+  and full-horizon continuous physical evidence; later 2--8-module training
+  must not claim that a 2--3-only checkpoint satisfies arbitrary-morphology
+  coverage.
+- The completed update-12 checkpoint passed a full-horizon physical check on
+  representative held-out two- and three-module buckets in `8/8` deterministic
+  episodes.  Every episode completed release/settle without fallback,
+  collision, drop, QP-infeasible terminal, or timeout.  This admits the
+  checkpoint as the output of the 2--3-module subcurriculum only; it does not
+  waive the later 4--8-module train/evaluation requirements.
+
+## 2026-08-02
+
+### Order 9 C3 Mixed State-Inheritance PPO Diagnostic
+
+- The user approved retaining the outcome-only C3 objective while mixing
+  phase-reset and continuous state-inheritance rollouts.  Every update now
+  contains the existing 14 phase-reset shards plus one continuous shard for
+  every module count 2--8.  Each continuous shard uses 12 environments for
+  1,280 simulator steps, starts equally from `contact_acquisition` and
+  `transport`, preserves physical and recurrent state across real phase
+  transitions, and resets recurrent state only at an episode boundary.
+- The first diagnostic generation contained 262,144 phase-reset train steps,
+  107,520 continuous train steps, and 262,144 validation steps.  Exact replay
+  passed for all 21 train shards.  Update 0 completed one epoch without KL
+  stop or rollback; aggregate KL was `0.0005767`, maximum applied topology-
+  phase KL was `0.032493 < 0.04`, and checkpoint SHA was
+  `d380828b...bdb4d4`.
+- Fixed-14 validation did not establish improvement over the initializer.
+  Mean reward changed by `-0.000998`, collision rate by `-0.000166`, QP-
+  feasible rate by `-0.000693`, and phase-success rate by `-1.31e-5`.
+  Six of 14 buckets improved, median paired reward delta was `-4.02e-5`, and
+  successful terminals remained `216`.
+- Paired continuous validation also showed no phase-outcome improvement.
+  Initializer and update 0 both reached `transport` and horizon-timed-out in
+  `4/4` bucket-28 episodes; both dropped during `lift` in `4/4` bucket-36
+  episodes.  Bucket-36 mean return changed by `-208.41`.  Update 0 is not
+  promoted, and no update 1 is authorized from this diagnostic checkpoint.
+- A trainer inefficiency was found during this run.  Fixed sequence-count
+  minibatches made a fragmented seven-module failure shard with 2,169 short
+  recurrent sequences dictate 181 optimizer attempts and cyclically reuse
+  smaller shards.  Production packing now preserves complete phase-
+  contiguous recurrent sequences but fills each topology minibatch by an
+  equal transition budget.  On the immutable update-0 generation this reduces
+  the computed attempt count from 181 to 93 without changing rollout data,
+  reward, GAE, recurrent-state, topology-equal loss, or KL contracts.  Any
+  further mixed-state experiment must restart at corrected update 0 from the
+  clean initializer; the slower diagnostic checkpoint is evidence only.
+
+### Order 9 C3 Outcome-Only Learning Result and State-Inheritance Blocker
+
+- The approved outcome-only C3 contract was exercised from a clean promoted-C2
+  initializer through updates 0--3.  Exact per-contact 6D wrench-range credit
+  was zero in both PPO return and auxiliary actor supervision; its measured
+  reward contribution was exactly zero in paired validation.
+- All four updates completed one PPO epoch without KL early stop.  Update 3
+  had aggregate KL `0.0001033`, maximum topology-phase KL `0.0009784`, clipped
+  fraction `3.82e-6`, and checkpoint SHA `40d3c7c3...a2953ad`.
+- On the fixed 14 held-out phase-reset buckets, update 3 minus the clean
+  initializer changed mean reward by `+0.003278`, collision rate by
+  `-8.72e-5`, QP-feasible rate by `-4.53e-4`, and phase-success rate by
+  `+8.72e-6`.  Seven buckets improved and seven regressed; the median reward
+  delta was `-0.000159`, and successful terminals remained `216`.
+- The required continuous physical check did not pass.  Bucket 28 reached
+  `place` without drop, collision, or QP terminal in all four episodes but
+  exhausted the 3,200-step horizon before `release`.  Bucket 36 reached
+  `transport`; two episodes dropped the object and two timed out in that
+  phase.  Overall task success was `0/8`, so update 3 is not promoted and no
+  later update is authorized from this lineage.
+- This establishes a state-distribution mismatch: the current topology-
+  stratified training batch is composed of 256-step phase-reset rollouts,
+  whereas promotion starts at `approach` and carries physical and recurrent
+  state across phase boundaries.  A higher fixed-reset score is therefore not
+  sufficient evidence for continuous task completion.
+- The next recommended method change is to retain the outcome-only reward and
+  mix fresh continuous state-inheritance rollouts into every topology-
+  stratified update, preserving recurrent state and GAE across real phase
+  transitions.  Phase-reset shards remain useful for coverage, but cannot be
+  the sole train distribution.  This is a method-level change and must be
+  approved before a new lineage is started.
+
+## 2026-08-01
+
+### Order 9 C3 Outcome-Only Pi-L Learning
+
+- The user approved removing exact per-contact 6D wrench-range error from the
+  C3 `pi_L` learning objective.  `w_wrench_range=0.0`, and the privileged
+  compression-teacher weight is also `0.0`; therefore neither PPO return nor
+  an auxiliary actor loss receives exact-wrench credit.
+- Raw PhysX wrench reduction and range-membership telemetry remain available
+  for diagnosis, critic-independent evaluation, and `pi_H` feasibility data.
+  They remain excluded from actor observations, `PolicyCommand`, IK, QPID/QP,
+  and deployable phase decisions.  Existing contact maintenance, slip, object
+  progress/pose, terminal success/failure, QP, collision, actuator saturation,
+  energy, drop, and timeout terms/gates are unchanged.
+- Formal learning starts from the clean C3 initializer derived from promoted
+  C2, not from any prior wrench-trained C3 update.  Its v4 actor is migrated
+  behavior-preservingly to v5 with a zero-output contact-residual branch; the
+  migration now explicitly accepts the canonical initializer update index
+  `-1` only when `initializer_only=true`.
+- Update 0 is evaluated against the same clean initializer on the fixed 14
+  held-out buckets.  Updates 1--3 proceed only if update 0 has a healthy PPO/KL
+  trace and no material task/safety regression.  Continuation requires task
+  outcome improvement independent of wrench telemetry.
+
+### Order 9 C3 Wrench-Range Soft-Regularizer Diagnostic
+
+- After removal of exact 6D wrench-box membership from the hard success gate,
+  the first outcome-gate update improved fixed-14 mean reward by `0.04162`,
+  but `0.03952` (about 95 percent) came from the still-configured
+  `w_wrench_range=10.0` term.  Successful terminals were unchanged and the
+  weak-grasp validation bucket still dropped in `4/4` continuous trials.
+- The user approved a bounded diagnostic with `w_wrench_range=1.0`.  During
+  that diagnostic, exact wrench membership remained privileged
+  reward/telemetry and `pi_H` feasibility information but was reduced to a
+  unit-weight soft regularizer.  Contact maintenance, slip, object/task
+  outcome, QP feasibility, collision, drop, and actuator constraints were
+  unchanged.
+- This changes only the scalar C3 reward weighting.  Actor observations and
+  actions, contact-residual architecture, nominal IK, `PolicyCommand`, QPID/QP,
+  phase-success gates, safety terminals, and tensor shapes are unchanged.
+- The diagnostic must first branch for one fresh update from the
+  behavior-preserving update-9 v5 initializer.  A clean update-0 lineage is
+  allowed only if paired fixed validation demonstrates task-outcome benefit;
+  total-reward improvement caused only by the wrench term is insufficient.
+- The one-update diagnostic consumed 524,288 fresh transitions across two
+  train topologies for every module count 2--8.  On the paired fixed-14
+  validation set, total reward changed by `-0.00437`; reward with the wrench
+  term algebraically removed changed by `-0.00112`; phase-success rate changed
+  by `-8.28e-5`; transport/place reward changed by `-0.02134/-0.03509`.
+  QP-feasible rate improved by `+0.000331`, while collision rate worsened by
+  `+2.62e-5` and successful terminals remained `215`.
+- Therefore the unit-weight condition did not demonstrate task-outcome
+  benefit.  It is rejected as the formal C3 setting, no clean update-0 lineage
+  is started from it, and the configuration returns to the last accepted
+  `w_wrench_range=10.0` pending a different method-level learning decision.
+
+### Order 9 C3 Outcome-Based Grasp Gate
+
+- The user approved removing exact per-assignment 6D contact-wrench box
+  membership from the C3 grasp-success hard gate.  This supersedes only the
+  hard-gate and phase-authority clauses of the 2026-07-30 `C3 Privileged PhysX
+  Wrench-Range Phase Supervision` section; raw PhysX wrench reduction and the
+  existing dense wrench-range reward/diagnostic remain unchanged.
+- C3 contact readiness now requires the configured number of selected physical
+  contacts, QP feasibility, and the existing continuous dwell.  `lift`,
+  `transport`, and `place` require maintained physical contacts, QP
+  feasibility, their existing object-pose/task conditions, and all unchanged
+  collision/drop/timeout safety rules.  Wrench-box membership is recorded but
+  cannot block phase progression or task success.
+- Actor observations/actions, nominal trajectory IK and inward contact lead,
+  `PolicyCommand`, QPID/QP, actuator limits, tensor shapes, and checkpoint
+  shapes are unchanged.  Raw PhysX contact remains privileged C3
+  reward/supervision evidence and is not an actor or controller input.
+- A fixed-checkpoint A/B on update 9 and validation buckets 28/36 confirmed
+  that both pass contact acquisition in `4/4` environments after removing the
+  range gate.  Bucket 28 completed lift in `4/4`, raised the object by about
+  `104 mm`, entered transport, maintained both contacts, and had no drop,
+  collision, rotor saturation, or QP terminal.  Bucket 36 attempted lift but
+  lost one selected contact and dropped the object in `4/4`; it therefore
+  remains a genuine grasp/task failure rather than a wrench-box false reject.
+- Contract identities advance to
+  `order9_c3_privileged_two_physx_contacts_qp_dwell_v7`,
+  `order9_c3_privileged_physx_contact_outcome_phase_supervisor_v2`, collector
+  v40, and promotion runner v16.  Evidence explicitly records
+  `wrench_range_hard_gate_enabled=false` so exact-gate artifacts cannot be
+  reused under the outcome contract.
+
+## 2026-07-31
+
+### Order 9 C3 Contact-Compression Credit Assignment
+
+- The existing C3 privileged wrench-range reward remains weighted by
+  `w_wrench_range=10.0`; raw PhysX contact wrench remains training/evaluation
+  truth only and is not added to actor observations, `PolicyCommand`, nominal
+  IK, QPID/QP, or actuator commands.
+- In the `establish_contact` and `lift` actor objective, the PPO advantage is
+  assigned only to the existing morphology-conditioned contact-compression
+  action coordinate.  During these boundary updates, actor optimization is
+  restricted to the node-wise `joint_decoder`; the shared/global actor is
+  frozen, while the critic remains trainable on all valid phase data.  This
+  changes training-time credit assignment, not the deployed policy interface
+  or action tensor shape.
+- Same-rollout comparison from the prior update-9 checkpoint and paired
+  fixed-14-bucket real-Isaac evaluation selected this combination: the
+  intended 10x wrench weight plus joint/compression-limited credit assignment
+  improved mean total reward and mean wrench-range reward; QP-feasible rate
+  changed by `+8.72e-6` and collision rate by only `+4.80e-5`.  Applying
+  another 10x multiplier on top of the configured value was diagnosed as an
+  unintended effective 100x condition and rejected.
+- A fresh official C3 lineage must therefore start from the hash-bound C2/C3
+  initializer rather than continue the diagnostic update-9 branch.  Exact
+  behavior replay, topology-stratified 2--8-module coverage, one-epoch
+  boundary optimization, parent/non-target KL preservation, and hard
+  topology-phase KL rollback remain mandatory.
+
+## 2026-07-30
+
+### Order 9 C3 Piecewise-Log Wrench-Range Penalty
+
+- The C3 privileged supervisor and its exact wrench-box success gate remain
+  unchanged.  However, the former dense penalty clipped each assignment's
+  normalized L-infinity violation at `1.0`.  Fresh update 4--6 evidence showed
+  that approximately 79--98 percent of contact-phase assignment samples were
+  on this plateau, so wrenches farther than one interval width outside the
+  teacher box lost their severity ordering even though they remained failures.
+- For a per-assignment normalized violation `v`, the user-approved shaping is
+  now `p(v)=v` for `v<=1` and `p(v)=1+log(v)` for `v>1`.  This preserves the
+  previous reward exactly over its formerly informative range, remains zero
+  exactly when all six wrench components lie inside the teacher box, and adds
+  a monotonic but robust logarithmic tail for larger PhysX deviations.  The
+  bounded-assignment mean and existing `w_wrench_range` weight are retained.
+- This changes reward shaping only.  The two-contact/complete-6D-range/QP/dwell
+  hard gate, timeout behavior, actor observations, `pi_H` teacher command,
+  nominal IK, `PolicyCommand`, QPID/QP, actuator commands, and tensor shapes are
+  unchanged.  Raw PhysX wrench remains privileged training/evaluation evidence
+  and is not made deployable input.
+- The reward contract advances to
+  `order9_privileged_contact_wrench_range_reward_v3_patch_moment_piecewise_log`,
+  the production collector to v37, and the promotion runner to v14 so saturated
+  v2 rollout evidence cannot be reused as fresh v3 training or promotion data.
+
+### Order 9 C3 Privileged PhysX Wrench-Range Phase Supervision
+
+- C3 is a `pi_L` teacher-trajectory training/evaluation stage, not the final
+  deployable `pi_H` phase controller.  During C3 only, runtime phase progression
+  therefore uses a privileged supervisor built from PhysX contact truth.  This
+  supersedes the C3 phase-authority portions of the 2026-07-29 Jacobian
+  force-observer and deployable-phase-gate sections; the observer remains useful
+  diagnostic evidence but is not allowed to block or admit a C3 transition.
+- For every active teacher assignment, the raw normal and friction patches are
+  reduced about the corresponding `ContactCandidate` frame to the realized 6D
+  wrench.  Grasp readiness requires at least two selected physical contacts,
+  every bounded assignment's complete 6D wrench to lie inside the active
+  `pi_H` teacher lower/upper box, QP feasibility, and a continuous `0.25 s`
+  dwell.  The existing `0.5 N` sensor floor only rejects numerical/no-contact
+  noise when counting physical contacts; it is not a wrench target and cannot
+  substitute for the teacher range.
+- `contact_acquisition` completes only after the above dwell.  `lift`,
+  `transport`, and `place` also require the current wrench-range and QP
+  conditions in addition to their existing object-pose/contact conditions.
+  A wrench-range violation retains its normalized privileged reward penalty and
+  prevents phase success; sustained nonachievement therefore ends through the
+  existing phase timeout/failure penalty rather than being silently accepted.
+  Controller-side preload completion is not part of this gate.
+- PhysX wrench values remain excluded from `pi_L` actor observations,
+  `PolicyCommand`, nominal IK, QPID/QP inputs, and actuator commands.  They are
+  training/evaluation supervision, reward/critic evidence, and diagnostics
+  only.  Hard collision, QP, drop, and other safety authorities remain in
+  force.  The C3 artifact records the privileged-supervisor contract and the
+  collector version prevents old deployable-gate evidence from being mixed
+  with new C3 promotion evidence.
+- From R1 onward, learned `pi_H` owns phase/timing decisions from deployable
+  observations.  The privileged supervisor then returns to label/reward/critic
+  and evaluation use and is removed from runtime phase progression; hard
+  deterministic feasibility and safety checks are not removed.
+
+## 2026-07-29
+
+### Order 9 C3 Deployable Jacobian Normal-Force Observer
+
+- 同日付の`Surface-Semantic Virtual Contact and Deployable Phase Gate`で定義した
+  contact-acquisition判定のうち、最大joint loadとjoint tracking errorを接触力の代用にする
+  部分を置き換える。これらは機体内部の姿勢保持負荷でも増加し、物体への接触法線力を
+  一意に示さないため、phase遷移のforce evidenceには使用しない。
+- 実行時は選択grasp frameにおける現在Jacobian `J_p`、`pi_H`が指定した接触法線
+  `n`、符号付き実joint torque、robot modelから得るgravity torque、および非接触
+  free-motion torque baselineを使用する。baselineは`approach`中は全jointで更新し、
+  `contact_acquisition`中は各anchorが幾何的contact bandの外側にある間だけ、そのanchorが
+  所有するjoint枝を更新する。contact bandへ入った枝は凍結し、実接触反力をbaselineへ
+  学習しない。接触によるactuator
+  residualを `tau_r = tau_applied - tau_gravity - tau_baseline`、各anchorの写像を
+  `A_i = -J_p_i^T n_i`とし、ridge付き非負最小二乗
+  `argmin_{f >= 0} ||A^T f - tau_r||^2 + lambda ||f||^2`でanchor法線力を推定する。
+  小規模なcoordinate NNLSで解き、外部QPライブラリやraw contact sensorを要求しない。
+- 推定confidenceは、接触法線Jacobianの可観測性と、推定後のtorque誤差を同Jacobian
+  行空間へ戻した残差から算出する。法線接触モデルと直交する姿勢保持torqueを残差へ
+  含めてはならない。これはobserverであり、joint target、torque biasまたは最終actuator
+  commandを生成しない。wrench-range内へ実レンチを収める責務は引き続きlearned
+  `pi_L`にあり、QPID/QPが最終制御・安全authorityを保持する。
+- `contact_acquisition -> lift`のproduction gateは、全選択anchorについて従来の
+  pose/relative-speed条件に加え、推定法線力、推定confidence、QP feasibleおよびdwellを
+  要求する。必要法線力は`pi_H` wrench rangeが同符号ならゼロに近い境界値を使用し、
+  rangeがゼロを跨ぐ場合でも少なくとも等分担Coulomb支持条件
+  `m_payload*g/(mu*N_contact)`を要求する。根拠のない固定`0.5 N`閾値は使用しない。
+- raw PhysX contact wrenchはprivileged reward、critic、診断および評価にだけ残し、
+  observer入力、phase遷移入力、controller分岐には使用しない。代表実Isaac診断で物理推定が
+  弱接触と十分な接触を分離できた。十分な接触の16環境は推定`2.17--2.41 N`、
+  privileged実力`1.70--2.27 N`、必要`1.18 N`で`16/16`がliftへ遷移した。弱接触の
+  phase-zero 16環境は推定`0.145--0.450 N`、privileged実力`0.043--0.208 N`、
+  必要`1.097 N`でlift遷移`0/16`だった。この分離結果によりlearned residual headは
+  現時点では追加しない。
+  複数形態で系統的な推定biasが観測された場合だけ、同じ物理推定に加算する校正項として
+  再検討し、deterministic gate自体をlearned判定へ置き換えない。
+- baseline校正は接触獲得中のfree-motion閉鎖torqueを接触力と誤認する問題を軽減するが、
+  接触法線Jacobian `J_p^T n`がゼロまたは極小のanchorを可観測にはしない。この場合は
+  confidence 0でfail closedとする。任意形態のproduction gateを完遂するには、motor
+  currentだけに依存しないdeployable contact evidenceを別途定義する必要があり、baselineを
+  privileged contact truthや推定値への固定加算で代用してはならない。
+- 内部`Order9DeployablePhaseGateInput`はjoint-load/tracking evidenceから
+  `estimated_normal_force / required_normal_force / estimator_confidence`へ変更する。
+  保存済みrollout tensor schema、`pi_L` observation/action shape、checkpoint shapeおよび
+  `pi_H -> nominal IK -> pi_L -> QPID/QP`契約は変更しない。
+
+### Order 9 C3 Surface-Semantic Virtual Contact and Deployable Phase Gate
+
+- `pi_H`のanchor poseは物体表面上の物理的な接触目標を表し、押込み量や接触力を
+  暗黙に含めない。実行時nominal IKだけが、選択anchorの接触法線方向へ有界な
+  virtual target leadを加えてjoint nominalを生成する。leadは`pi_H`出力、保存済み
+  teacher軌道、wrench rangeおよび物体geometryの意味を変更しない。
+- `pi_L`を無効化した実Isaac/PhysX sweepを、2・5・8モジュールの代表train bucketで
+  `2 / 5 / 10 / 15 / 20 mm`について実施した。2モジュールでは2 mmで両anchor約
+  `5.1 N`、5 mm以上で約`10 N`となった一方、5・8モジュールではbody/joint tracking
+  offsetにより20 mmでも接触力ゼロの例があった。したがって、形態別のdeterministic
+  force controllerは導入せず、安全な共通初期値として2 mmだけを採用し、強すぎる・
+  弱すぎる実接触をwrench-range rewardで`pi_L`に補償させる。
+- virtual leadはreview済み最終把持姿勢の局所differential IKでjoint targetへ変換し、
+  1 jointあたりの追加量を`0.15 rad`に制限する。`approach`ではゼロ、
+  `contact_acquisition`で滑らかに0から1、`lift / transport / place`で1、
+  `release`で1から0へ戻し、`retreat / settle`ではゼロとする。controller側でraw contact
+  forceに応じてjoint targetを積分するpreloadはproduction経路から削除する。本節は同日付の
+  `C3 controller-side preload production integration`記録を置き換える。
+- raw PhysX contact force、slip、penetrationおよびcollision truthは、privileged reward、
+  critic、評価、TensorBoard、診断artifactにだけ使用できる。actorのraw input、runtime
+  phase遷移、joint target生成、QPID/QP controller分岐には使用しない。phase遷移は
+  anchor/objectの推定poseと相対速度、motor-current-equivalent joint load、joint tracking
+  error、QP feasibleおよびdwellだけから判定する。
+- `pi_L`のdeployable observationへ各module 4 jointの符号付きlog loadを追加した。実機では
+  motor currentから換算し、Isaacでは前control stepに実際に適用したmotor torqueから同じ
+  featureを作る。policy contractはactive-knot feature v2 / `pi_L` v4とし、旧checkpointの
+  対応input weightをゼロ拡張したC2由来initializerから新しいC3 lineageを開始する。旧C3
+  checkpointは診断資料として保持するが、新contractの継続学習parentにはしない。
+- PPO actor更新は最初のcontact-control bootstrapでは`establish_contact / lift`を対象とし、
+  criticは全phaseを学習する。非対象phaseは同じSHA拘束behavior policyへKLで固定し、
+  `topology x phase`上限を越えたoptimizer stepはrollbackする。これは2 mm leadを接触力
+  controllerへ固定化せず、wrench-range/slipの改善責務をlearned `pi_L`へ残すための
+  training-only設定である。
+- 7モジュールへの拡張で、共通2 mm leadと10 mmのlearned compression spanでは、
+  held-out bucket 40がlift中にdropし、通常PPO updateを追加しても改善しないことを確認した。
+  nominal 2 mmは変更せず、`pi_L`の形態共通compression action spanを20 mmへ拡張する。
+  既習5・6モジュールはspan比に応じてmodule-count calibration biasをbehavior-preserving
+  変換し、7モジュールは強い補正を維持する。変換checkpointはacceptance-ineligibleで、
+  新しいschedule hashのfresh on-policy PPOを1 update以上通すまでpromoteしてはならない。
+  変換後の実Isaac診断では、bucket 40が2 mm leadのまま全8 phaseを6601 stepで完走し、
+  最大接触力10.862 N、collision/QP infeasible/drop/fallbackはいずれも0だった。5モジュール
+  held-outも6335 stepで完走し、6モジュールは既知のpost-release deterministic retreat
+  collisionまで把持・運搬・place・releaseを完了した。raw PhysX contactは引き続きactor入力
+  または実行時compression生成に使用しない。
+- 20 mmのlearned compressionは、review済みnominal collision-aware IKの後段に加わる局所
+  補正なので、nominal姿勢近傍から無制限に外れてはならない。形態・review済みnominal・
+  task geometryだけから、convex object/support/ground/self collisionと最大局所関節変位
+  `35 mrad`を満たす正規化action上限を形態ロード時に一度計算し、実行時は`pi_L`が要求した
+  共通compression scalarをその範囲へclampする。IK方向そのものは縮小しないため、上限内の
+  既習actionは不変である。この処理はraw PhysX contact/wrenchを使わず、force controllerでも
+  phase supervisorでもない。QPID制約とnominal collision-aware IKの間に置くdeployableな
+  局所trust regionである。
+- 5モジュールへの段階拡張後、held-out bucket 31で把持後のlift中にobject--robot相対回転が
+  `0.1509--0.1716 rad`まで増え、物体が滑ることを確認した。policy checkpointとaction契約を
+  固定した切り分けでは、virtual-contact total leadを3 mmから4 mmへ増やすと同回転は
+  `0.0117--0.0125 rad`へ低下し、bucket 31/38はいずれも`4/4`成功した。さらに同一checkpointで
+  2--5モジュールの固定validation 8 bucketを4 mmで評価し、全`32/32` episodeが成功、timeout、
+  fallback、安全失敗はいずれも0だった。よってproduction共通nominal leadを2 mmから4 mmへ
+  改定する。これは`pi_H`のsurface pose、保存nominal軌道、`pi_L`のaction shape、20 mm
+  compression spanを変更せず、実行時nominal IKの中立押込み量だけを変更する。
+
+### Order 9 C3 Complete Eight-Phase Nominal Replay Contract
+
+- C3で実行可能なnominal trajectoryは、`approach / contact_acquisition / lift /
+  transport / place / release / retreat / settle`の8 phaseをbucketごとに事前計算し、
+  phase別軌道と一つのtimelineをhash-bound artifactとして保存する。C3学習・評価では
+  これをcontrol周期で補間再生し、deterministic configuration-space plannerを実行しない。
+  実機推論ではこのbucket固有artifactを再生せず、従来どおり`pi_H -> runtime nominal IK ->
+  pi_L -> QPID/QP`を使用する。
+- `approach`と`contact_acquisition`はhuman-acceptedかつcollision-aware plannerで得た経路を
+  そのまま使用する。`lift / transport / place`は把持後のobject--robot相対SE(3)を厳密に
+  保持し、`release`はaccepted contact pathを支持面上で時間反転、`retreat`はaccepted
+  approach pathを上方clearanceで時間反転する。`settle`はその安全な退避終端を保持する。
+- 全8 phaseを、bucket固有のobject/supportと`z >= 0`地面条件、convex proxyによる
+  robot self/object/support collisionに対してoffline検査する。数値境界には`0.5 mm`だけを
+  許容するが、実際のproxy交差、ground violation、選択接触の許容penetration超過は
+  一切許可しない。42 bucketすべてがこの完全軌道検査に合格したlineageだけをC3へbindする。
+- Human-accepted最終把持姿勢を保ったまま旧`approach`のsupport clearanceだけが不足する場合、
+  offline teacher repairとしてrobot側のcentroidal/free-anchor目標を剛体並進してよい。
+  関節目標、contact assignment、object目標は変更せず、上方clearanceを持つ`approach`から
+  `contact_acquisition`中に把持高さへ連続的に降下させる。修復後は通常と同じfull-mesh
+  collision検査とIsaac nominal-QPID screeningを独立に再実行する。この修復はbucket生成時
+  だけに限定し、C3学習または推論時のprojection/plannerとして使用しない。
+- Vectorized collectorで一部環境をterminal resetするとき、target tensorはbatch全体について
+  再構築される。このため、reset対象だけでなく未終了環境を含む全行へ、保存済みC3 nominal
+  conditionを同じstep内で必ず再適用する。一stepでも汎用task targetへ戻すことを禁止する。
+  collector識別子は
+  `order9_vectorized_isaac_complete_pi_l_collector_v25_complete_nominal_target_rebind`とする。
+- Promotion時の学習throughput provenanceは、現在のdirectoryへupdate 0..Nが全て存在すると
+  仮定しない。active stage manifestの`parent_checkpoint`と`dataset_manifest`のhash bindingを
+  update Nから0まで逆向きに辿り、branchを跨いだ実際のgeneration列だけを集計する。
+  promotion runner識別子は
+  `order9_c3_promotion_runner_v3_complete_nominal_lineage`とする。
+- 本変更はnominal/reference provenanceとcollectorのtarget保持不備を修正するものであり、
+  policy入出力、reward、PPO、phase成功条件、QPID/QP、runtime nominal IK周期、deterministic
+  safety authorityは変更しない。
+
+## 2026-07-28
+
+### Order 9 C3 Boundary-Preserving PPO Fine-Tune Contract
+
+- 固定2 bucketの境界評価で、update 14は`release / retreat / settle`を改善した一方、
+  通常の全phase PPOをさらに1 update進めたupdate 15では非対象phaseの共有actorが
+  driftし、境界成功が`24/64 -> 10/64`へ後退した。aggregate phase KLだけでは
+  morphologyごとの局所driftを拘束できなかったため、ユーザー承認によりupdate 14を
+  親とする境界保持fine-tuneを追加する。
+- ActorのPPO surrogateとentropyは`release / retreat / settle`だけへ適用し、criticは
+  従来どおり全有効phaseを学習する。非対象phaseは同じSHA-256拘束on-policy rolloutに
+  保存されたbehavior log probabilityをfrozen parentとして、exact Monte-Carlo KLを
+  lossへ重み`1.0`で加える。別teacher policyや推論時fallbackは追加しない。
+- updateは1 epochに限定する。各optimizer step後、同じtopology-stratified batchを
+  再評価し、非対象の最大`topology x phase KL > 0.005`、または全phaseの最大
+  `topology x phase KL > 0.04`ならparameterをstep前へrollbackして当該updateを停止する。
+  適用済みstepだけから成るcheckpointが両上限を満たすことをstage runnerがfail-closedに
+  検証する。
+- 通常C3の`1e-5`で行った最初のcalibration stepは、rollback前の非対象最大KLが
+  `0.01907`となり`0.005`上限を超えた。このstepは適用・保存されていない。境界
+  fine-tuneだけはlearning rateを`0.25`倍（`2.5e-6`）へ校正し、hard rollbackと
+  1 epoch上限は維持する。これは未消費の同一fresh rolloutで再現確認する。
+- この変更はC3の境界性能を保持しながら後段phaseを追加学習するtraining-only契約である。
+  actor/criticのtensor shape、`pi_H -> nominal IK -> pi_L -> PolicyCommand -> QPID/QP`、
+  reward weight、phase成功条件、推論時周期・処理およびdeterministic safety authorityは
+  変更しない。識別子は
+  `order9_c3_boundary_fine_tune_v1_parent_kl_rollback`である。
+
+### Order 9 C3 Release/Retreat Boundary-Tail Sampling Contract
+
+- C3の通常rollout長`256 step x 0.02 s`では、30秒のphase後半から次phaseへ
+  遷移した実状態を十分収集できない。そこで従来のintra-phase reset進捗
+  `1/6, 1/2, 2/3`は全phaseで維持し、追加の`0.9` stratumだけを`release`と
+  `retreat`で選択可能にする。他phaseでは`0.9`をreset samplingへ使用しない。
+- Reset後は通常のlearned `pi_L -> PolicyCommand -> QPID/QP`を実行し、phase成功時には
+  recurrent state、controller state、実関節・機体・物体stateをresetせず後続phaseへ
+  引き継ぐ。これにより`release -> retreat`と`retreat -> settle`のsuccessor actionを、
+  実際の境界履歴および既存のcollision terminal/rewardで学習する。境界をteleportして
+  後続phaseだけを単独評価する方式ではない。
+- 各C3 train/validation shardはtail sampling契約と境界遷移回数をartifactへ保存する。
+  境界到達前に衝突した形態は有効なon-policy terminal学習データなので、そのshard単独に
+  遷移成功を要求しない。代わりに1 train generation全体では両境界を少なくとも1回
+  通過したことをrunnerがfail-closedに確認する。固定phase-zero promotion evaluationは
+  従来どおりapproachから全taskを実行する。
+- actor/critic入出力、reward weight、PPO hyperparameter、phase成功条件、QPID/QP、
+  nominal IK、configuration-space teacherおよび推論時処理は変更しない。識別子は
+  boundary-tail contract
+  `order9_c3_boundary_tail_sampling_v1_release_retreat`、phase-reset reference v3、
+  reset bank v2、collector v24、stage runner v9である。update 13からの検証学習は、
+  旧lineageを上書きせず明示的なbranch parent indexを持つ新lineageへ保存する。
+
+### Order 9 C3 Supported-Release Boundary Contract
+
+- place完了後の物体は支持面が保持するため、QPID/QPの推定payload質量・慣性
+  feedforwardは`lift / transport / place`に限って有効とし、`release`開始時に無効化する。
+  これは物体接触が消えた後も機体へpayload重力補償を加え続ける旧境界を置き換える。
+- `release`成功は、従来のcontact-free dwellと物体pose条件に加え、実関節角が
+  release軌道の最終関節姿勢へ最大絶対誤差`0.05 rad`以内で到達したことを要求する。
+  これによりopening軌道途中からfully-openな`retreat`目標へ不連続に遷移しない。
+- QPID/QP、衝突・QP terminal、policy入出力、reward weight、PPO、nominal IK、
+  phase順序および物体pose許容値は変更しない。新しい評価証拠はpayload契約
+  `order9_payload_feedforward_lift_transport_place_v1`とrelease契約
+  `order9_release_success_contact_free_object_pose_final_joint_posture_v1`を必須とし、
+  collector v23で識別する。rollout tensor schemaはartifact v17のままである。
+
+### Order 9 C3 Accepted-Nominal Static Phase-Reset Bank
+
+- C3のphase resetは、human-acceptedかつhash-boundなnominal軌道から得た物理stateを
+  形態別の固定reset bankへ一度だけ保存し、以後のtrain/evaluationでbyte-identicalに
+  再利用する。reset bank構築中にはlearned `pi_L`、initializer、QPID/QP、fixture、
+  settling simulationを実行しない。candidate `pi_L`はrolloutのstep 0から通常どおり
+  `PolicyCommand -> QPID/QP`経路を担当する。
+- Reset admissionは静的整合性に限定する。必須条件は、accepted nominal provenanceと
+  morphology graph / physical model / robot USD / task specのhash一致、finiteな
+  root/body/joint/object state、全phase/stratumの存在、accepted offline collision review、
+  joint limit、地面・支持台条件である。reset時に「2点接触維持、QP feasible、一定時間の
+  物体変位、downward speed」を再度成立させるdynamic stability gateは設けない。
+  接触維持、wrench-range、slip、QP、衝突、物体追従はpolicy rolloutのreward・terminal・
+  evaluation対象であり、reset bankの合否条件ではない。
+- initializerとcandidateのpaired比較は同一reset-bank fileとSHA-256を共有する。
+  rollout artifactは`c3_reset_bank_sha256`を必須とし、旧互換field
+  `c3_reset_stabilization_checkpoint_sha256`は常に`null`、
+  `dynamic_stability_gate_required`は`false`とする。bankのcontract/hash/tensor shape/
+  phase identityが異なる場合はfail closedとする。
+- 本契約は、下記の`Actor-Free Nominal-QPID Reset Construction`およびそれ以前の
+  reset-time learned actor / QPID settling方式を置き換える。reward weight、actor I/O、
+  PPO hyperparameter、nominal IK runtime、deployed inference、QPID/QPの最終権限は
+  変更しない。識別子はreset bank
+  `order9_c3_accepted_nominal_physical_reset_bank_v1`、artifact v17、collector v22、
+  stage runner v8である。
+
 ## 2026-07-27
+
+### Order 9 C3 Actor-Free Nominal-QPID Reset Construction
+
+- **Superseded:** 本節は上記`Accepted-Nominal Static Phase-Reset Bank`により置き換えた
+  旧実装記録であり、production collectorからは呼び出さない。
+- C3の`lift / transport / place` intra-phase reset構築では、learned `pi_L`
+  actorを実行しない。完成把持姿勢へのteleportによるmeshのdepenetration impulseを
+  避けるため、accepted contact-acquisition軌道の最後`0.1 s`を`0.5 s`へ低速化して
+  nominal `PolicyCommand -> production QPID/QP`で再生する。軌道終端が押付け力ゼロの
+  幾何接触になることを避けるため、最後`0.1 s`のjoint-space閉鎖差分をもう10回分
+  同じ方向へ延長し、QPIDで小さなcontact preloadを形成する。接触形成中は物体へ
+  3軸の減衰fixtureを適用する。接触後の`0.5 s`でfixture支持率を`1 -> 0`、QPIDの
+  payload mass/inertia feedforwardを`0 -> 1`へ連続的にhandoffし、最終nominal
+  姿勢ではfixtureを完全に外す。これにより荷重feedforwardのstep入力で機体だけが
+  上昇して接触を失うreset artifactを作らない。residual wrenchとjoint torque biasは
+  常にゼロとし、learned actor/recurrent stateは評価も更新もしない。
+- Reset構築のsimulation時間はtaskの`phase_elapsed`へ加算しない。したがって、
+  物体変位gateはtask軌道ではなくreset候補の接触形成・物理settling変位を測る。
+  2点selected contact、prohibited collisionなし、QP feasible、configured
+  displacement boundというadmission条件は変更しない。admissionはfixture解除後
+  のみ許可し、採用snapshotのbody/joint/object速度はゼロへ投影する。
+- この変更はreset分布をpolicy-independentにし、3モジュール中心で学習された
+  initializerを任意形態resetの成立条件にしないためのもの。PPO rollout開始後は
+  学習対象`pi_L -> PolicyCommand -> QPID/QP`を通常どおり使用する。reward、actor
+  入出力、PPO hyperparameter、runtime IK、deployed inferenceは変更しない。
+- 新しいprovenanceはtensor runtime
+  `order9_tensor_complete_pi_l_qpid_runtime_v5`、reset stabilizer
+  `order9_c3_contact_reset_stabilization_v7_continuous_payload_handoff`、artifact v16、
+  production collector v21、stage runner v7で識別する。本番runnerと固定
+  held-out比較runnerはreset用actor checkpointをcollectorへ渡さない。artifactの
+  旧provenance field `c3_reset_stabilization_checkpoint_sha256`は互換性のため残すが、
+  この方式では常に`null`とする。
+
+### Order 9 C3 Topology-Stratified On-Policy Update
+
+- C3の1回のPPO updateは、単一形態のrolloutから任意形態actor全体を更新してはならない。
+  各updateで2--8モジュールをそれぞれ1個ずつ含む、合計7個のfreshな
+  topology-homogeneous train shardを収集する。bucketは各モジュール数のtrain集合内で
+  updateごとに決定論的に巡回する。validationは従来どおり、更新には使わない独立した
+  1 bucketである。
+- trainの総環境数は従来と同じ`1024`、各shardのrollout長も`256` stepとする。
+  `1024 / 7`の余りはupdateごとに巡回し、各形態へ`146`または`147`環境を割り当てる。
+  したがって、1 updateのtrain/validationを合わせた総environment step数、C3全体の
+  update数、PPO learning rate、clip、KL閾値、reward、action schemaは変更しない。
+- graph/recurrent forwardとphase-local GAE・advantage正規化は形態ごとに行う。
+  1 optimizer stepでは各形態から同数のphase-balanced recurrent sequenceを取り、
+  7個の形態別lossを等重みでgradient accumulationした後に、一度だけgradient clipと
+  optimizer stepを実行する。これにより形態間でgraphを混在させず、モジュール数による
+  transition数差にも学習重みを支配させない。
+- KL early-stopは従来のactor-phase別aggregate KLの最大値で判定する。形態×phase別KLも
+  TensorBoardおよびupdate metadataへ記録するが、少数標本セルの瞬間値だけで更新を
+  停止するgateにはしない。
+- production C3 datasetは、7 train shardと1 validation shardをSHA-256で束ねる
+  `order9_tensor_native_pi_l_on_policy_dataset_v2_topology_stratified`とする。
+  collectorはGPUメモリとhost負荷を抑えるため最大2 processを並列実行する。この変更は
+  offline configuration-space teacher、保存済みnominal軌道、runtime IK、`pi_L`の
+  入出力、QPID/QP、deployed inferenceを変更しない。
+
+### Order 9 C3 PPO Regression Corrections and Restart Contract
+
+- The invalid `phase_reset_v2/update_000006` lineage must not be continued.
+  Corrected C3 PPO restarts from the unchanged active-knot initializer and
+  uses three interior reset-progress strata (`1/6`, `1/2`, and `2/3`) for
+  lift, transport, and place.  Avoiding exact phase boundaries prevents a
+  boundary-only support/collision state from dominating a stratum.  A reset
+  state is admitted only after real Isaac contact reports at least two selected
+  contacts, no prohibited collision, and feasible QPID/QP allocation within
+  the configured object-displacement bound.  The first admitted contact state
+  may be velocity-projected to a stationary reset; temporary settling support
+  is reset-construction-only and is cleared before rollout actions or rewards.
+- Reset construction is not part of the policy being evaluated or trained.
+  The later actor-free nominal-QPID reset contract above supersedes the former
+  immutable-initializer reset policy.  C3 generation and paired comparison
+  execute no learned actor during reset construction; they use the same task
+  seed, physics, accepted nominal trajectory, and production QPID/QP instead.
+  Thus later `pi_L` checkpoints cannot improve their own initial-state
+  distribution by acting during reset construction.
+- Recurrent PPO sequences do not cross phase boundaries.  Advantages are
+  normalized within actor phase, sequence minibatches are sampled in
+  phase-balanced round-robin order, and the KL guard is evaluated per actor
+  phase using the worst observed phase rather than only a global average.
+  These are required C3 settings, not optional diagnostic modes.
+- The critic may consume the actor recurrent state as a value feature, but
+  value-loss gradients are detached at that boundary.  Actor/GRU parameters
+  are therefore updated by the policy objective and entropy term, while the
+  privileged critic is updated by the value objective without a
+  value-dominated gradient into the shared actor representation.
+- Active contact-frame force boxes retain the friction-cone/capability check.
+  Moment boxes are derived from candidate contact-patch area, the bounded
+  normal-force range, friction, and anchor torque capability: tilt capacity is
+  patch radius times normal load, and torsional capacity is additionally
+  scaled by friction.  Historical accepted C3 trajectories are calibrated at
+  load time without changing their candidates, force bounds, targets,
+  schedules, or nominal joint paths.
+- The corrected implementation is identified by tensor PPO
+  `order9_tensor_native_pi_l_ppo_v2_phase_balanced_detached_critic`, contact
+  reset stabilization
+  `order9_c3_contact_reset_stabilization_v3_contact_admitted_projection`, and
+  production collector
+  `order9_vectorized_isaac_complete_pi_l_collector_v16_early_contact_reset_projection`.
+  No reward weight, action schema, `PolicyCommand`, nominal IK runtime, QPID/QP
+  ownership, or deployed actor input is changed.
+
+### Order 9 C3 Morphology-Specific Phase Reset Correction
+
+- C3 production PPO must use phase-specific resets for every arbitrary
+  morphology, matching the existing tensorized-collector and phase-conditioned
+  actor contract.  The earlier implementation enabled the reset distribution
+  only when an arbitrary graph happened to equal the canonical Order 8 graph.
+  C3 graphs therefore installed only phase zero; because one `256 x 0.02 s`
+  shard is shorter than the accepted `18--45 s` approach paths, updates 0--6
+  collected almost exclusively approach data.  Those checkpoints are retained
+  as diagnostic evidence and are not C3 promotion/training authority.
+- The accepted offline nominal path now supplies morphology-specific approach
+  and contact starts plus the final grasp state.  The existing deterministic
+  object-task translations derive lift, transport, place, release, retreat,
+  and settle starts from that same state.  Release/retreat use the accepted
+  contact-pregrasp posture as the arbitrary-morphology open posture.  Each USD
+  articulation root is solved from its realized root-to-assembled-body
+  transform after installing the corresponding Dock posture; no online IK or
+  configuration-space planner is introduced.
+- Normal C3 training initializes copied environments round-robin over all
+  eight runtime phases, while deterministic promotion evaluation remains
+  phase-zero-only.  Subsequent terminal resets advance from each environment's
+  own phase offset rather than collapsing all environments onto phase one.
+  Production validation now fails closed unless all eight actor-mapped runtime
+  phases occur in both train and validation shards and the complete reset bank
+  is reported.
+- The arbitrary-morphology posture banks now distinguish accepted initial,
+  pregrasp, and final-grasp joint states.  Lift through place hold final grasp;
+  release moves final grasp to pregrasp; retreat/settle hold pregrasp.  This
+  corrects the earlier constant-posture release target without changing
+  `pi_L`, `PolicyCommand`, QPID/QP, reward weights, phase gates, or task goals.
+- Exact behavior replay must archive the phase progress that was actually
+  consumed by the actor.  In C3 approach/contact, the accepted nominal IK
+  conditioner replaces the generic task-timeout progress with progress along
+  that morphology's nominal trajectory.  Recomputing the archived value as
+  `phase_elapsed / task_timeout` changes the phase and actor features during
+  replay.  Production evidence therefore stores
+  `Order9TensorObjectTaskTarget.phase_progress` directly and identifies its
+  semantics as `exact_policy_actor_input`.
+- New production evidence uses tensor artifact v11, collector v12, phase-reset
+  reference v1, and stage-runner v4.  The first reset-corrected attempt in
+  `phase_reset_v1` exposed the phase-progress archive defect during strict
+  replay and is retained as failed diagnostic evidence.  The independent
+  `phase_reset_v2` lineage contains the corrected update-0--6 training.  The
+  accepted nominal set, initializer, curriculum schedule, bucket split, PPO
+  hyperparameters, and environment-step budget are unchanged.
+
+### Order 9 `pi_L` PPO Tensor-Native Dataset and Replay Boundary
+
+- The real-Isaac rollout artifact is the canonical stochastic transition
+  payload for production `pi_L` PPO.  The stage runner now binds the train and
+  validation `.pt` files through a small versioned, SHA-256-verified manifest
+  and feeds the train tensors directly to recurrent PPO.  It must not expand
+  each transition into nested `LowLevelControlRecord` objects or write/read a
+  redundant compressed JSONL copy in the learning hot path.  Validation raw
+  data remains immutable and hash-bound as generation/split evidence but is
+  not converted into training records.
+- This is an execution/representation correction, not a learning-method
+  change: one fresh train+validation generation still produces exactly one PPO
+  update; GAE, sequence length, minibatch size, epoch count, clipping, KL stop,
+  phase/active-knot actor inputs, privileged critic input, actions, QPID/QP
+  ownership, checkpoint lineage, and TensorBoard metrics are unchanged.
+- Exact replay reconstructs actor features tensorially and re-evaluates all
+  train transitions in the original collection-shaped time slices.  Stored
+  `recurrent_state_out -> recurrent_state_in` and
+  `global_action -> previous_global_action` continuity is checked separately
+  at `2e-5` and was byte-exact for C3 update 0.  Because the v9 artifact does
+  not store the derived centroidal actor-feature vector, long articulated
+  trajectories amplify float reconstruction differences: update-0 full-data
+  maxima were `0.0012494` log-probability, `1.1445e-5` value, and
+  `0.0002461` recurrent state.  The replay evidence therefore carries and the
+  validator enforces field-specific bounds (`0.0025`, `5e-5`, `5e-4`),
+  rather than weakening value or temporal-continuity checks to one broad
+  threshold.
+- The initial `2.5e-5` critic-value bound was calibrated only on the
+  three-module/update-0 replay.  The first five-module collection reproduced
+  log probability, recurrent state, and stored temporal continuity well
+  within their unchanged bounds, but showed a deterministic maximum critic
+  difference of `3.43323e-5` at critic values around `17.3`.  The value-only
+  bound is therefore `5e-5` (about `2.9e-6` relative at that scale); this is a
+  GPU graph-reduction numerical allowance and does not change PPO, reward,
+  physics, or recurrent/action continuity semantics.
+- The additive tensor dataset manifest and tensor trainer are internal Order 9
+  production interfaces.  Existing canonical record/JSONL dataset support is
+  retained for behavior cloning, offline inspection, and other policy
+  families; it is simply removed from the `pi_L` PPO runtime-critical path.
+
+### Order 9 `pi_L` Privileged Contact-Wrench Range Reward Wiring
+
+- This implementation closes the already specified reward wiring in the
+  2026-07-07 policy/controller supplement; it does not redefine the method.
+  During `contact_acquisition`, `lift`, `transport`, and `place`, the measured
+  six-dimensional wrench for each selected assignment is compared with the
+  active `pi_H`/teacher `wrench_lower` and `wrench_upper` in that candidate's
+  moving contact frame.  Values anywhere inside the box receive zero range
+  penalty.  Only normalized lower/upper overflow is penalized, averaged over
+  the six axes and then the bounded assignments.  No point target or arbitrary
+  multi-contact force decomposition is introduced.
+- The measured force and moment are privileged-only.  The Isaac collector
+  combines raw normal and friction patches and evaluates each moment about the
+  corresponding object-following candidate contact-frame origin.  These values
+  are consumed by reward and recorded in privileged evidence/TensorBoard.  The
+  current critic observation contract is unchanged, and the values are not
+  added to actor observations, `PolicyCommand`, QPID targets, or the deployable
+  inference input.
+- The existing `0.5 N` value remains solely the contact-existence threshold
+  used for active-contact count, dwell, break, and release semantics.  It is
+  not a desired contact force and is not a substitute for the policy-proposed
+  wrench range.  The range reward has its own configurable non-negative weight
+  `w_wrench_range` (initial value `1.0`).
+- Raw rollout evidence advances to
+  `order9_tensor_isaac_complete_pi_l_rollout_v9_privileged_wrench_range` and
+  stores the measured contact-frame wrench, lower/upper bounds, and active
+  bound mask.  The contract remains backward-readable for pre-change active-
+  knot artifacts, while new production artifacts fail closed if the reward
+  contract or required tensors are missing.
 
 ### Order 9 C3 Accepted Nominal Replay and Runtime Planner Boundary
 
@@ -484,6 +1270,24 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
   actor observation.  The contact-acquisition phase gate additionally
   requires preload completion, so lift cannot begin from contact-force
   evidence alone.
+- Arbitrary-morphology production refinement (2026-07-29): the tensor
+  collector now implements this previously approved controller stage rather
+  than leaving it only in the scalar copied/shadow runtime.  Multi-morphology
+  Isaac evidence showed that a selected contact can be loaded by whole-
+  structure motion while its anchor-local Dock axis remains below `1.2 Nm`;
+  requiring only that local-axis threshold caused a false contact timeout in
+  the two-module validation morphology.  An anchor therefore freezes after
+  either the unchanged `1.2 Nm / 0.10 s` moving-branch load dwell or a
+  `0.10 s` dwell above the signed normal-force magnitude at the outer edge of
+  the `pi_H`-proposed wrench interval.  Using the interval outer edge rather
+  than its lower edge leaves relaxation margin after the absolute target is
+  frozen.  This is controller/privileged evidence only: raw contact remains
+  absent from the actor, the full six-axis wrench interval remains a reward
+  objective rather than an instantaneous gate, and `pi_L`, QPID, and `pi_H`
+  output schemas are unchanged.  Representative real-Isaac evidence changed
+  the former three-module failure from `0/8` contact timeouts to `8/8` full-
+  task success; the two-module regression crossed contact and all subsequent
+  task phases within the formal `15000`-step budget.
 
 ## 2026-07-24
 
@@ -1481,6 +2285,32 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 - Decision: `SharedInteractionWorkspace` now requires a `group_masks` entry for every group slice. Each group mask must have shape `[B, slice_width]` and match the corresponding slice of the global `mask`.
 - Compatibility impact: This strengthens the internal tensor contract without changing persisted task/IRG/envelope schemas. Existing tests were updated to pass explicit group masks.
 
+### C3 Object-Pose Success Comparison Margin
+
+- The object pose success precision remains 50 mm, as used by the Order 9
+  object-task contract.  Formal deterministic Isaac evaluation applies a
+  further 2 mm comparison margin to absorb contact-equilibrium and floating
+  point variation at the exact boundary.  The effective comparison is thus
+  `position_error <= 0.052 m`; this is not a change to the nominal trajectory,
+  reward target, object distribution, or collision/safety gates.
+- The named object-pose contract and effective comparison tolerance must be
+  persisted in raw rollout metadata, formal episode metadata, and promotion
+  results.  Promotion validation is fail-closed against those values so older
+  50 mm-only evidence is not silently combined with the revised evidence.
+
+### Tensor Contact-Preload Start Semantics
+
+- Controller-side contact preload begins at the earlier of: (a) the existing
+  simultaneous selected-contact force dwell, or (b) completion of the nominal
+  contact-acquisition trajectory.  Case (b) is required when allowed physical
+  randomization leaves a small gap at the deterministic nominal endpoint; it
+  initializes from the current learned-policy absolute joint target and then
+  uses the unchanged load/wrench-limited slow closure.
+- Contact/preload completion remains mandatory before lift.  This start rule
+  neither exposes contact truth to `pi_L` nor treats trajectory completion as
+  successful contact, and it does not relax collision, QP, drop, force/load,
+  or contact-dwell gates.
+
 ### InteractionEnvelope Count and Optional Slot Supplement
 
 - Context: v0.4's grasp/carry envelope example has `required_contact_count_range: [2, 4]` and `required_contact_modes: [grasp, support]`. The current IRG template represents grasp as a required slot and support as an optional slot.
@@ -1560,3 +2390,588 @@ This file records implementation-time supplements or deviations from `A-MSRR_cod
 - Context: v0.4 defines `group_slices: dict[str, slice]`, while JSON cannot directly represent Python `slice` objects.
 - Decision: Runtime schema stores Python `slice` objects, and JSON serialization represents them as `{start, stop, step}` mappings.
 - Compatibility impact: In-memory contract remains `dict[str, slice]`; serialization is a practical roundtrip representation for tests and archives.
+
+### C3 Promotion Hold: Module-Count Action Masks Are Curriculum Scaffolding
+
+- Context: The staged C3 curriculum currently applies standard full action to
+  2--3 modules, compression-only action to 4--7 modules, and joint-only action
+  to 8 modules. Formal 32-episode held-out evaluation showed that these
+  manually selected masks do not constitute one robust arbitrary-morphology
+  execution contract. For the two 8-module held-out morphologies, no tested
+  fixed action subset achieved zero safety failures on both.
+- Decision: Treat the module-count masks as curriculum scaffolding only. They
+  do not by themselves satisfy C3 promotion, and a mask must not be selected
+  from held-out bucket identity. C3 remains unpromoted until a common
+  morphology-general action contract, or a principled learned/safety
+  projection mechanism, is approved and validated over the complete held-out
+  set.
+- Compatibility impact: No persisted policy schema or action dimension is
+  changed. Existing checkpoints and curriculum evidence remain valid for
+  staged learning, but cannot be cited as final C3 promotion evidence.
+
+### C3 Common Coordinated-Compression Promotion Lineage
+
+- The user approved a new first promotion lineage in which every morphology
+  from two through eight modules uses the same
+  `contact_compression_only` action contract. Training begins from the clean,
+  behavior-preserving C2-derived C3 v5 initializer and every PPO update is
+  topology-stratified over all seven module-count strata.
+- Module-count-dependent action masks, count-specific warm starts,
+  count-specific calibration, and checkpoint switching are prohibited in this
+  lineage. The graph-conditioned actor may respond differently to different
+  morphology observations, but the applied action semantics, optimizer,
+  reward, controller, safety constraints, and promotion criteria remain the
+  same for every morphology.
+- The applied learned action is the single coordinated-compression residual
+  decoded along the collision-limited IK compression direction. CoM pose,
+  twist, residual-wrench, and independent joint residual outputs remain zero
+  at the action boundary for this first promotion attempt. After this common
+  contract passes C3, morphology-general CoM/global corrections may be added
+  incrementally under separate matched validation.
+- This changes no persisted schema, tensor dimension, controller/QP contract,
+  deterministic safety authority, reward definition, or C3 promotion gate.
+
+### C3 Full-PolicyCommand and Independent-Compression Superseding Lineage
+
+- The user superseded the compression-only promotion attempt after its
+  two--three-module learning plateau.  The next C3 lineage starts again at
+  update 0 from the clean behavior-preserving v6 initializer and enables the
+  same complete `pi_L` action contract for every two--eight-module morphology:
+  centroidal pose/twist correction, residual centroidal wrench, every local
+  joint position/velocity/torque correction, and one dedicated coordinated-
+  compression gain.
+- The final joint reference is
+  `q_cmd = q_IK_nominal + delta_q_individual + g_compression * d_IK`.
+  `d_IK` is the morphology-specific collision-limited compression direction.
+  The dedicated gain never reuses, masks, or replaces any per-joint actor
+  coordinate.  Joint velocity and torque-bias outputs retain their independent
+  bounded meanings.
+- This is one shared policy and one action interpretation across module
+  counts.  Module-count-dependent action masks, checkpoint switches, or
+  hand-selected output subsets are prohibited.  The actor may still condition
+  its values on the observed morphology graph.
+- QPID/QP and the existing safety shields remain downstream authorities;
+  `pi_L` still emits only bounded `PolicyCommand` intent and never final
+  actuator commands.  The reward, nominal trajectories, rollout buckets, and
+  C3 promotion criteria are unchanged.  The new adapter/contract identities
+  are persisted so older compression-only evidence retains its original
+  semantics.
+- C3 remains outcome-only: exact per-contact wrench-box membership has zero
+  reward weight and is not a phase-admission or success gate.  Its retained
+  privileged diagnostic is evaluated against the exact teacher box
+  (`wrench_range_gate_scale=1.0`) in training and evaluation; the obsolete
+  diagnostic-only widening schedule is disabled so telemetry cannot be
+  mistaken for a changing learning contract.
+
+### C3 Contact-Space Projected `pi_L` Superseding Lineage
+
+- The user approved replacing the grasp-specific coordinated-compression
+  scalar and learned residual-wrench path with one task-generic contact-space
+  action contract.  A shared `pi_L` now emits: (a) centroidal pose/twist
+  residuals, (b) a bounded local-frame pose residual for every active contact
+  slot, and (c) bounded per-joint posture residuals.  The same action meaning
+  is used for every morphology and contact task; there is no module-count or
+  bucket-specific output mask.
+- Each active-contact residual is the sole learned coordinate that changes
+  the corresponding contact closure/slip target.  A deterministic adapter
+  maps it through the nominal contact Jacobian to joint-space intent.  The
+  centroidal residual is projected into the subspace compatible with the
+  active point-contact translational constraints, and posture residuals are
+  projected into their generalized-coordinate Jacobian nullspace.  This
+  removes the previous ambiguity in which CoM, independent joints,
+  compression gain, and residual wrench could all create the same grasp-force
+  change.
+- The maintenance projector constrains contact-point translation, not two
+  independent full 6D rigid contact poses.  Contact-frame rotation remains an
+  explicit bounded contact action.  Consequently two opposed contacts do not
+  automatically cancel all centroidal freedom; compatible rigid motion such
+  as rotation about the contact line can remain available.
+- Projection authority is phase-continuous: it is inactive during approach,
+  ramps in during contact acquisition, is fully active through lift,
+  transport, and place, fades during release, and is inactive in retreat and
+  settle.  The basis is built from the reviewed nominal contact posture and
+  runtime application is tensor-only; the deterministic configuration-space
+  planner remains teacher-generation tooling and is not executed during PPO
+  rollout or deployment.
+- For this v7 lineage, learned residual wrench and learned joint-torque bias
+  are disabled.  QPID/QP remains the downstream authority for actuator,
+  thrust, torque, and feasibility constraints.  Exact PhysX contact data may
+  be used only for privileged training reward/evaluation and is not an actor
+  observation.  The C3 outcome and safety gates remain unchanged.
+
+### Batched QPID Applied-Command Feasibility and v7 Zero-Command Boundary
+
+- Batched virtual-thrust allocation separates numerical optimizer convergence
+  from physical command feasibility.  Every applied thrust and vectoring
+  channel is first projected into the existing thrust, angle, angle-rate, and
+  rotor-mask hard constraints.  Physical feasibility is then determined by
+  whether the wrench residual recomputed from those actual applied commands is
+  finite and no larger than the configured supported-wrench tolerance.
+- The ADMM `solver_converged`, primal-residual, and dual-residual signals remain
+  mandatory optimizer-health telemetry.  Failure to meet the optimizer's
+  tighter optimality stopping criterion does not by itself create a QPID
+  infeasible terminal when the projected command already satisfies the
+  controller's physical residual contract.  This changes neither actuator
+  limits nor the supported-wrench tolerance.
+- A policy-version migration must preserve the command boundary.  Any output
+  head that was masked by the source action contract but becomes active in the
+  target contract is initialized to zero output, while compatible
+  representation, recurrence, critic, and feature-decoder parameters may be
+  copied.  In particular, the v6-to-v7 contact-space migration resets the
+  newly activated global mean and final independent-joint decoder, as well as
+  their exploration scales, instead of exposing previously masked commands.
+- The repaired contract was checked with the unchanged contact-space update-2
+  checkpoint on the four fixed two--three-module validation buckets: all
+  16/16 formal phase-zero episodes reached settle with zero hard collision,
+  object drop, fallback, safety failure, or QPID infeasible terminal.  The
+  machine-readable evidence is retained under
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/diagnostics/contact_space_v7_qp_physical_feasibility_v2_fixed_2_3_16of16/`.
+
+### C3 Transition-Targeted Backward-Curriculum Trial
+
+- The approved five-module follow-up retains the common
+  `contact_space_projected_policy_command`, reward, QPID, physics, and formal
+  promotion gates.  It adds short continuous-state-inheritance shards only as
+  training data; the deterministic configuration-space planner remains an
+  offline teacher tool and is not run by the learned policy.
+- Ordinary phase-reset replay continues to cover two--five modules and two
+  train topologies per module count.  Four additional five-module shards cover
+  all four train morphologies.  Each additional shard uses 48 environments for
+  256 steps, seeds contact acquisition or lift, and resets every episode to the
+  exact persisted 0.9 phase-progress stratum.  Physical and recurrent state
+  cross a phase boundary without an intermediate reset.
+- The fixed-progress reset is hash-bound as
+  `order9_c3_transition_backward_curriculum_v1_fixed_progress`.  A configured
+  progress value must exactly match a persisted stratum; silently choosing a
+  nearest state is prohibited.  Module counts with zero inheritance shards
+  remain legal only when at least one explicitly focused module contributes
+  inheritance data.
+- This trial is evidence, not a promoted replacement contract.  Updates
+  10--13 remained numerically stable and produced contact-to-lift transitions
+  on one of four five-module train morphologies, but no lift-to-transport
+  transition on any morphology.  The best evaluated checkpoint still scored
+  4/8 in the fixed five-module continuous validation.  Therefore no trial
+  checkpoint is selected and the lineage is not eligible as a successor-stage
+  parent.  Any further change to boundary supervision or curriculum ownership
+  requires a new method-level decision.
+
+### C3 Uniform Per-Morphology Transition-Backward Trial
+
+- The five-module-only transition trial is superseded for diagnosis by a
+  uniform contract: every active module-count stratum contributes exactly two
+  continuous state-inheritance topology shards alongside its two phase-reset
+  topology shards.  For the first six-module trial this applies identically to
+  modules two through six; no module-count-dependent policy/action behavior is
+  permitted.
+- Each inheritance shard begins at the persisted 90% state of either contact
+  acquisition or lift, executes for 256 control steps with 48 environments,
+  and carries both physical and recurrent state across the next phase
+  boundary.  This remains PPO training data only.  The deterministic planner
+  is not executed by the learned policy during training rollout or inference.
+- The shared action contract, outcome reward, QPID, physics, 4 mm nominal
+  inward lead, and formal phase-zero evaluation are unchanged.  Therefore the
+  trial isolates whether uniform exposure to true boundary state can close the
+  training/evaluation distribution gap.
+- Three stable updates from the accepted two--five-module parent improved
+  aggregate reward and QP feasibility without material two--five-module
+  forgetting.  The controlled six-module reward and phase-success measures did
+  not improve, and all three checkpoints scored 0/8 on fixed six-module formal
+  validation due to object drop during lift, with no hard collision or
+  terminal QPID infeasibility at the final checkpoint.
+- Consequently uniform transition inheritance is a valid data-generation
+  mechanism but is not, by itself, a sufficient six-module solution.  This
+  trial is not promoted and further identical PPO updates are not authorized
+  by the evidence.  Altering contact-action authority, the common nominal
+  contact margin, or transition-specific credit assignment is a new
+  method-level decision.
+
+### Six-Module Nominal Contact-Margin Diagnostic
+
+- A fixed-policy diagnostic varied only the common virtual-contact inward lead
+  over 4, 5, and 6 mm on the two held-out six-module buckets.  Every condition
+  failed 0/8 by object drop during lift, without hard collision or terminal
+  QPID infeasibility.  Larger lead increased both measured normal force and
+  retention time, so contact margin contributes to the failure, but no tested
+  value is accepted as a production replacement.
+- The contact-space actor used only about 0.21 mm of its available 10 mm
+  inward-normal residual range.  Therefore the failure is not caused by
+  saturation of the common action contract.  Module-6 inheritance data did not
+  contain an inward sample above 3 mm, while a controlled 2 mm nominal increase
+  was still insufficient.  The next C3 method decision should therefore
+  consider morphology-uniform widening of contact-normal exploration so the
+  shared policy can observe the unused higher-compression region; merely
+  continuing identical PPO updates or changing the production nominal to 5/6
+  mm is unsupported.
+
+### C3 Morphology-Uniform Contact-Normal Exploration Trial
+
+- The approved trial widens only the stochastic
+  `translation.inward_normal` contact-space coordinate, uniformly for every
+  morphology. A provenance-bound migration changes its per-contact standard
+  deviation from `0.13533` to `0.30` while proving that all deterministic
+  actor means and every other checkpoint scalar are unchanged. The migrated
+  file is an initializer only; promotion evidence requires fresh on-policy
+  PPO and deterministic physical validation.
+- The action mean, 10 mm residual span, production 4 mm virtual-contact lead,
+  common `contact_space_projected_policy_command`, reward, QPID, physics, and
+  module-count behavior remain common and unchanged. In particular, this
+  mechanism is training-only exploration and does not add stochasticity at
+  deployment.
+- The fresh 2--6-module update successfully entered the intended unused action
+  region: module-6 lift samples using more than 3 mm of two-contact mean
+  closure increased from zero to `8.29%`, and weaker-anchor normal force rose
+  from `0.788 N` to `1.182 N`. Training remained KL-stable and the resulting
+  deterministic mean moved toward stronger closure.
+- The fixed formal six-module evaluation nevertheless remained `0/8`, with
+  all episodes dropping the object during lift and no episode reaching
+  transport. The deterministic mean shift was only about `0.042 mm`; wider
+  symmetric exploration also reduced lift-sample reward. Therefore this trial
+  does not supersede the accepted C3 parent and its child is not promotion
+  eligible.
+- Further identical updates are unsupported by this evidence. Any follow-up
+  that makes exploration asymmetric or changes contact-retention credit so
+  high-compression successes affect the deterministic mean is a new
+  method-level change and requires an explicit decision before implementation.
+
+### C3 Factorized Actor-Credit Trial
+
+- The approved factorized-credit contract preserves the common
+  `contact_space_projected_policy_command`, actor observations, action bounds,
+  nominal trajectory, QPID, physics, and total scalar reward. It changes only
+  training-time credit assignment.
+- Every recorded reward transition is partitioned exactly into contact,
+  centroidal, and posture channels. Contact maintenance, wrench-range, and
+  slip terms supervise the contact-space density; object-motion, CoM/QP, and
+  actuator terms supervise the CoM pose/twist density; collision supervises
+  the independent joint density. Energy is shared between centroidal and
+  posture, and terminal task outcome is shared equally by all three roles.
+  The three channels must reconstruct the original reward and unnormalized
+  GAE within recorded numerical tolerances. The critic remains a single total-
+  return critic.
+- The policy encoder remains shared, while each role-specific PPO likelihood
+  excludes the other two output distributions. Thus a contact advantage does
+  not directly update CoM or independent-joint output parameters, although it
+  may still improve their common representation.
+- Three fresh two--six-module updates were numerically stable, without KL
+  rollback or early stop. The fixed two-bucket, eight-episode six-module
+  validation nevertheless remained 0/8 for updates 13, 14, and 15. Every
+  failure was an object drop in transport; no hard collision, terminal QPID
+  infeasibility, timeout, or fallback occurred.
+- Therefore factorized actor credit is accepted as a valid experimental
+  training mechanism but does not supersede the accepted C3 parent and is not
+  sufficient evidence for promotion. Additional identical updates are not
+  justified by the non-monotonic six-module reward and unchanged formal
+  outcome. Any next change to temporal contact-retention credit or the common
+  contact-control contract is method-level work.
+
+### C3 Deployable Contact-Feedback `pi_L` v8
+
+- The user approved adding deployable closed-loop contact observations while
+  preserving the task-generic v7 contact-space action contract. Each active
+  contact slot appends signed anchor-to-object surface distance, contact-frame
+  relative linear and angular velocity, and a signed motor-load compression
+  proxy. The actor does not consume raw PhysX contact force and does not assume
+  an F/T sensor; simulator contact information remains privileged reward and
+  evaluation data only.
+- The v7-to-v8 migration is provenance-bound. It copies all existing policy
+  parameters exactly, expands the contact feature encoder from 30 to 38
+  inputs, and initializes only the eight new columns to zero. A fresh on-policy
+  update is mandatory before the migrated checkpoint can be considered a
+  continuation candidate.
+- A fixed-policy, acceptance-ineligible physical sweep showed that common
+  inward-normal contact residuals of `0/2/4/6/8 mm` produced
+  `0/0/7/8/8` successes out of eight on the two fixed six-module buckets.
+  Therefore v8 initializes the trainable contact-action mean at `6 mm` and its
+  exploration standard deviation at `1 mm`. The production nominal lead
+  remains `4 mm`. This initialization is policy state and is not a fixed
+  controller-side preload, QPID feed-forward command, or module-count-specific
+  action rule.
+- Factorized contact/centroidal/posture PPO credit remains active. The v8
+  feedback and action prior apply uniformly to every morphology; QPID/QP still
+  owns actuator limits and final physical feasibility.
+- Fresh two--six-module update 0 was numerically stable and the exact child
+  checkpoint passed all `8/8` full-sequence held-out six-module episodes with
+  zero drop, hard collision, terminal QPID infeasibility, timeout, fallback,
+  or safety failure. The feedback encoder's new columns became non-zero, but
+  the deterministic contact residual remained approximately `6.08 mm` with
+  only about `0.008 mm` temporal variation. The present success is therefore
+  attributed primarily to the trainable prior; feedback-dependent adaptation
+  requires evidence from later updates/randomized conditions.
+- This result selects v8 update 0 as the six-module continuation candidate,
+  not as final C3 promotion. The same contract must still be extended through
+  modules seven and eight and pass the complete promotion evaluation.
+
+### C3 Factorized Contact-Head Extra Optimization
+
+- Seven-module extension updates 1 and 2 showed deployable load/slip feedback
+  differences between the successful and failed buckets, while all six
+  deterministic contact-space outputs remained effectively constant. A fixed
+  6--10 mm inward-normal sweep did not resolve the failed bucket. Additional
+  identical all-head PPO updates are therefore not supported.
+- The approved minimum follow-up preserves the existing v8 actor observation,
+  deployed action, nominal trajectory, QPID, physics, scalar reward, and
+  factorized reward routing. After the ordinary one-epoch all-head PPO update,
+  the same immutable on-policy rollout receives one additional PPO pass using
+  only the factorized contact advantage and contact action likelihood.
+- The extra pass may update only `contact_space_feature_encoder`,
+  `contact_space_slot_embedding`, `contact_space_actor_mean`, and
+  `contact_space_actor_log_std`. The shared graph/recurrent trunk, centroidal
+  head, posture head, and critic are fixed during this pass so contact credit
+  cannot indirectly move unrelated deployed outputs.
+- The extra pass uses the original behavior checkpoint log probability,
+  topology-equal minibatches, exact recurrent replay, PPO clipping, and the
+  same non-target/topology-phase KL rollback limits as the normal pass. It is
+  applied identically to every module count and introduces no runtime switch,
+  sensor, or module-specific action rule.
+
+#### Trial outcome
+
+- The implementation boundary was verified: only the contact feature encoder,
+  slot embedding, contact mean, and contact log-standard-deviation changed in
+  the additional pass. The shared trunk, centroidal/posture outputs, and
+  critic did not receive that pass's optimizer update.
+- A fresh common 2--7-module update used 671,744 transitions and produced
+  child SHA `76f8a684...c3bf2b`. It applied 135 ordinary and 132 additional
+  contact-only minibatches. The final candidate minibatch was rolled back by
+  the existing non-target parent-KL limit; all prior applied updates remained
+  within the configured limits.
+- Fixed seven-module validation remained `4/8`: the already-solved bucket
+  stayed `4/4`, while the difficult bucket stayed `0/4` with object drop in
+  lift and no collision or terminal QPID infeasibility.
+- Exact replay of both policies on the failed rollout showed that the
+  deterministic inward-normal action moved by only about `+0.008 mm`; most
+  policy change appeared in tangential/rotational coordinates. A single
+  contact advantage attached to the summed 6-D contact likelihood therefore
+  does not resolve within-head coordinate credit assignment.
+- This child is diagnostic-only and does not supersede its parent. Further
+  identical extra passes are not justified. Coordinate-specific contact
+  credit or action-probe-derived supervision is a separate method-level
+  decision.
+
+### C3 Contact-Coordinate Credit Trial
+
+- The approved diagnostic retained the v8 runtime contract and ordinary
+  factorized PPO update, then split only the contact-head extra pass into
+  inward-normal translation, tangential translation, and rotation. Grasp
+  maintenance supervises the normal likelihood, slip supervises the
+  tangential likelihood, and terminal contact outcome is shared. The three
+  rewards and GAEs must reconstruct the existing contact reward and advantage.
+- This is a training-only mechanism. It adds no sensor, deployed action,
+  runtime switch, module-specific rule, nominal command, or QPID change.
+- One fresh common 2--7-module child passed exact replay and stayed within all
+  KL limits. Fixed seven-module validation nevertheless remained `4/8`:
+  bucket 33 passed `4/4`, while bucket 40 dropped the object during lift in
+  `4/4` with no collision or terminal QPID infeasibility.
+- The failed bucket's deterministic normal residual increased by only about
+  `0.022 mm`. Separating coordinate likelihoods therefore resolves the
+  within-head attribution ambiguity, but does not provide the counterfactual
+  signal needed to learn how much additional squeeze would avoid a later
+  drop.
+- The coordinate extra pass is implemented but disabled in the accepted
+  curriculum. Its child SHA `0d27905a...d7f` is diagnostic-only; accepted
+  update 2 SHA `5df273b5...455f` remains the continuation parent. Further
+  identical updates are unsupported. Action-probe-derived or equivalent
+  causal supervision is a method-level alternative requiring a separate
+  decision.
+
+### C3 Common 20 mm Contact-Normal Authority Diagnostic
+
+- The user approved changing the morphology-independent contact-space
+  inward-normal residual limit from `10 mm` to `20 mm`.  The nominal virtual
+  contact lead remains `4 mm`; tangential/rotational limits, independent joint
+  residuals, centroidal residuals, QPID, physics, and bucket geometry are
+  unchanged.  No module-count-specific switch is introduced.
+- A fixed-checkpoint A/B used the same seven-module bucket 40, update-3 SHA
+  `0d27905a...d7f`, seeds `9052--9055`, and four formal phase-zero episodes.
+  The deterministic normalized normal action remained about `0.612`, so its
+  physical normal residual changed from about `6.12 mm` to `12.24 mm`.
+- The larger authority improved retention materially: terminal step counts
+  changed from `1620--2049` to `2338--2408`, episode return increased in every
+  seed, and the deployable estimated minimum normal force increased from
+  `0.000--0.206 N` to `0.628--1.126 N`.
+- It did not complete bucket 40: all four episodes still dropped the object
+  during lift, before `lift -> transport`.  Hard collision, terminal QPID
+  infeasibility, timeout, and fallback counts remained zero.  Therefore
+  `20 mm` authority is a useful causal improvement but is not by itself a
+  successful fixed-checkpoint solution or promotion result.  Training under
+  the widened common action scale must be evaluated separately.
+
+#### Retraining outcome
+
+- A fresh common 2--7-module update was run from accepted update 2 under the
+  20 mm physical scale. The matched trial retained factorized PPO and added
+  the implemented normal/tangential/rotational contact-coordinate pass.
+- The child remained within every KL guard but failed bucket 40 in all four
+  fixed seeds: contact acquisition succeeded and the object dropped during
+  lift, with no collision, QPID-infeasible terminal, timeout, or fallback.
+- The deterministic lift normal residual changed from about `12.217 mm` in
+  the parent to `12.199 mm` in the child. The extra physical authority was
+  therefore available but PPO did not learn to use more of it.
+- The 20 mm common authority remains the deployed action bound. The
+  coordinate extra pass remains diagnostic and disabled in the accepted
+  curriculum; the failed child does not replace accepted update 2. More
+  identical PPO budget is unsupported without a different causal learning
+  signal or an explicit curriculum-method revision.
+
+### C3 Physical Contact-Normal Quantization Diagnostic
+
+- A morphology-independent optional action adapter may quantize only the
+  physical inward-normal contact residual after continuous-policy scaling and
+  before contact-Jacobian projection. The latent PPO action and likelihood
+  remain continuous, so exact on-policy replay is unchanged. The adapter must
+  not quantize tangential/rotational contact coordinates, CoM/global actions,
+  or independent joint residuals, and its step must be recorded in rollout
+  provenance.
+- The approved `0.5 mm` experiment used only seven-module data for one update
+  from accepted update 2. It completed within all KL limits, but the fixed
+  difficult bucket remained `0/4` with object drop during lift.
+- The parent and child latent actions both fell in the same physical
+  `12.0 mm` bin at every valid step (`12.1725 mm` versus `12.1755 mm` before
+  quantization). Thus this experiment did not test a different deployed
+  normal command after learning and supplies no evidence that quantization
+  improves grasp retention.
+- Quantization remains implemented but disabled in the accepted curriculum.
+  The active C3 contract continues to use the continuous physical normal
+  mapping and accepted update 2; the seven-module child is diagnostic-only.
+
+### C3 Direct Categorical Contact-Normal Diagnostic
+
+- A diagnostic π_L policy may replace only each active contact slot's
+  inward-normal contact-space distribution with 81 categorical values over
+  `[-20 mm, +20 mm]` at exact `0.5 mm` intervals. This is an explicit
+  categorical likelihood trained by PPO, not a continuous Gaussian rounded
+  after sampling.
+- The other five contact coordinates remain squashed-Gaussian. CoM/global and
+  independent-joint actions, nominal IK lead, QPID, reward, observation, and
+  physics contracts remain common and unchanged across module counts.
+- Migration from v8 copies all existing parameters exactly and initializes
+  only the new category-logit head. Its initial state-dependent prior is
+  centered on the existing continuous normal mean so migration does not
+  arbitrarily change deterministic physical action.
+- Mixed-action behavior likelihood must be computed directly from the five
+  executed Gaussian coordinates plus the executed categorical coordinate.
+  An unsaved provisional Gaussian normal sample must not participate in the
+  stored likelihood. Exact replay is fail-closed.
+- One seven-module update passed exact replay and improved difficult bucket 40
+  from `0/4` to `1/4`, but deterministic inference remained at the same
+  `12.0 mm` category in every reached phase. This child is diagnostic-only and
+  does not replace accepted update 2. The direct categorical mechanism is not
+  yet an accepted C3 production contract.
+- The approved extension through three total categorical updates moved the
+  deterministic choice to the adjacent `12.5 mm` category. Nevertheless,
+  update 5 scored `0/4` on difficult bucket 40 (all object drops in lift),
+  while a known-success seven-module control bucket scored `4/4`. Thus the
+  categorical head can change the deployed squeeze bin, but more identical
+  PPO budget did not solve the target retention failure. The extension is
+  diagnostic evidence only; update 5 is not promoted and accepted update 2
+  remains the continuation parent.
+- A fixed-action causal sweep on difficult bucket 40 subsequently established
+  that the same plan and controller succeed `4/4` at each of `16, 18, 20 mm`,
+  while `10, 12, 14 mm` score `0/4, 1/4, 0/4`. No tested value caused hard
+  collision or terminal QPID infeasibility. Thus bucket 40 is not intrinsically
+  infeasible; the categorical policy's learned `12.5 mm` argmax is below the
+  observed robust-success region. This evidence supports revising categorical
+  exploration/initial probability mass, not hard-coding a global `16 mm`
+  residual or replacing the bucket.
+- A subsequent full-support broad-prior diagnostic kept the same 81 categories
+  but distributed initial probability nearly uniformly over `10--20 mm`.
+  One seven-module update learned a deterministic `16.5 mm` category and
+  passed both difficult bucket 40 and control bucket 33 at `4/4`, with no
+  safety failure. This validates broad high-squeeze exploration as a candidate
+  curriculum contract. It does not yet authorize promotion: the identical
+  common action/distribution contract must be trained and regression-checked
+  across the earlier module-count strata without module-specific switches.
+- The same categorical contract was then trained jointly on module counts
+  2--7 in one topology-stratified update. Paired held-out phase-reset checks
+  showed no catastrophic forgetting or broad safety regression for module
+  counts 2--6, and formal seven-module validation passed both bucket 33 and
+  difficult bucket 40 at `4/4` with no safety failure. The policy selected
+  contact-specific normal residuals (`16.5/20.0 mm` and `16.5/18.0 mm`) rather
+  than a module-specific fixed command. Update 4 SHA `19ab01d4...22eb` is
+  therefore the accepted continuation parent for adding eight-module data;
+  it is not yet a C3 promotion result.
+
+### C3 Actuator/Leverage-Aware Physical-Minimum Nominal Preload
+
+- The common nominal contact lead is morphology- and contact-conditioned, not
+  module-count-conditioned. At the reviewed final contact posture, the
+  deterministic calculation allocates the normal forces needed for
+  `1.25 * m * g` frictional support while minimizing peak joint utilization
+  under the configured actuator torque envelope. It then converts the
+  allocated normal force to displacement using joint compliance projected
+  through the contact-normal Jacobian plus configured contact compliance.
+- The selected nominal lead is the largest required anchor displacement,
+  bounded below by `4 mm` and rounded upward to the next `1 mm`. The formerly
+  added universal `12 mm` model-error margin is removed: it was not derived
+  from morphology/load mechanics and duplicated the responsibility of the
+  bounded learned contact-normal residual. No per-module or per-bucket rule is
+  permitted.
+- Terminal contact-offset IK must reproduce the requested normal displacement
+  within its configured tolerance while preserving the tangential contact
+  coordinates and joint limits. Bounded continuation/refinement is a
+  numerical realization of the same IK contract, not a new high-level
+  planner or a runtime collision-avoidance substitute.
+- Actor-free real-Isaac evidence used the full accepted nominal sequence and
+  production QPID/QP with all learned `pi_L` corrections set to zero.
+  Eight-module bucket 34 used a `30 mm` calculated nominal lead and passed
+  `4/4`; five-module bucket 38 used `7 mm` and passed `4/4`. All eight runs
+  reached release/settle with zero drop, hard collision, terminal QPID
+  infeasibility, timeout, fallback, or safety failure.
+- This evidence validates the physical-minimum nominal baseline only. It is
+  acceptance-ineligible for C3 promotion because the learned actor was
+  disabled. The categorical contact-normal action, all other policy outputs,
+  observation schema, `PolicyCommand`, and QPID/QP authority remain unchanged;
+  a fresh common 2--8-module on-policy lineage and formal actor-enabled
+  validation are required before promotion.
+
+### Physical-Minimum C3 Retraining Evidence
+
+- A fresh v9 C3 initializer is derived from the promoted C2 representation via
+  the clean zero-command contact-space initializer.  It does not inherit a
+  learned actor head from any retired C3 preload lineage.  Its normal-contact
+  action is the common 81-category `[-20, 20] mm` contract at `0.5 mm`
+  resolution, while CoM pose/twist, tangential/rotational contact residuals,
+  and independent joint position/velocity residuals remain active.
+- Initializer migration may use update index `-1` to denote a pre-training
+  artifact and may use exactly zero initial contact-normal residual.  This is
+  provenance metadata, not a trained negative update number and not a change
+  to runtime action semantics.
+- Four topology-stratified 2--3-module updates were run under the corrected
+  physical-minimum nominal contract.  PPO replay, KL bounds, entropy, QPID
+  feasibility, and all actor output paths were operational; parameter-diff
+  evidence rules out a frozen actor or action-routing failure.
+- Paired same-bucket rollout evidence did not show repeatable improvement.
+  Module-2 mean reward was effectively flat, while module-3 mean reward moved
+  from `3.445186` to `3.391553` in one paired generation and from `3.315786`
+  to `3.293348` in the other.  Therefore update 3 is diagnostic-only, no C3
+  checkpoint is promoted, and the curriculum must not expand to four modules
+  from this lineage without first resolving the absent 2--3-module learning
+  gain.
+
+### Promoted Common C3 Contract (Update 18)
+
+- The earlier flat 2--3-module diagnostic above is not the final lineage. The
+  accepted continuation restarted from the clean v9 initializer and completed
+  19 hash-linked PPO generations while expanding the common replay curriculum
+  from module counts 2--3 through 2--8.
+- The same v9 policy/action contract applies to every module count. Runtime and
+  evaluation must not select module-count-specific action masks, controller
+  modes, nominal-preload rules, or success rules.
+- The deterministic nominal contact lead is morphology/contact/load
+  conditioned, rounded upward in 1 mm steps, bounded below by 2 mm, and has no
+  universal 12 mm addition. The policy retains a distinct bounded categorical
+  contact-normal residual, together with its global, joint, tangential, and
+  rotational residual paths.
+- Probe-derived supervision is an auxiliary update to the contact-normal head;
+  it does not replace PPO. Seven-module training used PPO update 17 followed by
+  the head-only probe teacher. Eight-module training used the preload-deficit
+  teacher before PPO update 18. Teacher passes do not consume PPO update
+  indices.
+- The accepted checkpoint is update 18 SHA-256
+  `6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b`.
+  Formal actor-enabled phase-zero evaluation passed 448/448 episodes over 14
+  held-out buckets with no safety failure or fallback. C3 is therefore
+  promoted under this exact contract.
+- The authoritative training/data inventory is
+  `for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json`; the human-readable
+  release description is `for_codex/C3_PROMOTED_UPDATE18_RELEASE.md`.

@@ -2,6 +2,1534 @@
 
 ## Global Worklog
 
+### 2026-08-04 (Order 9 C3 2--3-module PPO subcurriculum)
+
+- Scope: Start the approved low-complexity C3 subcurriculum on every available
+  two- and three-module train topology, continue automatically while update 0
+  remains numerically healthy, and validate the resulting policy before
+  returning to the full 2--8-module curriculum.
+- Implementation: Added explicit training-module bounds to the production C3
+  stage runner and tensor-native dataset contract, plus
+  `scripts/run_order9_c3_ppo_2_3.sh`.  The canonical C3 bucket manifest and
+  policy/QPID/reward semantics remain unchanged; only the train topology
+  subset is selected.  Each update combines four phase-reset topology shards
+  and two continuous state-inheritance shards, balanced across module counts
+  2 and 3.
+- Minibatch repair: Update 10 exposed a 16-transition phase-reset tail that
+  contained a boundary actor phase without its target/anchor counterpart.
+  Boundary-aware packing now merges such an incomplete tail into an adjacent
+  sequence batch without dropping, duplicating, or relabeling transitions.
+  Actual update-10 artifacts then passed the boundary contract, and 36 focused
+  PPO/stage-runner/dataset tests passed.
+- Training: Updates 0--12 completed, each with 555,008 transitions, for
+  7,215,104 transitions total.  The final update completed one epoch and 95
+  optimizer steps without KL early stop.  Its aggregate KL was `0.002798`,
+  maximum phase KL was `0.015806 < 0.04`, clipped fraction was `0.03196`, and
+  checkpoint SHA is `bd92071a...fef9e`.
+- Fixed held-out result: Versus the clean initializer on the same two buckets
+  per module count, the two-module mean reward changed by `-0.001687`, with
+  unchanged collision rate and QP-feasible delta `-9.16e-5`.  The
+  three-module mean reward changed by `+0.080288`, with unchanged collision
+  rate and QP-feasible delta `-3.05e-5`.  Thus three-module behavior improved
+  clearly while two-module behavior remained effectively neutral and retained
+  the measured safety envelope.
+- Continuous result: A 15,000-step full-horizon deterministic Isaac check ran
+  four episodes each on held-out two-module bucket 28 and three-module bucket
+  36.  All `8/8` episodes reached terminal phase 8 successfully, with no
+  fallback, collision, object drop, QP-infeasible terminal, or timeout.
+  Episode lengths were 7,580 steps for the two-module case and 7,183--7,185
+  steps for the three-module case.  This supersedes the earlier misleading
+  3,600-step timeout diagnostic for these two cases.
+- Exact nominal-failure A/B: Validation bucket 29 was replayed with the same
+  seed, reset bank, and four late-phase strata used by nominal-QPID screening.
+  Nominal-QPID was `3/4`; environment 0, initialized at phase 3 / stratum 2,
+  remained in retreat at the 3,600-step horizon.  Update 12 was `4/4` and
+  completed that same environment at step 3,539, with no collision, drop,
+  QP-infeasible terminal, or timeout.  The 61-step margin is positive but
+  narrow, so this is exact A/B evidence of correction rather than a broad
+  robustness claim.  An explicit acceptance-ineligible learned phase-strata
+  diagnostic flag was added so this comparison cannot be mistaken for formal
+  phase-zero promotion evidence.
+- Runtime: Updates 10--12 reused only hash-valid artifacts.  Update 10--12
+  maximum phase KL values were `0.007214`, `0.008985`, and `0.015806`;
+  no NaN, rollback, missing shard, or Isaac startup deadlock occurred in the
+  final run.  TensorBoard logs are under
+  `training_lineages/module_2_3_curriculum_v1/tensorboard/`.
+- Evidence: `training_lineages/module_2_3_curriculum_v1/update_000012/`,
+  `evaluations/update_000012_vs_initializer_fixed_2_3_v1/`, and the resumable
+  full-horizon continuous evaluation directory
+  `evaluations/update_000012_continuous_2_3_full_horizon_v1/`.
+
+### 2026-08-02 (Order 9 C3 mixed state-inheritance update-0 diagnostic)
+
+- Scope: Implement the approved mixed phase-reset plus continuous-state-
+  inheritance PPO distribution, execute update 0 from a clean initializer,
+  and evaluate it on both fixed and continuous held-out evidence before any
+  later update.
+- Runtime/data contract: Retained 14 phase-reset train shards and added seven
+  continuous shards, one per module count 2--8.  Continuous shards use
+  `12 x 1,280` steps, balanced initial phases `[contact_acquisition,
+  transport]`, physical/RNN state inheritance across phase transitions, and
+  RNN reset only on episode termination.  The generation contained 262,144
+  reset-train, 107,520 continuous-train, and 262,144 validation transitions
+  (`631,808` total).
+- Training: All 21 train shards passed exact behavior/recurrent replay.  The
+  update completed 181 optimizer steps in one epoch with aggregate KL
+  `0.0005767`, maximum applied topology-phase KL `0.032493 < 0.04`, no KL
+  stop, no rollback, and checkpoint SHA `d380828b...bdb4d4`.
+- Fixed-14 result: Candidate minus initializer was `-0.0009978` mean reward,
+  `-0.0001657` collision rate, `-0.0006932` QP-feasible rate, and
+  `-1.308e-5` phase-success rate.  Six of 14 buckets improved, median reward
+  delta was `-4.02e-5`, and successful terminals remained `216`.
+- Continuous paired result: On bucket 28, both checkpoints reached transport
+  and horizon-timed-out in `4/4` episodes; update-0 mean return changed by
+  `+1.14`.  On bucket 36, both dropped during lift in `4/4`; update-0 mean
+  return changed by `-208.41`.  Neither run had collision or QP-infeasible
+  terminal.  Mixed update 0 therefore did not improve phase outcome and is
+  not promoted.
+- Runtime diagnosis/fix: Sequence-count minibatching allowed the fragmented
+  seven-module continuous shard (2,169 sequences) to force 181 optimizer
+  attempts and repeated sampling of smaller shards.  Replaced it with phase-
+  contiguous sequence packing by equal per-topology transition budget.  A
+  dry count on the immutable generation predicts 93 attempts, and 107 focused
+  curriculum/dataset/PPO/promotion/evaluation/runtime tests pass.  Further
+  training must start a corrected update-0 lineage from the initializer;
+  update 1 is not continued from this diagnostic checkpoint.
+- Evidence:
+  `training_lineages/mixed_state_inheritance_outcome_only_v1/`,
+  `evaluations/update_000000_vs_initializer_fixed14_v1/`,
+  `evaluations/initializer_mixed_continuous_v1/`, and
+  `evaluations/update_000000_mixed_continuous_v1/`.
+
+### 2026-08-02 (Order 9 C3 clean outcome-only updates 0--3)
+
+- Scope: Remove exact 6D wrench-range credit entirely from C3 `pi_L`, start
+  from the clean promoted-C2-derived initializer, train updates 0--3, and
+  decide continuation from fixed and continuous physical evidence.
+- Implementation: Set `w_wrench_range=0.0` and the privileged compression
+  teacher weight to `0.0`.  Extended the behavior-preserving v4-to-v5
+  migration to accept canonical `initializer_only=true` checkpoints at update
+  index `-1`.  Raw PhysX wrench telemetry remains diagnostic/`pi_H`
+  feasibility data and is absent from actor observations and learning credit.
+- Initializer: Migrated clean checkpoint SHA `27f908c3...f4c9` to v5 SHA
+  `1a660f95...fd92c` with copied-parameter maximum error `0` and zero initial
+  contact-residual output.
+- Training: Updates 0--3 each consumed 524,288 transitions over 14 train
+  shards spanning two examples for every module count 2--8.  All completed one
+  epoch without KL stop.  Update 3 produced SHA `40d3c7c3...a2953ad`,
+  aggregate KL `0.0001033`, maximum phase KL `0.0009784`, and clipped fraction
+  `3.82e-6`.
+- Fixed-14 validation: Update 3 versus the clean initializer changed mean
+  reward by `+0.003278`, collision rate by `-8.72e-5`, QP-feasible rate by
+  `-4.53e-4`, and phase-success rate by `+8.72e-6`.  Seven buckets improved,
+  seven regressed, median reward delta was `-0.000159`, successful terminals
+  remained `216`, and the wrench reward delta was exactly `0`.
+- Continuous validation: Two representative buckets were run for four
+  episodes each with 3,200 steps.  Bucket 28 reached `place` in `4/4` without
+  drop/collision/QP terminal but timed out before release.  Bucket 36 reached
+  `transport`, then dropped in `2/4` and phase-timed-out in `2/4`.  Task
+  success was `0/8`.
+- Interruption recovery: A host restart interrupted the fixed comparison after
+  one bucket.  The valid initializer/reset artifacts were hash-checked and
+  reused; the candidate artifact with a truncated log was quarantined and
+  recollected.  The final report uses identical reset-bank hashes and passed
+  artifact validation for all 14 buckets.
+- Decision: Do not promote update 3 and do not add more updates under the same
+  phase-reset-only train distribution.  The remaining blocker is the mismatch
+  between 256-step phase-reset training and continuous state/recurrent-state
+  inheritance during promotion.  The recommended next method is a mixed
+  phase-reset plus continuous-state-inheritance PPO batch, pending approval.
+- Evidence:
+  `training_lineages/outcome_only_w0_from_clean_initializer_v1/`,
+  `evaluations/update_000003_vs_clean_initializer_fixed14_v1/`, and
+  `evaluations/update_000003_outcome_only_continuous_v1/`.
+
+### 2026-08-01 (Order 9 C3 unit-weight wrench diagnostic rejected)
+
+- Scope: Test whether reducing the now-soft exact wrench-range reward from
+  `10.0` to `1.0` lets task outcome, slip, QP, collision, and actuator terms
+  produce a useful C3 learning direction.
+- Training: Branched once from the behavior-preserving update-9 v5 checkpoint
+  SHA `3aacc11c...5d2a6`, collected 524,288 fresh transitions over 14 train
+  shards spanning two examples for every module count 2--8, and completed one
+  epoch/111 optimizer steps.  Approximate KL was `0.000126`, maximum phase KL
+  `0.001583`, clipped fraction `1.48e-5`, and no KL early stop occurred.  The
+  diagnostic checkpoint SHA is `17df4b8...bcc1`.
+- Fixed-14 validation: Candidate minus update 9 was `-0.004368` mean total
+  reward, `-0.001124` reward after algebraically excluding the wrench term,
+  `-8.28e-5` phase-success rate, `+0.000331` QP-feasible rate, and `+0.0000262`
+  collision rate.  Transport/place reward changed by `-0.02134/-0.03509`, and
+  successful terminals remained `215`.
+- Decision: Reject the unit-weight condition.  It did not produce independent
+  task-outcome benefit, so the planned continuous physical test and clean
+  update-0 lineage were not started.  Restore the last accepted configured
+  weight `10.0`; neither diagnostic update 10 is promoted.
+- Evidence:
+  `training_lineages/outcome_gate_wrench_soft1_from_update9_v1/` and
+  `evaluations/update_000010_vs_update_000009_fixed14_v1/comparison_report.json`.
+
+### 2026-08-01 (Order 9 C3 outcome-gate learning and fixed validation)
+
+- Scope: Train the existing `pi_L` once under the approved outcome-based
+  contact gate and decide whether further updates are justified.
+- Lineage: Migrated update 9 to the behavior-preserving v5 contact-residual
+  actor (maximum copied-parameter error `0`, zero initial residual), then
+  collected a fresh on-policy update with two train topologies for every
+  module count 2--8.  The production update consumed 524,288 transitions and
+  produced checkpoint SHA `5a3e7c07...509ec`.
+- Optimizer: One epoch/110 steps completed without KL stop; aggregate KL was
+  `4.32e-5`, maximum topology-phase KL `4.06e-4`, clipped fraction `0`, and
+  entropy remained effectively unchanged.
+- Fixed validation: Across 14 paired validation buckets, mean reward improved
+  by `+0.04162` and QP-feasible rate by `+0.000427`; collision rate worsened by
+  `+0.000109`, phase-success rate was unchanged, and successful terminals
+  remained `215`.  About 95 percent of the reward gain (`+0.03952`) came from
+  the retained exact wrench-range penalty.
+- Continuous physical validation: Bucket 28 again reached transport `4/4`,
+  lifted the object about 104 mm, and had no collision/drop/QP terminal.
+  Bucket 36 again dropped during lift `4/4` and never entered transport, with
+  no collision or QP-infeasible sample.
+- Evidence:
+  `training_lineages/outcome_gate_contact_residual_from_update9_v1/` and
+  `evaluations/update_000010_outcome_gate_lift_v1/outcome_gate_training_diagnosis_v1.md`.
+- Decision: Do not promote update 10 or spend further updates with the same
+  reward weights.  Exact wrench membership is no longer a hard objective, but
+  its configured 10x soft penalty dominates the measured learning gain.  A
+  method-level reward-weight decision is required before restarting from the
+  behavior-preserving update-9 v5 initializer.
+
+### 2026-08-01 (Order 9 C3 outcome-based grasp gate)
+
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` plus the user-approved
+  Order 9 supplements in `AMSRR_design_modification_by_codex.md`.
+- Work package / Agent label: Agent J/K, C3 learned low-level control and
+  physical promotion evidence.
+- Summary: Removed exact per-contact 6D wrench-box membership from C3 phase
+  success while retaining the wrench penalty/telemetry, two real contacts,
+  QP/dwell, collision, drop, timeout, object-pose, QPID, and actuator safety
+  contracts.  Added fail-closed artifact identity for the new outcome gate.
+- Files changed: `amsrr/training/order9_tensor_reward.py`,
+  `amsrr/training/order9_tensor_rollout_artifact.py`,
+  `amsrr/training/order9_c3_promotion.py`,
+  `amsrr/training/order9_pi_l_stage_runner.py`,
+  `scripts/order9_vectorized_isaac_rollout.py`, focused reward tests, design
+  supplement, and this worklog.
+- Schema/interface changes: No tensor, actor, `PolicyCommand`, QPID/QP, or
+  checkpoint-shape changes.  Artifact metadata adds
+  `wrench_range_hard_gate_enabled=false`; contact/phase, collector, and
+  promotion semantic versions advance.
+- Upstream dependencies used: Accepted complete nominal C3 trajectory set v2,
+  update-9 checkpoint SHA `5c18c1f6...d203cf`, raw PhysX contact reduction,
+  existing QP/drop/collision gates, and fixed validation buckets 28/36.
+- Downstream impact: New C3 collection/promotion evidence must use the outcome
+  contract; exact-wrench-gate artifacts are stale for promotion.  The dense
+  wrench reward remains present pending a separate learning decision.
+- Tests/commands: Expanded reward/promotion/artifact/stage-runner/PPO/curriculum/
+  evaluation/force-observer/deployable-gate pytest suite passed `80/80`;
+  Python compilation and `git diff --check` passed.  Two
+  parallel real-Isaac comparisons ran at 1,800 and 3,200 steps with four
+  deterministic environments per bucket.
+- Physical result: Both buckets passed contact acquisition `4/4`.  Bucket 28
+  completed lift `4/4`, raised the object about `104 mm`, entered transport,
+  maintained both contacts, stayed below `10.255 N / 0.765 Nm`, and had no
+  collision, rotor saturation, drop, or QP terminal (one `0.02 s` transition
+  sample per environment was QP-infeasible, below the unchanged `0.10 s`
+  terminal grace).  Bucket 36 lost one contact during lift and dropped `4/4`;
+  maximum contact force/moment were `3.527 N / 0.284 Nm`, with no collision,
+  rotor saturation, or QP-infeasible sample.
+- Assumptions: Exact wrench-range equality is not a task objective; stable
+  object manipulation within controller/actuator/safety constraints is.
+- Blockers/open questions: C3 is not promoted.  Bucket 36 demonstrates that
+  gate removal fixes false rejection but does not replace insufficient learned
+  grasp maintenance.
+- Next step: Train/evaluate the existing `pi_L` under the outcome-based gate
+  and task outcome, then run the fixed 14-bucket promotion matrix.
+
+### 2026-07-31 (Order 9 C3 contact-compression credit assignment)
+
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` plus the approved Order 9
+  supplements in `AMSRR_design_modification_by_codex.md`.
+- Scope: Determine whether the configured 10x privileged wrench-range reward
+  can train physical contact compression without moving unrelated shared actor
+  outputs, then start a clean C3 lineage from the hash-bound initializer only
+  if paired evidence improves.
+- Method selection: Same-rollout training from the prior update-9 checkpoint
+  and deterministic fixed-14-bucket evaluation selected compression-coordinate
+  PPO credit routed only through the node-wise `joint_decoder`.  Mean reward
+  improved by `+0.0628359` and the weighted wrench-range term by `+0.0606442`;
+  QP-feasible rate changed by only `+8.72e-6`.  The diagnostic that multiplied
+  the already configured `w_wrench_range=10.0` by another ten was recognized as
+  an unintended effective 100x condition and was rejected.
+- Implementation: Added explicit `compression_only_actor_objective` and
+  `joint_head_only_actor_update` C3 boundary-training settings.  Production
+  training freezes all actor parameters except `joint_decoder.*`; the critic
+  remains trainable.  Stage validation records and checks both settings.
+  Actor/action tensor shape, deployment interface, nominal IK, QPID/QP, and
+  the privileged-information boundary are unchanged.
+- Fresh lineage: Created
+  `training_lineages/w10_joint_head_from_initializer_v1` from initializer SHA
+  `27f908c...f4c9` and completed update 0 using 14 topology shards spanning
+  two examples for every module count 2--8.  It consumed 524,288 environment
+  steps (262,144 train samples), completed one epoch and 105 optimizer steps,
+  and wrote checkpoint SHA `6a39b486...39b5bf`.
+- Validation: Exact behavior replay passed; maximum log-probability,
+  recurrent, and value replay errors were `2.29e-5`, `2.38e-7`, and `1.91e-6`.
+  Maximum applied non-target and overall topology-phase KL were `0.0009074`
+  and `0.0029072`, below their `0.01/0.04` limits.  Direct parent/child tensor
+  comparison found changes only in `joint_decoder.*` and `critic.*` (8 of 88
+  tensors); every shared/global actor tensor remained bit-identical.
+- Verification: Focused curriculum, tensor PPO, stage-runner, online-training,
+  and initializer-rebind suites passed `37/37`; `git diff --check` passed.
+  TensorBoard remains available under the new lineage.  No training or Isaac
+  process remains running after update 0.
+- Next step: Evaluate or continue update 1 onward from checkpoint
+  `6a39b486...39b5bf`; update 0 alone is not a C3 promotion claim.
+
+### 2026-07-30 (Order 9 C3 piecewise-log wrench-range penalty)
+
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` plus the approved
+  `AMSRR_design_modification_by_codex.md` Order 9 supplements.
+- Work package / Agent label: Agent J/K, C3 learned low-level control training
+  and physical evaluation.
+- Scope: Remove the empirically demonstrated dense-reward plateau without
+  changing the privileged wrench-range hard gate or deployable policy/control
+  interfaces.
+- Evidence and decision: Fresh privileged-contract updates 4--6 were stable
+  (`update 6` KL `0.00155`, clip fraction `0.00124`) but fixed bucket 28 stayed
+  at `3/13` required range-ready steps and bucket 36 at `0/13`.  Contact-phase
+  assignment violation was clipped at `1.0` for approximately 79--98 percent
+  of train samples.  Saved-rollout counterfactual evaluation selected a
+  piecewise logarithmic tail: `v` through one interval width and `1+log(v)`
+  afterward.  It preserves all former sub-threshold values and kept the
+  observed 99th-percentile penalty at or below `4.61`.
+- Files changed: `amsrr/training/order9_tensor_reward.py`,
+  `amsrr/training/order9_contact_wrench_reward.py`,
+  `amsrr/training/order9_tensor_rollout_artifact.py`,
+  `amsrr/training/order9_c3_promotion.py`, focused reward tests, the design
+  modification log, and this worklog.
+- Schema/interface changes: None.  Reward/collector/promotion evidence versions
+  advance to v3/v37/v14; tensor shapes, actor input/action, checkpoint shape,
+  `pi_H`, IK, `PolicyCommand`, and QPID/QP interfaces are unchanged.
+- Upstream dependencies used: Teacher contact-frame 6D wrench boxes, selected
+  PhysX patch wrench reduction, assignment masks, and the existing privileged
+  C3 phase supervisor.
+- Downstream impact: New C3 data must be collected under the v3 contract.  The
+  update 3 policy checkpoint remains the initializer, while v2 updates 4--6
+  remain diagnostic and are not continued as the new reward lineage.
+- Tests added/run: Added a regression proving exact linear behavior through
+  one interval width, monotonic `1+log(v)` behavior beyond it, and unchanged
+  hard failure.  Focused reward/artifact/promotion suite passed `28/28`.
+- Commands run: Focused pytest suite and saved-rollout counterfactual reward
+  scale analysis.  Fresh Isaac training and fixed validation follow in the new
+  lineage.
+- Assumptions: Phase-normalized PPO remains appropriate; only the removed
+  plateau, not the hard range definition, was approved for change.
+- Fresh learning result: Branched from update 3 and completed six fresh
+  topology-stratified updates 4--9 under the v3 reward.  Each update collected
+  524,288 simulator transitions over train/validation and all 2--8-module
+  train strata.  Exact replay and numerical/safety checks passed.  Applied
+  optimizer-step counts were `8/32/6/5/3/2`; every update stopped on the
+  unchanged non-target topology/phase KL guard.  None of the 42
+  update-by-topology contact shards produced privileged contact-acquisition
+  success.
+- Fixed real-Isaac result: On bucket 28, mean piecewise wrench violation
+  changed `1.752990 -> 1.757033` from update 4 to 9 and remained at `3/13`
+  consecutive range-ready steps in all four environments.  Bucket 36 changed
+  `1.052450 -> 1.095212` and remained at `0/13`.  Neither checkpoint produced
+  a contact-to-lift transition.  The mean deterministic joint target changed
+  by only about `0.00028--0.00029 rad`; the approved dense-reward correction
+  therefore works computationally but the present actor update cannot exert a
+  meaningful physical correction.
+- Blocker / decision: Do not spend unchanged updates 10--13 or the formal
+  14-bucket promotion budget.  Contact/lift optimization currently updates a
+  shared morphology/recurrent/action actor and reaches the non-target KL
+  preservation boundary before the contact command moves materially.  This is
+  a new method-level actor-specialization issue, not a reward, Isaac, QPID/QP,
+  or numerical failure.  Recommended next change is a zero-initialized
+  contact/lift-only residual action adapter with the verified base actor frozen;
+  non-target phases would remain exactly unchanged.  Evidence:
+  `training_lineages/privileged_wrench_piecewise_log_v2/evaluations/
+  piecewise_log_update_000009_diagnosis_v1.md`.
+
+### 2026-07-30 (Order 9 C3 privileged PhysX wrench-range phase supervision)
+
+- Scope: Implement the user-approved C3-only privileged grasp/phase
+  supervisor, retain wrench-range failure as both a reward penalty and a phase
+  failure, and verify the contract against saved and fresh real-Isaac evidence.
+- Implementation: The tensor reward engine now evaluates every active
+  assignment's complete PhysX 6D contact wrench against the teacher lower/upper
+  box before contact dwell can accumulate.  Contact readiness requires two
+  physical contacts, full range membership, QP feasibility, and continuous
+  `0.25 s` dwell.  Lift/transport/place success also requires current range
+  membership.  The retired controller-preload flag remains schema-compatible
+  but no longer gates progress.  C3 runtime transitions and recurrent-policy
+  phase resets use this privileged result; non-C3 stages retain the deployable
+  gate.  PhysX wrench truth was not added to actor, nominal IK, PolicyCommand,
+  QPID/QP, or actuator inputs.
+- Evidence contract: Added named C3 privileged-supervisor and contact-success
+  contracts, recorded the phase-supervision source in raw and episode metadata,
+  advanced the collector to v36 and promotion runner to v13, and made C3
+  promotion reject evidence from the superseded collector/phase contract.
+- Saved-rollout precheck: Under update 3, validation bucket 28 achieved at most
+  three consecutive range-valid steps versus the required thirteen; bucket 36
+  achieved zero.  This predicted that the new gate would expose insufficient
+  wrench regulation rather than admit either bucket based on the old observer.
+- Real-Isaac validation: Replayed four deterministic phase-zero environments
+  each for two representative buckets.  Both advanced approach `4/4` with
+  finite state and no collision/drop/QP failure.  Both correctly remained in
+  contact acquisition: bucket 28 again reached only three consecutive valid
+  wrench steps, and bucket 36 reached zero.  All eight episodes therefore
+  ended as evaluation-horizon timeouts, not false grasp successes.  Raw SHA-256
+  values are `9bb80155...0a417` (bucket 28) and `8ba83a8d...a678` (bucket 36).
+  The partial-evidence state is v13, SHA-256 `a597fe85...26e2`.
+- Verification: Focused reward, TensorBoard, promotion, rollout artifact,
+  stage-runner, force-observer, deployable-gate, curriculum, PPO, and on-policy
+  dataset tests passed `80/80`; Python compilation and `git diff --check`
+  passed.  No Isaac or promotion process remains running.
+- Conclusion: The approved supervisor is implemented and behaves correctly.
+  Existing update 3 is not a passing checkpoint under the new criterion; a
+  fresh C3 on-policy lineage/update is required to train sustained wrench-range
+  regulation before formal 14-bucket promotion is meaningful.
+
+### 2026-07-30 (Order 9 C3 geometry-gated force-observer baseline)
+
+- Scope: Efficiently determine whether a free-motion torque baseline improves
+  the deployable contact-force observer, integrate it only when supported by
+  evidence, and validate it in real C3 buckets.
+- Diagnosis: A compact 4-environment, 1,800-step phase-zero Isaac trace showed
+  that the former approach-only EWMA froze about 130 control steps before
+  physical contact.  Contact-acquisition closing torque was therefore fitted
+  as normal force.  Replaying the exact torque/gravity/Jacobian/contact-distance
+  series with baseline alpha values from 0.001 through 1.0 showed that changing
+  EWMA speed alone did not resolve the error.
+- Implementation: Added a branch/joint mask that updates all joints during
+  approach and continues updating only a clearly free anchor's owned joints
+  during contact acquisition.  The update freezes at the existing 4 mm
+  deployable contact band and never consumes PhysX contact truth.  Added a
+  compact force-observer trace, offline no-baseline/phase-only/geometry-gated
+  replay utility, atomic evidence output, estimator/trace/collector version
+  updates, and focused tests.  Policy I/O, checkpoint shape, `pi_H`, nominal
+  IK, `pi_L`, QPID/QP, and reward contracts are unchanged.
+- Offline A/B: On the original two-module trace, phase-only baseline admitted
+  `0/4` contact dwells.  Geometry-gated branch replay admitted `4/4` with zero
+  force-ready false positives; the saved comparison SHA-256 is
+  `fb63e11a...05909c`.
+- Real bucket 28: Re-running update 3 from phase zero transitioned `4/4`
+  environments from approach to contact acquisition and `4/4` from contact
+  acquisition to lift.  Against a no-baseline replay of the same physical
+  trace, contact-force MAE improved from `21.4124 N` to `6.4570 N`, false
+  positive rate from `0.0035945` to zero, and online/offline force replay
+  agreed within `3.82e-6 N`.  Raw/trace/comparison SHA-256 values are
+  `f8ecdd4a...df1a`, `f4cf893d...e266`, and `87d069ae...1252`.
+- Real bucket 36 limitation: Both anchors achieved privileged physical force
+  near `2.06 N` against a `1.176 N` requirement, but their contact-normal
+  Jacobian components were zero.  The deployable observer therefore returned
+  zero force/confidence and correctly failed closed (`0/4` lift transitions),
+  independent of baseline.  Raw/trace/comparison SHA-256 values are
+  `c899f1f8...6438`, `aecf2cc4...305c`, and `36f076fe...ca4b`.
+- Verification: Focused estimator, gate, replay, tensor-artifact, and curriculum
+  suites passed `41/41`; Python compilation and whitespace checks passed.
+- Conclusion: The geometry-gated baseline is evidence-backed and retained,
+  but it cannot make a contact force observable when `J_p^T n` is zero.  This
+  is a separate method-level blocker for arbitrary-morphology production
+  gating; no C3 promotion or further learned-policy update is claimed here.
+
+### 2026-07-29 (Order 9 C3 deployable Jacobian normal-force observer)
+
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` plus the approved
+  `AMSRR_design_modification_by_codex.md` supplements.
+- Work package / Agent label: Agent J/K, Order 9 learned curriculum and
+  physical execution.
+- Summary: Replaced the contact phase gate's maximum-joint-load proxy with a
+  deployable physics observer.  It shifts the live link Jacobian to each
+  grasp frame, removes gravity and an approach-phase free-motion torque
+  baseline, solves a batched nonnegative ridge least-squares problem for
+  anchor normal forces, and checks the result against the `pi_H` wrench range
+  plus `m*g/(mu*N)` support demand.  Raw PhysX contact remains privileged
+  validation/reward information and is not observer, gate, actor, or
+  controller input.
+- Files changed: `amsrr/training/order9_anchor_normal_force_estimator.py`,
+  `amsrr/training/order9_deployable_phase_gate.py`,
+  `amsrr/training/order9_curriculum.py`,
+  `amsrr/training/order9_tensor_rollout_artifact.py`,
+  `scripts/order9_vectorized_isaac_rollout.py`, training config, focused unit
+  tests, design supplement, and this worklog.
+- Schema/interface changes: Internal `Order9DeployablePhaseGateInput` now
+  receives estimated/required normal force and estimator confidence instead
+  of joint-load/tracking proxies.  Seven additive production-runtime config
+  fields were added.  Persisted rollout tensor shapes, `pi_L` policy I/O,
+  checkpoint shape, `pi_H` output, and QPID/QP interfaces are unchanged.
+- Upstream dependencies used: current grasp-frame transforms and link
+  Jacobians, signed applied joint torque, model gravity compensation,
+  `pi_H` contact normals/wrench boxes, payload mass/friction estimates, and
+  the existing phase/state/QP contracts.
+- Downstream impact: Contact acquisition can no longer be promoted solely by
+  high internal joint load.  `pi_L` retains contact-force correction
+  responsibility; the observer supplies evidence only and QPID/QP remains the
+  actuator/safety authority.
+- Tests/commands: focused observer/gate/curriculum tests passed `23/23`; wider
+  observer/gate/curriculum/promotion/evaluation/artifact/runtime tests passed
+  `56/56`; real-Isaac current-Jacobian smoke passed; a 16-environment positive
+  contact diagnostic transitioned `16/16` from contact acquisition to lift.
+  A 16-environment phase-zero weak-contact regression transitioned `0/16` to
+  lift and timed out all 16 safely in contact acquisition.  Its terminal
+  estimated minimum force was `0.145--0.450 N` versus required `1.097 N` and
+  privileged actual `0.043--0.208 N`.  Final positive/negative raw artifact
+  SHA-256 values are `509ca413...a5f09f` and `05153aab...79a10`.
+  Host pytest used `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` because the installed ROS
+  plugin is incompatible with host pytest.
+- Assumptions: actuator torque is available from measured motor current on the
+  robot; the same robot model used by nominal IK/QPID supplies gravity and
+  grasp-point Jacobians.  A learned residual is not introduced unless broader
+  validation demonstrates a systematic physics-model bias.
+- Blockers / open questions: None at implementation level.  Broader C3
+  promotion remains a separate validation and no promotion claim is made here.
+- Next steps: rerun the fixed C3 promotion matrix under the new observer/gate;
+  if insufficient contact remains common, resume training from the selected
+  update-3 checkpoint under this corrected phase-transition contract.
+
+### 2026-07-29 (Order 9 C3 virtual-contact IK and privileged-force separation)
+
+- User-approved redesign: removed the production raw-force-driven contact
+  preload.  `pi_H` contact poses retain physical surface semantics; runtime
+  nominal IK applies only a bounded 2 mm inward virtual target during contact
+  maintenance, learned `pi_L` supplies bounded residuals, and QPID/QP remains
+  the final actuator authority.
+- Ran an actor-free real-PhysX sweep at 2/5/10/15/20 mm on representative
+  2/5/8-module buckets.  The two-module case produced about 5.1 N per anchor at
+  2 mm and about 10 N from 5 mm upward.  Five- and eight-module QPID-only cases
+  could remain 1--3 mm short even at 20 mm.  Chose the smallest common 2 mm
+  lead rather than a topology-specific deterministic force heuristic.  Sweep
+  artifacts are under
+  `artifacts/p4_full/order9/diagnostics/virtual_contact_sweep_v1/complete`.
+- Added local bounded virtual-contact IK, a deployable kinematic/proprioceptive
+  phase gate, four per-module motor-current-equivalent joint-load features,
+  physical joint-limit clamps in the decoder, and production collector
+  integration.  Raw PhysX force/slip/penetration/collision remains available
+  only to privileged reward/critic/evaluation/logging; it is not actor input,
+  phase-transition input, target generation, or controller feedback.
+- Migrated the C2-derived initializer to active-knot feature v2 / `pi_L` v4.
+  Current initializer SHA-256 is
+  `27f908c3385a43dbe8cfb4207eb7820f8cebef61da37a8d575d921c075bff4c9`.
+  Started the fresh C3 lineage at
+  `training_lineages/virtual_contact_joint_load_v1`; old C3 lineages are not
+  continuation parents for the new observation contract.
+- Real-Isaac smoke used 2 environments for 80 steps and verified finite state,
+  nonzero joint-load observation slots, null controller preload provenance,
+  deployable phase transitions, and later privileged contact force without a
+  raw-force controller path.  Smoke raw artifact SHA-256 is
+  `805125ba3d16ee91c7aa51edc3ea95c6e6a876a6374e6d7a5b07f64af88ec872`.
+- Fresh topology-stratified update 0 consumed 262,144 train transitions over
+  seven 2--8-module train buckets.  Dataset construction took 5.97 s and PPO
+  44.33 s.  Three optimizer steps were applied; a fourth exceeded the
+  non-target parent KL limit (`0.0051146 > 0.005`) and was fully rolled back.
+  Maximum applied topology-phase KL was 0.0032401.  Checkpoint SHA-256 is
+  `83b2c26a188d45aa452b16844d4444a6252ddca8daa30beb51f6d7ad31bf3446`.
+- Updated the fixed-checkpoint comparator from the obsolete three-stratum
+  assumption to the current complete-task four-stratum reset contract.  A
+  paired deterministic comparison used identical reset-bank SHA values for
+  initializer/update 0 over 14 held-out buckets and all eight runtime phases
+  (229,376 samples per checkpoint).  Update 0 improved 8/14 buckets with
+  median reward delta +0.000725; aggregate reward delta was -0.003186, QP
+  feasible delta +0.000087, collision delta +0.000031, wrench-range term
+  +0.001201, slip term +0.001430, and successful terminals 153 -> 154.  The
+  small negative aggregate is dominated by one three-module contact outlier;
+  no method rollback is indicated after one update.  Report:
+  `training_lineages/virtual_contact_joint_load_v1/evaluations/update_000000_vs_initializer_fixed_validation_v1/comparison_report.json`.
+- Focused policy/controller/runtime/training regression suite passed 71 tests
+  before the fixed comparison.  Host pytest plugin autoload is disabled due to
+  the installed ROS `launch_testing` incompatibility.  No C3 promotion claim
+  is made at update 0; this checkpoint is the verified start of the new
+  lineage.
+- Continued the same immutable lineage through updates 1--3.  Each update
+  consumed a fresh topology-stratified 524,288-step generation.  Applied
+  optimizer step counts were 2, 4, and 6; each update rolled back its final
+  attempted step when the non-target parent-KL guard fired.  Maximum applied
+  non-target topology-phase KL remained 0.004398, 0.004517, and 0.004814
+  against the 0.005 limit.  Entropy remained effectively constant near
+  -45.3599, with no policy-distribution collapse.  Update-3 checkpoint
+  SHA-256 is
+  `13c7235095c8e95427bd04f8bb645886f24a27e88f1d98556d494c036a706128`.
+- Extended the fixed-checkpoint comparison runner so an already validated
+  initializer rollout/reset-bank set can be reused by SHA while every new
+  candidate still runs real Isaac.  This reduced duplicate physics work
+  without changing the paired comparison distribution or validation gates.
+- The fixed 14-bucket/all-eight-phase update-3 comparison improved aggregate
+  reward by +0.021420 over the initializer.  Seven of 14 buckets improved and
+  the median delta was +0.000045.  Collision rate was byte-for-byte equal at
+  0.00197928; QP feasible rate changed by only -0.0000218.  Wrench-range and
+  slip reward terms improved by +0.002995 and +0.000205.  Contact reward and
+  success improved by +0.021015 and +0.003361; the former update-0
+  three-module outlier recovered to +0.094370 reward versus initializer.
+  Lift reward remains a monitoring item at -0.035541, although lift success
+  changed by only -0.000836.  No method rollback is indicated; the next
+  bounded learning block should continue from update 3 and recheck lift.
+  Report:
+  `training_lineages/virtual_contact_joint_load_v1/evaluations/update_000003_vs_initializer_fixed_validation_v1/comparison_report.json`.
+- Continued the same lineage through updates 4--6, again using one fresh
+  524,288-step topology-stratified generation per update.  Applied optimizer
+  step counts were 2, 7, and 14; the final attempted step of every update was
+  rolled back by the non-target parent-KL guard.  Maximum applied non-target
+  topology-phase KL remained 0.003740, 0.004961, and 0.004855 against the
+  0.005 limit, and entropy remained stable from -45.3600 to -45.3603.
+  Update-6 checkpoint SHA-256 is
+  `77e489d38b6cd623cff1dccf220925741eadb957472be804a3349cdc94ad66ae`.
+- The fixed 14-bucket/all-eight-phase update-6 comparison remained safe and
+  slightly above the initializer: aggregate reward +0.003528, QP feasible
+  rate +0.000279, collision rate -0.00000436, 7/14 buckets improved, and
+  median reward delta +0.000921.  However, it regressed from update 3 by
+  -0.017892 aggregate reward and improved only 3/14 buckets in that direct
+  comparison.  Wrench-range and slip terms changed by -0.004143 and
+  -0.001063 from update 3.  Lift reward recovered by +0.035440 from update 3,
+  but contact/place/release and terminal-success gains receded.  The former
+  update-0 outlier remains recovered at +0.087833 versus the initializer.
+  Update 6 is therefore not selected as the best checkpoint; update 3 remains
+  the verified best checkpoint and the linear lineage must not resume from
+  update 6.  This is cumulative optimization drift rather than a safety or
+  method-contract failure.  Report:
+  `training_lineages/virtual_contact_joint_load_v1/evaluations/update_000006_vs_initializer_fixed_validation_v1/comparison_report.json`.
+
+### 2026-07-29 (Order 9 C3 complete nominal replay and target-rebind correction)
+
+- Replaced the incomplete C3 nominal contract with a persisted eight-phase
+  trajectory for every one of the 42 accepted buckets.  Approach/contact use
+  the accepted collision-aware paths; carried phases preserve object--robot
+  SE(3); release and retreat reverse the accepted contact/approach paths at
+  safe support/clearance states.  No configuration-space planner is called by
+  the C3 learning/evaluation runtime.
+- The complete-task nominal manifest SHA-256 is
+  `64abb1153fd9280748b6069f54538e8e8ed9c0b86fca46e380a3b8f38826c050`.
+  Parallel convex-proxy validation checked all eight phases of all 42 buckets:
+  42/42 accepted, no ground violation, no colliding proxy pair, and about
+  `4.8 mm` minimum reported object/support clearance.
+- Added phase-complete reset references containing robot, joint, object pose,
+  and twist; regenerated hash-bound static reset banks.  Bucket 35 retreat
+  passed both zero-actor and learned update-15 smoke checks without the former
+  support collision.
+- The first two-bucket formal attempt exposed a collector bug rather than a
+  policy failure.  When any vectorized environment terminated, reset handling
+  rebuilt the batch-wide target but omitted the C3 nominal conditioner.  The
+  remaining live environments received a one-step CoM target jump of roughly
+  `0.57 m`; each bucket consequently produced `8/32` success and `24/32`
+  settle-phase QP safety failures.
+- Reapplying the persisted nominal condition after every terminal reset fixed
+  the discontinuity.  A same-checkpoint/same-bucket/same-seed real-Isaac A/B
+  produced `32/32` success and zero safety failures in each bucket (`64/64`
+  total), with zero occurrences of the old downward target-jump signature.
+  No PPO update, reward, phase gate, policy interface, or QPID/QP method was
+  changed.
+- Promotion throughput aggregation now follows the immutable
+  `parent_checkpoint`/`dataset_manifest` chain across branch directories,
+  instead of assuming all generations exist below the current branch.  Unit
+  coverage verifies a three-branch lineage.  Collector v25 and promotion
+  runner v3 bind the corrected evidence; 33 focused tests and compilation
+  pass.  The full fixed 14-bucket/448-episode v25 promotion evaluation is in
+  progress and is not yet claimed here as promoted.
+
+### 2026-07-29 (Order 9 C3 bucket-35 retreat collision diagnosis)
+
+- Spec/work package: v0.4 plus the approved Order 9 amendments; Agent J/K C3
+  learned low-level policy and physical validation.  No optimizer update or
+  checkpoint promotion was performed.
+- Added acceptance-ineligible first-contact telemetry to the real-Isaac tensor
+  rollout.  It distinguishes prohibited object versus environment contact and
+  records the active authored robot body, force norm, and body pose.
+- Reproduced bucket 35's retreat terminal as
+  `module_0__battery1` against the support environment at rollout index 5.
+  QP remained feasible, selected-anchor force was zero, and object motion was
+  negligible.  A same-structure bucket-28 control did not reproduce the tail
+  support contact; its retreat reset root was about 10 mm higher.
+- Built an acceptance-ineligible diagnostic copy of update 15 with both actor
+  output heads identically zero.  The same battery/support collision persisted
+  at the same step with `4.792 N`, proving that additional unchanged `pi_L` PPO
+  is not the appropriate correction.
+- Root cause: the saved collision-aware nominal artifact and 331-frame convex
+  recheck cover only approach/contact acquisition.  Lift through settle are
+  synthesized later by deterministic translations/interpolation in the tensor
+  runtime.  The failing retreat path was therefore never passed through the
+  offline configuration-space planner or saved collision validation.
+- Decision: do not allocate more PPO budget yet.  First materialize and
+  collision-check every executable nominal phase against bucket-local
+  object/support/ground geometry, regenerate the affected reset bank, pass the
+  zero-actor retreat diagnostic, then reevaluate the learned checkpoint.
+- Evidence:
+  `training_lineages/boundary_preserving_v2/diagnostics/bucket35_retreat_collision_v1/bucket35_retreat_collision_diagnosis_v1.md`.
+- Schema/interface changes: additive diagnostic CLI telemetry only.  Policy,
+  PolicyCommand, reward, QPID/QP, IK, and deployed inference interfaces are
+  unchanged.
+
+### 2026-07-28 (Order 9 C3 boundary-preserving PPO and physical validation)
+
+- Spec/work package: v0.4 plus the approved Order 9 amendments; Agent J/K C3
+  learned low-level policy and physical validation.
+- Implemented a training-only boundary fine-tune from update 14.  Actor PPO
+  and entropy target only `release / retreat / settle`; critic learning remains
+  all-phase.  Non-target phases are anchored to the SHA-bound parent behavior
+  log probability.  Every optimizer step is transactionally checked against
+  non-target `topology x phase KL <= 0.005` and all-phase
+  `topology x phase KL <= 0.04`; violating parameters are rolled back.
+- The first `1e-5` calibration step was fully rolled back at non-target KL
+  `0.01907276` and wrote no checkpoint.  The boundary-only learning rate was
+  calibrated to `2.5e-6`.  The final update used 1 epoch, attempted 3 steps,
+  applied 2, and rolled back the third.  Maximum applied KL was `0.00305634`;
+  exact replay passed.  Checkpoint SHA-256 is
+  `4d1cdcedf115c3f9a5502e7d1ba4c2d99702b7c287e8c68d1d70adbc73c0c012`.
+- Same two-bucket full-mesh real-Isaac gate: parent update 14 was `24/64`,
+  rejected unconstrained update 15 was `10/64`, and boundary-preserving update
+  15 was `25/64`.  Bucket 28 improved `24/32 -> 25/32`; bucket 35 remained
+  `0/32`.  All 39 remaining failures were retreat hard collisions.  The new
+  child is valid and preserves the parent, but is not C3 promotion eligible.
+- Files changed: curriculum schema/YAML, tensor PPO, online trainer, stage
+  runner/CLI validation, focused tests, design supplement, worklog, and
+  ignored hash-bound training/evaluation evidence.
+- Schema/interface changes: additive internal training config and provenance
+  only.  Actor/critic tensor shapes, PolicyCommand, nominal IK, QPID/QP,
+  reward, phase-success, and deployed inference interfaces are unchanged.
+- Tests/commands: compileall; 36 focused tests passed in `isaaclab3`; fresh
+  seven-topology train plus validation collection; one exact-replay PPO update;
+  64 deterministic phase-zero full-mesh Isaac evaluation episodes.  Host
+  pytest plugin autoload remains disabled because the installed ROS
+  `launch_testing` plugin is incompatible with the active pytest version.
+- Assumptions/blockers/next: no automatic additional fine-tune.  Diagnose the
+  bucket-35 morphology-specific retreat collision before allocating more C3
+  training budget.  Report:
+  `training_lineages/boundary_preserving_v2/evaluations/update_000015_boundary_preserving_gate_v1/boundary_preserving_update15_validation_v1.md`.
+
+### 2026-07-28 (Order 9 C3 boundary-tail sampling implementation)
+
+- User-approved method supplement: added a fourth `0.9` phase-reset stratum,
+  selectable only in release and retreat.  The original `1/6, 1/2, 2/3`
+  distribution remains selectable in every phase.  Successful transitions
+  preserve the real recurrent/controller/physical state, so the unchanged
+  collision terminal trains the actual `release -> retreat` and
+  `retreat -> settle` successor actions.
+- Added fail-closed provenance for the sampling contract, selectable strata,
+  and observed adjacent-phase transition counts.  A topology that terminates
+  before crossing remains valid training evidence; therefore transition
+  success is required across the aggregate train generation, not separately
+  in every shard.  Reset banks are versioned separately because their stratum
+  tensor shape changed from three to four.
+- Added explicit immutable branch-lineage support to the C3 PPO stage runner.
+  The approved experiment starts from update 13 at next index 14 without
+  overwriting the historical update 14/15 lineage.  Checkpoint stage identity
+  and embedded PPO update index are validated before branch execution.
+- Schema/interface changes: production-runtime config adds
+  `c3_boundary_tail_phase_labels` and
+  `c3_boundary_tail_progress_fraction`; phase-reset strata increase from 3 to
+  4.  Policy/PolicyCommand/QPID/QP/reward/IK interfaces are unchanged.
+- Tests so far: Python compileall passed; 25 focused unit tests passed with
+  `PYTHONPATH=. PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`.  The default host pytest
+  plugin set is unusable because an installed ROS `launch_testing` plugin is
+  incompatible with the active pytest version.
+- Next: run the wider Order 9 unit suite, execute one topology-stratified PPO
+  update in the boundary-tail branch, and repeat the same two-bucket formal
+  safety gate.
+
+### 2026-07-28 (Order 9 C3 supported-release correction and settle blocker)
+
+- Implemented the user-approved release-boundary contract.  Estimated payload
+  feedforward is now active only in lift/transport/place.  Release success
+  additionally requires actual controllable joints to reach the final release
+  posture within `0.05 rad`; contact-free dwell and object-pose requirements
+  remain.  QPID/QP, safety gates, policy I/O, PPO, nominal IK, and reward
+  weights are unchanged.  New evidence binds explicit payload/release contract
+  IDs and collector v23; 31 focused tests pass.
+- The first real-Isaac attempt failed closed before physics because actual
+  joint state and controllable-joint reference shapes were not aligned; this
+  was corrected by selecting the exact decoder command-joint indices.  A later
+  output-only provenance typo occurred after one physical rollout had already
+  written its hash-bound raw artifact.  The typo is fixed; neither issue
+  changed the physical rollout semantics.
+- The corrected 32-environment raw rollout for validation bucket
+  `validation-000035-e40693909bf0` passed release and retreat but produced
+  `32/32` prohibited collisions about `0.12 s` after entering settle.  QP was
+  feasible in all 32 and selected-anchor forces were zero.  The nominal target
+  stayed continuous, while the phase-conditioned learned PolicyCommand changed
+  Dock joint targets by up to `0.037625 rad`; actual local-joint motion reached
+  `0.06684 rad` before collision.  This is a new retreat-to-settle actor
+  boundary failure, not the removed payload/opening discontinuity.
+- C3's zero-safety-failure gate is irreversibly failed by this bucket, so the
+  duplicate run and remaining 12 validation buckets were stopped.  Evidence is
+  `evaluations/update_000013_final_448_release_v2/
+  release_v2_gate_diagnosis.md`; raw SHA-256 is
+  `af9a3f6679158d26c73a63103f46a7a9e256aa4da76d3eee023c81af3db0670a`.
+- Method-level blocker: current C3 reset strata do not expose the learned actor
+  to the realized `release -> retreat` / `retreat -> settle` boundary within a
+  256-step shard.  Recommended next change is targeted boundary-tail rollout
+  support that preserves recurrent/controller state and lets the unchanged
+  collision terminal train the successor action.  This reset/sampling contract
+  change requires user approval before implementation.
+
+### 2026-07-28 (Order 9 C3 formal phase-zero promotion gate stopped)
+
+- Added a resumable formal C3 promotion runner.  It fixes update 13, selects
+  exactly two validation buckets for every module count from 2 through 8,
+  runs deterministic phase-zero/first-terminal/full-mesh Isaac episodes with
+  at most two simulator processes, hash-validates every raw rollout and JSONL
+  row, conservatively derives measured training-rollout throughput, and uses
+  the existing stage-evaluation/finalization gate without weakening it.
+- Runner and related evaluation/runner tests passed: 13 tests.  The measured
+  update-0--13 training rollout throughput is `686.13077 env-step/s` even when
+  overlapping collector wall times are summed as if they ran serially, above
+  the configured `500 env-step/s` floor.
+- Formal evaluation was stopped after the first two two-module validation
+  buckets (64/448 episodes).  First-terminal success was 0/64 and safety
+  failure was 64/64: 58 `qp_infeasible_terminal` and 6 `hard_collision`.
+  Terminal actor phases were release (23) and retreat (41); every episode had
+  already passed approach, contact acquisition, lift, transport, and place.
+  Because the stage permits zero safety-failure episodes, promotion was
+  already irreversibly impossible and the remaining 384 episodes were not
+  spent.
+- Root cause is a phase-boundary contract defect rather than evidence that the
+  learned policy cannot grasp/transport.  Payload gravity feedforward remains
+  enabled during release even after contacts disappear.  Release success then
+  fires after only 0.1 s contact-free, before its nominal opening trajectory
+  completes.  In the observed episodes release advanced after roughly 14% of
+  the opening path; retreat immediately selected the fully open posture,
+  producing up to about `0.51 rad` nominal-joint discontinuity and `9--10 N`
+  desired-wrench discontinuity.  Persistent QP non-convergence and several
+  prohibited collisions followed.
+- No reward, phase-success, payload-feedforward, policy, or controller method
+  contract was changed.  Per the user instruction, implementation stopped for
+  approval of the proposed method-level correction: disable payload
+  feedforward in release once the object is supported, and require release
+  posture completion (or an equivalent continuous successor-start contract)
+  before retreat.
+- Evidence:
+  `training_lineages/topology_stratified_v1/evaluations/
+  update_000013_final_448/phase_boundary_failure_diagnosis_v1.md` and the two
+  completed bucket-local raw/JSONL/log triplets.  The run remains resumable.
+
+### 2026-07-28 (Order 9 C3 configured budget, bounded extension, and final audit)
+
+- Completed topology-stratified updates 7--13, reaching the configured
+  14-update budget.  Every update passed exact behavior replay.  Updates 10
+  and 13 were valid KL-guarded updates; all others completed four epochs.
+  Entropy remained between `-45.42554` and `-45.40845`, with no variance
+  collapse, NaN, or replay-contract failure.
+- The fixed 14-bucket update-13 audit changed reward `+0.05988503`, QP
+  feasible rate `+0.00976998`, and collision rate `-0.00147356` versus the
+  initializer.  Reward improved in 9/14 buckets with median paired delta
+  `+0.02149945`.  Transport and release improved materially; place and the
+  wrench-range term remained negative.  This supported a bounded two-update
+  budget extension without changing reward, PPO, reset, actor I/O, nominal IK,
+  or QPID/QP.
+- Update 14 completed 133 optimizer steps before the existing phase-KL guard
+  fired at `0.02454333`.  Update 15 completed four epochs and 496 optimizer
+  steps with maximum phase KL `0.01740972 < 0.02`, entropy `-45.41603`, clip
+  fraction `0.08481359`, and exact replay valid.  The extended stage completed
+  at 16 cumulative updates and `8,388,608` environment steps.  Update-15
+  checkpoint SHA-256 is
+  `391b9edb333220d05cc357dee2eb777491868f878a83e086f4acf7b5ac10db76`.
+- Fixed 14-bucket update-15 evaluation changed reward `+0.05346466`, QP
+  feasible rate `+0.00789969`, collision rate `-0.00146484`, and terminal rate
+  `-0.00153460` versus initializer.  Slip improved `+0.01022`, while place
+  reward and wrench-range penalty remained negative (`-0.07782`, `-0.00594`).
+  Only 6/14 buckets improved and the median reward delta was `-0.01525235`;
+  gains were concentrated in four- and six-module buckets.
+- Decision: stop automatic budget growth and retain update 13
+  (`9646f52196069719fbaf8f29479500fdc611dda2f36bed25f3a9e657cc4994a1`)
+  as the recommended current checkpoint.  Update 3 remains the broadest early
+  reference.  Do not promote update 15.  The final trend does not establish a
+  method defect, but it does show that more unchanged updates are not presently
+  justified.
+- The first update-15 optimizer attempt ended in a single invalid-opcode trap
+  inside `libcuda.so.580.173.02`; driver module/user library versions matched,
+  and there was no Xid or OOM.  A retry reused the exact raw rollout and tensor
+  dataset and completed.  One detail-free Machine Check event was logged during
+  the successful retry.  Treat both as host hardware/driver-boundary evidence,
+  not a learning-method failure.
+- Evidence:
+  `training_lineages/topology_stratified_v1/evaluations/
+  update_000015_vs_initializer_fixed_validation_v1_accepted_nominal_reset/
+  comparison_report.json`, SHA-256
+  `a28229fbcb56ee42282a369054a7a2a5429f5176a141b752b9d6395b97b38432`.
+  Detailed diagnosis is stored beside it in `final_budget_diagnosis_v1.md`.
+
+### 2026-07-28 (Order 9 C3 accepted-nominal static reset and update-3 audit)
+
+- User-approved reset contract: Replaced reset-time actor/QPID settling and its
+  dynamic stability admission gate with a morphology-specific, hash-bound
+  physical reset bank derived directly from the human-accepted nominal
+  trajectory.  Bank construction runs no learned actor, initializer, QPID/QP,
+  fixture, or settling simulation.  Candidate `pi_L` takes control from rollout
+  step zero; contact maintenance, QP feasibility, wrench-range, slip, collision,
+  and object tracking remain reward/terminal/evaluation outcomes rather than
+  reset-admission requirements.
+- Static validation remains fail closed: accepted-nominal provenance, morphology
+  graph / physical model / robot USD / task spec identity, finite robot/joint/
+  object states, complete phase/stratum coverage, accepted collision review,
+  joint limits, and ground/support constraints.  The exact same reset-bank bytes
+  and SHA-256 are reused for initializer/candidate paired evaluation.  Rollout
+  metadata requires `dynamic_stability_gate_required=false`, a valid
+  `c3_reset_bank_sha256`, and a null legacy reset-checkpoint hash.
+- The previously blocking six-module bucket
+  `validation-000032-570cdd597559` generated and reloaded the same reset bank
+  (`7f9420a32be05d27c5db65c8cc2e9f575ce544a75cef8d05712b62162edaa6b3`)
+  for both initializer and update 3.  All eight phase identities and all saved
+  tensors were finite.  Any early terminal after step zero is now correctly
+  policy/controller evidence, not a reset-generation failure.
+- Fixed held-out audit used 14 validation buckets (two per module count 2--8),
+  64 environments x 256 steps per checkpoint/bucket, deterministic actions,
+  and 28 valid real-Isaac rollouts.  Update 3 versus initializer changed mean
+  reward `1.14799351 -> 1.16748021` (`+0.01948670`), QP feasible rate
+  `0.92599487 -> 0.93035017` (`+0.00435529`), and prohibited-collision rate
+  `0.01473999 -> 0.01426915` (`-0.00047084`).  Reward improved in 10/14
+  buckets with median delta `+0.02742`; the six-module blocker improved reward
+  `+0.05855`, QP `+0.01263`, and collision `-0.00562`.
+- Transport improved (`reward +0.00437`, `QP +0.00748`, terminal rate
+  `-0.00305`, collision `-0.00163`).  Lift and place reward remain the next
+  intermediate guardrails (`-0.01813` and `-0.09109`); slip and wrench-range
+  weighted penalties also changed slightly negatively (`-0.00139` and
+  `-0.00138`).  These early-update regressions do not outweigh the aggregate,
+  median, QP, collision, and transport improvements and do not justify a reward
+  or method change before update 4.
+- Evidence report:
+  `training_lineages/topology_stratified_v1/evaluations/
+  update_000003_vs_initializer_fixed_validation_v3_accepted_nominal_reset/
+  comparison_report.json`, SHA-256
+  `a5c1dba6ce08c415ba3acef5a31c1c8507c2adf9debe37c4ee4042b7ca6606b0`.
+  Current provenance is accepted-nominal reset-bank v1, rollout artifact v17,
+  collector v22, and stage runner v8.  Conclusion: continue from update 4
+  without changing reward, PPO, actor I/O, nominal IK, or deployed QPID/QP.
+- Production update 4 then consumed the seven topology-stratified train shards
+  plus one validation shard under the accepted-nominal bank contract.  PPO
+  completed four epochs and 588 optimizer steps without KL early stop; mean KL
+  was `0.00638084`, maximum aggregate phase KL was `0.01544421 < 0.02`, and
+  clipped fraction was `0.0757777`.  Checkpoint SHA-256 is
+  `a8c91806ffd8a02d4507745c5c50aa8ea7c0937a6ae9339f8485f1231e652b91`.
+- The first optimizer attempt stopped at step 148 with a process-level segfault
+  in `nvidiactl`; the kernel had logged Machine Check events before and during
+  that attempt.  The eight rollout shards and dataset manifest remained valid.
+  An exact retry reused their hashes, retained the same parent checkpoint,
+  seed, PPO settings, and single-thread autograd contract, and completed after
+  excluding logical CPU 8 from host scheduling.  No further Machine Check,
+  NVIDIA Xid, or segfault occurred.  This is a host-hardware/driver-boundary
+  incident, not a reset, rollout, reward, or optimizer-method failure.
+- Fixed 14-bucket update-4 evaluation changed mean reward
+  `1.14900546 -> 1.17924726` (`+0.03024180`), QP feasible rate
+  `0.92609079 -> 0.93273490` (`+0.00664411`), and collision rate
+  `0.01451765 -> 0.01297869` (`-0.00153896`).  Transport reward improved
+  `+0.08060`, transport QP `+0.02171`, slip penalty `+0.00882`, and terminal
+  failure penalty `+0.02189`.  Place and lift reward remained mildly negative
+  (`-0.05215`, `-0.00578`), and wrench-range penalty changed `-0.00180`.
+- The aggregate is not treated as uniform generalization: reward improved in
+  5/14 buckets and the paired bucket median was `-0.01009`; the largest
+  regression was `-0.03510`, while the previously blocking six-module bucket
+  improved `+0.36101` and materially lifted the mean.  Therefore update 4 is
+  neither promoted nor used to justify a reward/method revision.  Preserve
+  update 3 as the broader intermediate reference, continue the lineage through
+  updates 5--6, and repeat the same fixed 14-bucket audit at update 6.
+- Update-4 comparison evidence:
+  `training_lineages/topology_stratified_v1/evaluations/
+  update_000004_vs_initializer_fixed_validation_v1_accepted_nominal_reset/
+  comparison_report.json`, SHA-256
+  `429542b1294feb7ebeedfdb00eb1a3fab38caf54b1ec59d619aabb339c6d3661`.
+- Production updates 5 and 6 continued cumulatively from update 4 and update 5,
+  respectively.  Each consumed `524,288` environment steps over seven
+  topology-stratified train shards plus validation and completed all four PPO
+  epochs without KL early stop.  Update 5 used 584 optimizer steps, maximum
+  aggregate phase KL `0.01891583`, and `1951.91 s`; checkpoint SHA-256 is
+  `402537131b1e721f4d74d82776fe17196e718558dd691bc2397fbf6c0f0daf68`.
+  Update 6 used 504 optimizer steps, maximum aggregate phase KL `0.01966103`,
+  and `1722.15 s`; checkpoint SHA-256 is
+  `d6854a88dc8fccf3a35d9e250dde6917b242bee6402404bdaea5489dc2d1d0f9`.
+  Both passed exact behavior replay; no A-MSRR collector, optimizer, CUDA, or
+  Machine Check failure occurred while logical CPU 8 remained excluded.
+- Fixed 14-bucket update-6 evaluation changed mean reward
+  `1.14746062 -> 1.16488286` (`+0.01742224`), QP feasible rate
+  `0.92564610 -> 0.92994472` (`+0.00429862`), and collision rate
+  `0.01487514 -> 0.01436942` (`-0.00050572`).  Reward improved in 7/14
+  buckets with median delta `+0.00150`; QP improved in 8/14.  Transport reward,
+  QP, collision, and success changed favorably (`+0.04983`, `+0.01924`,
+  `-0.00283`, `+0.00139`), while place reward/success remained weak
+  (`-0.09940`, `-0.01768`).  Aggregate wrench-range and slip terms changed
+  `-0.00513` and `-0.00035`.
+- Update 6 is more balanced than update 4 but does not supersede update 3 as
+  the broad-generalization reference (update 3 improved 10/14 buckets with
+  median `+0.02742`).  Keep update 6 as the cumulative latest checkpoint,
+  retain update 3 as the validation reference, and continue the unchanged
+  method only in another short block followed by the same fixed audit.
+  Evidence report SHA-256 is
+  `2b036dad0795fd380b2faf85346672f1379e3ecc0b82f2d1877288955211c21c`;
+  detailed diagnosis is stored beside it in `intermediate_diagnosis_v1.md`.
+
+### 2026-07-27 (Order 9 C3 actor-free nominal-QPID reset)
+
+- The six-module fixed-validation bucket
+  `validation-000032-570cdd597559` cannot sustain the longer actor-free QPID
+  reset: immediately before handoff its dock tracking error is at least about
+  `0.86 rad`, rotor thrust reaches the `20 N` limit, and allocation residual
+  reaches about `17`.  The older v3 reset admitted after only two simulation
+  steps (`0.04 s`) and therefore did not establish QPID-only stability.  The
+  runtime was confirmed to use the accepted nominal bundle, not the older
+  articulated-precheck trajectory.  Further training is paused pending the
+  reset-contract decision.
+
+- During update-3 optimization, the host kernel recorded two reproducible
+  `pt_autograd_0` segmentation faults (the first in `libcuda.so.580.173.02`)
+  despite ample RAM/VRAM and a healthy `nvidia-smi`.  Tensor-native C3 PPO now
+  scopes `torch.autograd.set_multithreading_enabled(False)` around each update.
+  This preserves the optimizer, minibatches, seed, and backward graph while
+  preventing concurrent autograd-engine scheduling; the setting is stored in
+  PPO metadata under tensor trainer v4.
+
+- Replaced learned-policy settling for C3 `lift / transport / place` reset
+  construction with an actor-free nominal-QPID path.  Reset now starts at the
+  last `0.1 s` of the accepted contact-acquisition trajectory, replays that
+  tail over `0.5 s` through production QPID/QP with zero residual wrench and
+  joint bias, and only then holds the final phase target.  The learned actor
+  and its recurrent/action state are never evaluated or advanced.
+- Root cause of the prior four-module reset failure was direct teleport into
+  final grasp mesh contact: PhysX depenetration dragged the object roughly
+  `0.07 m`.  Direct frozen holding, velocity clearing, and a temporary convex-
+  decomposition asset probe did not fix it.  Slow local contact formation did.
+  A translational damped object fixture is used only during closing, is removed
+  before admission, and payload mass/inertia/CoM feedforward is enabled for the
+  unassisted admission step.  Admitted robot/joint/object velocities are
+  projected to zero and task phase time is unchanged.
+- Admission remains minimal and physical: at least two selected contacts, no
+  prohibited collision, feasible QPID/QP allocation, and object displacement
+  at most `0.03 m`, all checked after the fixture is absent.  Reward, actor
+  I/O, PPO hyperparameters, runtime IK, and deployed inference are unchanged.
+- Real-Isaac regression passed all nine phase/stratum reset states for the
+  previously failing four-module bucket `train-000016-a9b26f370bba`:
+  admitted displacement was approximately `0.0061--0.0069 m`, peak reset
+  displacement `0.01836 m`, two selected contacts, feasible QP, and no
+  prohibited collision.  The two-module bucket
+  `train-000014-5fecfad4f44f` also passed all nine, with approximately
+  `0.000331 m` admitted displacement.
+- Production restart exposed a seven-module endpoint whose exact geometric
+  contact had effectively zero sustained preload: contact/QP existed during
+  the fixture window, then both selected contacts opened and the object fell
+  to its support.  Reset now extends the final `0.1 s` joint-space closing
+  delta by ten additional tail intervals while replaying it through QPID.  This is a topology-neutral
+  sub-millimetre contact preload along the accepted trajectory, not an actor
+  action or a new IK/planning pass.
+- The first preload-only diagnostic exposed the actual seven-module failure:
+  fixture removal and full payload feedforward were applied in the same step,
+  so the unloaded robot rose roughly `0.175 m` before contact carried the
+  object.  Reset now hands support over continuously for `0.5 s`, scaling the
+  fixture from `1 -> 0` while scaling payload mass/inertia feedforward from
+  `0 -> 1`; admission still begins only after the fixture is fully absent.
+- Current provenance is runtime v5, reset stabilizer v7, rollout artifact v16,
+  collector v21, and stage runner v7.  Production and fixed-comparison runners
+  no longer bind a reset actor checkpoint; the legacy artifact metadata field
+  is retained as `null`.  The stage runner validates existing shard provenance
+  before reuse, moves stale raw/log files to recoverable `.stale-*` paths, and
+  automatically recollects their canonical paths.  Therefore the
+  partial topology-stratified update-2 raw shards collected under the previous
+  collector/reset contract will be regenerated, never mixed with v21 shards.
+- Final production-command regression (without any reset checkpoint argument)
+  again passed the four-module bucket's `9/9` reset states.  Artifact SHA-256
+  is `e2b3037be3751d269320f389e1fd22782cf54d60072c2447a5d12c97d60cdfc6`;
+  metadata confirms artifact v14, collector v19, reset v5, actor unused,
+  fixture removed before admission, and reset-checkpoint SHA `null`.  The
+  focused unit suite passed `37`; compileall and `git diff --check` passed.
+
+### 2026-07-27 (Order 9 C3 topology-stratified PPO update 0)
+
+- Active spec / work package: v0.4 plus approved design supplements; Agent J/K
+  Order 9 arbitrary-morphology learning.  Replaced the single-topology C3
+  update with a fresh topology-stratified generation.  Every update now
+  selects one train bucket for each module count `2--8`, while retaining the
+  existing total train budget of `1024` environments and `256` steps.  Update
+  0 allocated environments `[147, 147, 146, 146, 146, 146, 146]`; validation
+  remained a separate `1024 x 256` shard.
+- Recurrent graph evaluation, GAE, advantage normalization, and phase-balanced
+  sequence construction remain topology-homogeneous.  Each optimizer step
+  accumulates seven equally weighted topology losses before one gradient clip
+  and parameter update.  The aggregate actor-phase KL remains the early-stop
+  gate; topology-by-phase KL is additive telemetry.  The production collector
+  runs at most two Isaac processes concurrently.  No reward weight, action or
+  actor-input schema, nominal trajectory, runtime IK, QPID/QP, or deployed
+  inference contract changed.
+- Added the hash-bound multi-shard dataset contract
+  `order9_tensor_native_pi_l_on_policy_dataset_v2_topology_stratified`, stage
+  runner v6, tensor PPO v3, and collector v17.  The legacy single-train-shard
+  v1 tensor manifest remains readable, while new C3 completion validation
+  fails closed unless train shards cover all module counts `2--8` and sum to
+  the configured `1024` environments.
+- Production update 0 consumed `262,144` fresh train and `262,144` validation
+  transitions.  All `262,144` train transitions passed exact behavior replay;
+  maximum log-probability, value, recurrent, and stored continuity errors were
+  `2.289e-5`, `1.907e-6`, `1.788e-7`, and zero.  PPO completed four epochs and
+  `576` optimizer steps without KL early stop.  Mean KL was `0.00640`, maximum
+  aggregate phase KL was `0.01484 < 0.02`, and clipped fraction was `0.07630`.
+  The checkpoint SHA-256 is
+  `6993c7f18f1ab9b70b3e32962b9f0fa3e5ec1616399b94c2a195fe2e5e1cab47`.
+- Update wall time was `1643.46 s`: topology-shard collection `430.84 s`,
+  tensor manifest construction `5.75 s`, and PPO `1198.83 s`.  No OOM,
+  non-finite state, failed contact reset, or host instability occurred.
+- Compared the initializer and topology-stratified update 0 on the same fixed
+  14 validation buckets (two per module count `2--8`), `64 x 256` per
+  checkpoint/bucket, deterministic actions, immutable initializer-driven
+  resets, and 28 real-Isaac rollouts.  Mean reward changed
+  `1.18932658 -> 1.17157514` (`-0.01775145`), QP feasibility
+  `0.93340193 -> 0.93021938` (`-0.00318255`), and prohibited collision rate
+  `0.01382010 -> 0.01446969` (`+0.00064959`).  Six of 14 buckets improved;
+  the bucket-median reward delta was `-0.00390`, and the descriptive paired
+  95% interval `[-0.03800, +0.00250]` crosses zero.
+- The previous transport/place failure was reduced: transport reward changed
+  by `+0.00443`, and place by `-0.01152` instead of the old single-topology
+  update-0 values `-0.01990/-0.06083`.  Remaining aggregate regressions are
+  approach `-0.03901`, contact acquisition `-0.03776`, lift `-0.02796`, and
+  grasp maintenance `-0.00928`; a four-module validation bucket contributed
+  the largest reward outlier (`-0.12956`).  Wrench-range penalty worsened
+  `-0.00246`, while slip improved `+0.00411`.
+- Conclusion: topology exposure and update composition are corrected, but one
+  arbitrary-morphology update does not yet outperform the C2-derived
+  initializer.  This is compatible with the initializer having been trained
+  only on the canonical three-module morphology and is not evidence of a
+  runtime/schema failure.  Do not promote update 0.  No further method or
+  reward change is justified from this single update; the proportionate next
+  test is topology-stratified updates `1--3`, followed by the same fixed
+  14-bucket comparison before authorizing the remainder of C3.
+- Evidence: `training_lineages/topology_stratified_v1/update_000000/
+  ppo_update_000000.json` and `evaluations/
+  update_000000_vs_initializer_fixed_validation_v1/comparison_report.json`;
+  comparison SHA-256
+  `bbbb6ffd6b9cf2d37a900f9f1ce133381cb0594fd1950f3ba28594f0e34aa858`.
+  The related unit suite passed `63`; compileall, launcher shell syntax,
+  checkpoint/report rehash, `git diff --check`, and process cleanup passed.
+  No training, comparison, or Isaac collector process remains active.
+
+### 2026-07-27 (Order 9 C3 stabilized phase-balanced PPO update 0)
+
+- Implemented the approved restart corrections and did not continue the
+  invalid `phase_reset_v2/update_000006` lineage.  The production restart is
+  `training_lineages/phase_balanced_stabilized_v3`, whose update 0 starts from
+  the unchanged active-knot initializer SHA-256
+  `c926f783bd5b868ac393d8d3f8d6b9edd988c8cfb441649218fded88c27d8e52`.
+- C3 reset construction now uses interior lift/transport/place progress strata
+  `[1/6, 1/2, 2/3]`.  A reset is contact-admitted only after at least two
+  selected contacts, feasible QPID/QP, no accumulated prohibited collision,
+  and object displacement at most `0.03 m`.  A fixed initializer checkpoint,
+  independent of the policy being trained/evaluated, constructs resets for
+  production and paired comparisons.  Reset-only temporary support is cleared
+  before actions and rewards.  Final smoke evidence admitted all nine reset
+  states on the previously failing eight-module bucket.
+- PPO now uses phase-pure recurrent sequences, phase-local advantage
+  normalization, phase-balanced sequence sampling, and worst-phase KL guarding.
+  Critic loss is detached at the actor recurrent-state boundary.  Contact
+  moment windows are derived from patch size, force bounds, friction, and
+  torque capability rather than inherited placeholder values.  No reward
+  weight, action schema, nominal IK/QPID/QP ownership, or deployed actor input
+  was changed.
+- Production update 0 consumed `262,144` fresh train and `262,144` validation
+  transitions.  Generation took `286.17 s` including concurrent Isaac
+  collection (`143.31 s`), tensor dataset indexing (`4.44 s`), and PPO
+  (`131.98 s`).  Train/validation simulator throughput was
+  `3197.70/3203.68 env-step/s`; global GPU-memory peak was about `10.66 GiB`.
+  Exact behavior replay passed all `262,144` train transitions, with maximum
+  log-probability error `7.629e-6` and zero value/recurrent/continuity error.
+  PPO completed four epochs/`352` optimizer steps without KL early stop;
+  global KL was `0.00658`, maximum observed phase KL `0.01699 < 0.02`, and
+  clipped fraction `0.08051`.  The output checkpoint SHA-256 is
+  `d1ca7e5f6d37a2092bd3c859b2cb5923f2e852616dbbca42d6a81a58e9160f70`.
+- Evaluated initializer and update 0 deterministically on the same fixed 14
+  validation buckets (two each for module counts 2--8), `64 x 256` per
+  checkpoint/bucket and 28 real-Isaac rollouts total.  Fixed-reset evidence was
+  paired to numerical tolerance.  Mean reward changed
+  `1.19083435 -> 1.18054263` (`-0.01029173`), QP feasibility
+  `0.93270002 -> 0.93130493` (`-0.00139509`), and prohibited collision rate
+  `0.01394217 -> 0.01426479` (`+0.00032261`).  Only `4/14` buckets improved;
+  bucket-median reward delta was `-0.00893`, and the descriptive paired 95%
+  interval `[-0.03446, +0.01388]` crosses zero.
+- The old update-6 transport failure is substantially reduced but not removed:
+  transport reward delta is now `-0.01990` instead of `-0.33622`.  Remaining
+  leading negative reward-term deltas are terminal failure `-0.00480`, slip
+  `-0.00211`, wrench-range violation `-0.00173`, and QP residual `-0.00163`;
+  place reward is `-0.06083` and transport collision rate is `+0.00254`.
+  Therefore update 1 is not authorized from this lineage.
+- The remaining structural defect is topology exposure: one update still
+  trains on one topology bucket, so this update changed the arbitrary-
+  morphology actor using only the two-module train bucket.  Phase balancing
+  cannot correct that topology imbalance.  The recommended method-level next
+  change is a fresh, topology-stratified on-policy generation within each
+  update, preserving the current total `1024` train-environment budget while
+  combining several topology-homogeneous Isaac shards.  Recurrent minibatch
+  subbatches remain topology-homogeneous and losses are aggregated before an
+  optimizer step.  Do not change reward weights, learning rate, or KL target
+  until a restarted topology-stratified update 0 is compared on the same gate.
+- Evidence: `phase_balanced_stabilized_v3/update_000000/ppo_update_000000.json`
+  and `evaluations/update_000000_vs_initializer_fixed_validation_v1/
+  comparison_report.json` (comparison SHA-256
+  `0aa4e9a924afb79aadbd3561799eb38b01af649923ceea295d3610c76d25445e`).
+  TensorBoard data is retained under the lineage's `tensorboard/` directory;
+  no Isaac collector, comparison, or PPO process remains active.  The final
+  focused unit suite passed `51`; Python compilation, launcher shell syntax,
+  `git diff --check`, checkpoint/report rehash, and runner-state continuity
+  checks also passed.
+
+### 2026-07-27 (Order 9 C3 update-6 regression root-cause audit)
+
+- Audited the fixed 14-bucket initializer/update-6 real-Isaac comparison,
+  matched original transitions, all update-0--6 on-policy tensors and GAE,
+  phase-local terminal causes, checkpoint action evolution, PPO optimizer/KL
+  reports, critic predictions, and the teacher wrench envelopes.  No new
+  training run or policy/reward/controller change was made.
+- Conclusion: do not resume updates `7--13` from the current
+  `phase_reset_v2/update_000006` checkpoint.  Transport/place regression is
+  present on the same held-out states from the first policy action, begins at
+  update 1, and grows through update 6.  In matched transport transitions,
+  reward changes `2.09604 -> 1.66153`, wrench violation rises `+0.28391`, and
+  update-6 global action differs from the initializer by RMS `0.21684`.
+- Root causes are jointly structural: phase-start transport/place resets
+  usually lose contact/drop within a few physics steps and cover almost none
+  of the 30 s phase; PPO globally normalizes advantages and samples sequences
+  without phase balance or phase-local KL; one topology bucket is consumed per
+  update without replay; the nearly useless critic (explained variance near
+  zero) updates the actor's shared recurrent trunk through a value-dominated
+  loss; and the teacher force/moment boxes make even initializer nominal
+  contact almost never fully six-axis wrench-compliant.  The current slip
+  evidence is also invalid as an absolute metric because it compares a link
+  origin with the object CoM and omits contact-point angular velocity.
+- Correction proposal, not yet approved or implemented: intra-phase
+  dynamically stabilized reset states; per-phase advantage/sequence balance,
+  step-backtracked per-phase KL, and topology-stratified updates; a critic path
+  whose value gradients do not update the actor representation; true
+  contact-point tangential slip evidence; and force/moment bounds projected
+  from the task-equivalent multi-contact feasible set.  No reward-weight
+  change or longer full-phase rollout is recommended before these defects are
+  corrected.
+- Evidence and restart gate are recorded in
+  `training_lineages/phase_reset_v2/evaluations/
+  update_000006_vs_initializer_fixed_validation_v1/
+  transport_wrench_slip_diagnosis_v1.md`.  The proposed corrected lineage
+  restarts from the unchanged active-knot initializer, runs update 0 only, and
+  must pass the same fixed held-out transport/place non-regression audit before
+  further updates are authorized.
+
+### 2026-07-27 (Order 9 C3 fixed held-out initializer/update-6 comparison)
+
+- Active spec / work package: v0.4 plus approved design supplement; Agent J/K
+  Order 9 learned curriculum diagnostics.  Compared the unchanged active-knot
+  initializer and the phase-correct update-6 checkpoint on the same complete
+  set of `14` validation buckets (two buckets for every module count `2--8`).
+- Evaluation contract: both checkpoints used each bucket's identical seed,
+  asset, task specification, physical parameters, `64` environments, and
+  `256` steps.  Policy actions were deterministic means.  Every rollout used
+  the normal round-robin distribution over all eight actor-mapped task phases;
+  no phase-zero-only evaluation or training was performed.  The resulting
+  `28` real-Isaac rollouts contain `229,376` valid transitions per checkpoint.
+- Result: mean reward changed from `1.19256872` to `1.20075060`
+  (`+0.00818188`, about `+0.69%`), prohibited-collision rate from
+  `0.00367519` to `0.00323922` (`-0.00043597`), and QP-feasible rate from
+  `0.99224854` to `0.99202619` (`-0.00022234`).  Successful phase-terminal
+  count changed from `130` to `134`; this is not an end-to-end episode count.
+- Interpretation: the result is mixed rather than a uniform policy
+  improvement.  Exactly `7/14` buckets improved mean reward and the paired
+  bucket median delta is approximately zero (`-2.27e-5`).  Reward improved in
+  approach/contact/lift/release/retreat/settle, but decreased by `-0.04825`
+  in place and `-0.33622` in transport.  Grasp-maintenance contribution
+  improved `+0.03288`, while wrench-range and slip penalties worsened by
+  `-0.01555` and `-0.01089`.  The descriptive paired 95% interval over the
+  14 bucket reward deltas crosses zero (`[-0.02829, +0.04465]`), so this
+  diagnostic alone does not establish general held-out improvement.
+- Evidence: `training_lineages/phase_reset_v2/evaluations/
+  update_000006_vs_initializer_fixed_validation_v1/comparison_report.json`,
+  SHA-256 `0f157193d250f4a19d9de71978a34bd98a448419284c8cab90431b003535fea7`.
+  Raw hash-checked rollout artifacts and per-checkpoint logs are retained in
+  the same evaluation directory.  Wall time was `1100.51 s`; GPU utilization
+  stayed approximately `98--99%` with about `7.0--7.2 GiB` allocated across
+  the two paired collectors.
+- Files changed: `scripts/order9_compare_pi_l_checkpoints.py`,
+  `scripts/order9_vectorized_isaac_rollout.py`, and this worklog.  Schema/
+  deployed-policy interface changes: none.  The collector only gains additive
+  acceptance-ineligible diagnostic provenance for deterministic all-phase
+  evaluation.
+- Tests/commands: Python compilation and `git diff --check` passed; focused
+  stage-runner/artifact/task-runtime unit suite passed `22`; real-Isaac
+  `8 x 2 x 1 bucket x 2 checkpoints` smoke passed; complete paired
+  `64 x 256 x 14 buckets x 2 checkpoints` evaluation passed all finite,
+  checkpoint-hash, bucket-identity, exact phase-progress, and eight-phase
+  coverage checks.  The first unit-test invocation was blocked only by an
+  unrelated ROS pytest plugin missing `lark`; rerunning with
+  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` passed.
+- Assumptions/limitations: this is a fixed-set deterministic diagnostic with
+  runtime overrides and is explicitly not promotion evidence.  GPU PhysX is
+  configured identically for each paired run but bit-exact cross-process
+  simulation is not claimed.  No PPO hyperparameter, reward weight, policy,
+  controller, QPID/QP, checkpoint, or curriculum method was changed.
+- Next step/open question: do not infer that update 6 is globally superior
+  from the small positive aggregate mean.  Before authorizing updates `7--13`
+  or changing a learning parameter, inspect the transport regression and the
+  worsened wrench-range/slip terms as a method-level training decision.
+
+### 2026-07-27 (Order 9 C3 phase-correct PPO updates 0--6)
+
+- Active spec / work package: v0.4 plus approved design supplement; Agent J/K
+  Order 9 learned curriculum and physical execution.  Replaced the invalid
+  approach-only C3 lineage with the complete arbitrary-morphology eight-phase
+  reset distribution and ran corrected PPO updates `0--6` from the unchanged
+  active-knot initializer.
+- During the first reset-corrected update-0 attempt, strict replay isolated a
+  contact-acquisition-only discrepancy: C3 passed nominal-trajectory progress
+  to the actor but archived `phase_elapsed / 90 s task timeout`.  The artifact
+  now stores the exact `pre_target.phase_progress` consumed by the actor and
+  fails closed on `phase_progress_semantics=exact_policy_actor_input`.
+  Evidence advanced to tensor artifact v11 / collector v12; the failed
+  `phase_reset_v1` attempt remains untouched and production restarted in
+  `training_lineages/phase_reset_v2`.
+- Real-Isaac preflight used one copied environment for each of the eight task
+  phases.  The final v11 `8 x 2` diagnostic was finite and strict replay passed
+  all `16/16` transitions with maximum log-probability error `1.90735e-6` and
+  zero value/recurrent/temporal-continuity error.  Every subsequent production
+  train and validation shard contained all eight actor-mapped runtime phases.
+- Updates `0--6` collected `3,670,016` train+validation environment steps and
+  consumed `1,835,008` train steps in PPO.  All seven exact replays covered
+  `262,144/262,144` train transitions; maximum log-probability error remained
+  between `7.62939e-6` and `2.28882e-5`, with zero value, recurrent, stored-GRU,
+  and previous-action continuity error.  The final checkpoint is
+  `update_000006/checkpoint_update_000006.pt`, SHA-256
+  `83d0f02a94dd11533873aa5a2668d405f6f0a2bea2119cd656465321e7d99f98`.
+- PPO update `0` completed four epochs/288 optimizer steps.  KL early stopping
+  progressively limited updates `1--6` to `176, 89, 16, 3, 3, 5` steps; their
+  mean KL values were `0.00714, 0.00784, 0.00950, 0.01051, 0.01420, 0.01336`
+  against target `0.02`.  No non-finite loss or failed checkpoint occurred.
+- The per-update rollout buckets increase from two to eight modules, so their
+  raw reward values are not a same-condition learning curve.  On update 6's
+  eight-module train/validation buckets, mean reward was `0.3455/0.1652`, QP
+  feasibility `0.8858/0.8392`, prohibited-collision rate `0.01212/0.00926`,
+  and phase-reset successful-terminal counts `172/155`.  These terminal counts
+  are phase-isolated successes, not complete end-to-end grasp-carry episodes.
+  Six-module validation was the weakest sampled condition (mean reward
+  `-0.9207`, QP feasibility `0.5426`, collision rate `0.04468`).  The
+  privileged wrench-range penalty was active and nonzero in every shard.
+- Performance: total wall time for seven generations was about `28.5 min`.
+  Simulator hot-loop throughput decreased from about `3428` env-step/s at two
+  modules to `2519` at eight modules.  Update-6 global GPU-memory peak was
+  `19,349 MiB` on the `24,564 MiB` device; no OOM or host crash occurred.
+- Files changed: C3 nominal/reset runtime, Isaac collector, tensor artifact and
+  PPO/dataset/stage-runner paths, launcher, focused tests, design supplement,
+  and worklog.  Schema/interface change: internal tensor artifact semantic
+  version v11 and required exact actor phase-progress provenance; no policy
+  action, `PolicyCommand`, QPID/QP, reward weight, curriculum hyperparameter,
+  or deployed inference interface changed.
+- Tests/commands: the final focused IsaacLab unit suite passed `38`; compileall,
+  `git diff --check`, and final checkpoint rehash passed.  Real-Isaac `8 x 2`
+  strict replay and production updates `0--6` passed.  TensorBoard remains live
+  on port `6006`; no training process remains active, and the runner is
+  resumable at update `7`.
+- Blockers/open questions: C3 is not promotion-ready from this intermediate
+  evidence.  Before updates `7--13`, compare the initializer and update-6
+  checkpoints on the same fixed held-out bucket set to separate policy change
+  from morphology difficulty.  Any learning-rate/KL/minibatch change is a
+  method-level decision and has not been made.
+
+### 2026-07-27 (Order 9 C3 arbitrary-morphology phase resets corrected)
+
+- Corrected the intermediate-audit blocker without changing the approved
+  learning method.  C3 now installs a complete eight-phase physical reset bank
+  from each bucket's accepted nominal approach/contact path, its final grasp,
+  and the existing lift/transport/place/release/retreat translations.  The
+  articulation root is reconstructed separately for each installed Dock
+  posture so the saved assembled-body/CoM target is reproduced by the actual
+  bucket USD.
+- Corrected the arbitrary-morphology joint banks at the same boundary: approach
+  uses accepted initial-to-pregrasp, contact uses pregrasp-to-final-grasp,
+  lift through place retain final grasp, release opens to pregrasp, and
+  retreat/settle retain pregrasp.  Terminal reset rotation now includes the
+  environment's initial phase offset instead of sending every terminated copy
+  to the same phase.
+- Added fail-closed production validation for complete C3 reset provenance and
+  all eight actor-mapped runtime phases in every train/validation shard.  New
+  evidence identities are tensor artifact v10, collector v11, phase-reset
+  reference v1, and stage-runner v4.  The launcher writes a distinct
+  `training_lineages/phase_reset_v1` output tree, preserving the prior
+  approach-only update-0--6 artifacts unchanged.
+- Real-Isaac gate on the accepted eight-module train bucket passed `8 x 2`:
+  exactly one copied environment per runtime phase, all `16` transitions
+  finite, QP feasible `16/16`, no terminal, and no prohibited collision.  The
+  extended `8 x 32` gate retained all eight phases across `256` transitions,
+  was finite with QP feasible rate `0.96094`, zero prohibited collisions, and
+  active wrench bounds on `190` assignment-steps.  Its four terminals/two
+  phase advances are untrained-policy behavior, not reset/runtime failure.
+- Focused pure/runtime/artifact/stage-runner tests passed `26`; full-suite and
+  restarted PPO lineage evidence are pending below.
+
+### 2026-07-27 (Order 9 C3 updates 1--6 intermediate stop)
+
+- Resumed the hash-contiguous tensor-native C3 PPO lineage at update `1` and
+  completed updates `1--6`, then stopped before update `7` as requested.  Each
+  update consumed one fresh train/validation pair of `1024 x 256` real-Isaac
+  transitions.  The update-6 checkpoint is
+  `checkpoint_update_000006.pt`, SHA-256
+  `7ae7ec6f8c5a501939101bf1ca4cd78ba884c7a8c6f8a9dd948aeb0760bded55`;
+  no collector or trainer process remains active and the runner is resumable.
+- The train/validation collectors remained finite and did not OOM.  Rollout
+  throughput decreased from `4215/3704 env-step/s` at three modules (update 1)
+  to `2599/2603 env-step/s` at eight modules (update 6).  Peak global GPU
+  memory at update 6 was `19388/18706 MiB`, leaving `5176 MiB` against the
+  `24564 MiB` device total.
+- PPO updates were finite and hash/replay checks passed.  Updates `1/3`
+  completed all four epochs; updates `2/4` stopped after two epochs and
+  updates `5/6` after one because of the unchanged KL guard.  Approximate KL
+  over updates `1--6` was `0.00568, 0.00722, 0.00865, 0.00845, 0.01336,
+  0.01231`; clipped fraction was `0.0605, 0.0783, 0.0889, 0.0986, 0.2102,
+  0.1324`.
+- Update 3 initially failed exact replay only on a deterministic float32
+  critic difference of `3.43323e-5` at values near `17.3`; log-probability,
+  recurrent reconstruction, stored recurrent continuity, and stored previous
+  action continuity remained within their existing bounds.  The critic-only
+  numerical tolerance was calibrated from `2.5e-5` to `5e-5` and documented;
+  no PPO, reward, policy, QPID/QP, physics, or temporal-continuity rule changed.
+  Reusing the immutable update-3 raw pair then passed exact replay and avoided
+  recollection.
+- The intermediate metric audit found a blocking C3 collector defect: all
+  arbitrary-morphology shards record `canonical_phase_resets=false` and
+  `initial_phase_zero=true`; their phase tensor is entirely approach except
+  for seven transitions in update-3 train.  The arbitrary-morphology setup
+  installs only phase zero in `_PhaseStateBank`.  A shard lasts `5.12 s`, while
+  the accepted nominal approach trajectories last `18--45 s`, so later-phase
+  reset states cannot be reached or sampled within a generation.  This
+  violates the existing phase-specific-reset training contract; it is an
+  implementation omission, not a newly unresolved learning method.
+- Consequence: task success was zero in every train/validation shard and only
+  one approach phase transition occurred across updates `0--6`.  From update
+  2 onward, most terminal events were QP-infeasible; at update 6 they were
+  `7065/7020` in train/validation, with mean QP-feasible rate
+  `0.5811/0.5830`.  Object-goal, grasp, slip, and wrench-range rewards are
+  consequently almost entirely inactive.  These checkpoints are retained as
+  reproducible diagnostic evidence but must not be treated as valid complete
+  phase-conditioned C3 training or promotion evidence.
+- Next required action: install morphology-specific phase reset states derived
+  from the accepted nominal final grasp plus the existing deterministic
+  object-task phase transforms, verify balanced coverage for all eight runtime
+  phases in a short no-training shard, then restart C3 from the unchanged
+  initializer/update 0 rather than continue this approach-only lineage.
+- Verification: checkpoint bytes and contiguous result lineage through update
+  6 were rehashed successfully; `git diff --check` passed; the complete unit
+  suite passed `1357` with `1` skip in `433.12 s`.
+
+### 2026-07-27 (Order 9 C3 tensor-native PPO and update 0 completion)
+
+- Active spec / work package: v0.4 plus approved design supplement; Agent J/K
+  Order 9 learned curriculum and physical execution.  The user authorized
+  stopping the stalled update-0 run, replacing its derived-data/training hot
+  path, and rerunning through a completed update 0.
+- Root cause: the prior runner converted the two already complete
+  `1024 x 256` tensor rollouts into `524,288` deeply nested
+  `LowLevelControlRecord` objects, repeatedly reconstructed the same active
+  `ContactWrenchTrajectory`, wrote multi-gigabyte compressed JSONL, and would
+  tensorize the train half again.  It remained on one CPU core for about
+  `2 h 40 min` without producing a dataset manifest; this work is not required
+  by PPO.
+- Implemented: a versioned hash-bound train/validation tensor dataset index;
+  tensor-native GAE, recurrent sequence batching, exact behavior replay, and
+  PPO; standard stage preflight/checkpoint/result/TensorBoard integration; a
+  v3 resumable stage runner; field-specific exact-replay evidence; and strict
+  stored GRU/previous-action continuity validation.  The canonical record
+  dataset path remains available outside production `pi_L` PPO.
+- Performance/evidence: tensor dataset indexing finished in `4.328 s`.  The
+  reused immutable raw hashes are train `06de5287...` and validation
+  `15a6bde...`; dataset manifest SHA-256 is `520d852c...`.  Full train replay
+  covered `262,144/262,144` transitions; maximum log-prob/value/recurrent
+  reconstruction errors were `0.0012493134 / 1.1444092e-5 /
+  0.0002460480`, while stored recurrent and previous-action continuity errors
+  were both exactly zero.
+- Update 0 result: four PPO epochs and `260` optimizer steps completed in
+  `97.487 s`; complete resumed-generation handling took `108.000 s`.  Mean KL
+  was `0.0059083` against target `0.02`, clipped fraction `0.0647543`, no KL
+  early stop, and no non-finite metric.  The child checkpoint SHA-256 is
+  `9f47677c7d4005368a4192b1bba6399b8006f33ed2b04eb5f64877cf7cb6321c`.
+  Runner state is safely stopped/resumable at update index `1`; TensorBoard
+  remains live at `http://127.0.0.1:6006/`.
+- Files changed: new tensor dataset/PPO modules; online trainer, stage pipeline,
+  runner validation/orchestration, PPO script; focused tests; design
+  supplement; and this worklog.  The earlier uncommitted privileged
+  contact-wrench reward implementation remains part of the same working tree.
+- Schema/interface changes: additive internal tensor dataset manifest and an
+  optional verified-dataset preflight input.  No actor/action, reward, QPID/QP,
+  curriculum hyperparameter, checkpoint family, or final actuator interface
+  changed.
+- Tests/commands: compileall and `git diff --check` passed; focused related
+  tests passed `41`; full IsaacLab unit suite passed `1282` with `1` skip in
+  `173.24 s`; completed-update hash/lineage/exact-replay validation passed.
+- Assumptions: validation rollouts are immutable split/provenance evidence and
+  are not PPO optimizer samples, matching the prior train-only record
+  selection.  Current v9 raw tensors are retained; no recollection was needed.
+- Blockers/open questions: none for continuing from update 1.  C3 success and
+  promotion remain future empirical gates; update 0 itself had phase-zero
+  experience only as recorded in the preceding launch entry.
+- Next steps: review update-0 TensorBoard/metrics, then resume the v3 runner at
+  update 1 under the unchanged stage budget when requested.
+
+### 2026-07-27 (Order 9 C3 production PPO launched)
+
+- Started the resumable production C3 runner with
+  `scripts/run_order9_c3_ppo.sh` from the current physical-model initializer,
+  42-bucket accepted nominal set, and the newly wired privileged contact-wrench
+  range reward.  Startup lineage/preflight validation passed with `28` train
+  and `14` validation buckets, PhysicalModel hash `23dfd5a1...`, update index
+  `0`, and the configured `14 x 524,288 = 7,340,032` interaction plan.
+- The runner and TensorBoard server are isolated in persistent tmux sessions
+  `order9_c3_ppo` and `order9_c3_tensorboard`; TensorBoard is live at
+  `http://127.0.0.1:6006/` and reloads the stage `train`/`validation` event
+  directories every five seconds.  Reward, phase, terminal/QP, throughput,
+  GPU, process-memory, and PPO optimizer metrics are enabled.  The new
+  `weighted_wrench_range_violation_penalty` scalar is present in both splits.
+- Update-0 collection completed successfully for both production collectors:
+  each ran `1024 x 256 = 262,144` finite environment steps.  Train/validation
+  rollout throughput was `3806.84 / 3743.90 env-step/s`; collection wall time
+  was `90.26 / 91.25 s`, end-to-end throughput including setup was
+  `2904.25 / 2872.90 env-step/s`, GPU utilization averaged
+  `88.82 / 87.81%` and peaked at `99%`, and global GPU memory peaked at about
+  `10.63 GiB`.
+- The C2-derived initializer did not yet cross the physical approach gate for
+  either first arbitrary-morphology bucket, so update 0 contains phase-zero
+  experience only (`successful_terminal_count=0`, unlocked phase indices
+  `[0]`).  Accordingly, the contact-wrench-range penalty is correctly zero in
+  this first rollout; it becomes active only after contact acquisition is
+  reached.  This is observed learning state, not a simulator/runtime failure.
+- Current status at handoff: update 0 is running the canonical immutable
+  dataset conversion before its first PPO optimizer pass.  The runner state is
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/stage_runner_state.json`;
+  collection artifacts and all telemetry are being retained for later timing,
+  load, and promotion analysis.  No method-level blocker has been found.
+
+### 2026-07-27 (Order 9 privileged wrench-range reward completion)
+
+- Active spec / work package: complete the approved privileged `pi_L` reward
+  path from `pi_H`/teacher per-contact six-dimensional wrench ranges to real
+  Isaac measurements, without exposing raw contact truth to the actor or QPID.
+- Implemented an object-following contact-frame reference that resolves the
+  active attach/maintain bounds from the same `ContactWrenchTrajectory` used by
+  the actor.  The reward is zero anywhere inside each range and penalizes only
+  normalized lower/upper overflow; it does not track an arbitrary pointwise
+  wrench target.
+- Implemented GPU reduction of raw PhysX normal and friction patches into
+  force plus moment about each selected candidate frame.  An Isaac smoke found
+  that detailed normal and friction queries reuse the same backend pair-index
+  buffers; the normal count/start tensors are now cloned before the friction
+  query can overwrite them.
+- Preserved the existing `0.5 N` contact-existence threshold.  It continues to
+  drive contact count/dwell/break/release only and is independent of the new
+  `w_wrench_range: 1.0` reward coefficient.
+- Added artifact v9 fields for measured contact-frame wrench, lower/upper
+  bounds, and bound mask, plus a versioned reward contract.  Reward terms flow
+  through the existing TensorBoard path as
+  `weighted_wrench_range_violation_penalty`; raw contact remains absent from
+  actor inputs (`raw_contact_actor_input=false`).
+- Files changed: `amsrr/training/order9_contact_wrench_reward.py`, tensor
+  reward/config/artifact code, Isaac tensor I/O and rollout collector, Order 9
+  curriculum YAML, focused unit tests, design supplement, and this worklog.
+- Verification: focused unit suites passed, followed by the complete IsaacLab
+  Python unit suite (`1278 passed, 1 skipped` in `172.34 s`); real Isaac passed
+  current C3 `1 x 2` and `16 x 256` finite rollout smokes.
+  A canonical lift-phase diagnostic passed `8 x 4` with active bounds and
+  non-zero six-dimensional patch wrenches; it used a temporary `/tmp` manifest
+  compatibility rebind solely to exercise the current runtime against the
+  stale pre-URDF-update C2 asset and is not production evidence or an artifact
+  mutation.  A system-Python-only suite attempt had one expected missing-
+  `trimesh` dependency; that exact test and the full suite pass in the
+  repository's required IsaacLab environment.
+- Limitations: these are reward-wiring and runtime-smoke results, not a new
+  C3 PPO update, learned task success, wrench-range tuning result, or promotion
+  decision.  The provisional reward weight must be judged from C3 telemetry.
+- Blockers/open questions: none for starting collection with the new reward.
+
 ### 2026-07-27 (Order 9 C3 steps 1--3 production preparation complete)
 
 - Active spec / work package: finalize the user-reviewed 42-bucket C3 nominal
@@ -5171,6 +6699,198 @@
 
 ### Agent J/K: Order 9 learned curriculum and physical execution
 
+#### 2026-07-29 (deployable Jacobian normal-force observer)
+- Scope: Implement and validate the approved physics-based replacement for
+  joint load as contact-force evidence in the C3 production phase gate.
+- Files changed: normal-force observer, deployable phase gate, production
+  curriculum/config, Isaac tensor collector metadata/integration, focused
+  tests, design supplement, and worklog.
+- Upstream dependencies: current grasp-frame kinematics, live link Jacobian,
+  applied motor torque, model gravity, `pi_H` assignment/contact normal/wrench
+  range, estimated payload mass/friction, and unchanged QPID/QP feasibility.
+- Implemented: per-environment free-motion baseline; grasp-point Jacobian
+  shift; nonnegative ridge force solve; row-space fit confidence; physical
+  wrench/support threshold; state reset/phase preservation; privileged actual-
+  force diagnostic comparison; fail-closed phase admission.
+- Not implemented: no learned residual head, new force controller, raw-contact
+  runtime input, reward-weight change, policy/checkpoint shape change,
+  optimizer update, or C3 promotion claim.
+- Schema/interface changes: internal phase-gate input and additive runtime
+  config/metadata only; persisted tensor policy/training interfaces unchanged.
+- Downstream impact: false contact admission from internal posture load is
+  removed while `pi_L` remains responsible for learned wrench correction.
+- Tests added: exact force recovery, free-motion baseline rejection,
+  unobservable fail-closed behavior, unrelated-joint residual exclusion,
+  grasp-frame Jacobian shift, physical force threshold, and gate evidence.
+- Tests passed: focused `23/23`; wider related regression `56/56`; real-Isaac
+  API smoke; positive-contact diagnostic `16/16` gate transitions; weak-
+  contact phase-zero regression `0/16` false lift transitions with zero safety
+  failures.
+- Handoff notes: use observer version
+  `order9_jacobian_normal_force_estimator_v2_rowspace_fit_confidence` and gate
+  version `order9_kinematic_estimated_normal_force_phase_gate_v3_release_latch`.
+- Open questions: full held-out promotion is still pending.  Learned residual
+  remains evidence-triggered rather than assumed because the two directed
+  physical diagnostics already separate insufficient and sufficient contact.
+
+#### 2026-07-29 (C3 bucket-35 retreat collision diagnosis)
+- Scope: Identify the concrete collision pair behind bucket 35's `32/32`
+  retreat hard-collision result and decide whether more unchanged PPO is
+  justified.
+- Implemented: additive first-contact body/force telemetry; matched
+  same-structure bucket-28 control; learned-actor retreat replay; and an
+  acceptance-ineligible zero-output actor replay using the same nominal path,
+  QPID/QP, object, support, and Isaac asset.
+- Result: both learned and zero-output actors contact the support with
+  `module_0__battery1` at rollout index 5.  QP is feasible, selected-anchor
+  forces are zero, and the object is stationary.  Bucket 28 does not reproduce
+  this tail support contact and starts retreat about 10 mm higher.
+- Root cause: saved C3 collision-aware planning/recheck covers only approach
+  and contact acquisition.  Lift through settle are synthesized at runtime;
+  the failing retreat path was not part of the offline collision gate.
+- Not implemented: no optimizer update, reward/policy/controller change,
+  checkpoint promotion, collision-threshold relaxation, or regenerated
+  nominal trajectory.
+- Tests passed: diagnostic real-Isaac replays, Python compileall, and 20
+  focused Isaac-I/O/rollout-artifact tests.  Full evidence is in
+  `bucket35_retreat_collision_diagnosis_v1.md` under the boundary-preserving
+  diagnostics directory.
+- Downstream impact/handoff: do not spend more PPO budget until all executable
+  nominal phases are materialized and collision checked, the affected reset
+  bank is regenerated, and the zero-output retreat replay is collision-free.
+
+#### 2026-07-28 (C3 boundary-preserving PPO branch)
+- Scope: Implement and validate the approved frozen-parent/topology-phase-KL
+  correction from boundary-tail update 14.
+- Upstream dependencies: update-14 checkpoint `8b268845...91c4`, boundary-tail
+  reset/transition contract, accepted static reset banks, topology-stratified
+  fresh rollout, exact behavior replay, unchanged QPID/QP and collision gates.
+- Implemented: target-only actor objective for release/retreat/settle;
+  all-phase critic; exact parent-KL preservation for non-target actor phases;
+  post-step topology-phase KL recomputation; transactional parameter rollback;
+  one-epoch authority; boundary-only `0.25` learning-rate scale; fail-closed
+  stage provenance validation.
+- Not implemented: no deployed policy I/O, nominal IK, reward, phase gate,
+  QPID/QP, deterministic safety, `pi_H`, or `pi_D` change.
+- Tests passed: compileall and 36 focused curriculum/PPO/runner/dataset/
+  boundary/promotion tests.  The new rollback unit test proves violating
+  parameters are restored exactly.
+- Physical evidence: update 15 checkpoint `4d1cdced...c0c012`; 2 applied and
+  1 rolled-back optimizer steps; applied maximum topology-phase KL
+  `0.00305634`.  Same fixed 64-episode gate produced `25/64`, versus parent
+  `24/64` and rejected unconstrained child `10/64`.
+- Downstream impact/handoff: retain the boundary-preserving checkpoint as a
+  valid diagnostic child, but do not promote C3 or launch another unchanged
+  update.  Bucket 35 is still `0/32`, with all failures hard collisions in
+  retreat.  Next work is bucket-specific retreat collision diagnosis.
+
+#### 2026-07-28 (C3 release/retreat boundary-tail branch)
+- Scope: Add the approved late-predecessor reset distribution, preserve true
+  cross-boundary runtime state, and run a bounded update-13 child experiment.
+- Files changed: C3 production runtime config, boundary sampling helper,
+  nominal reset reference/reset-bank/collector provenance, Isaac collector,
+  PPO stage runner/CLI, tests, design supplement, and worklog.
+- Upstream dependencies: human-accepted nominal trajectories, static phase
+  reset banks, topology-stratified update 13, supported-release contract,
+  unchanged phase collision terminal and QPID/QP.
+- Implemented: `0.9` reset stratum selectable only for release/retreat;
+  per-artifact transition telemetry; aggregate-train boundary coverage gate;
+  immutable same-stage checkpoint branching with stage/update validation.
+- Not implemented: no reward/hyperparameter/policy I/O/QPID/QP/IK change and
+  no deployed planner or inference change.
+- Schema/interface changes: additive production runtime sampling fields and a
+  four-stratum C3 reset tensor; deployed policy/controller interfaces remain
+  unchanged.
+- Tests passed: compileall; 27 focused tests; wider Order 9 set 168 passed with
+  one unrelated test unavailable because host Python lacks optional `trimesh`.
+- Physical evidence in progress: seven train shards collected 493
+  `release->retreat` and 926 `retreat->settle` transitions; the independent
+  validation shard collected 128 and 357 respectively.  Per-topology zero
+  transition is allowed because failure before the boundary is valid terminal
+  training evidence; aggregate train coverage is fail-closed.
+- Physical result: update 14 completed after reusing its exact immutable
+  rollout once following a host segfault.  It used 2 epochs / 265 optimizer
+  steps (`KL=0.00775394`, maximum aggregate phase KL `0.02237061`) and produced
+  checkpoint `8b268845...91c4`.  The same two-bucket phase-zero gate improved
+  from the old `0/64` to `24/64` successes; all remaining 40 failures were
+  hard collisions at settle entry.
+- Continuation result: update 15 reused no old behavior data; it collected a
+  fresh update-14 on-policy generation and completed 4 epochs / 500 optimizer
+  steps after one recoverable host segfault retry (`KL=0.00692207`, maximum
+  aggregate phase KL `0.01715722`).  Its checkpoint `f9ecf283...34f3` regressed
+  to `10/64`: bucket 28 had 10 successes and 22 settle collisions, while
+  bucket 35 had 20 hard collisions and 12 QP terminals in approach/contact.
+  Update 15 is rejected and no further update was launched.
+- Diagnosis: update 15 maximum observed topology-phase KL reached `0.06042029`
+  despite passing aggregate phase KL.  Same-seed initial states matched and
+  initial command deltas were sub-milliradian/sub-millimetre, so recurrent
+  closed-loop amplification plus shared actor drift, not a reset mismatch,
+  explains the regression.  Canonical report:
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/boundary_tail_v1/evaluations/boundary_tail_branch_diagnosis_v1.md`.
+- Handoff/open question: update 14 remains the best branch checkpoint but is
+  not promotion eligible.  Before another branch, approve a topology-phase KL
+  hard authority and explicit frozen-parent preservation for non-boundary
+  actor outputs.  More unchanged PPO budget is not justified.
+
+#### 2026-07-27 (fixed held-out checkpoint comparison)
+- Scope: Compare the active-knot initializer and phase-correct update 6 under
+  identical validation morphologies, seeds, physics, and all-phase resets.
+- Files changed: deterministic all-phase diagnostic metadata in the Isaac
+  collector, paired checkpoint comparison runner, and worklog.
+- Upstream dependencies: accepted 42-bucket manifest and its 14-bucket
+  validation split, current v11 tensor rollout artifact, collector v12,
+  phase-reset v2 initializer/update-6 lineage, QPID/QP and privileged reward.
+- Implemented: resumable two-process paired collection; strict checkpoint,
+  bucket, physical-model, exact actor phase-progress, and all-eight-phase
+  validation; sample-weighted aggregate, phase, reward-term, and bucket deltas.
+- Not implemented: no training, checkpoint promotion, stochastic multi-seed
+  robustness run, hyperparameter/reward change, or end-to-end phase-zero task
+  success evaluation.
+- Schema/interface changes: none to deployed interfaces; additive diagnostic
+  result/artifact provenance only.
+- Downstream impact: update 6 has mixed held-out evidence: aggregate reward
+  `+0.00818` and collision rate `-0.000436`, but transport reward `-0.33622`,
+  wrench-range contribution `-0.01555`, and slip contribution `-0.01089`.
+  It should not yet replace the initializer as an established better policy.
+- Tests/evidence: focused unit `22` passed; real-Isaac one-bucket smoke and
+  complete `28`-rollout comparison passed.  Canonical report SHA-256 is
+  `0f157193d250f4a19d9de71978a34bd98a448419284c8cab90431b003535fea7`.
+- Handoff/open question: use the phase/reward-term breakdown in the report to
+  decide whether to diagnose transport learning before updates `7--13`.
+
+#### 2026-07-27 (C3 tensor-native PPO/update 0)
+- Scope: Remove the non-learning record/JSONL conversion bottleneck from the
+  production `pi_L` PPO path, preserve strict lineage/replay checks, and finish
+  the already collected C3 update 0.
+- Files changed: `amsrr/training/order9_tensor_on_policy_dataset.py`,
+  `order9_tensor_pi_l_ppo.py`, online trainer/pipeline/stage runner, PPO and
+  stage-runner scripts, focused tests, design supplement, and worklog.
+- Upstream dependencies: current v9 privileged-wrench tensor artifacts,
+  rebound active-knot initializer, accepted C3 bucket manifest, promoted
+  C0--C2 lineage, current PhysicalModel, phase-conditioned actor, recurrent
+  PPO, QPID/QP, and TensorBoard logger.
+- Implemented: SHA-bound tensor generation index; direct tensor feature/graph
+  reconstruction; vectorized GAE; recurrent sequence PPO; collection-shaped
+  full behavior replay; stored temporal-continuity gate; standard checkpoint
+  and stage-ledger output; safe resume at update 1.
+- Not implemented: no update 1+, C3 promotion evaluation, reward tuning,
+  policy/controller architecture change, new Isaac rollout, learned `pi_H`,
+  or learned `pi_D`.
+- Schema/interface changes: additive internal tensor dataset manifest and
+  verified-preflight input only.  Existing canonical dataset formats remain.
+- Downstream impact: production `pi_L` PPO no longer performs redundant
+  transition-schema/JSONL roundtrips.  Consumers may resume at update 1 from
+  checkpoint SHA-256 `9f47677c...`; update 0 consumed manifest SHA-256
+  `520d852c...` exactly once.
+- Tests added/passed: tensor manifest roundtrip/split gate, tensor GAE
+  truncation bootstrap, recurrent/action continuity failure; focused `41`;
+  full unit `1282 passed, 1 skipped`; compile/hash/lineage validation passed.
+- Handoff notes: dataset index construction measured `4.328 s`, PPO
+  `97.487 s`, total reuse-to-update completion `108.000 s`.  TensorBoard stays
+  at `http://127.0.0.1:6006/`; the training process itself is stopped.
+- Open questions: None for the implementation.  Review metrics before
+  authorizing the remaining 13 C3 updates.
+
 #### 2026-07-26 (bucket-support/ground-safe nominal C3 trajectories)
 - Scope: Regenerate the requested 2/3/4-module pilot trajectories with each
   bucket's finite support and an infinite `z >= 0` robot ground constraint.
@@ -6835,3 +8555,2269 @@
 - Tests passed: Included in 7 passing unit tests.
 - Handoff notes: PyYAML is already available in the environment; no dependency install was performed.
 - Open questions: None currently.
+## 2026-07-29 — C3 controller-side preload production integration
+
+- Found that the user-approved load-limited contact preload existed in the
+  scalar copied/shadow runtime but was not connected to the production
+  topology-bucketed tensor Isaac collector.  Added a GPU-resident batched
+  implementation after learned `pi_L` and before QPID, with per-anchor branch
+  ownership, previous-target integration at `0.002 rad/s`, load dwell/freeze,
+  held absolute targets through lift/transport/place, release reset, and no
+  raw-contact actor input.
+- Changed privileged wrench-range reward aggregation from a six-axis mean to
+  per-assignment L-infinity violation.  Contact admission now requires
+  controller-preload completion; the complete wrench box remains reward-only.
+- Real-Isaac diagnosis on `validation-000036-ce4fc615b095` changed the former
+  `0/8` contact timeout to `8/8` complete-task success with zero safety
+  failures.  A two-module regression exposed morphology-coupled contact load:
+  one assigned surface carried about `7 N` while its anchor-local Dock axis
+  remained below `1.2 Nm`.  Added a second, policy-bound completion route at
+  the signed normal outer edge of the `pi_H` wrench interval; the lower-edge
+  prototype froze too early and was rejected after lift regression.
+- The outer-edge variant crossed contact and every downstream phase for the
+  two-module representative; its 7500-step smoke ended during retreat/settle
+  without a terminal because slow preload extended total episode duration.
+  Formal C3 evaluation retains the configured 15000-step budget.  Focused
+  controller/reward/PPO/promotion regression tests pass.
+
+## 2026-07-29 — C3 object-pose boundary stabilization
+
+- The first controller-preload formal matrix group completed 64 deterministic
+  phase-zero Isaac episodes with zero collision, drop, QP, or other safety
+  failures.  All 21 failures were transport phase timeouts at 50.0--51.8 mm
+  object-position error against the 50 mm task tolerance; successful peers
+  crossed the same comparison at 49.99 mm.  This was a numerical threshold
+  cliff, not a learned-policy or grasp failure.
+- Retained the 50 mm task precision and added an explicit 2 mm deterministic
+  PhysX/contact-equilibrium comparison margin.  The resulting 52 mm gate and
+  its named contract are recorded in raw artifacts, rollout results, and every
+  formal evaluation episode.  Collector and promotion-runner versions were
+  advanced so old and new evidence cannot be mixed.
+- The interrupted v30 formal evidence remains diagnostic only.  Formal
+  promotion is rerun under the hash-bound v31/v9 evidence contract.
+
+## 2026-07-29 — C3 nominal-end preload admission
+
+- The v31 formal matrix reached 192 completed episodes.  Five of six buckets
+  were 156/160 successful with zero safety failures; one four-module bucket
+  was 0/32 because its randomized nominal contact endpoint retained a small
+  no-contact gap.  Every failed episode timed out in contact acquisition with
+  zero selected force and `contact_preload_initialized=false`.
+- The scalar Order 8 preload is explicitly started by its caller.  The tensor
+  implementation had instead added a raw-contact-dwell prerequisite, creating
+  a circular dependency when nominal replay ended just short of contact.
+  Tensor preload now starts at whichever occurs first: two-contact raw-force
+  dwell, or completion of the nominal contact trajectory.  The latter starts
+  from the final learned-policy absolute target and retains the same 0.002
+  rad/s load/wrench-limited closure, so it adds no actor contact observation
+  and does not bypass force/load admission.
+- Collector, preload, and promotion-runner contracts advanced to v32/v4/v10;
+  v31 formal artifacts remain diagnostic and are not mixed into promotion.
+
+## 2026-07-29 — C3 deployable force-observer formal diagnosis
+
+- Started the fixed 14-bucket, 32-episode-per-bucket promotion matrix for
+  update 3 under the Jacobian normal-force gate.  The first two two-module
+  buckets completed 64/64 episodes without collision, drop, or QP failure, but
+  all timed out in contact acquisition.  Privileged evidence showed stable
+  approximately 10--12 N contact on both anchors; the deployable gate alone
+  failed to admit lift.  The remaining matrix was stopped because promotion
+  was already impossible for the observed topology and further full-horizon
+  runs would not identify the cause.
+- Added anchor-resolved phase-gate diagnostics.  On
+  `validation-000028-e40693909bf0`, both privileged normal forces were
+  `12.12/12.42 N`, while the v2 observer returned approximately `0/12.86 N`.
+  The pi_H wrench intervals have opposite normal signs, but the observer had
+  received the same contact-frame +x direction for both anchors.  Added the
+  explicit equal-and-opposite robot-reaction direction contract and advanced
+  the collector contract to v34.
+- Replaced globally scaled projected gradient with cyclic coordinate descent
+  for the same non-negative ridge least-squares problem.  A unit regression
+  with `0.0066/0.409 m` moment-arm disparity now recovers both exact synthetic
+  forces.  Real-Isaac evidence nevertheless saturated the weak-moment-arm
+  anchor estimate at `100 N` with confidence only about `0.0016`; its actual
+  force remained about `12.12 N`.  The 6.6 mm normal moment arm is overwhelmed
+  by posture/tangential joint load, so the normal-only joint-torque model does
+  not uniquely identify that anchor's force.  Confidence correctly fails
+  closed, but C3 cannot promote with this observer as the sole admission path.
+- No privileged contact tensor was added to actor or deployable gate input.
+  A method-level decision remains required: add calibrated anchor force/tactile
+  sensing; use a deployable hybrid kinematic-compression admission with
+  slip/pose monitoring; or expand to a full dynamics/wrench observer and prove
+  observability per morphology.  Per project instruction, no such method
+  change was selected automatically.
+- Focused tests:
+  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .../isaaclab3/bin/python -m pytest -q
+  tests/unit/training/test_order9_anchor_normal_force_estimator.py
+  tests/unit/training/test_order9_deployable_phase_gate.py` -> 15 passed.
+
+## 2026-08-06 — C3 morphology-entry compression warm-start diagnosis
+
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` plus approved design
+  modifications through the C3 outcome-only/contact-compression lineage.
+- Work package / Agent label: Order 9 C3 `pi_L` arbitrary-morphology training.
+- Summary: Added a training-only privileged warm-start for the existing C3
+  contact-residual branch.  The first same-generation fit did not act on the
+  true phase-zero continuous state distribution.  Replaying the actual
+  update-16 continuous failure as a diagnostic target reduced target RMSE
+  from `0.3965` to `0.0198` and changed the held-out five-module result from
+  `object_dropped` at 2327--2335 steps to complete success at 6320 steps with
+  no collision, QP failure, fallback, or drop.
+- Files changed:
+  - `amsrr/training/order9_contact_residual_warm_start.py`
+  - `scripts/order9_warm_start_c3_contact_residual.py`
+  - `scripts/order9_vectorized_isaac_rollout.py`
+  - `scripts/order9_compare_c3_ppo_methods.py`
+  - `tests/unit/training/test_order9_tensor_pi_l_ppo.py`
+  - `for_codex/WORKLOG.md`
+- Schema/interface changes: A train-only phase-zero deterministic collection
+  flag was added without changing tensor shapes.  A further action-interface
+  change is proposed but intentionally not implemented: the current adapter
+  selects a morphology-dependent joint-action coordinate as its compression
+  scalar carrier.
+- Upstream dependencies used: current C3 v5 contact-residual checkpoint,
+  generation-16 tensor rollout dataset, accepted nominal trajectories, C3
+  reset banks, and PhysX wrench tensors used only as training labels.
+- Downstream impact: Fresh PPO must not start from the diagnostic checkpoint.
+  The diagnostic consumed held-out validation trajectory state and is
+  acceptance-ineligible.  A morphology-invariant compression residual action
+  must be approved before production warm-start and fresh PPO proceed.
+- Tests added/run: privileged target behavior, actor-prior freezing, and
+  output-row gradient masking.  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
+  ~/.local/bin/micromamba run -n isaaclab3 python -m pytest -q
+  tests/unit/training/test_order9_tensor_pi_l_ppo.py
+  tests/unit/training/test_order9_tensor_rollout_artifact.py` -> 31 passed;
+  focused PPO tests alone -> 20 passed.
+- Commands run: two diagnostic warm-start sweeps, fixed five-module paired
+  Isaac comparison, three phase-zero continuous five-module Isaac runs, and
+  train-only continuous-teacher collection.  Two train artifacts completed;
+  the remaining two were stopped once the action-interface blocker was found.
+- Assumptions: Raw PhysX contact/wrench remains excluded from actor input and
+  deployment.  Training-only privileged labels do not constitute promotion
+  evidence.
+- Blocker / open question: approve a dedicated morphology-invariant
+  `contact_compression_residual_action` scalar.  Recommended behavior is
+  `combined_compression = legacy_carrier + residual`, zero-initializing the
+  new residual so v5 behavior is preserved while all morphologies share one
+  learned correction coordinate.
+- Next steps: version and migrate the policy/action/artifact contracts,
+  warm-start only the new scalar head from train buckets, run 2--4 regression
+  plus held-out five-module continuous validation, then collect a fresh
+  on-policy PPO generation.
+
+## 2026-08-07 — C3 morphology-invariant compression action and fresh PPO
+
+- The user approved a dedicated topology-invariant
+  `contact_compression_residual_action` scalar for `pi_L`.  Added the v6 actor,
+  v2 command adapter, and v18 rollout contract.  The decoder combines the
+  preserved v5 compression scalar with the new residual, removes the selected
+  legacy joint from direct application to avoid double-counting, and maps the
+  combined scalar over the full IK compression direction.
+- Added behavior-preserving v5-to-v6 checkpoint migration, v18 exact replay,
+  checkpoint loading, dataset/PPO support, and a train-only privileged warm
+  start.  The actor receives no raw PhysX contact/wrench input.  A
+  zero-initialized module-count calibration vector permits entering-morphology
+  bootstrap without changing earlier module counts; normal PPO can train the
+  common graph-conditioned head afterwards.
+- Migrated update 16 exactly.  The count-5 warm start reduced target RMSE from
+  `0.398203` to `0.018281`; 108,433 two--four-module anchor samples retained
+  RMSE and maximum error exactly `0.0`.  The resulting five-module held-out
+  continuous run completed all phase transitions in 6,353 steps with zero
+  collision, drop, QP failure, or fallback.
+- Collected a fresh v18 2--5-module generation and completed PPO update 17:
+  585,728 transitions, 97 optimizer steps, one epoch, approximate KL
+  `0.0001198`, maximum phase KL `0.0007614`, no KL stop, and checkpoint SHA
+  `1a0b944e...b6157de`.  Collection took 1,177.3 s, PPO 631.8 s, and the whole
+  generation 1,828.0 s.  The new scalar was persisted and included in exact
+  stochastic replay.
+- Update-17 fixed deterministic validation used 16 environments per bucket on
+  all seven held-out 2--5-module buckets.  Reward deltas versus the warm-start
+  parent were: 2 modules `-0.000209`, 3 modules `-0.000931`, 4 modules
+  `+0.026386`, and 5 modules `-0.002557`; the bucket-weighted mean was about
+  `+0.00685`.  Collision rate was unchanged for 2, 3, and 5 modules and
+  improved by `0.000244` for 4 modules.  QP feasibility was unchanged except
+  a `0.000244` decrease on the 3-module diagnostic (two samples out of 8,192).
+- The update-17 held-out five-module phase-zero continuous run again completed
+  all phases in 6,351 steps with no collision, drop, QP failure, fallback, or
+  timeout.  This validates the action-interface change and one fresh PPO
+  update for the 2--5-module subcurriculum.  It is not formal C3 promotion and
+  does not claim six--eight-module coverage.
+- Relevant tests: 85 focused policy/checkpoint/artifact/dataset/PPO/runtime
+  tests passed.  Added explicit regression coverage showing a count-5
+  calibration produces exactly zero residual for counts 2--4.
+
+## 2026-08-07 — C3 six-module screening and PPO update 19
+
+- Extended the conservative contact-compression entry list to six modules and
+  built a screened 2--6-module manifest.  Two original six-module train
+  buckets were safe for learning.  The original validation-39 nominal was
+  repaired with a 20 mm grasp-height offset and 80 mm pregrasp clearance; its
+  offline full-mesh check and Isaac collision replay both passed.  Unsafe
+  original six-module candidates were excluded from training.
+- A first fresh 2--6 PPO update from the uncalibrated parent improved fixed
+  validation reward but produced only about 1--1.2 N during held-out lift and
+  dropped the object.  Two train-only continuous six-module trajectories were
+  therefore collected for the already approved per-module-count bootstrap.
+- Screened count-6 compression targets `0.6` and `0.8` on a train bucket.
+  Both reached place over 2,800 steps with no collision, QP infeasibility,
+  rotor saturation, or object drop.  The `0.8` checkpoint produced an actual
+  scalar near `0.70`, lifted the object by about 100 mm, and entered place
+  sooner; it was selected as the training initializer.  The diagnostic
+  initializer remains acceptance-ineligible and preserved counts two--five
+  within about `3e-8`.
+- Completed a fresh topology-stratified 2--6-module PPO update 19 from that
+  initializer: 601,088 transitions, 98 optimizer steps, one epoch,
+  approximate KL `7.4067e-5`, maximum phase KL `4.0108e-4`, no clipping, no
+  KL early stop, and checkpoint SHA-256
+  `e49cc1ffdd9d38bb818006f9cd4722ccc6eb6f0a481f5f19c73103d323696638`.
+  Collection took 1,375.8 s, tensor-native dataset indexing 8.69 s, PPO
+  optimization 835.4 s, and the complete generation 2,231.1 s.
+- Fixed held-out six-module comparison against the selected initializer gave
+  reward `1.63250 -> 1.64267` (`+0.01017`), with unchanged QP-feasible and
+  collision rates.  A continuous held-out run completed contact acquisition,
+  lift, transport, place, release, and retreat; the object rose about 103 mm,
+  returned to the support, and was not dropped.  The run failed only 14 steps
+  into post-release settle on one hard-collision sample.  During retreat and
+  settle the contact-compression command and all joint command deltas were
+  exactly zero, so this residual failure belongs to the deterministic
+  post-release settle trajectory/QPID transition rather than six-module
+  grasp learning.  The six-module PPO checkpoint is retained; formal C3
+  promotion is not claimed.
+- TensorBoard root:
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/module_2_6_warm_start_step080_v1/ppo_fresh_v1/tensorboard`.
+
+## 2026-08-08 — C3 seven-module screening and PPO update 21
+
+- Advanced the morphology-invariant contact-compression curriculum to seven
+  modules.  The legacy seven-module components had human-accepted final grasps
+  but insufficient support clearance during approach.  Added a narrow offline
+  repair which preserves joint trajectories, object targets, and contact
+  assignments while translating the centroidal/free-anchor targets: approach
+  is raised 40 mm, contact acquisition descends continuously from 40 to 10 mm,
+  and the remaining phases retain 10 mm clearance.  All six seven-module
+  buckets passed a fresh offline collision check.
+- Isaac nominal screening then confirmed all four train and two held-out
+  seven-module buckets can traverse approach/contact without collision or QP
+  failure.  Nominal-only execution exposed the intended learning gap: one
+  train bucket reached lift and dropped the object, while the other three
+  stopped in contact acquisition.  The screened 2--7 manifest contains 36
+  buckets and has SHA-256
+  `fb59f54c9aeed6f368083740be5be86448bb35588eb6b8184cbccc33604ad638`.
+- Collected train-only continuous targets from two seven-module buckets and
+  applied the already approved count-specific bootstrap at compression target
+  `0.8`.  Target RMSE fell from `0.799` to `0.0549`; outputs for module counts
+  two--six changed by at most `1.2e-7`.  The diagnostic initializer remained
+  acceptance-ineligible and was used only as the parent of fresh on-policy PPO.
+- Completed topology-stratified PPO updates 20 and 21 over module counts
+  two--seven.  Each update consumed 616,448 transitions in one epoch.  Update
+  21 used 99 optimizer steps, approximate KL `1.5333e-5`, maximum phase KL
+  `1.1691e-4`, zero clipped fraction, and no KL early stop.  Its checkpoint
+  SHA-256 is
+  `7272cb0e869c039adf78bece95a87aeda9b85a9b72ea0fa5fa9b526e2003f66d`.
+- On fixed held-out seven-module validation, update 21 improved mean reward
+  `1.727405 -> 1.729819` (`+0.002414`) while preserving QP feasibility at
+  `1.0`, collision rate at `0.0`, and four successful terminals.  In continuous
+  held-out replay, validation bucket 33 reached transport and improved return
+  by 4.33%; bucket 40 remained a lift drop but survived 73 steps longer and
+  improved return by 9.05%.  Both had zero collision and zero QP failure.
+- Update 21 is therefore the selected seven-module checkpoint.  Seven-module
+  entry is validated as a safe, improving learning stage, but full-task success
+  on both held-out buckets and formal C3 promotion are not claimed.  The next
+  curriculum action is eight-module nominal screening before any eight-module
+  training.
+
+## 2026-08-08 — C3 seven-module span migration and complete held-out success
+
+- Continuing ordinary 10 mm-span PPO from update 21 through updates 22 and 23
+  did not solve held-out bucket 40: the lift drop moved earlier despite small
+  positive fixed-validation reward changes.  A train-only count-7 diagnostic
+  showed that stronger compression can complete the task, so the shared
+  morphology-invariant compression span was widened from 10 to 20 mm while
+  keeping the approved 2 mm nominal inward lead.
+- Added a hash-recorded span migration which rescales the learned count-5 and
+  count-6 calibration biases to preserve their physical command under the new
+  span.  Count 7 retains the stronger diagnostic calibration.  The migrated
+  initializer SHA-256 is
+  `3ea60f28aad373eeb85c6f7de3506f56999726d624f964381d9a120d758c39e0`;
+  it remains acceptance-ineligible by itself.
+- Restarted fresh on-policy PPO at update 0 on the rebound 2--7 manifest.
+  Update 0 consumed 616,448 transitions and improved the fixed fourteen-
+  bucket mean reward by `+0.000883`, QP-feasible rate by `+0.000645`, and
+  collision rate by `-0.000048` versus the migrated initializer.  Update 1
+  rotated to the remaining train topologies and improved fixed seven-module
+  mean reward by `+0.029605` over update 0.  The selected update-1 checkpoint
+  SHA-256 is
+  `aa0b1c5b5285f7c9c47fd2db3bee9ca1cf7ec82a36edf49a4a215065f0cef58c`.
+- Diagnosed bucket 33's hard collision as a dynamic tracking collapse caused
+  by applying a large learned local correction after the nominal collision-
+  aware trajectory IK.  Added a deployable, morphology-specific action clamp
+  computed once from convex object/support/ground/self collision checks and a
+  `35 mrad` local joint trust region.  The clamp limits the complete learned
+  compression scalar; it does not rescale the IK direction, use raw PhysX
+  contact/wrench, replace `pi_L`, or act as a force controller.
+- Offline deterministic replay on all ten fixed 2--6-module validation
+  topologies found zero clipped samples across about 74k attach/maintain
+  samples, so prior commands are unchanged.  Relevant policy/runtime/PPO/
+  dataset/migration tests passed: 63 tests.
+- Under the selected update-1 checkpoint, held-out seven-module bucket 33
+  completed all phases in 5,912 steps and bucket 40 completed in 6,605 steps.
+  Both had zero collision, object drop, QP infeasibility, fallback, and
+  timeout.  Bucket 33 used action limit `0.501109`; bucket 40 used `1.0` and
+  was unaffected by the clamp.  Seven-module entry is therefore complete and
+  no further seven-module update is needed.  Formal C3 promotion remains open
+  until eight-module screening/training and complete promotion evaluation.
+
+## 2026-08-11 — C3 formal promotion action-contract hold
+
+- Completed the first 14-bucket by 32-episode continuous formal evaluation at
+  update 0. It produced 433/448 successes but was correctly rejected for one
+  safety failure and fourteen phase timeouts. Corrected a separate throughput
+  accounting defect so only production-width 1,024-environment collectors are
+  used for the runtime gate; the measured production collector remains above
+  the 500 env-step/s threshold.
+- Diagnosed the 8-module failures with a fixed checkpoint and identical held-
+  out buckets. Validation-41 passed 32/32 with either global plus dedicated
+  compression residual or standard full action, while validation-34 produced
+  0/32 and 30/32 respectively. The earlier joint-only contract showed the
+  opposite margin: validation-34 passed 32/32 but validation-41 passed 31/32.
+  No tested fixed action subset therefore passes both 8-module morphologies
+  with zero safety failures.
+- Rejected bucket-specific action routing. The existing module-count masks are
+  explicitly retained only as staged-curriculum execution scaffolding and are
+  not sufficient evidence for arbitrary-morphology C3 promotion. C3 is not
+  promoted; a common morphology-general action contract or principled
+  learned/safety projection requires method-level approval before more long
+  formal runs.
+- Preserved episode JSONL, logs, raw hashes, and the complete diagnosis in
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/evaluations/c3_action_contract_diagnosis_20260811.md`.
+
+## 2026-08-11 — C3 explicit action contracts retrained without the abrupt phase mask
+
+- Removed the release/retreat nominal-only action mask from explicit C3
+  train/evaluation contracts.  The legacy module-count curriculum path retains
+  its previous behavior; the explicit comparison path records a null mask and
+  an empty mask-phase list in both raw artifacts and the final rollout report.
+- Trained three matched update-13 branches from the same 2--3-module update-12
+  parent over identical 2--4-module rollout budgets: coordinated compression
+  only, compression plus centroidal pose/twist, and compression plus
+  centroidal pose/twist plus residual wrench.  Each consumed 570,368
+  transitions in one epoch without a KL early stop.
+- A host restart interrupted only the third branch's PPO optimizer.  Its ten
+  raw collector shards and tensor dataset were already durable, so the runner
+  reused them and completed PPO without recollection.  The previous boot log
+  contained an MCE hardware error and no Python/CUDA exception.
+- Fixed held-out four-module evaluation on buckets 30 and 37 produced 4/8,
+  6/8, and 7/8 successes respectively.  Bucket 30 passed 4/4 for all three;
+  bucket 37 improved from 0/4 to 2/4 to 3/4.  Every failure was a retreat hard
+  collision, and seed 9052 failed under all contracts.
+- The compression + centroidal + residual-wrench contract is the best tested
+  common contract, but its 7/8 result is not formal C3 promotion evidence.
+  Details and immutable checkpoint hashes are recorded in
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/evaluations/action_contract_ablation_nomask_trained_v1/comparison_report.md`.
+
+## 2026-08-12 — C3 clear300 matched action-contract comparison
+
+- Spec version: A-MSRR codex-ready specification v0.4 plus approved design
+  modifications.
+- Work package / Agent label: Order 9 C3 pi_L arbitrary-morphology evaluation.
+- Summary: Repeated the three explicit action-contract evaluations after
+  correcting the prior nominal-lineage mismatch.  All branches used the same
+  two held-out four-module buckets, clear300 nominal manifest, dedicated reset
+  banks, robot/object parameters, seeds, 32 environments, 32 first-terminal
+  episodes, 18,000-step horizon, formal phase-zero start, single Isaac process,
+  and no release/retreat action mask.  Only the learned checkpoint and explicit
+  action contract differed.
+- Results: coordinated compression only 64/64; compression plus centroidal
+  pose/twist 63/64; compression plus centroidal pose/twist plus residual wrench
+  64/64.  The sole failure was a retreat hard collision on bucket 37, seed
+  9059, under the centroidal-only extension.  Condition 3 improved paired mean
+  return by 698.35 over condition 1 and won 63/64 paired returns.
+- Files changed: `scripts/order9_run_c3_promotion.py`; comparison report under
+  `evaluations/action_contract_ablation_clear300_matched_v2/`; this worklog.
+- Schema/interface changes: None.  The promotion runner gained an optional CLI
+  binding for the already implemented explicit C3 action-contract interface.
+- Upstream dependencies used: accepted clear300 nominal trajectories, their
+  hash-bound reset banks, fixed held-out buckets 30 and 37, and the three
+  matched update-13 checkpoints.
+- Downstream impact: the obsolete 4/8, 6/8, 7/8 result is invalid for method
+  selection.  Condition 3 is the best observed common contract on this fixed
+  four-module comparison; formal C3 promotion remains unclaimed.
+- Tests run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
+  tests/unit/training/test_order9_pi_l_stage_runner.py
+  tests/unit/training/test_order9_c3_promotion.py` — 23 passed.  The first
+  pytest invocation without plugin autoload disabled failed before collection
+  because a ROS `launch_testing` plugin imported an unavailable `lark` module.
+- Commands run: three resumable `order9_run_c3_promotion.py` evaluations, each
+  restricted to buckets 30 and 37 with 32 episodes, clear300 assets, and one
+  explicit action contract.
+- Assumptions: the accepted clear300 trajectory/reset hashes are the required
+  deterministic nominal contract for this comparison.
+- Blockers / open questions: None for the requested comparison.  Only two
+  four-module held-out topologies were evaluated, so cross-morphology formal
+  promotion is a separate step.
+- Next steps: use condition 3 as the current best observed contract if the
+  curriculum proceeds, while retaining condition 1 as the equally safe but
+  lower-return comparator.
+
+## 2026-08-12 — C3 cross-morphology clear300 action-contract screening
+
+- Spec version: A-MSRR codex-ready specification v0.4 plus approved design
+  modifications.
+- Work package / Agent label: Order 9 C3 pi_L arbitrary-morphology evaluation.
+- Summary: Expanded the matched clear300 comparison from four modules to two
+  held-out buckets each at 2, 3, 5, 6, 7, and 8 modules.  Compared coordinated
+  compression only (condition 1) with compression plus centroidal pose/twist
+  and residual wrench (condition 3).  Added a screening-runner binding for the
+  existing formal phase-zero-start option so the comparison cannot silently
+  start from phase-reset states.
+- Results: condition 1 completed 14/48 episodes and condition 3 completed
+  13/48.  Aggregate mean returns were 19,936.97 and 19,830.22 respectively;
+  paired condition-3 minus condition-1 return was -106.75.  Condition 3 also
+  changed held-out two-module bucket 35 from 2/4 to 1/4 and increased QP-
+  terminal failures from two to three.  Neither checkpoint completed a 6--8-
+  module episode in this zero-shot screening.
+- Files changed: `scripts/order9_screen_nominal_buckets.py`; comparison report
+  under `evaluations/action_contract_cross_morphology_clear300_screen_v1/`;
+  this worklog.
+- Schema/interface changes: None.  The new CLI flag binds an already existing
+  rollout interface and records it in the screening summary.
+- Upstream dependencies used: matched update-13 checkpoints, accepted
+  clear300 nominal trajectories, physical reset banks, fixed held-out buckets,
+  and identical paired seeds.
+- Downstream impact: corrected after review.  This zero-shot run does not select
+  an action contract because both checkpoints were trained only through four
+  modules.  The earlier condition-1 recommendation is withdrawn.  Conditions
+  1 and 3 must instead receive matched training through each new morphology
+  boundary before held-out comparison.
+- Tests run: `python -m py_compile scripts/order9_screen_nominal_buckets.py` —
+  passed.  The screening itself validated all 96 paired Isaac episodes and the
+  recorded formal phase-zero/reset/checkpoint contracts.
+- Commands run: resumable `order9_screen_nominal_buckets.py` runs for both
+  explicit action contracts, 12 buckets, four episodes per bucket, 18,000-step
+  horizon, single Isaac process per bucket; SHA-256 and paired-result
+  aggregation checks.  Removed only the 24 reproducible `evaluation_rollout.pt`
+  intermediate tensors after aggregation (4.2 GiB); episode JSONL, logs,
+  summaries, hashes, and the report were retained, increasing free space from
+  8.8 GiB to 13 GiB.
+- Assumptions: four episodes per bucket are a screening gate, not formal C3
+  promotion evidence.  Only a condition showing a cross-morphology advantage
+  would be expanded to 32 episodes.
+- Blockers / open questions: None for action-contract selection.  The tested
+  checkpoints were trained only through four modules, so 5--8-module results
+  are zero-shot and require curriculum training before promotion can be judged.
+- Next steps: train both `contact_compression_only` and
+  `contact_compression_plus_global` from their matched four-module checkpoints
+  through five modules using identical buckets and update budgets, compare on
+  held-out five-module buckets, and repeat at 6--8 modules only as needed.
+
+## 2026-08-12 — C3 matched five-module training action-contract selection
+
+- Spec version: A-MSRR codex-ready specification v0.4 plus approved design
+  modifications.
+- Work package / Agent label: Order 9 C3 pi_L arbitrary-morphology training.
+- Summary: Corrected the prior zero-shot comparison by training both candidate
+  action contracts from their matched four-module update-13 checkpoints through
+  the five-module boundary.  Each update-14 branch consumed the same 585,728
+  fresh 2--5-module transitions in one topology-stratified PPO epoch, with the
+  same bucket manifest, continuous-state-inheritance sampling, optimizer
+  settings, and seed.
+- Training results: coordinated compression only produced checkpoint SHA-256
+  `23af6c850b815c9b32c78ee593ad1f4a7d08de8a6c44615368ab1df9e94b1a06`
+  with approximate KL 0.003689 and entropy -34.88864.  Compression plus global
+  residual produced SHA-256
+  `e4544e5cf32f9d3d23a5ced0e4adc2de6d6f34847f9c18dc7ffba4327e2f9212`
+  with approximate KL 0.004191 and entropy -34.88840.
+- Evaluation results: on two held-out five-module buckets and four fixed-seed
+  episodes per bucket, both branches completed 4/8.  Both passed bucket 38 at
+  4/4.  Both dropped the object during lift at 0/4 on bucket 31, but coordinated
+  compression survived to mean step 3,008.25 versus 1,990.25 for the global
+  extension.  Aggregate mean return was 29,879.47 versus 28,774.02; condition 1
+  also had the higher mean return on each individual bucket.
+- Decision: select `contact_compression_only`.  The global residual extension
+  showed no success-rate advantage after matched five-module training and was
+  materially worse on the difficult held-out topology.  Do not spend matched
+  6--8-module training budget on condition 3; continue morphology expansion
+  from the condition-1 lineage under a single common action contract.
+- Files changed: comparison report under
+  `evaluations/action_contract_morphology_trained_v1/`; this worklog.  The
+  previously added formal-phase-zero CLI binding remains unchanged.
+- Schema/interface changes: None.
+- Tests and checks: both 585,728-transition PPO updates completed with
+  topology-phase KL rollback protection; both paired Isaac evaluations
+  completed with matching reset, nominal, seed, and horizon contracts.  The
+  reproducible raw train/evaluation tensors were deleted only after checkpoints,
+  PPO summaries, episode JSONL, logs, and screening summaries were durable.
+- Assumptions: four episodes per bucket are sufficient for action-contract
+  screening but not for formal C3 promotion.
+- Blockers / open questions: bucket 31 remains an unsolved five-module lift
+  topology for both contracts and must be addressed during condition-1
+  curriculum training rather than by restoring global residual actions.
+- Next steps: continue the 2--N morphology curriculum from condition 1, screen
+  and train the six-module boundary, and retain one common explicit action
+  contract for learning and formal evaluation.
+
+## 2026-08-14 — C3 common-compression v6 curriculum restart
+
+- Spec version: A-MSRR codex-ready specification v0.4 plus approved design
+  modifications, including the 2026-08-07 morphology-invariant compression
+  scalar contract.
+- Work package / Agent label: Order 9 C3 common 2--8-module curriculum.
+- Summary: Audited the stopped stagewise run before resuming and found that its
+  nominally common-compression lineage had actually started from the legacy v5
+  checkpoint.  The explicit C3 action-contract optimizer branch would also
+  have trained the inherited joint decoder instead of the dedicated v6 scalar
+  head.  Corrected both bindings, generated a behavior-preserving v6
+  initializer from the clean C3 initializer, and restarted in a separate v2
+  lineage.  No reward, action contract, bucket, nominal trajectory, or
+  promotion criterion was changed.
+- Files changed: `amsrr/training/order9_online_training.py`,
+  `scripts/order9_run_c3_stagewise_common_compression.py`,
+  `scripts/run_order9_c3_ppo_2_8_common_compression.sh`,
+  `tests/unit/training/test_order9_online_training.py`, generated initializer
+  manifest/checkpoint under
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/`
+  `morphology_invariant_compression_initializers/from_clean_c3_initializer_v1/`,
+  and this worklog.
+- Schema/interface changes: None.  The runner now fails closed unless its
+  initializer is `order9_morphology_invariant_contact_compression_pi_l_v6`.
+  Under the explicit compression-only contract, v6 trains only the dedicated
+  compression actor, module-count bias, and critic; the inherited v5 joint
+  decoder remains frozen.  Legacy v5 remains supported for reproducibility.
+- Verification: 42 targeted unit tests passed, Python compile checks passed,
+  and the stagewise dry run resolved the v6 initializer and common action
+  contract.  The migrated initializer copied all inherited parameters exactly
+  (maximum error 0.0), zero-initialized the new scalar output, and has SHA-256
+  `9c9731175c673cad1fdcd65ede578217dccd7e2d9b0fed523615079cb46aace3`.
+  Update 0 completed without rollback (maximum topology-phase KL 0.001487);
+  checkpoint differencing confirmed a nonzero dedicated compression-head
+  update and exactly zero change in `contact_residual_decoder.*`.
+- Runtime policy: every update collects the cheap held-out phase-reset signal;
+  full continuous validation runs every three updates and at each morphology
+  boundary.  Training collection uses at most two staggered Isaac processes,
+  continuous validation at most four.  Reproducible raw tensors are deleted
+  only after their hash-bound summaries are durable.
+- Storage: the new lineage used about 2.8 GiB during one generation and raw
+  cleanup restored approximately 88 GiB free space; storage remains monitored.
+- Assumptions: phase-reset validation is a fast trend signal bound to the
+  pre-update behavior checkpoint and is not promotion evidence.  Only full
+  continuous validation can advance a morphology boundary.
+- Blockers / open questions: None at restart.  The first full continuous
+  validation is scheduled after update 2 for the two- and three-module stage.
+- Next steps: require the common v6 checkpoint to pass the fixed continuous
+  two-/three-module validation, then expand sequentially through four to eight
+  modules without module-count-specific action restrictions.
+
+## 2026-08-14 — C3 full-output independent-compression preflight
+
+- Spec version: A-MSRR codex-ready specification v0.4 plus the user-approved
+  C3 full-PolicyCommand superseding supplement.
+- Work package / Agent label: Order 9 C3 two--three-module restart preflight.
+- Summary: Added the explicit
+  `full_policy_command_plus_independent_compression` C3 contract.  It applies
+  all centroidal, residual-wrench, individual joint, and dedicated coordinated-
+  compression outputs with one identical interpretation for every module
+  count.  The historical v2 decoder remains available for old evidence; the
+  new v3 adapter no longer repurposes the largest-IK-motion joint coordinate as
+  a compression scalar.
+- Schema/interface changes: Additive versioned action-contract semantics only;
+  tensor widths and persisted checkpoint model schema are unchanged.  Under
+  the new contract, PPO uses the complete sampled-action log probability and
+  enables every actor/trunk/head parameter plus the critic.
+- Preflight verification: 55 targeted policy/runtime/trainer tests passed, an
+  additional gradient test confirmed nonzero credit reaches the global,
+  independent-joint, contact-residual, and dedicated-compression heads, and a
+  real four-environment/16-step Isaac smoke completed.  The smoke archived the
+  v3 adapter identity, nonzero global/joint/compression actions, and 64/64 exact
+  replay records; maximum log-probability replay error was `9.54e-06` against a
+  `2.5e-03` limit.  The clean v6 initializer SHA-256 remains
+  `9c9731175c673cad1fdcd65ede578217dccd7e2d9b0fed523615079cb46aace3`.
+- Output lineage:
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/`
+  `training_lineages/full_action_independent_compression_stagewise_2_8_from_clean_initializer_v1/`.
+- Next steps: run update 0 over the fixed two--three-module topology-stratified
+  budget, then execute the same fixed four-bucket phase-reset trend validation
+  before deciding whether to continue.  Full-horizon continuous validation
+  remains required before advancing the morphology boundary.
+
+## 2026-08-14 — C3 full-output updates 0--5 and fixed trend validation
+
+- Spec version: A-MSRR codex-ready specification v0.4 plus the user-approved
+  C3 full-PolicyCommand and independent-compression supplement.
+- Scope: Train the common full-output `pi_L` from the clean v6 initializer on
+  the two--three-module stage, validate every candidate on the same four
+  held-out phase-reset buckets, and stop additional updates if the trend
+  plateaus instead of spending the remaining budget blindly.
+- Contract audit: The final joint reference is
+  `q_IK_nominal + delta_q_individual + g_compression * d_IK`; global
+  pose/twist, residual wrench, every individual joint residual, and the
+  dedicated compression scalar are all applied and trained.  No
+  module-count-dependent action mask or checkpoint switch is present.
+  Gradient and checkpoint-difference checks reached every actor head and the
+  shared graph/recurrent trunk.
+- Outcome-only cleanup: Update 4 exposed a legacy configured wrench-range
+  diagnostic widening schedule.  Source inspection proved that the value no
+  longer entered reward, phase success, or actor input, but it would have made
+  telemetry differ by update.  The partial collection was stopped before PPO,
+  retained under
+  `generation_000004_aborted_diagnostic_scale4_20260814`, and recollected with
+  exact diagnostic scale `1.0`.  Configuration and focused tests now require
+  `1.0` for every update; `w_wrench_range=0.0` and privileged compression-
+  teacher weight `0.0` remain unchanged.
+- Training: Updates 0--5 each consumed `555,008` fresh transitions
+  (`3,330,048` total), with balanced two-/three-module phase-reset shards and
+  one continuous state-inheritance shard per module count.  Every update
+  completed one PPO epoch without KL stop or rollback.  Update 5 aggregate KL
+  was `0.003043`, maximum phase KL `0.006701 < 0.02`, clipped fraction
+  `0.017896`, and checkpoint SHA
+  `d78f4a05431b18854af75b2ea5002c199cdfe8f08ff18f859b0880cc6d1d2ae7`.
+- Fixed trend result: On the identical four held-out buckets, initializer mean
+  reward / phase-success were `7.098702 / 0.489339`.  The best candidate was
+  update 2 at `7.227170 / 0.497152`, a gain of `+1.81%` reward and `+0.781`
+  percentage points phase success.  Updates 3--5 were respectively
+  `7.212204 / 0.494710`, `7.217910 / 0.494710`, and
+  `7.211750 / 0.493978`; the extra updates did not exceed update 2.  QP
+  feasibility stayed `0.997070` and prohibited-collision rate stayed `0.0`
+  for initializer and every candidate.
+- Interruption recovery: A host restart occurred after update-5 rollout and
+  dataset indexing but before checkpoint creation.  The prior boot contained
+  no OOM, NVIDIA Xid, thermal, NVMe, filesystem, or machine-check evidence.
+  All seven raw-artifact hashes and the update-4 parent hash were revalidated;
+  update 5 then resumed at PPO without recollection and completed normally.
+- Verification: 119 focused policy/runtime/dataset/PPO/reward tests passed
+  after the exact-diagnostic cleanup; 47 resume-critical tests passed after
+  reboot.  `git diff --check` passed.  A pre-training real-Isaac smoke had
+  already established nonzero full-output application and exact replay.
+- Decision: Keep update 2 (SHA
+  `5bf7280796054983026d13432f2c0023f064a57e4b8682b78f9504755684e3ed`)
+  as the current two--three-module candidate.  Do not promote C3 and do not
+  continue updates 6--12 solely on the short-horizon plateau.  The next
+  evidence step is matched full-horizon continuous held-out validation of the
+  initializer and update 2; only that result can justify expanding to four
+  modules.
+- Evidence:
+  `training_lineages/full_action_independent_compression_stagewise_2_8_from_clean_initializer_v1/modules_2_3/`
+  and its `evaluations/*_fast_phase_reset_fixed_2_3_v2/` directories.
+
+## 2026-08-14 — C3 update-2 continuous two--three-module validation
+
+- Spec version: A-MSRR codex-ready specification v0.4 plus the user-approved
+  C3 full-PolicyCommand and independent-compression supplement.
+- Scope: Evaluate the best short phase-reset candidate, update 2 (SHA-256
+  `5bf7280796054983026d13432f2c0023f064a57e4b8682b78f9504755684e3ed`),
+  from the formal approach start through terminal settle on one fixed held-out
+  bucket per module count, with four deterministic episodes per bucket.
+- Contract: Both buckets used
+  `full_policy_command_plus_independent_compression`, the same current nominal
+  manifest, 15,000-step horizons, no action mask, no fallback, and the formal
+  phase-zero start.  The two Isaac jobs ran concurrently.
+- Result: The two-module bucket
+  `validation-000028-e40693909bf0` completed all phases in 4/4 episodes.  The
+  three-module bucket `validation-000036-ce4fc615b095` completed approach and
+  contact acquisition in 4/4 episodes but timed out during lift in 4/4; none
+  reached transport.  Across both buckets the result is therefore 4/8 full
+  task successes.
+- Safety evidence: All eight episodes had zero fallback decisions.  The four
+  three-module failures had no prohibited collision, object drop, or terminal
+  QP infeasibility; their sole recorded failure reason was `phase_timeout` at
+  terminal phase index 3 (lift).
+- Decision: Update 2 does not clear the common two--three-module continuous
+  validation and must not advance to four-module training.  The next diagnosis
+  is specifically the three-module lift-to-transport transition; the
+  two-module result does not require a method change.
+- Evidence:
+  `training_lineages/full_action_independent_compression_stagewise_2_8_from_clean_initializer_v1/modules_2_3/evaluations/update_000002_continuous_2_3_full_horizon_v1/`.
+
+## 2026-08-15 — C3 v7 release-QPID repair and two--three-module 16/16 validation
+
+- Scope: Diagnose the contact-space v7 update-2 fixed validation in which the
+  two three-module held-out buckets were already 8/8 successful, while both
+  two-module held-out buckets terminated during release and were 0/8.
+- Exact diagnosis: A four-environment release trace on
+  `validation-000028-e40693909bf0` captured the desired and applied wrench,
+  actual applied-command residual, ADMM residuals, solver convergence, thrust
+  and vectoring clipping, pose errors, and terminal dwell.  During every one
+  of the six consecutive terminal ticks, the applied wrench residual was
+  below the unchanged `0.01` tolerance; per-environment maxima were
+  `0.002512`, `0.002423`, `0.002415`, and `0.002409`.  No rotor thrust or
+  vectoring command was clipped.  The only false signal was
+  `solver_converged=false`, caused by the ADMM dual residual not reaching its
+  tighter optimality threshold within 64 iterations.  There were zero
+  physically residual-infeasible active-episode ticks.
+- Root cause and repair: The batched allocator incorrectly conjoined numerical
+  ADMM convergence with physical allocation feasibility.  The scalar
+  allocator and the intended QPID contract already used the residual of the
+  command actually sent to the constrained actuators.  The batched allocator
+  now follows that contract: finite applied-wrench residual within tolerance
+  is physically feasible, while solver convergence and primal/dual residuals
+  remain separate optimizer-health telemetry.  No actuator constraint,
+  terminal dwell, or supported-wrench tolerance was relaxed.
+- Migration hardening: Investigation also found that the first v7 initializer
+  copied v6 global and final joint-output parameters that had been masked by
+  the source action contract.  A command-preserving migration now zeroes the
+  newly activated global and independent-joint output layers and resets their
+  exploration scales while retaining compatible representation and critic
+  state.  The immutable corrected initializer is
+  `contact_space_initializers/from_clean_c3_initializer_place_release_tail_v3_zero_command/checkpoint_initializer_contact_space_v7.pt`,
+  SHA-256
+  `eccf81c610ef78c47a88dd2a79779226fe9c31307761ce56105b5f59a685f164`.
+  It was not substituted into the validation below, so it does not confound
+  the QPID repair result.
+- Formal validation: The unchanged learned update-2 checkpoint, SHA-256
+  `9ef98c6993d4c6a0557d94922ee32305e1f705eff4399e52b745023b0a0abd53`,
+  was run from the formal phase-zero start with the unchanged
+  `contact_space_projected_policy_command` contract, current nominal set, and
+  15,000-step limit.  Buckets 28 and 35 (two modules) were 8/8; buckets 29 and
+  36 (three modules) were 8/8.  All 16 episodes reached terminal phase 8
+  (settle), with zero hard collision, object drop, fallback, safety failure,
+  and QPID infeasible terminal.  Step counts were 9,911 for both two-module
+  buckets, 10,208 for bucket 29, and 9,908 for bucket 36.
+- Verification: 84 controller unit tests and 55 focused Order 9
+  contact-space/runtime/reward/promotion tests passed (`139` total).
+  `git diff --check` also passed.  The machine-checked 100% criterion is in
+  `diagnostics/contact_space_v7_qp_physical_feasibility_v2_fixed_2_3_16of16/validation_summary.json`;
+  its four linked source bucket directories retain the per-episode JSONL,
+  rollout tensors, and logs.
+- Decision: The requested two--three-module fixed validation is repaired and
+  complete at 16/16.  Retraining was neither required nor performed for this
+  result because the learned checkpoint was unchanged and the failure was a
+  downstream QPID feasibility-classification defect.  This result validates
+  only the two--three-module stage and does not by itself promote all of C3.
+
+## 2026-08-15 — C3 corrected-QPID fresh learning convergence and validation
+
+- Scope: Restart the two--three-module C3 lineage from the corrected
+  zero-command contact-space v7 initializer, collect fresh rollout before
+  every PPO update with the physically corrected QPID, and select the
+  checkpoint by reward convergence before continuous validation.
+- Contract: Every generation used the same
+  `contact_space_projected_policy_command` action contract, two--three-module
+  topology-stratified phase-reset rollout, continuous-state-inheritance
+  rollout, and held-out short validation.  Each reward estimate contains
+  292,864 fresh train transitions; alternating bucket cycles are compared
+  only at equal parity.
+- Reward evidence: initializer `4.388034`, update 0 `4.481169`, update 1
+  `4.464094`, update 2 `4.510828`, update 3 `4.391692`, and update 4
+  `4.497089`.  Update 4 is `0.305%` below update 2 on the same odd bucket
+  cycle, confirming the plateau/regression.  Update 2, SHA-256
+  `567f6f99f34fca7c5edf021c9427e61a7224e8311e9bb6fc3090f92656971009`,
+  remains the selected checkpoint.
+- Full-horizon evidence: Update 2 was evaluated from formal phase zero for
+  four episodes on each of validation buckets 28, 35, 29, and 36.  Every
+  bucket was 4/4 successful, for 16/16 total.  All episodes reached settle
+  phase 8, with zero safety failures, fallback decisions, horizon timeouts,
+  and terminal QPID infeasibility.
+- Storage: Generation-5 training raw tensors (4.26 GB) and the four
+  continuous-validation rollout tensors (1.19 GB) were deleted only after
+  hash-bound summaries and per-episode JSONL evidence were written.
+- Evidence:
+  `training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3/reward_convergence_assessment_v1.md`
+  and
+  `training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3/evaluations/update_000002_continuous_fixed_2_3_16_v1/validation_summary.json`.
+
+## 2026-08-15 — C3 small-batch QP and persistent same-morphology validation
+
+- Spec version: A-MSRR codex-ready specification v0.4 plus the approved
+  learned `pi_H` -> deterministic IK -> learned `pi_L` -> QPID amendment.
+- Work package / scope: Reduce the measured two-module continuous-validation
+  latency without changing the `PolicyCommand`, QPID ownership, virtual-thrust
+  objective/constraints, bucket semantics, or C3 acceptance criteria.
+- QP implementation: Replaced the 12-sweep Dykstra approximation performed
+  inside every ADMM iteration with the exact Euclidean projection onto the
+  fixed 2-D thrust/angle polytope and added a lazily compiled/fused CUDA
+  projection for batches of at most eight environments; exact eager projection
+  is the safe fallback.  A trial geometric ADMM early-exit schedule was later
+  proven to change the controller result and was removed by the regression
+  repair below.  The production solver retains the configured fixed iteration
+  count.  Physical feasibility remains the already-approved finite applied-
+  wrench residual test, while ADMM convergence remains diagnostic.
+- Collector implementation: Exact-morphology pending buckets are coalesced
+  into one persistent AppLauncher/Kit process.  Buckets execute sequentially
+  with an independently created and cleared SimulationContext, and retain
+  separate task/randomization inputs, reset banks, raw tensors, episode JSONL,
+  logs, hashes, and promotion validation.  Different morphologies remain
+  separate processes.
+- Files changed: `amsrr/controllers/batched_virtual_thrust_qp.py`,
+  `amsrr/training/order9_pi_l_stage_runner.py`,
+  `amsrr/training/order9_c3_promotion.py`,
+  `scripts/order9_vectorized_isaac_rollout.py`,
+  `scripts/order9_run_c3_promotion.py`, and their focused controller/stage-
+  runner unit tests.
+- Schema/interface changes: None.  The existing controller/policy tensor
+  shapes, config hashes, artifact schemas, and per-bucket evaluation contract
+  are unchanged.  The promotion runner provenance version advanced to v19.
+- Trial performance before the early-exit repair: The four-environment/eight-
+  rotor QP microbenchmark improved
+  from `84.669 ms` to `9.470 ms` steady-state (`8.94x`); first compilation was
+  `3.276 s` and is reused by later same-shape buckets in the persistent
+  process.  The matched real-Isaac 512-step two-module diagnostic produced
+  `73.389` env-step/s for the first bucket including compilation and `82.422`
+  env-step/s for the warm second bucket.  Their weighted rollout throughput
+  was `77.64` env-step/s versus the measured pre-change `29.72` env-step/s
+  (`2.61x`).  Both buckets reported finite state and wrote all independent
+  evidence; the persistent process completed in `73.394 s` wall time.
+- Tests/commands: `python -m py_compile` passed for the four changed runtime
+  modules.  The focused controller, QPID, stage-runner, and promotion suites
+  passed `36/36`; `git diff --check` passed.  A real-Isaac persistent-process
+  smoke ran validation buckets 28 and 35 with 4 environments and 512 steps
+  each.  The deliberately short horizons ended as expected timeouts and are
+  performance diagnostics, not C3 success evidence.
+- Storage: New profiling evidence occupies about `58 MB`; the filesystem had
+  about `66 GB` free after completion.
+- Assumptions/blockers: Same-morphology process reuse means exact morphology
+  hash equality, not merely equal module count.  No blocker remains.
+- Downstream impact / next step: Continuous validation automatically uses the
+  new grouping and QP path.  A full 9,909-step-per-bucket run is still required
+  for acceptance; scaling the measured diagnostic gives roughly 17 minutes
+  for the two sequential two-module rollouts plus fixed setup/finalization,
+  rather than constituting measured promotion evidence.
+
+## 2026-08-15 — C3 optimized two-module full-horizon timing confirmation
+
+- Scope: Confirm the preceding short-diagnostic latency estimate with the
+  same two validation buckets (`validation-000028-e40693909bf0` and
+  `validation-000035-e40693909bf0`), checkpoint, action contract, four
+  environments per bucket, and the formal maximum horizon of 9,909 steps.
+- Result: The persistent same-morphology runner completed both buckets and
+  wrote eight independent episode records in `10:13.59` wall time.  Bucket 28
+  ran the full 9,909 steps in `477.677 s` at `83.464 env-step/s`.  Bucket 35
+  reached terminal QPID infeasibility in all four environments after 2,411
+  steps, so it completed in `115.619 s` at `85.495 env-step/s`.
+- Normalized latency: The observed `10:13.59` is the real formal-run latency
+  for this checkpoint, but it is shortened by bucket 35's valid early
+  termination.  Holding the measured per-bucket throughput and fixed process
+  overhead constant while requiring both buckets to execute all 9,909 steps
+  gives approximately `16.1 minutes`.  Therefore the earlier approximately
+  17-minute estimate is confirmed and remains a conservative full-load value.
+- Acceptance note: This run was a matched performance confirmation, not new
+  C3 success evidence.  Its eight episodes did not pass the task-success
+  gates: bucket 28 produced two horizon timeouts and two terminal QPID
+  infeasibilities; bucket 35 produced four terminal QPID infeasibilities.
+- Evidence/storage: Results are under
+  `diagnostics/continuous_validation_optimization_v1/persistent_qp_compiled_full_steps9909_v1`
+  and occupy about `328 MB`; approximately `65 GB` remained free afterward.
+- Code/schema changes: None.
+
+## 2026-08-15 — C3 latest-checkpoint optimized continuous validation
+
+- Scope: Repeat the two-module continuous validation with the actually selected
+  latest checkpoint rather than the older checkpoint accidentally used by the
+  first timing confirmation.  The evaluated checkpoint was generated at
+  `2026-08-15 11:06:14 +0900` and was hash-bound as
+  `567f6f99f34fca7c5edf021c9427e61a7224e8311e9bb6fc3090f92656971009`.
+- Matched inputs: Validation buckets 28 and 35, four episodes per bucket,
+  seeds 9040--9043 and 9047--9050, the
+  `contact_space_projected_policy_command` contract, formal phase-zero start,
+  current nominal set, and the prior successful 15,000-step upper bound were
+  retained.  The corresponding reset-bank hashes were `ab825082...e34`
+  (bucket 28) and `380845c5...58d` (bucket 35).  The active stage manifest and
+  both spawned commands independently carried the same checkpoint hash.
+- Result: The optimized runtime completed all eight episode records but
+  achieved `0/8` task successes.  Bucket 28 terminated all four environments
+  with QPID infeasibility in release (phase 6) at steps 6,995--7,002.  Bucket
+  35 terminated three environments with QPID infeasibility in release at
+  steps 6,994--6,995 and one in lift (phase 3) at step 2,443.  There were zero
+  hard collisions, object drops, fallbacks, and horizon timeouts; all physical
+  states remained finite.
+- Interpretation: This does not invalidate the checkpoint's earlier 16/16
+  evidence.  Because checkpoint, reset banks, horizon, buckets, nominal set,
+  seeds, and action contract were restored, the result demonstrates a runtime
+  behavior regression after the QP/persistent-validation optimization.  The
+  exact projection, bounded ADMM termination, and process reuse must be
+  isolated before this optimization can replace the prior validated runtime.
+- Performance/storage: Total wall time was `11:46.33`; bucket collection times
+  were `342.355 s` and `342.962 s`, at `82.491` and `82.167 env-step/s`.
+  Evidence under
+  `diagnostics/continuous_validation_optimization_v1/latest_567f_full15000_persistent_v1`
+  occupies about `372 MB`, with approximately `65 GB` free afterward.
+- Code/schema changes: None in this validation run.
+
+## 2026-08-15 — C3 optimized-QP semantic regression repair
+
+- Scope: Find and repair the cause of the latest selected two--three-module
+  checkpoint changing from its prior `16/16` evidence to `0/8` after the
+  small-batch QP and persistent-process optimization.  The evaluated
+  checkpoint remained SHA-256
+  `567f6f99f34fca7c5edf021c9427e61a7224e8311e9bb6fc3090f92656971009`.
+- Isolation evidence: For the same bucket, reset bank, seed, desired wrench,
+  and checkpoint, the optimized early-exit path produced a first-step applied-
+  wrench residual of approximately `0.04402 N`, above the unchanged `0.01 N`
+  physical tolerance.  Disabling only early exit, while retaining the exact
+  projection, reduced it to `0.000298--0.000302 N` and made all four rows QP
+  feasible.  The result matched the prior fixed-iteration path.  Because this
+  failure was already present in the first fresh bucket, persistent process
+  reuse was also excluded as a cause.
+- Root cause: The geometric ADMM early-exit check at iterations 8, 16, and 32
+  used only primal/dual iterate deltas.  For the ill-conditioned wrench
+  allocation problem, small iterate deltas occurred before the wrench
+  objective reached its physical tolerance, so a numerically stationary but
+  materially suboptimal command was incorrectly accepted as the terminal QP
+  result.
+- Repair: Removed data-dependent ADMM early termination.  Every solve again
+  executes the configured 64 iterations, and primal/dual convergence is
+  evaluated only as terminal optimizer-health telemetry.  The exact 2-D
+  projection, its small-batch CUDA compilation, applied-wrench feasibility
+  semantics, and same-morphology persistent Isaac process are retained.  No
+  reward, policy, actuator constraint, tolerance, bucket, or checkpoint was
+  changed, and no retraining was performed.
+- Regression coverage: Added a controller test that verifies the solver
+  performs exactly the configured number of ADMM projection iterations even
+  for a stationary input that the faulty implementation exited at iteration
+  8.  Controller/QPID/stage-runner/promotion tests passed `56/56`; relevant
+  modules passed `py_compile`, and `git diff --check` passed.
+- Formal matched validation: Buckets `validation-000028-e40693909bf0` and
+  `validation-000035-e40693909bf0` ran four deterministic episodes each from
+  formal phase zero with the same reset banks, seeds, action contract, nominal
+  trajectories, and 15,000-step upper bound as the prior successful run.  All
+  `8/8` episodes reached settle phase 8 after 9,909 steps.  Hard collisions,
+  object drops, fallbacks, safety failures, timeouts, and QPID-infeasible ticks
+  were all zero.  Maximum applied-wrench residuals were `0.007463 N` and
+  `0.008022 N`, both below `0.01 N`.
+- Performance/storage: The repaired fixed-iteration path measured `71.343`
+  and `71.554 env-step/s`, about `13%` below the invalid early-exit path but
+  approximately `2.4x` the measured pre-optimization `29.72 env-step/s`.
+  Evidence occupies about `526 MB`; approximately `64 GB` remained free.
+- Evidence:
+  `diagnostics/qp_regression_isolation_v1/fixed64_production_1step/` and
+  `diagnostics/continuous_validation_optimization_v1/latest_567f_fixed64_full15000_persistent_v2/`.
+
+## 2026-08-15 — Obsolete C3 method checkpoint cleanup
+
+- Scope: Remove loadable checkpoints from superseded C3 methods after the
+  contact-space projected QPID lineage and its optimized-QP validation were
+  established, while preserving logs, manifests, reset banks, rollout
+  tensors, and evaluation evidence for historical diagnosis.
+- Deleted: `236` obsolete checkpoint files totaling `628,609,346 bytes`
+  (`599.49 MiB`).  These consisted of superseded C3 training-lineage
+  checkpoints, method-diagnostic trial checkpoints, contact-residual and
+  morphology-invariant-compression initializers, obsolete contact-space
+  initializer targets, and the original top-level C3 update 0--6 checkpoints.
+  No directory-level recursive deletion was used.
+- Protected current lineage: All six checkpoints in
+  `training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/`
+  remain.  The selected update-2 checkpoint still hashes to
+  `567f6f99f34fca7c5edf021c9427e61a7224e8311e9bb6fc3090f92656971009`.
+- Protected bootstrap dependencies: The zero-command contact-space v7
+  initializer remains at SHA-256
+  `eccf81c610ef78c47a88dd2a79779226fe9c31307761ce56105b5f59a685f164`;
+  its immediate rebound source remains at
+  `38fafacac57224178763e25af523bc40df512dd97add805bb2a3ab891e4b2279`;
+  and the promoted C2 update-49 dependency remains at
+  `85474d9da96a6eb729e7f21fae5f7628fd0d9defc39488c74fe71e10476c6274`.
+- Verification: Superseded C3 training-lineage checkpoint count is now zero.
+  Repository-wide checkpoint inventory decreased from `308` files / about
+  `0.743 GiB` to `72` files / `161.79 MiB`.  Current C3 retains exactly eight
+  checkpoint files: six same-method updates, the active initializer, and its
+  immediate reproducibility source.
+- Recovery note: The deleted artifact files were not Git-tracked and were
+  permanently removed from the local filesystem; recovery requires an
+  external backup or regenerating the obsolete experiments.
+- Code/schema changes: None.
+
+## 2026-08-15 — Corrected optimized-QPID three-module continuous validation
+
+- Scope: Confirm that the selected corrected-QPID checkpoint also retains its
+  three-module continuous-task capability under the repaired optimized QP
+  runtime, without using a superseded checkpoint or historical evaluation
+  artifact.
+- Pre-run binding: The checkpoint file and active stage manifest both resolved
+  to SHA-256
+  `567f6f99f34fca7c5edf021c9427e61a7224e8311e9bb6fc3090f92656971009`.
+  Source inspection confirmed the current fixed 64-iteration ADMM loop and
+  applied-wrench-residual QPID feasibility contract; the removed geometric
+  early-exit symbol was absent.  Reset-bank hashes were `28e0a498...2689`
+  for bucket 29 and `d91166fd...df7b` for bucket 36.
+- Execution: Generated fresh formal-phase-zero rollouts for fixed validation
+  buckets `validation-000029-adb534d78b21` and
+  `validation-000036-ce4fc615b095`, with four deterministic environments per
+  bucket, the `contact_space_projected_policy_command` contract, and the
+  unchanged 15,000-step upper bound.  The two distinct morphologies ran in
+  parallel Isaac processes.
+- Result: Both buckets were `4/4`, for `8/8` three-module successes.  Bucket
+  29 reached settle phase 8 at 10,208 steps in all four episodes; bucket 36
+  reached settle phase 8 at 9,910 steps in all four episodes.  QPID-infeasible
+  ticks, QPID-infeasible terminals, hard collisions, object drops, fallbacks,
+  safety failures, and timeouts were all zero.
+- QP evidence: Maximum applied-wrench residual was `0.0001236 N` for bucket 29
+  and `0.00002404 N` for bucket 36, both far below the unchanged `0.01 N`
+  tolerance.  Each raw rollout metadata block independently records the
+  selected checkpoint SHA above.
+- Performance/storage: Parallel per-process throughput was `29.728` and
+  `29.277 env-step/s`; wall times were about `1,374 s` and `1,354 s`.
+  Evidence occupies about `610 MB`; approximately `64 GB` remained free.
+- Evidence:
+  `diagnostics/continuous_validation_optimization_v1/latest_567f_fixed64_3module_full15000_parallel_v1/`.
+- Code/training changes: None.  This was validation only.
+
+---
+
+## Work Package Logs
+
+### Agent C3 runtime: validation throughput
+
+#### 2026-08-15
+
+- Scope: Small-batch virtual-thrust QP and persistent exact-morphology bucket
+  collection.
+- Upstream dependencies: Current C3 v7 contact-space checkpoint, immutable
+  bucket manifest, accepted nominal trajectories, reset banks, QPID/QP
+  ownership contract, and formal per-bucket evidence validator.
+- Implemented: Exact/fused small-batch projection, fixed-iteration ADMM,
+  persistent Kit job manifest, same-morphology coalescing, independent log
+  routing, and promotion-runner integration.  The trial bounded ADMM early
+  exit was removed after the matched semantic regression described above.
+- Not implemented: Heterogeneous morphologies or simultaneous task variants in
+  one physics scene; neither is required for exact-morphology process reuse.
+- Schema/interface changes: None.
+- Tests added: Exact projection versus converged Dykstra reference and
+  same-morphology orchestration manifest/grouping test.
+- Tests passed: 36 focused tests plus two-bucket real-Isaac speed smoke.
+- Handoff notes: The first small-batch solve pays compilation cost; retain the
+  persistent process so the second exact-morphology bucket reuses it.
+- Open questions: None for this work package.
+
+## 2026-08-15 — C3 contact-space curriculum extension through four modules
+
+- Scope: Extend the selected corrected-QPID two--three-module checkpoint to a
+  single, unchanged `contact_space_projected_policy_command` training contract
+  covering two, three, and four modules, then select and continuously validate
+  the best checkpoint.  The parent checkpoint was update 2 at SHA-256
+  `567f6f99f34fca7c5edf021c9427e61a7224e8311e9bb6fc3090f92656971009`.
+- Training: Completed updates 3--6 with topology-stratified phase-reset and
+  state-inheritance rollouts for all three module counts.  Every update used
+  1,024 train environments, 570,368 total environment steps, one PPO epoch,
+  and the same action contract for every morphology.  All updates completed
+  without KL early stopping; aggregate phase KL remained below `0.00085`.
+- Fixed held-out selection: Compared updates 3--6 on the same four-module
+  validation buckets 30 and 37, with the same immutable phase-reset states,
+  64 environments, 256 steps, and deterministic mean actions.  Mean rewards
+  were `3.90670`, `3.96854`, `3.84111`, and `3.95551`; phase-success rates were
+  `0.25394`, `0.26086`, `0.24545`, and `0.25909`.  Update 4 was therefore
+  selected for continuous validation.  Its SHA-256 is
+  `545fffa0fd49894d361105a3fdd66afd7ec3ab5cfa27eec8e2c978d181284f3f`.
+- Continuous validation: Ran two held-out buckets per module count, four
+  deterministic episodes per bucket, from formal phase zero with the current
+  fixed-64 QPID and 15,000-step upper bound.  Results were `8/8` for two
+  modules, `8/8` for three modules, and `8/8` for four modules (`24/24`
+  overall).  Safety failures, fallback decisions, horizon timeouts, hard
+  collisions, object drops, and terminal QPID infeasibility were all zero.
+- Evaluation plumbing repair: Updated the fixed-checkpoint comparator to pass
+  and validate the explicit C3 action contract and to accept the current
+  contact-space rollout artifact version.  This changed only evaluation
+  wiring; policy, reward, QPID, and physics semantics were unchanged.  The
+  stage-runner tests passed `20/20`, the comparator passed `py_compile`, and
+  the repaired path completed end to end.
+- Evidence: Selection record is
+  `training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_4/checkpoint_selection.json`;
+  continuous evidence is under its
+  `evaluations/continuous_validation_update4_modules_2_4_v1/` directory.
+- Storage: Deleted eight summarized fixed-comparison rollout tensors totaling
+  `1,175,770,560` bytes.  Their reports, logs, reset banks, and hashes remain;
+  all continuous-validation rollout and episode evidence is retained.  The
+  deleted comparison tensors are reproducible from the recorded checkpoints,
+  reset banks, seeds, and bucket manifest.
+
+## 2026-08-16 — C3 contact-space curriculum extension through five modules
+
+- Scope: Continued the selected two--four-module update-4 checkpoint under the
+  same `contact_space_projected_policy_command` contract.  Per the accelerated
+  evaluation agreement, forgetting for modules 2--4 was judged from matched
+  training-rollout reward and phase-success evidence, while full continuous
+  validation was run only for module 5.
+- Training: Completed updates 5--10.  Updates 8--10 remained well inside the
+  KL budget (maximum aggregate KL `0.000629`, maximum phase KL `0.001148`),
+  without clipping or early stopping.  Update 10 has no following fresh
+  rollout and was therefore not considered for selection.
+- Forgetting check: Comparing the same even collection cycle from generation 6
+  (update-5 policy) to generation 10 (update-9 policy), reward/phase-success
+  changed from `5.34259/0.34963` to `5.34862/0.35018` for two modules,
+  `4.26916/0.26833` to `4.45475/0.28655` for three modules, and
+  `2.07283/0.15793` to `3.11937/0.19706` for four modules.  No forgetting was
+  detected by the approved criteria.
+- Five-module validation: Update 9 was the strongest evaluated candidate on
+  the matched even cycle.  It passed bucket `validation-000038-e6065f5b3c3e`
+  `4/4`, but bucket `validation-000031-0b2ee4296aaf` remained `0/4` (two object
+  drops and two lift-phase timeouts), for `4/8` overall.  There were no safety
+  failures, fallbacks, hard-collision terminals, or terminal QPID-infeasible
+  events.
+- Diagnosis: The parent update-4 policy also scored `0/4` on the failing bucket
+  with object drops.  Nominal QPID scored `0/4` with lift timeouts, and the
+  historical five-module nominal screen had already scored `0/4` train and
+  `0/2` validation.  This is therefore an unresolved five-module continuous
+  contact-to-lift-to-transport problem, not newly introduced forgetting.
+- Decision: No two--five-module checkpoint was selected and the lineage is not
+  parent-eligible.  Further unchanged updates are not justified.  The proposed
+  method-level follow-up is to mix continuous state-inheritance examples across
+  contact acquisition, lift, and early transport for five-module morphologies,
+  while retaining the common action contract and replaying modules 2--4.
+- Evaluation repair: Nominal-QPID diagnostic plumbing was updated to carry the
+  explicit immutable contact-space contract/evidence while actor actions are
+  bypassed.  Policy, reward, controller, and physics semantics were unchanged;
+  `29/29` focused tests passed.
+- Evidence: The complete hash-bound decision record is
+  `training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_5/checkpoint_selection.json`.
+- Storage: Deleted 39 summarized raw training-rollout files totaling
+  `14,433,732,280` bytes.  Summaries, hashes, checkpoints, logs, reset banks,
+  and all continuous-validation evidence remain.  Approximately `56 GB` was
+  free at handoff.
+
+## 2026-08-16 — C3 five-module transition-focused curriculum trial
+
+- Scope: Test the approved follow-up to the unresolved five-module continuous
+  transition failure without changing the common policy action contract,
+  reward ownership, QPID, physics, or module-specific behavior.  The trial
+  branched from the original module-2--5 update-9 checkpoint at SHA-256
+  `22024ace084fc38f89b443505aba2c73e513387a64863f0716d7b564ee7a0ece`.
+- Curriculum change: Retained the existing phase-reset and continuous-state-
+  inheritance PPO mixture, but increased five-module inheritance coverage from
+  one to all four train morphologies and seeded phases 1, 2, and 3 (contact
+  acquisition, lift, and transport).  Modules 2--4 remained in replay.  Each
+  update used `369,664` train steps plus `262,144` held-out phase-reset steps.
+- Implementation: Added configuration and validation for per-module
+  inheritance topology counts, focused module counts, and configurable phase
+  seeds.  Updated the stage runner, tensor on-policy dataset assembly, and run
+  script to accept the variable shard count.  Focused unit tests passed
+  `41/41`; relevant Python modules passed `py_compile`, the shell runner passed
+  `bash -n`, and `git diff --check` passed.
+- Training: Completed updates 10--14.  All five updates completed one PPO epoch
+  without KL early stopping or rollback; maximum aggregate KL was `0.001179`
+  and maximum phase KL was `0.001922`, both far below the `0.02` limit.  Update
+  14 has no following fresh rollout and is not selectable.
+- Matched transition result: Generation 10 evaluated the parent update-9
+  policy and generation 14 evaluated update 13 on the same four five-module
+  state-inheritance morphologies and seeds.  Mean reward changed from
+  `0.908372467` to `0.907128052`, phase-success rate from `0.001904297` to
+  `0.002148438`, QP-feasible rate from `0.999625651` to `0.999332682`, and
+  actor-task-success rate from `0.000520833` to `0.000537109`.  This is flat
+  rather than a robust learning trend.
+- Continuous validation: Update 10 had the strongest evaluated five-module
+  inheritance reward (`0.918201403`) and was tested on the same fixed buckets
+  and seeds as the parent.  Bucket 31 remained `0/4` (two lift-phase object
+  drops and two lift-phase timeouts); bucket 38 remained `4/4`.  The total was
+  therefore the same `4/8` as update 9, with no fallback or terminal QPID-
+  infeasible event.
+- Decision: No focused-trial checkpoint was selected, the lineage is not
+  parent-eligible, and more unchanged updates are not justified.  The sparse
+  five-module phase-success rate remained near `0.2%`, so simply adding more
+  long inheritance rollouts did not provide an effective transition-learning
+  signal.  The next proposed method-level change is a transition-targeted
+  backward curriculum: short-horizon supervision around contact-to-lift and
+  lift-to-transport boundaries, followed by progressively earlier reset
+  states.  This requires approval before implementation.
+- Evidence: The hash-bound decision record is
+  `training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_5_transition_focused_v1/checkpoint_selection.json`;
+  formal episode evidence is under its
+  `evaluations/continuous_validation_update10_module_05_v1/` directory.
+- Storage: Deleted generation-14 raw tensors totaling `5,526,347,072` bytes
+  after retaining their manifest, hashes, reward summary, checkpoint, and
+  logs.  Formal continuous-validation rollouts remain.  The deleted raw data
+  are reproducible from the retained hash-bound checkpoint, reset banks,
+  bucket manifest, seeds, and collector logs; approximately `54 GB` was free
+  afterward.
+
+## 2026-08-16 — C3 five-module transition-targeted backward curriculum
+
+- Scope: Implemented the approved short-horizon backward curriculum after the
+  long state-inheritance trial remained flat.  The branch starts from the
+  original module-2--5 update-9 checkpoint at SHA-256
+  `22024ace084fc38f89b443505aba2c73e513387a64863f0716d7b564ee7a0ece`.
+  Policy action meaning, reward, QPID, physics, and formal evaluation were not
+  changed.
+- Implementation: Added an exact fixed-progress stratum selector and bound the
+  collector, dataset, stage runner, config, and artifact metadata to
+  `order9_c3_transition_backward_curriculum_v1_fixed_progress`.  Each update
+  replayed 262,144 two--five-module phase-reset steps and added 49,152
+  five-module continuous steps: all four train morphologies, 48 environments
+  each, 256 steps, contact/lift seeds, and an exact 0.9 reset after every
+  terminal.  Focused tests passed `78/78`; `py_compile`, `bash -n`, exact
+  behavior replay, and `git diff --check` passed.
+- Training: Completed updates 10--13.  Checkpoint SHA-256 values were
+  `4ec429e0...feb14b`, `2b3cd897...153c0`, `4a57fbca...5a793d`, and
+  `1db23908...dc3902`.  No update hit KL early stop; maximum aggregate KL was
+  `0.001016` and maximum phase KL was `0.001754`.
+- Matched boundary evidence: Parent generation 10 had zero contact-to-lift
+  transitions.  Updates 10, 11, and 12 produced 5, 1, and 5 transitions,
+  respectively, but every transition occurred on the same one of four train
+  morphologies.  Mean boundary reward changed from `0.833259` to a best
+  `0.843962`; QP feasibility was 99.996--100% and collision rate was zero.
+  No generation produced a lift-to-transport transition.
+- Formal five-module validation: Selected update 12 as the strongest evaluated
+  diagnostic candidate and reran the exact previous bucket/seed conditions.
+  Bucket 31 remained `0/4`, with one object drop and three lift timeouts;
+  bucket 38 remained `4/4`.  Overall result was still `4/8`, with zero hard
+  collision, fallback, or terminal QPID-infeasible event.  Relative to the
+  parent, one drop changed to a lift timeout, which is improved holding but not
+  task success.
+- Decision: No checkpoint is selected and this lineage is not parent-eligible.
+  The approved method delivered a local contact-to-lift signal but did not
+  generalize across topology or reach lift-to-transport.  More unchanged
+  updates are not justified; changing boundary supervision now constitutes a
+  new method-level decision.
+- Evidence: The machine-readable record is
+  `training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_5_transition_backward_p90_v1/checkpoint_selection.json`;
+  formal episode evidence is under its
+  `evaluations/continuous_validation_update12_module_05_transition_backward_p90_v1/`
+  directory.
+- Storage: Deleted 52 summarized training rollout tensors totaling
+  `19,632,266,336` bytes.  Per-generation manifests, hashes, reward summaries,
+  logs, reset banks, all checkpoints/PPO reports, and the 590 MB formal
+  validation evidence remain.  The deleted tensors are reproducible from the
+  retained inputs; approximately `53 GB` was free at handoff.
+
+## Global Worklog
+
+### 2026-08-16 — Saved C3 validation artifact real-time mesh playback
+
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md`, with the active
+  `AMSRR_design_modification_by_codex.md` amendments.
+- Work package / Agent label: C3 runtime visualization and validation
+  diagnostics.
+- Summary: Added a read-only browser GUI for the retained formal C3 rollout
+  tensors.  It selects bucket 31 or 38 and environment 0--3, reconstructs the
+  exact URDF visual meshes from recorded articulation-root/joint/object state,
+  and plays the saved simulation clock at 1x without launching Isaac, PhysX,
+  `pi_L`, QPID, collision admission, or validation.  The first terminal state
+  is retained while a later automatic environment reset is excluded.
+- Files changed: `amsrr/visualization/order9_c3_rollout_playback.py`,
+  `amsrr/visualization/order9_c3_curation.py`,
+  `amsrr/visualization/static/order9_c3_mesh_viewer.js`,
+  `scripts/order9_render_c3_validation_playback.py`,
+  `tests/unit/visualization/test_order9_c3_rollout_playback.py`, and
+  `tests/unit/visualization/test_order9_c3_curation_visualization.py`.
+- Schema/interface changes: No production schema or policy/controller
+  interface change.  The private visualization scene payload was extended
+  backward-compatibly with optional compact `urdf_fk_v1` animation frames;
+  existing per-frame model-matrix animations remain supported.
+- Upstream dependencies used: Hash-bound morphology URDFs, formal update-12
+  `evaluation_rollout.pt` files, their four-row episode JSONL evidence, and the
+  existing exact-STL WebGL viewer.
+- Downstream impact: Diagnostic visualization only.  Generated output is
+  `evaluations/continuous_validation_update12_module_05_transition_backward_p90_v1/artifact_playback_v1/index.html`;
+  its eight viewers occupy about 87 MB and are ignored by Git.
+- Tests added or run: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python -m pytest -q
+  tests/unit/visualization` passed `13/13`; relevant modules passed
+  `py_compile`; `git diff --check` passed.  A real-artifact conversion generated
+  all eight episodes in 13.11 s with 1.08 GB maximum RSS.  Headless Chrome
+  rendered bucket 31/environment 0 and bucket 38/environment 3, including
+  their final failure/success states.
+- Commands run: Focused pytest/py_compile/diff checks, the new playback CLI at
+  10 Hz for both formal buckets, and read-only headless/browser rendering.
+- Assumptions: The rollout `robot_root_pose_world`, local joint readback, and
+  object pose are the authoritative saved visualization state.  URDF FK may
+  omit sub-millimetre PhysX fixed-joint/body-readback disagreement; it does not
+  alter the recorded root, joints, object trajectory, outcome, or timing.
+- Blockers / open questions: None.  Bucket 31 remains the failed comparison
+  (`object_dropped` once and `phase_timeout` three times); bucket 38 is the
+  successful `4/4` comparison.
+- Next steps: Use the GUI to inspect when contact/object motion diverges in the
+  four bucket-31 episodes before proposing another C3 method change.
+
+---
+
+## Work Package Logs
+
+### Agent C3 runtime visualization: saved validation playback
+
+#### 2026-08-16
+
+- Scope: Offline, real-time visual replay of retained formal C3 evidence.
+- Upstream dependencies: Formal update-12 tensors/episode rows and immutable
+  morphology URDF hashes.
+- Implemented: Compact browser-side URDF FK, per-step diagnostic status,
+  terminal post-state retention, bucket/environment selector, shared exact-STL
+  library, and a generic multi-bucket CLI.
+- Not implemented: PhysX resimulation, rerunning validation, contact-patch
+  rendering, or changing any learned/control method.
+- Schema/interface changes: Visualization-only optional `urdf_fk_v1` payload;
+  production interfaces are unchanged.
+- Downstream impact: None outside diagnostics.
+- Tests added: First-episode/reset exclusion, real-time sampling endpoints,
+  episode selector/index provenance, duplicate-row rejection, and compact-FK
+  viewer compatibility.
+- Tests passed: `13/13` visualization tests plus real-artifact and Chrome
+  rendering checks.
+- Handoff notes: Open `artifact_playback_v1/index.html`, select a bucket and
+  environment, then press Play at `1x`.  The manifest explicitly records
+  `physics_executed_during_playback=false` and
+  `revalidation_performed=false`.
+- Open questions: None.
+
+### 2026-08-16 — C3 bucket-31 virtual-contact lead sweep
+
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md`, with the active
+  `AMSRR_design_modification_by_codex.md` amendments.
+- Scope: Tested the first proposed bucket-31 remedy without changing the
+  checkpoint, pi_L action contract, QPID, reward, or physics. Added a strictly
+  acceptance-ineligible diagnostic that assigns equal environment groups to
+  additional virtual-contact IK leads and terminates after lift.
+- Implementation: `scripts/order9_vectorized_isaac_rollout.py` now accepts
+  `--diagnostic-virtual-contact-additional-lead-sweep-mm`. It solves each local
+  compression target once, broadcasts the resulting joint target by
+  environment, retains the exact formal phase-zero start and learned pi_L, and
+  marks every resulting artifact as ineligible for promotion. The existing
+  anchor-owner diagnostic mask was made batch-safe for per-environment nominal
+  joint deltas.
+- Execution: Used update-12 checkpoint SHA-256
+  `4a57fbca1b46db0d853855a736545a478a4ad65249a0cca10a2de74f9d5a793d`.
+  Swept additional `0, 0.5, 1, 2, 3 mm` over the configured `2 mm` nominal
+  lead, with four Isaac environments per condition, on failed bucket 31 and
+  successful control bucket 38.
+- Result: Bucket 31 lift success was `0/4, 0/4, 4/4, 4/4, 4/4`; bucket 38 was
+  `4/4, 4/4, 4/4, 4/4, 0/4`. All conditions had 100% lift QP feasibility,
+  zero rotor saturation, and zero prohibited collision. At `+1 mm`, bucket-31
+  mean carrier/object vertical slip fell from `73.0 mm` to `10.3 mm`, while
+  bucket 38 remained `4/4` with `2.5 mm` mean slip.
+- Decision: The immediate bucket-31 failure is insufficient nominal
+  compression margin. `+1 mm` is the smallest tested safe/effective value;
+  `+3 mm` is excessive and breaks the control morphology. Production config
+  was not changed. The next method/parameter decision is whether to screen
+  `+1 mm` across the complete current validation set.
+- Evidence:
+  `training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_5_transition_backward_p90_v1/evaluations/diagnostic_virtual_contact_additional_lead_sweep_update12_v1/diagnostic_summary.md`
+  plus its two 20-environment raw artifacts and episode JSONL files.
+- Tests: `py_compile` passed. With third-party pytest plugin autoload disabled,
+  the virtual-contact and tensor pi_L runtime tests passed `25/25`. The first
+  pytest invocation was blocked before collection by a ROS Python 3.10 plugin
+  missing `lark`; this was an environment plugin issue, not a repository test
+  failure.
+
+### 2026-08-16 — C3 total 3 mm full-sequence validation diagnostic
+
+- Scope: Screened the sweep-selected total `3.0 mm` virtual-contact inward
+  lead on every fixed validation bucket in the checkpoint's current 2--5
+  module training scope. The deterministic update-12 policy, contact-space
+  action contract, formal phase-zero start, nominal IK, QPID, full PhysX mesh,
+  and four episodes per bucket were retained through settle.
+- Diagnostic isolation: `scripts/order9_run_c3_promotion.py` gained a partial-
+  collection-only `--diagnostic-virtual-contact-lead-mm` option. Explicit
+  virtual-contact lead overrides are now marked
+  `promotion_evidence_eligible=false` by the collector. Production config and
+  the checkpoint were not changed.
+- Checkpoint: SHA-256
+  `4a57fbca1b46db0d853855a736545a478a4ad65249a0cca10a2de74f9d5a793d`.
+- Result: Modules 2--4 passed `24/24`; five-module bucket 38 passed `4/4`;
+  bucket 31 remained `0/4`. Aggregate was `28/32`. All 32 episodes had zero
+  hard collision, object drop, terminal QPID infeasibility, fallback, and
+  safety failure.
+- Failure movement: At 2 mm, all four bucket-31 episodes failed during lift
+  (one drop and three timeouts). At 3 mm, all four passed lift; one timed out
+  in transport and three timed out in place. Thus the extra 1 mm fixes the
+  measured contact/lift margin without sampled regression, but not the later
+  transport/place completion problem.
+- Decision: The evidence supports 3 mm as the better nominal lead, but it is
+  not C3 promotion evidence and is not a complete bucket-31 remedy. Diagnose
+  transport/place tracking before changing reward or retraining pi_L.
+- Evidence:
+  `evaluations/diagnostic_virtual_contact_total_lead_3mm_update12_modules_2_5_v1/diagnostic_summary.md`
+  and its eight raw rollout/episode bundles (about 2.5 GiB).
+- Tests: `py_compile` passed for both modified scripts. With third-party
+  plugin autoload disabled, promotion, virtual-contact, and stage-runner tests
+  passed `33/33`.
+
+### 2026-08-16 — C3 bucket-31 retained-rollout playback and failure isolation
+
+- Scope: Generated an offline real-time exact-mesh playback for all retained
+  total-3-mm episodes of five-module buckets 31 and 38, then diagnosed the
+  remaining bucket-31 timeout directly from the stored PhysX tensors. No
+  simulation, policy, IK, QPID, checkpoint, reward, or production config was
+  changed.
+- Playback: `diagnostic_virtual_contact_total_lead_3mm_update12_modules_2_5_v1/
+  module_05/artifact_playback_v1/index.html` contains eight selectable episodes
+  sampled at 10 Hz. Headless Chrome loading and exact-STL rendering passed.
+- Exact gate failure: Bucket 31 retains position error below `0.052 m`, QPID
+  feasibility, and zero collision/drop failures. One episode times out in
+  runtime place and three in runtime release because object-orientation error
+  reaches `0.212--0.251 rad`, above the `0.20 rad` gate.
+- Cause: During transport, robot-root orientation error remains only
+  `0.0145--0.0165 rad`, while object orientation relative to the robot drifts
+  `0.1509--0.1716 rad`. The drift axis is approximately the line joining the
+  opposing `+Y/-Y` grasp contacts. Thus the dominant issue is rotational slip
+  in a weakly constrained two-point grasp, not body/CoM tracking or QPID.
+- Control: Successful bucket 38 has only `0.0121--0.0132 rad` relative grasp
+  drift during transport.
+- Decision: Do not change reward or retrain pi_L yet. The next bounded test is
+  total `4 mm` on buckets 31 and 38 through the complete sequence. If relative
+  rotation persists, treat it as a contact-geometry/torsional-stability issue
+  rather than adding more nominal compression.
+- Evidence: `transport_orientation_slip_diagnosis_v1.md` beside the diagnostic
+  summary and raw rollout bundles.
+
+### 2026-08-16 — C3 total 4 mm bucket-31/control A/B
+
+- Scope: Ran a full-sequence, acceptance-ineligible total-4-mm inward-lead A/B
+  on failed five-module bucket 31 and successful control bucket 38. The exact
+  update-12 checkpoint, deterministic pi_L, contact-space action contract,
+  nominal trajectory, QPID, full PhysX mesh, and four formal-phase-zero
+  episodes per bucket were retained.
+- Checkpoint SHA-256:
+  `4a57fbca1b46db0d853855a736545a478a4ad65249a0cca10a2de74f9d5a793d`.
+- Result: Bucket 31 improved from `0/4` at 3 mm to `4/4` at 4 mm; bucket 38
+  remained `4/4`. All eight 4 mm episodes had zero timeout, drop, hard
+  collision, terminal QPID infeasibility, fallback, and safety failure.
+- Mechanism: Bucket-31 transport object-to-robot orientation drift fell from
+  `0.1509--0.1716 rad` to `0.0117--0.0125 rad`. The corresponding end-of-
+  transport object orientation error fell to `0.0245--0.0249 rad`.
+- Conclusion: The immediate bucket-31 failure was insufficient nominal inward
+  lead/contact margin, not an intrinsically infeasible two-point contact
+  assignment. Total 4 mm is the nominal candidate.
+- Next gate: Screen total 4 mm across all eight fixed 2--5-module validation
+  buckets (32 episodes). If it passes without safety regression, update the
+  production nominal lead and rerun formal validation with the unchanged
+  checkpoint; no retraining is indicated yet.
+- Evidence:
+  `evaluations/diagnostic_virtual_contact_total_lead_4mm_update12_bucket31_38_v1/diagnostic_summary.md`
+  plus two raw rollout bundles. Collection took `1311.1 s` and `1544.4 s` in
+  parallel and retained approximately `807 MiB`.
+
+### 2026-08-16 — C3 production 4 mm adoption and 2--5-module validation
+
+- Scope: Completed the approved follow-up to the bucket-31/control A/B. First,
+  the unchanged update-12 checkpoint was screened at total `4 mm` on all eight
+  fixed 2--5-module validation buckets (`32` full approach-through-settle
+  episodes). Then `c3_virtual_contact_inward_lead_m` was changed from `0.002`
+  to `0.004`, and the same set was rerun without any diagnostic override.
+- Provenance: Checkpoint SHA-256 remained
+  `4a57fbca1b46db0d853855a736545a478a4ad65249a0cca10a2de74f9d5a793d`;
+  action contract remained `contact_space_projected_policy_command`. The
+  runtime-only lead edit did not change the curriculum schedule hash
+  `47e7fb64...37f81bd` or C3 stage hash `8025354c...214837`, so no checkpoint
+  rebind or PPO retraining was required.
+- Diagnostic screen: All `32/32` episodes succeeded with zero timeout,
+  fallback, safety failure, object drop, hard collision, or terminal QPID
+  infeasibility.
+- Formal production-condition result: All `32/32` episodes again succeeded.
+  Every raw artifact records lead `0.004 m`, config hash
+  `da6e3c8f...81a`, no diagnostic lead override, `raw_contact_actor_input=false`,
+  and the exact checkpoint SHA. All six failure counters remained zero.
+- Decision: Adopt common production nominal lead `4 mm` for subsequent C3
+  work. This closes the current 2--5-module validation scope but is not the
+  complete later 2--8-module C3 promotion evaluation.
+- Tests: Curriculum, C3 promotion, and virtual-contact unit tests passed
+  `25/25` with third-party pytest plugin autoload disabled. Config parsing and
+  manifest/checkpoint binding passed before Isaac execution.
+- Evidence:
+  `evaluations/formal_production_virtual_contact_4mm_update12_modules_2_5_v1/formal_summary.json`
+  and `formal_summary.md`, plus eight raw rollout/episode bundles. The formal
+  evidence occupies approximately `2.6 GiB`; about `43 GiB` remained free at
+  completion.
+
+### 2026-08-17 — Uniform 2--6-module transition-backward PPO trial
+
+- Scope: Implemented the approved correction to the phase-reset/continuous-
+  execution distribution gap. Every module count from two through six now
+  contributes the same two contact-acquisition/lift state-inheritance
+  topologies per update, in addition to two ordinary phase-reset topologies.
+  No module-count-specific action mode, reward, QPID, physics, nominal 4 mm
+  inward lead, or formal validation condition was changed.
+- Implementation: Updated the production curriculum to use two inheritance
+  topologies for every active module count, added
+  `scripts/run_order9_c3_ppo_2_6_uniform_transition.sh`, and updated the
+  curriculum/stage-runner contract tests. Preflight resolved exactly two
+  inherited topologies for each of modules 2--6 and 647,168 total generation
+  steps per update.
+- Verification: Curriculum, stage-runner, and tensor on-policy dataset tests
+  passed `41/41`; Python compilation, shell syntax, and `git diff --check`
+  passed.
+- Training: Starting from the accepted 2--5 update-12 checkpoint
+  (`4a57fbca...5a793d`), updates 13--15 completed without KL rollback or early
+  stop. The resulting SHA-256 values are update 13 `fa654047...d94471`, update
+  14 `b3c70a92...f2d8`, and update 15 `0d914703...8f934`. Maximum phase KL was
+  `0.00186475`, `0.00122313`, and `0.00193777`, respectively.
+- Controlled reward result: Generation 13 and 15 use the same bucket cycle and
+  compare update-12 with update-14 behavior. Overall reward increased
+  `+0.270210`, phase success `+0.014069`, and QP feasibility `+0.046150`.
+  Modules 2--5 showed no material forgetting; module 4 improved strongly.
+  Module 6 instead changed by reward `-0.038346` and phase success
+  `-0.002497`.
+- Formal result: Updates 13, 14, and 15 each scored `0/8` on the two fixed
+  held-out six-module buckets. Every failure was an object drop during lift;
+  there was no hard collision or terminal QPID infeasibility in update 15.
+  The learned inward-normal action increased, but measured lift contact force
+  did not materially increase and still decayed to zero.
+- Decision: Do not spend further identical-update budget. The approved
+  distribution correction is operational but insufficient for six-module
+  lift retention, so no checkpoint from this child lineage is selected for C3
+  promotion. Any next change to contact authority, nominal contact margin, or
+  transition credit assignment is a method-level decision.
+- Storage: Deleted only reproducible raw validation tensors from generations
+  13--15 after SHA, checkpoint, and reward-summary checks (about `7.3 GiB`).
+  Train shards, reward summaries, checkpoints, and formal evaluation artifacts
+  remain. Approximately `23 GiB` was free at completion.
+- Evidence:
+  `modules_2_6_uniform_transition_p90_from_update12_v1/uniform_transition_trial_summary.md`
+  and its referenced generation/evaluation directories.
+
+### 2026-08-17 — Fixed-checkpoint six-module 4/5/6 mm lead diagnosis
+
+- Scope: Performed the approved minimal A/B/C test to distinguish nominal
+  contact-margin shortage from learned contact-action authority. The update-15
+  checkpoint (`0d914703...8f934`), two fixed six-module validation buckets,
+  four seeds per bucket, formal phase-zero start, policy, QPID, physics, and
+  gates were held constant. Existing production 4 mm evidence was reused and
+  only 5/6 mm diagnostic overrides were newly simulated.
+- Result: 4, 5, and 6 mm each scored `0/8`; all 24 failures were object drops
+  during lift. No hard collision or terminal QPID infeasibility occurred.
+  Mean terminal step increased monotonically from `3176.0 -> 3654.3 ->
+  3862.8` on bucket 32 and `2920.0 -> 3291.3 -> 3933.0` on bucket 39.
+- Physical evidence: The lift-time mean weaker-anchor normal force increased
+  from `1.156 -> 1.330 -> 1.524 N` on bucket 32 and `0.805 -> 1.138 ->
+  1.222 N` on bucket 39. The estimated required value remained `4.0 N`.
+  Thus nominal lead affects contact margin but remains insufficient through
+  6 mm.
+- Policy evidence: The fixed actor emitted approximately `0.0213` normalized
+  inward-normal action, corresponding to only about `0.21 mm` of the available
+  10 mm residual range. It was not action-saturated, and lift-time QP
+  feasibility remained 1.0. In the two module-6 inheritance shards, 694
+  relevant sampled actions had standard deviation `0.0941` and maximum
+  `0.2921`; none explored more than 3 mm of learned closure.
+- Decision: Retain production 4 mm; neither 5 nor 6 mm is accepted. The
+  remaining bottleneck is learning to use the existing contact-normal action
+  authority for sustained lift, not a QPID or contact-action hard limit. A
+  curriculum/credit change is required before further training. The smallest
+  candidate is morphology-uniform widening of contact-normal exploration,
+  leaving the deterministic deployed action and action limits unchanged.
+- Storage: The two added formal diagnostic bundles occupy about `640 MiB`;
+  approximately `21 GiB` remained free at completion.
+- Evidence:
+  `modules_2_6_uniform_transition_p90_from_update12_v1/nominal_lead_4_5_6mm_diagnosis_v1.md`.
+
+### 2026-08-17 — Morphology-uniform contact-normal exploration trial
+
+- Scope: Implemented the approved minimum follow-up to the six-module
+  diagnosis. A recorded warm-start migration changed only the per-contact
+  `translation.inward_normal` exploration standard deviation from `0.13533`
+  to `0.30`; actor means, every other action coordinate, common action
+  contract, 10 mm bound, production 4 mm lead, reward, QPID, physics, and
+  module-count behavior remained unchanged.
+- Implementation: Added the typed curriculum setting, one-scalar migration,
+  verified initializer builder, and a 2--6-module runner. The initializer SHA
+  is `b5875800...e3b2`; automated verification proved that exactly one state
+  scalar changed and the deterministic actor mean was preserved. Targeted
+  curriculum/migration tests passed `47/47` before training.
+- Training: Fresh update 0 collected `647,168` environment steps and completed
+  `133` optimizer steps without rollback or KL early stop. Approximate KL was
+  `0.0009272`, maximum phase KL `0.0017636`, and the child SHA is
+  `c1e9a189...bf8a1`. Collection, dataset build, and PPO took `789.68 s`,
+  `12.33 s`, and `1636.12 s`, respectively.
+- Exploration result: On the two module-6 inheritance shards, lift sample
+  count increased `694 -> 1,495`, two-contact mean-action standard deviation
+  `0.0940 -> 0.1965`, samples above normalized 0.3 `0 -> 8.29%`, and mean
+  weaker-anchor force `0.788 -> 1.182 N`. Thus the previously unvisited
+  compression region was reached. Lift-sample mean reward nevertheless fell
+  `2.226 -> 1.570`, showing the cost of symmetric wide exploration.
+- Formal result: The unchanged fixed two-bucket, four-episode-per-bucket,
+  phase-zero, production-4-mm validation remained `0/8`; all failures were
+  object drops during lift, with no hard collision or terminal QPID
+  infeasibility. Deterministic inward action increased only about `0.042 mm`.
+  Mean retention step improved `3176 -> 3342` and `2920 -> 3484.25`, but no
+  episode reached transport.
+- Decision: Do not promote this child or spend further identical-update
+  budget. Uniform exploration widening is operational and physically useful,
+  but insufficient by itself. A change to asymmetric exploration or how
+  successful retention samples move the deterministic mean is a new
+  method-level decision.
+- Storage: After matching its recorded SHA-256 `b3284020...4143`, removed
+  only the reproducible `generation_000000/raw/validation.pt` (`1.82 GB`).
+  Train shards, exact-replay manifest, reward summary, checkpoint, and formal
+  validation evidence remain; approximately `18 GiB` is free.
+- Evidence:
+  `modules_2_6_normal_exploration_std030_from_update15_v1/contact_normal_exploration_trial_summary.md`.
+
+### 2026-08-17 — Factorized contact/centroidal/posture actor credit
+
+- Scope: Implemented the approved separation of PPO learning signals without
+  changing the deployed action contract. The original reward is partitioned
+  exactly into contact, centroidal, and posture channels; each channel is
+  paired with only its matching action log-probability. The total-return critic
+  and all runtime inputs/outputs remain unchanged.
+- Implementation: Added `order9_factorized_actor_credit.py`, component action
+  log-probability/entropy exposure, per-channel GAE and phase normalization,
+  clipped component PPO losses, checkpoint/TensorBoard provenance, curriculum
+  validation, and a reproducible two--six-module runner. Legacy head-only
+  objectives are explicitly incompatible with this mode.
+- Verification: The focused suite passed 88 tests and the follow-up provenance
+  suite passed 53 tests. Real-artifact reward reconstruction error was
+  `1.907e-6`, component GAE sum error `9.155e-5`, total behavior log-probability
+  replay error `4.768e-6`, and component-density sum error `7.629e-6` over
+  12,288 records.
+- Training: Starting from the accepted update-12 checkpoint, updates 13--15
+  each consumed 647,168 environment steps. They completed 132, 132, and 133
+  optimizer steps with zero rollback or KL early stop. Checkpoint SHAs are
+  `a16fcf6...fca1`, `6985c66...60ce`, and `ccae601...f424`.
+- Reward result: Six-module mean reward / phase success changed
+  `2.1671/0.1294 -> 2.2114/0.1356 -> 2.1593/0.1285` for behavior updates
+  12--14. The last two comparisons use alternating bucket cycles, but neither
+  aggregate nor six-module metrics show sustained improvement; modules 3--5
+  also move in opposing directions.
+- Formal result: Updates 13, 14, and 15 each scored 0/8 on the same two fixed
+  six-module held-out buckets. All 24 episodes completed approach, contact
+  acquisition, and lift, then dropped the object in transport. There were no
+  hard collisions, terminal QPID infeasibilities, timeouts, or fallbacks.
+- Decision: Stop identical-update spending. Factorized credit is operational
+  and numerically stable but insufficient for six-module transport retention,
+  so this child lineage is not selected for C3 promotion. Further temporal
+  contact-retention or control-contract changes are method-level decisions.
+- Storage: After saving checkpoint hashes and reward summaries, deleted only
+  reproducible generation-13--15 raw train tensors (about 17.6 GB). Formal
+  validation raw, checkpoints, manifests, summaries, and TensorBoard events
+  remain. Evidence is in
+  `modules_2_6_factorized_actor_credit_from_update12_v1/factorized_actor_credit_trial_summary.md`.
+
+## 2026-08-17 — C3 deployable contact-feedback v8 and six-module success
+
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md`, superseded where noted
+  by `AMSRR_design_modification_by_codex.md`.
+- Work package / Agent label: Agent J/K/L, C3 learned `pi_L`, tensor PPO,
+  physical evaluation, and evidence integrity.
+- Summary: Implemented the approved v8 contact-feedback actor, migrated the
+  accepted v7 update-12 checkpoint, ran fresh two--six-module update 0, and
+  completed fixed six-module formal continuous validation at `8/8`.
+- Files changed: `amsrr/policies/order9_low_level_policy.py`,
+  `amsrr/training/order9_contact_space_action.py`,
+  `amsrr/training/order9_pi_l_contact_feedback_migration.py`,
+  `amsrr/training/order9_checkpoints.py`,
+  `amsrr/training/order9_tensor_pi_l_runtime.py`,
+  `amsrr/training/order9_tensor_rollout_artifact.py`,
+  `amsrr/training/order9_tensor_pi_l_ppo.py`,
+  `amsrr/training/order9_offline_training.py`,
+  `scripts/order9_prepare_c3_contact_feedback_initializer.py`,
+  `scripts/order9_vectorized_isaac_rollout.py`,
+  `scripts/run_order9_c3_ppo_2_6_contact_feedback.sh`, and nearby unit tests.
+- Schema/interface changes: No public schema change. Policy checkpoint version
+  advances from v7 to v8 and the internal per-contact actor feature width
+  advances from 30 to 38. The executed `PolicyCommand`, contact-space action,
+  QPID/QP, and safety interfaces are unchanged.
+- Upstream dependencies: Accepted v7 update-12 SHA
+  `4a57fbca...5a793d`, reviewed contact-space bases and nominal trajectories,
+  production 4 mm virtual-contact lead, motor-load readback, and fixed bucket
+  manifest.
+- Implementation: Added signed surface distance, contact-frame relative twist,
+  and motor-load compression proxy as deployable observations. Raw PhysX
+  contact force is rejected as an actor input. Migration copied all old
+  parameters exactly, zeroed only new encoder columns, and initialized a
+  trainable 6 mm inward residual / 1 mm standard deviation based on an
+  acceptance-ineligible 0--8 mm sweep.
+- Training: Initializer SHA is `ecaa774b...683`; fresh update-0 SHA is
+  `e5815d86...c3b`. The update generated 647,168 environment transitions,
+  trained on 385,024 records for one epoch / 133 optimizer steps, and completed
+  without rollback or KL stop. Approximate KL was `0.0001752`, maximum phase
+  KL `0.0003280`, and maximum topology-phase KL `0.0016598 < 0.04`.
+- Evaluation: Both fixed six-module buckets passed `4/4`, for `8/8` total.
+  All episodes reached settle; drop, hard collision, terminal QPID infeasible,
+  timeout, fallback, and safety-failure counts were zero. Evaluation was bound
+  to the exact child SHA with formal phase-zero start, production 4 mm nominal
+  lead, no diagnostic override, no controller-side preload, and no raw-contact
+  actor input.
+- Tests added/run: Added a runtime contract test proving v8 rejects missing
+  feedback and appends all eight supplied channels. The focused runtime,
+  action, migration/checkpoint, artifact, dataset/stage-runner, and PPO suite
+  passed `126/126` in the `isaaclab3` environment. Python compilation, shell
+  syntax, and `git diff --check` also passed.
+- Commands run: v8 initializer preparation; tensor/Isaac smoke rollout and
+  exact replay; `scripts/run_order9_c3_ppo_2_6_contact_feedback.sh`; formal
+  two-bucket continuous validation; focused pytest and checkpoint/artifact
+  provenance audits.
+- Assumptions: Motor-current-derived joint load is available at deployment;
+  no F/T sensor is used. The 6 mm contact residual is a trainable policy prior,
+  not a deterministic controller command.
+- Downstream impact: v8 update 0 is the current six-module continuation
+  candidate. Modules seven and eight can use the identical actor/action
+  contract; no module-count-specific mode is allowed.
+- Blockers / open questions: The new feedback columns changed from zero but
+  remain small after one update. Formal success is primarily attributable to
+  the 6 mm prior, so feedback-dependent adaptation is not yet established.
+  Modules 2--5 were checked through rollout reward/phase-success and bounded
+  KL, not a repeated full continuous suite.
+- Next steps: Preserve summaries/checkpoints, remove only reproducible giant
+  raw tensors if disk pressure requires it, then extend the same v8 contract to
+  seven modules before any complete C3 promotion claim.
+- Storage: After retaining checkpoint SHA, exact-replay manifest, reward
+  summary, formal JSONL/logs, TensorBoard, and the trial report, deleted only
+  the reproducible generation-0 and formal-evaluation raw tensors (`6.1 GB`).
+  Free space increased from about `9.8 GB` to `16 GB`; reconstruction requires
+  rerunning the recorded rollout commands.
+
+### Agent J/K/L: C3 deployable contact-feedback v8
+
+#### 2026-08-17
+
+- Scope: Deployable `pi_L` contact feedback, v7-to-v8 migration, fresh PPO,
+  and fixed six-module formal validation.
+- Implemented: Eight feedback channels per contact, exact-copy migration,
+  trainable 6 mm policy prior, smoke/exact replay, update 0, and 8/8 validation.
+- Not implemented: Seven/eight-module extension and complete C3 promotion.
+- Schema/interface changes: Internal checkpoint/feature version only; public
+  policy/controller command boundary unchanged.
+- Tests passed: `126/126` focused tests plus Python/shell syntax and diff
+  whitespace checks.
+- Handoff notes: Use only update-0 SHA `e5815d86...c3b` as the v8 continuation
+  parent. Do not attribute current success to learned feedback adaptation yet.
+- Open questions: Measure whether later randomized training creates meaningful
+  feedback-conditioned action variation while retaining old-module behavior.
+
+### Codex: C3 contact-feedback v8 extension to seven modules
+
+#### 2026-08-18
+
+- Scope: Continue the identical v8 action/observation/QPID contract from the
+  accepted 2--6-module update-0 checkpoint into 2--7-module PPO, then evaluate
+  only the two fixed seven-module held-out buckets as requested.
+- Training: Completed update 1 (`3ae10779...f3bb`) and update 2
+  (`5df273b5...455f`), each with 671,744 transitions, one epoch, exact replay,
+  no KL stop, and maximum phase KL below `0.00029`.
+- Evaluation: Both checkpoints scored `4/8`: bucket 33 passed `4/4`, while
+  bucket 40 dropped the object at the lift-to-transport handoff in `4/4`.
+  There were no hard collisions or terminal QPID-infeasible events.
+- Diagnosis: Success and failure produced distinct deployable load/slip
+  feedback, but the deterministic six-dimensional contact residual was almost
+  constant across bucket and phase. Bucket-40 normal residual changed only
+  `6.083 -> 6.086 mm` across the two updates. A fixed 6--10 mm normal-residual
+  sweep also failed every environment, excluding normal squeeze magnitude as
+  the sole cause.
+- Storage: Preserved checkpoints, manifests, reward summaries, logs,
+  TensorBoard, JSONL evidence, and the diagnosis report. Deleted only the 25
+  reproducible raw PPO tensors after each update (`5.9 GB` and `6.2 GB`) and
+  five reproducible evaluation tensors (`1,257,100,072` bytes).
+- Stop reason: The current actor is not learning state-dependent tangential or
+  rotational contact correction. Further identical updates are not supported
+  by the evidence. A contact-head-focused optimizer pass or a larger
+  action-probe/pretraining change requires method-level approval.
+- Report:
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_feedback_v8_from_2_6_update0_v1/contact_feedback_v8_modules_2_7_update2_diagnosis.md`.
+
+### Codex: C3 contact-head-only extra-pass trial
+
+#### 2026-08-18
+
+- Scope: Implement the approved same-rollout factorized-contact-advantage
+  optimizer pass, train one common 2--7-module child from update 2, and rerun
+  the two fixed seven-module continuous-validation buckets.
+- Implementation: Added an explicit `contact_head_extra_optimizer_passes`
+  curriculum contract and a topology-equal PPO pass that can update only the
+  contact feature encoder, contact slot embedding, contact mean, and contact
+  log-standard-deviation. The shared trunk, centroidal/posture heads, critic,
+  runtime observation/action, nominal trajectory, and QPID are unchanged.
+- Verification: Focused tests passed `65/65`; the wider related suite passed
+  `126/126`. A real-artifact A/B smoke replay showed nonzero contact-parameter
+  movement and exactly zero non-contact parameter movement.
+- Training: Fresh update 3 consumed 671,744 transitions, applied 267 optimizer
+  steps, and created SHA `76f8a684...c3bf2b`. Exact replay passed. Maximum
+  aggregate phase KL was `0.00368337`. The final contact-only candidate step
+  exceeded the `0.01` non-target parent-KL limit and was rolled back; 132/133
+  contact-only minibatches were retained.
+- Validation: Bucket 33 remained `4/4`; bucket 40 remained `0/4`, so the fixed
+  result stayed `4/8`. All bucket-40 failures were object drops during lift;
+  collision, terminal QPID infeasibility, timeout, and fallback counts were
+  zero.
+- Diagnosis: On the failed rollout the deterministic inward-normal action
+  changed only from `6.0863 mm` to `6.0942 mm` and had about `0.0063 mm`
+  temporal standard deviation. The additional update primarily changed
+  tangential/rotational coordinates. A scalar contact advantage on the summed
+  6-D likelihood therefore does not identify which contact coordinate should
+  move.
+- Decision: Keep the child as diagnostic evidence only; update 2 remains the
+  continuation parent. Do not add identical PPO budget. Coordinate-specific
+  contact credit or action-probe supervision is a new method-level change.
+- Storage: After checkpoint/hash/reward summaries were secured, deleted only
+  25 reproducible generation raw tensors (about `6.4 GB`), increasing free
+  space from `8.3 GB` to `15 GB`. Fixed-validation tensors were retained for
+  diagnosis and possible playback.
+- Report:
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_head_extra_pass_v1_from_update2/contact_head_extra_pass_update3_diagnosis.md`.
+
+### Codex: C3 common 20 mm contact-normal authority diagnostic
+
+#### 2026-08-18
+
+- Spec version: A-MSRR v0.4 plus approved design modifications.
+- Scope: Change the common contact-space inward-normal residual limit from
+  `10 mm` to `20 mm` and rerun the difficult seven-module bucket 40 without
+  changing its nominal trajectory or checkpoint.
+- Files changed: `amsrr/training/order9_contact_space_action.py`,
+  `tests/unit/training/test_order9_contact_space_action.py`, this worklog, and
+  `AMSRR_design_modification_by_codex.md`.
+- Schema/interface changes: None.  Tensor/action shapes and CLI are unchanged;
+  only the morphology-independent physical scale of the existing normal
+  coordinate changed.
+- Upstream dependencies: Human-reviewed nominal set v19, bucket 40 morphology
+  and task spec, update-3 checkpoint SHA `0d27905a...d7f`, nominal `4 mm`
+  virtual-contact lead.
+- Commands/tests: Focused contact-space/runtime tests passed `28/28` before
+  adding the default-value regression test; the final focused suite passed
+  `29/29`.  Ran four real-Isaac formal phase-zero episodes with seeds
+  `9052--9055`.
+- Result: `0/4` success.  Every episode entered lift and later dropped before
+  transport.  No hard collision, terminal QPID infeasibility, timeout, or
+  fallback occurred.  Terminal time and return improved in all seeds and the
+  estimated minimum normal force rose materially, so contact-normal authority
+  is causal but insufficient without matched learning.
+- Artifact:
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_coordinate_credit_v1_from_update2/evaluations/diagnostic_bucket40_contact_normal_limit20mm_v1/`.
+- Storage: Added about `115 MB`; approximately `13 GB` remains free.  No
+  checkpoint or unrelated artifact was deleted.
+- Assumptions: The requested `20 mm` is the existing contact-space normal
+  correction authority, not the nominal inward lead.
+- Blockers/open questions: A fixed checkpoint trained with the `10 mm` scale
+  does not solve bucket 40 after scale widening alone.  The next supported
+  experiment is a fresh common 2--7-module update under the `20 mm` scale,
+  followed first by bucket-40 validation and then forgetting checks.
+
+### Codex: C3 contact-coordinate credit trial
+
+#### 2026-08-18
+
+- Scope: Implement the approved normal/tangential/rotational contact-credit
+  split, train one fresh common 2--7-module child, and rerun the two fixed
+  seven-module validation buckets.
+- Implementation: Added exact reward/GAE reconstruction and coordinate
+  log-probability replay checks. The extra pass updates only contact-specific
+  parameters; runtime observations/actions, nominal trajectory, QPID,
+  physics, total reward, and ordinary all-head PPO are unchanged.
+- Verification: The focused suite passed `43/43`; the wider related suite
+  passed `96/96` before the final accepted-config restoration. Exact behavior
+  replay and coordinate reconstruction passed on the real 671,744-transition
+  rollout.
+- Training: Parent SHA `5df273b5...455f`; diagnostic child SHA
+  `0d27905a...d7f`. The run applied 235 optimizer steps, including 100 safe
+  contact-coordinate-only steps. One final candidate was rolled back by the
+  existing KL guard. Maximum phase KL was `0.0053241` and maximum applied
+  topology-phase KL was `0.017878 < 0.04`.
+- Validation: Bucket 33 stayed `4/4`; bucket 40 stayed `0/4`, for `4/8`
+  overall. Every failure was an object drop during lift; there were no hard
+  collisions, terminal QPID-infeasible events, timeouts, or fallbacks.
+- Diagnosis: The failed bucket's mean deterministic normal residual increased
+  by only about `0.022 mm`. Coordinate attribution alone is therefore
+  insufficient; it does not supply a causal/counterfactual target for how
+  much normal squeeze should increase.
+- Decision: Do not promote the child or add identical budget. Restore the
+  accepted config to zero extra contact-head passes and retain update 2 as the
+  continuation parent. A causal action-probe/auxiliary target is a separate
+  method-level decision.
+- Storage: Deleted only the reproducible generation-3 raw tensors (about
+  `6.4 GB`) after preserving checkpoint, report, logs, TensorBoard, dataset
+  manifest, and validation evidence. Free space returned to about `14 GB`.
+- Report:
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_coordinate_credit_v1_from_update2/contact_coordinate_credit_update3_diagnosis.md`.
+
+### Codex: C3 retraining with common 20 mm contact-normal authority
+
+#### 2026-08-18
+
+- Scope: Retrain the common 2--7-module policy from accepted update 2 after
+  widening the existing inward-normal contact residual from `10 mm` to
+  `20 mm`, then rerun the difficult fixed seven-module bucket 40.
+- Preflight: The focused curriculum/contact-space/runtime suite passed
+  `42/42`; the factorized-credit suite passed `3/3`.
+- A first ordinary-PPO control run produced SHA `5cd75335...b23f` and reached
+  `1/4` on bucket 40, but it had inadvertently omitted the previously
+  approved contact-coordinate extra pass. It is retained only as a control,
+  not as the requested matched-method result.
+- Matched training: Parent SHA `5df273b5...455f`; child SHA
+  `ab0cdeac...d719`; 671,744 transitions; 269 optimizer steps; all 134
+  contact-coordinate extra steps completed; no KL early stop. Maximum phase
+  KL was `0.00242256` and maximum topology-phase KL was
+  `0.00779933 < 0.04`.
+- Validation: Bucket 40 was `0/4`. Every seed completed contact acquisition
+  and dropped during lift before transport. Hard collision, terminal QPID
+  infeasibility, timeout, and fallback were all zero.
+- Diagnosis: The parent at the common 20 mm scale commanded about `12.217 mm`
+  inward-normal residual. Ordinary PPO produced `12.170 mm`; the matched
+  coordinate-credit child produced `12.199 mm`. Neither training run
+  increased the squeeze action, so adding identical budget is unsupported.
+- Decision: Keep both children diagnostic-only, retain update 2 as the
+  continuation parent, keep the common `20 mm` authority, and restore zero
+  extra contact-head passes in the accepted curriculum. Bucket 33 was not
+  rerun because the required bucket-40 test already failed.
+- Storage: Preserved checkpoints, logs, manifests, reward summary, and fixed
+  validation evidence. Deleted exactly 25 reproducible raw tensors totaling
+  `6,806,930,312` bytes; free space returned to about `13 GB`.
+- Report:
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_coordinate_credit_limit20mm_v1_from_update2/contact_coordinate_credit_limit20mm_update3_diagnosis.md`.
+
+### Codex: C3 seven-module 0.5 mm contact-normal quantization trial
+
+#### 2026-08-18
+
+- Scope: Test the user-approved alternative in which only the deployed
+  inward-normal contact residual is changed in exact `0.5 mm` increments,
+  using one seven-module-only update from accepted update 2.
+- Implementation: Kept the PPO latent Gaussian action continuous and
+  quantized its physical normal coordinate after `20 mm` scaling and before
+  contact-Jacobian projection. Tangential/rotational contact coordinates,
+  CoM/global and independent-joint actions, reward, observations, nominal
+  trajectory, QPID, and physics were unchanged. Rollout provenance records
+  both the quantizer version and step.
+- Verification: Focused curriculum/contact-action tests passed `43/43`, and
+  the unit test proves `12.24 mm -> 12.0 mm` while leaving a `1.25 mm`
+  tangential command unchanged.
+- Training: Parent SHA `5df273b5...455f`; diagnostic child SHA
+  `ddb31cf7...af8e`; seven modules only; `548,864` environment steps; one
+  complete epoch and `117` optimizer steps; aggregate KL `0.00040960` and
+  maximum phase KL `0.00068710`; no KL early stop.
+- Validation: Fixed bucket 40 with seeds `9052--9055` remained `0/4` for both
+  parent and child. All failures were object drops in lift; collision,
+  terminal QPID infeasibility, timeout, and fallback were zero. Mean episode
+  return increased from `2798.63` to `2907.02`, but this was not task success.
+- Diagnosis: The deterministic latent normal residual changed only from about
+  `12.1725 mm` to `12.1755 mm`; both mapped to exactly the same `12.0 mm`
+  physical bin at every valid step. One PPO update therefore did not alter
+  the discrete normal action.
+- Decision: Do not promote the child or adopt quantization. Restore the
+  accepted continuous mapping (`quantization_step=null`) while retaining the
+  disabled, tested implementation for reproducibility. Accepted update 2
+  remains the continuation parent.
+- Storage: Deleted the five reproducible training raw tensors after
+  preserving their hashes, checkpoint, summaries, logs, TensorBoard, dataset
+  manifest, and both fixed validation artifacts. Free space returned from
+  about `5.7 GB` to about `12 GB`.
+- Report:
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/module_07_contact_normal_quantized_0p5mm_v1_from_update2/contact_normal_quantized_0p5mm_update3_diagnosis.md`.
+
+### Codex: C3 direct 81-category contact-normal trial
+
+#### 2026-08-18
+
+- Scope: Replace only the contact-space inward-normal Gaussian with a direct
+  81-category distribution over `-20--+20 mm` at exact `0.5 mm` intervals,
+  then run one seven-module update from accepted update 2.
+- Implementation: Added the v9 categorical policy/checkpoint/artifact
+  contract and strict v8-to-v9 migration. The other five contact coordinates,
+  CoM/global and independent-joint actions, nominal `4 mm` lead, QPID,
+  physics, reward, and observations remain unchanged. This is not post-hoc
+  rounding.
+- Verification: The focused suite passed `81/81`, including sampled replay
+  and a saturated endpoint category. A first real collection exposed an
+  unreplayable subtraction of an unsaved provisional Gaussian sample and
+  failed closed before optimization. Direct mixed-density calculation fixed
+  it; recollection passed exact replay at `7.63e-06` maximum log-probability
+  error.
+- Training: Parent SHA `0d6a7ea...30dd8`; child SHA `705f8a45...6a09f`;
+  seven modules only; `548,864` transitions; one epoch and `118` optimizer
+  steps; aggregate KL `0.0004030`, maximum phase KL `0.0006512`; no early
+  stop.
+- Fixed validation: Bucket 40 improved from initializer `0/4` to child `1/4`.
+  The other three child episodes still dropped in lift. Collision, terminal
+  QPID infeasibility, timeout, and fallback were zero.
+- Diagnosis: Deterministic inference selected exactly `12.0 mm` in every
+  active slot and phase before and after the update. The categorical weights
+  changed, but the argmax category did not. The single success therefore does
+  not establish that discrete normal selection solved the squeeze problem.
+- Decision: Do not promote. Retain the child as diagnostic evidence and keep
+  accepted update 2 as continuation parent. Additional categorical budget is
+  not implied by this single update.
+- Storage: Deleted the five reproducible training raw tensors after retaining
+  hashes, checkpoint, metrics, dataset manifest, logs, TensorBoard, and both
+  fixed evaluation artifacts. Free space returned to about `12 GB`.
+- Report:
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/module_07_contact_normal_categorical_81_v1_from_update2/categorical_contact_normal_update3_diagnosis.md`.
+
+### Codex: C3 direct categorical contact-normal budget extension
+
+#### 2026-08-18
+
+- Ran the user-approved second and third categorical updates (update 4 and
+  update 5) with no method or environment changes. Each consumed `548,864`
+  transitions and completed one PPO epoch inside all KL guards.
+- Update 4 SHA: `e6928ba2...3fd2`; aggregate KL `0.00024202`; maximum phase
+  KL `0.00084146`. Update 5 SHA: `9d810f28...e04`; aggregate KL
+  `0.00029754`; maximum phase KL `0.00046209`.
+- Deterministic inference moved from the `12.0 mm` category at update 3 to the
+  adjacent `12.5 mm` category at update 5 in every active contact slot and
+  reached phase.
+- Fixed update-5 evaluation: difficult bucket 40 was `0/4`, with all four
+  episodes dropping the object in lift and no collision or terminal QPID
+  infeasibility. Known-success bucket 33 was `4/4` and completed all phases.
+- Conclusion: the policy did learn a one-bin larger squeeze, but two more
+  identical updates did not solve bucket 40 and did not cause general policy
+  collapse. Stop this diagnostic at three updates; do not promote update 5 or
+  spend more identical categorical PPO budget. Accepted update 2 remains the
+  continuation parent.
+- Deleted only the reproducible update-4/update-5 training raw tensors after
+  retaining checkpoint hashes, metrics, manifests, logs, TensorBoard, and
+  fixed evaluation artifacts. Free space remains about `11 GB`.
+
+### Codex: Bucket 40 fixed contact-normal causal sweep
+
+#### 2026-08-18
+
+- Extended the acceptance-ineligible diagnostic contact-normal sweep input
+  bound from its stale `10 mm` limit to the active common `20 mm` action
+  authority. This changes no production action limit or policy behavior.
+- Held categorical update 5 fixed and ran one 24-environment real-Isaac
+  evaluation on bucket 40: `10, 12, 14, 16, 18, 20 mm`, four episodes each.
+  Every non-normal policy output, recurrent state, nominal lead, QPID,
+  physics, and formal phase-zero contract remained unchanged.
+- Results: `10=0/4`, `12=1/4`, `14=0/4`, `16=4/4`, `18=4/4`, `20=4/4`.
+  All failures were object drops; collision and terminal QPID infeasibility
+  were zero for every value.
+- Conclusion: bucket 40 is executable with the existing contact assignment
+  and nominal trajectory. Its learned `12.5 mm` category is insufficient;
+  the first robust level in this coarse sweep is `16 mm`. The next issue is
+  categorical exploration/credit, not bucket replacement or more identical
+  PPO budget.
+- Report:
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/module_07_contact_normal_categorical_81_v1_from_update2/fixed_normal_sweep_10_20mm_report.md`.
+
+### Codex: C3 categorical 10--20 mm broad-exploration trial
+
+#### 2026-08-19
+
+- Added a full-support categorical prior that is uniform over `10--20 mm`
+  and applies a `-4.0` logit penalty outside that window. The 81 bins,
+  `0.5 mm` spacing, all other policy outputs, nominal lead, QPID, reward,
+  observation, and physics contracts are unchanged.
+- Exact v8 migration copied all existing parameters with maximum error `0.0`
+  and initialized only the categorical-logit head. The focused suite passed
+  `70/70`.
+- Ran one seven-module update from accepted update 2: `548,864` transitions,
+  one epoch, `117` optimizer steps, aggregate KL `0.000195139`, maximum phase
+  KL `0.000311420`. Child SHA is `7cbfc056...d024`.
+- Formal phase-zero validation passed difficult bucket 40 at `4/4` and
+  known-success bucket 33 at `4/4`. All eight episodes reached phase 8 with
+  zero drop, collision, terminal QPID infeasibility, timeout, or fallback.
+- Raw analysis showed an exact deterministic `16.5 mm` normal category in
+  every active contact and reached phase. This agrees with the independent
+  fixed sweep's robust-success threshold at `16 mm` and supports a causal
+  exploration explanation.
+- Decision: successful diagnostic evidence, not yet the accepted continuation
+  checkpoint. The common categorical contract must next be trained across the
+  2--7-module curriculum and checked for forgetting; no module-specific switch
+  is allowed.
+- Report:
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/module_07_contact_normal_categorical_uniform_10_20mm_v1_from_update2/uniform_10_20mm_update3_report.md`.
+
+### Codex: C3 common 2--7-module categorical update
+
+#### 2026-08-19
+
+- Continued from the successful seven-module broad-prior checkpoint and ran
+  one topology-stratified update across module counts 2--7 under one common
+  v9 action contract. There were no module-count-specific masks or method
+  switches.
+- The update consumed `671,744` transitions, completed one epoch and `134`
+  optimizer steps, and remained well inside the KL guard (aggregate
+  `0.000119304`, maximum phase `0.000194810`). Child SHA is
+  `19ab01d4...22eb`.
+- A paired fixed phase-reset forgetting check on two held-out buckets per
+  module count found reward deltas of `-0.23%`, `-0.38%`, `-1.64%`, `-1.08%`,
+  and `-0.40%` for 2--6 modules. The largest phase-success decline was only
+  `0.519` percentage point. Contact acquisition improved for every module
+  count; there was no broad QPID/collision regression.
+- Formal phase-zero continuous validation passed seven-module bucket 33 at
+  `4/4` and difficult bucket 40 at `4/4`. All eight episodes reached phase 8
+  with zero drop, hard collision, terminal QPID infeasibility, timeout, or
+  fallback.
+- The learned deterministic categories remained contact-specific: bucket 33
+  used `16.5/20.0 mm`; bucket 40 used `16.5/18.0 mm`. The common update did not
+  collapse to the former insufficient `12--12.5 mm` squeeze.
+- Decision: accept update 4 SHA `19ab01d4...22eb` as the continuation parent
+  for eight-module training. This does not yet promote C3; eight-module
+  learning and validation remain.
+- Storage: after preserving hashes, checkpoint, compact episode evidence,
+  reports, logs, manifests, reset banks, and TensorBoard data, deleted only
+  reproducible generation/comparison/formal raw tensors (about `9.5 GB`).
+  Free space increased from `59 GB` to `68 GB`.
+- Report:
+  `artifacts/p4_full/order9/stages/c3_pi_l_ppo_arbitrary_morphology/training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_7_contact_normal_categorical_uniform_10_20mm_v1_from_m07_update3/common_2_7_update4_report.md`.
+
+### Codex: C3 common 2--8-module update and closure-margin boundary
+
+#### 2026-08-19
+
+- Scope: Continued the accepted common categorical lineage from 2--7 to
+  2--8 modules with one shared action contract and no module-count-specific
+  mask or method switch.
+- Training: Parent SHA `19ab01d4...22eb`; child SHA
+  `187d5ae6...23f5`; 696,320 transitions; one epoch; 134 optimizer steps;
+  aggregate KL `0.000139311`; maximum phase KL `0.000374617`; exact replay
+  passed. Collection took 1,281.16 s and PPO optimization took 2,979.18 s.
+- Eight-module validation: bucket 41 passed `4/4`; bucket 34 failed `0/4` by
+  lift timeout after successful approach and contact acquisition. No episode
+  had hard collision, terminal QPID infeasibility, or fallback.
+- Causal action sweep: Holding the checkpoint fixed, contact-normal residuals
+  of `18/19/20 mm` all failed bucket 34 and produced only about
+  `1.37/1.42/1.47 N` mean minimum actual normal force. Offline FK confirmed
+  that the contact-space adapter does convert those residuals into inward
+  anchor motion, so this is not a dropped-action implementation bug.
+- Nominal-lead sweep: Holding the learned `18 mm` action fixed, total nominal
+  leads of `4/12/20 mm` produced fail/pass/pass through lift. Minimum
+  privileged normal force increased from `1.305 N` to `1.720/2.087 N`, with
+  no collision, drop terminal, or QPID-infeasible terminal.
+- Feasibility diagnosis: The bucket is physically executable but lies outside
+  the closure margin of the current common `4 mm nominal + 20 mm learned`
+  contract. A conservative static Jacobian check also shows its ideal equal
+  normal-force peak-torque bound is about `2.218 N/anchor`; long-chain
+  leverage is therefore material. Several other reviewed 5--8-module
+  assignments fall below the teacher's diagnostic `4 N` lower bound, whereas
+  all 2--4-module buckets clear it.
+- Decision: Do not promote update 5 or spend identical PPO budget. The next
+  step requires an explicit method choice: preferably a common
+  actuator/leverage-aware, morphology-conditioned nominal preload resolver and
+  feasibility screen; alternatively a larger versioned learned action range;
+  or only replacing the current weak-leverage bucket/contact assignment.
+  Implementation is stopped because the recommended option changes the
+  approved fixed-4-mm nominal contract.
+- Verification: Focused categorical/contact-space/stage-runner tests passed
+  `70/70` before training. Full diagnosis and evidence are in
+  `modules_2_8_contact_normal_categorical_uniform_10_20mm_v1_from_2_7_update4/common_2_8_update5_diagnosis.md`.
+
+### Codex: C3 physical-minimum nominal preload and actor-free diagnosis
+
+#### 2026-08-20
+
+- Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md` plus
+  `AMSRR_design_modification_by_codex.md`.
+- Work package / Agent label: C3 nominal IK and QPID validation.
+- Summary: Removed the unquantified fixed `12 mm` model-error addition from
+  the common actuator/leverage-aware nominal preload calculation. The active
+  rule now retains the `4 mm` minimum, computes the morphology/contact/load
+  requirement from the contact Jacobian, joint stiffness/torque envelope,
+  friction, and contact stiffness, then rounds the result upward to the next
+  `1 mm`. The bounded learned contact-normal residual remains a separate
+  policy output.
+- Files changed:
+  `configs/training/order9_learning_curriculum.yaml`,
+  `amsrr/training/order9_virtual_contact_compression.py`,
+  `scripts/order9_audit_actuator_aware_nominal_preload.py`,
+  `tests/unit/training/test_order9_actuator_aware_nominal_preload.py`,
+  `for_codex/AMSRR_design_modification_by_codex.md`, and this worklog.
+- IK implementation: The terminal contact-offset IK uses bounded continuation
+  and residual refinement so the requested normal displacement is achieved
+  without silently accepting a poorly converged joint target.
+- Offline audit: On the hash-bound 5--8-module manifest, eight-module bucket
+  34 required `29.4349 mm`, requested `30 mm`, and achieved `29.99946 mm`
+  with `0.00296 mm` maximum tangential error. Five-module bucket 38 required
+  `6.36982 mm`, requested `7 mm`, and achieved `6.999993 mm` with negligible
+  tangential error. Both retained collision scale `1.0`.
+- Real-Isaac actor-free diagnosis: With every `pi_L` correction disabled and
+  only nominal trajectory plus production QPID/QP active, eight-module bucket
+  34 passed `4/4`; five-module bucket 38 also passed `4/4`. All eight episodes
+  reached phase 8 with zero hard collision, object drop, terminal QPID
+  infeasibility, timeout, fallback, or safety failure.
+- Tests run:
+  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 .../isaaclab3/bin/python -m pytest -q tests/unit/training/test_order9_actuator_aware_nominal_preload.py tests/unit/training/test_order9_virtual_contact_compression.py tests/unit/training/test_order9_curriculum.py`
+  (`22 passed`).
+- Commands run: Offline preload audit and two four-environment
+  `order9_run_c3_promotion.py --diagnostic-nominal-qpid-only` invocations for
+  validation buckets 34 and 38.
+- Schema/interface changes: None. Existing configuration fields and action
+  tensor shapes are unchanged; only the active fixed-margin value and IK
+  numerical implementation changed.
+- Upstream dependencies used: Accepted nominal trajectories, reviewed contact
+  assignments, actuator limits/stiffness, object/friction/contact estimates,
+  and production QPID/QP.
+- Downstream impact: The diagnostic establishes a viable nominal baseline for
+  retraining the common 2--8-module policy without a universal 12 mm offset.
+  It does not constitute C3 promotion evidence because the learned actor was
+  intentionally disabled.
+- Assumptions: Quasi-static load support and the configured contact-compliance
+  model are the deterministic nominal calculation boundary; remaining model
+  error is assigned to the bounded learned contact-normal residual.
+- Blockers / open questions: A new 2--8-module policy must be trained under
+  this corrected nominal contract and pass the formal actor-enabled promotion
+  suite before promotion.
+- Next steps: Build a clean initializer/lineage under the corrected nominal
+  contract, run topology-stratified training, then perform full formal C3
+  validation with `pi_L` enabled.
+
+### Codex: C3 update-18 promoted release protection and artifact cleanup
+
+#### 2026-08-22
+
+- Confirmed the authoritative promoted checkpoint at update 18, SHA-256
+  `6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b`.
+  The exact training provenance resolver follows 19 PPO generations from
+  update 0 through update 18.
+- Confirmed formal actor-enabled promotion over 14 held-out buckets and 32
+  episodes per bucket: 448/448 successes, zero safety failures, zero fallback.
+  The promotion manifest SHA-256 is
+  `366ff7eeb32885db296d8ffbfc0aa61826ecbf93ef3404adc69f05baf33eb923`.
+- Created the read-only release
+  `artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1`. It contains
+  the final checkpoint and promotion decision, the compact C2/initializer/
+  update-0--18/teacher provenance, the accepted nominal and bucket runtime
+  inputs, and formal promotion JSON/JSONL evidence.
+- Added `for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json`, containing hashes
+  for 180 source/protected-copy pairs, the grouped update history, and an
+  implementation inventory. The inventory classifies 92 files as
+  promotion-critical or regression coverage and 67 as historical diagnostic
+  or reproduction tooling. Lightweight source in both classes is retained.
+- Added the dry-run-by-default cleanup tool
+  `scripts/cleanup_order9_c3_promoted_release_artifacts.py`. It refuses
+  deletion unless the direct protected ledger, exact C3-root containment, and
+  production transitive nominal-set validation all pass.
+- Deleted 354 exact, pre-audited targets: superseded lineages/checkpoints,
+  obsolete nominal/screens/diagnostics, duplicate evaluation tensors, and
+  reproducible retained-lineage raw rollout tensors. Allocated storage removed
+  was 650,876,272,640 bytes (606.176 GiB); final free space was approximately
+  682 GiB. Deleted superseded data is not directly recoverable.
+- Post-delete production validation exposed one dependency omitted by the
+  original direct-file ledger: the sibling validation-bucket-33 nominal
+  component referenced by the accepted 43-bucket manifest. No training or
+  evaluation continued in this state. A read-only ext4 block scan recovered
+  all 41 files, and every file was accepted only by equality with a
+  pre-recorded SHA-256. The restored component manifest, collision admission,
+  bucket manifest, and timeline hashes are respectively `a8542e1f...edc9104`,
+  `30895472...e6ca7`, `f70bbfc0...8b0b5`, and `fee4be00...d52b`.
+- Added that component to both the source retention set and protected release,
+  then changed the cleanup preflight to traverse the production nominal-set
+  dependency graph. Final source and protected nominal validation both pass
+  43/43; a final cleanup dry-run reports 180 protected files, zero errors, and
+  zero remaining deletion targets.
+- Verification: source and protected final checkpoints strictly load with the
+  expected SHA; the update lineage resolves 19/19; changed-test suite passed
+  354/354; the complete Order-9 unit suite passed 454/454; `compileall` passed.
+- Human-readable release record:
+  `for_codex/C3_PROMOTED_UPDATE18_RELEASE.md`. Applied cleanup report:
+  `for_codex/C3_ARTIFACT_CLEANUP_REPORT.json`.
+
+### Codex: Clean physical-minimum C3 lineage, modules 2--3
+
+#### 2026-08-20
+
+- Scope: Started a new C3 on-policy lineage from the promoted C2-derived clean
+  representation rather than inheriting any learned weights from the retired
+  C3 preload experiments.  The common contact-space action contract keeps CoM
+  pose/twist, per-contact normal/tangential/rotational residual, and independent
+  joint position/velocity residual paths active; residual wrench and joint
+  torque bias remain disabled by the contact-space projection.
+- Clean initializer: migrated the zero-command contact-space v7 initializer to
+  deployable-feedback v8 and then to categorical-normal v9.  The v9 checkpoint
+  SHA is `1e86a688ce51dda9789cc87be6113935e27e2f4db60936cda9d89ddb3ac25a8c`.
+  It has 81 normal-displacement categories at `0.5 mm` spacing, a zero-centered
+  `3 mm` physical exploration prior, and no inherited learned C3 output head.
+  Migration now accepts the intentional clean-initializer update index `-1`
+  and the valid zero initial normal residual; ordinary trained checkpoints
+  remain nonnegative.
+- Preflight: `37/37` focused unit tests passed.  A two-environment, four-step
+  real-Isaac deterministic smoke passed with exactly zero global and joint
+  action, zero residual wrench/torque bias, and only `1.49e-8` floating-point
+  noise in the contact-space residual.  The physical nominal calculation was
+  active with no fixed model-error margin.
+- Training lineage:
+  `training_lineages/contact_space_projected_qpid_physical_feasibility_from_zero_command_v1/modules_2_3_actuator_aware_physical_minimum_from_clean_c2_v1`.
+  Updates 0--3 each consumed 573,440 fresh transitions, including equal
+  2/3-module phase-reset shards plus state-inheritance shards.  Checkpoint SHAs
+  are update 0 `3ec2e486...ea08`, update 1 `3e21b2f1...bc93`, update 2
+  `7313557c...e9715`, and update 3 `8647721c...aba3`.
+- Optimizer health: all four updates completed one epoch and 128 optimizer
+  steps without KL early stop or clipping.  Aggregate KL remained
+  `0.000194--0.000260`; maximum observed phase KL remained
+  `0.000302--0.000484`, well below the configured limits.  Checkpoint diff
+  confirmed that 94/102 floating-point tensors changed, including global,
+  joint, contact-continuous, and categorical-normal actor paths; the result is
+  not a frozen-head or dropped-action implementation failure.
+- Reward result: paired generations use the same buckets, allowing direct
+  comparison.  On the generation-0/generation-2 pair, module 2 reward was
+  `5.203716 -> 5.203448` and module 3 was `3.445186 -> 3.391553`.  On the
+  generation-1/generation-3 pair, module 2 was `5.195142 -> 5.200033` and
+  module 3 was `3.315786 -> 3.293348`.  State-inheritance reward was likewise
+  effectively flat for module 2 and did not improve consistently for module
+  3.  QPID feasibility remained approximately `98.7--100%` depending on the
+  shard, with no broad collision regression.
+- Decision: stop after update 3.  The learning pipeline is numerically and
+  operationally healthy, but it has not produced a repeatable reward increase,
+  especially for module 3.  No learned checkpoint is promoted, module-count
+  expansion is not started, and formal continuous validation is deferred in
+  accordance with the agreed rule that reward must first improve/converge.
+  The update-3 checkpoint is retained as diagnostic evidence, not as the new
+  accepted continuation parent.

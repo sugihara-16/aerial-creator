@@ -4394,6 +4394,31 @@ run_tests:
 
 ---
 
+## Appendix F. Order-9 C3 promoted artifact binding
+
+Order-9 C3 の promoted artifact は次の byte identity に固定する。
+
+```text
+release_id = c3_pi_l_promoted_update18_v1
+checkpoint_sha256 = 6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b
+promotion_manifest_sha256 = 366ff7eeb32885db296d8ffbfc0aa61826ecbf93ef3404adc69f05baf33eb923
+formal_result = 448 / 448 success, 0 safety failure, 0 fallback
+```
+
+全 module count 2--8 で同一の v9 action/runtime contract を用いる。
+module-count ごとの action mask、nominal preload rule、success rule の切替を
+導入してはならない。Nominal contact lead は morphology/contact/load に依存して
+計算し、1 mm 単位で切り上げ、最低値を 2 mm とする。固定 12 mm margin は
+使用しない。Learned categorical contact-normal residual は nominal lead と別の
+policy output として維持する。
+
+完全な update 0--18 lineage、teacher ordering、関連 source/test の区分、保持
+dataset、および全 protected file hash は
+`for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json` を正本とする。説明用記録は
+`for_codex/C3_PROMOTED_UPDATE18_RELEASE.md` を参照する。
+
+---
+
 ## Final Implementation Rule
 
 Codex は次の順序でシステムを実装しなければならない。
