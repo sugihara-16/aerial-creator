@@ -1,0 +1,127 @@
+# APPROVED 2026-08-25 by the repository user.  Teacher-path construction may
+# use deterministic ad-hoc surface selection; contact IK solutions above the
+# 60 degree body-tilt boundary are removed before dense path construction.
+protocol_version: order9_r1_nominal_calibration_protocol_v4
+calibration_gate_id: r1-nominal-early-safe-teacher-gate-v4
+status: approved
+approval_record: for_codex/R1_NOMINAL_CALIBRATION_PROTOCOL_V4_APPROVAL.json
+
+base_v3_protocol:
+  artifact_kind: approved_nominal_calibration_protocol
+  path: configs/training/order9_r1_nominal_calibration_protocol_v3.yaml
+  sha256: e0dfee539548a508426848a855122a95b9b45456c459f8ee4bc7102e7edae63c
+base_v3_approval:
+  artifact_kind: approved_nominal_calibration_approval
+  path: for_codex/R1_NOMINAL_CALIBRATION_PROTOCOL_V3_APPROVAL.json
+  sha256: b589fc3db1f90e94f4c8a6e77a055c2759839e7701be24d023e94906f4cbb27d
+base_v3_result_ledger:
+  artifact_kind: superseded_rejected_calibration_result
+  path: for_codex/R1_NOMINAL_CALIBRATION_V3_RESULT_LEDGER.json
+  sha256: a967b68f06ac58265fc526e41b6d255edd82ae2bb9a53d3c91843bb6a2917264
+base_numeric_protocol:
+  artifact_kind: approved_calibration_protocol
+  path: configs/training/order9_r1_calibration_protocol_v1.yaml
+  sha256: dfd947b877636a31b0a7d6cd632e42e4f054e3ae1a8a8746bc6d9db7b78418c9
+base_numeric_approval:
+  artifact_kind: calibration_gate_approval
+  path: for_codex/R1_CALIBRATION_PROTOCOL_V1_APPROVAL.json
+  sha256: b49490f1b3638797b53c2ccf98ce39b884e19d879e85a683f29e7a77be9d4759
+
+protected_c3_curriculum:
+  artifact_kind: protected_c3_curriculum
+  path: configs/training/order9_learning_curriculum.yaml
+  sha256: 965b1abc180d3dab80369c150c55a774c4ceee186befda68f3093c22f7d6f9d4
+protected_c3_checkpoint:
+  artifact_kind: c3_promoted_pi_l_checkpoint_retained_not_applied
+  path: artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt
+  sha256: 6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b
+protected_c3_rollout:
+  artifact_kind: c3_protected_rollout_implementation
+  path: scripts/order9_vectorized_isaac_rollout.py
+  sha256: e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2
+protected_c3_release_ledger:
+  artifact_kind: c3_promoted_release_ledger
+  path: for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json
+  sha256: 7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729
+
+articulated_teacher_implementation:
+  artifact_kind: optional_early_contact_tilt_admission
+  path: amsrr/training/order9_articulated_teacher.py
+  sha256: a4a694c6655e967fd3146beab62adc09c13fcaa920d55e70a8629edc96447e55
+c3_teacher_adapter_implementation:
+  artifact_kind: optional_tilt_admission_forwarding
+  path: amsrr/training/order9_c3_teacher.py
+  sha256: ef3297c5ae37e6ded85a3b2b7a653816dba06530ea8833bb7446f97551206105
+nominal_teacher_implementation:
+  artifact_kind: optional_tilt_admission_nominal_forwarding
+  path: amsrr/training/order9_c3_nominal_trajectory.py
+  sha256: a576c78a46f6737239a462a32b0c19245a964db0386cd0ac89027682a0db5f7e
+r1_early_tilt_pipeline_implementation:
+  artifact_kind: r1_early_tilt_teacher_pipeline
+  path: amsrr/training/order9_r1_early_tilt_pipeline.py
+  sha256: 9877eb2134265bebd21abfafb577feb8233505a18529c5d99def9761f2cce083
+r1_teacher_overrides:
+  artifact_kind: deterministic_r1_teacher_surface_overrides
+  path: configs/training/order9_r1_teacher_overrides_v1.json
+  sha256: a76f9e90efe3c9bf36a8e864f5640167a41a9210ee024c63ba3b075a6a32ae07
+joint_reserve_projection_implementation:
+  artifact_kind: r1_joint_reserve_projection
+  path: amsrr/training/order9_r1_joint_reserve.py
+  sha256: 3742ea763cabef58f5f885fad11896e99d572572e69712db46736ddbbce69ff0
+teacher_screen_pipeline_implementation:
+  artifact_kind: r1_teacher_screen_pipeline
+  path: amsrr/training/order9_r1_calibration_runner.py
+  sha256: 1e48c704def43c4abd1b047c36b1ef481f6ea746a7d520f518ddab5ace7a2bf5
+nominal_v3_runtime_overlay:
+  artifact_kind: reused_v3_nominal_runtime_overlay
+  path: amsrr/training/order9_r1_nominal_calibration_v3.py
+  sha256: 08f75659ba1260bc0b35d48eb89f53014ff6b8efaee9cd55fe1c6a8398b2be41
+nominal_isaac_runtime_implementation:
+  artifact_kind: reused_v2_nominal_isaac_runtime
+  path: amsrr/training/order9_r1_nominal_calibration.py
+  sha256: 0075c9b18fb8c28c6a7ec1c17e677a89a6911896f46f43cfd02e7a26c884bff1
+
+execution_contract: deterministic_teacher_early_tilt_alternative_surface_joint_reserve_30mm_nominal_qpid_qp_local_servo_isaac_v3
+base_v3_execution_contract: deterministic_teacher_ik_joint_reserve_30mm_nominal_qpid_qp_local_servo_isaac_v2
+pi_l_system_retained: true
+pi_l_checkpoint_loaded_for_protected_runtime_compatibility: true
+pi_l_actor_command_applied: false
+nominal_preload_applied: true
+qpid_qp_applied: true
+local_servo_applied: true
+deterministic_safety_applied: true
+isaac_required_after_fast_screen: true
+
+maximum_body_tilt_rad: 1.0471975511965976
+contact_solution_tilt_checked_before_dense_path: true
+extreme_contact_solution_removed_before_configuration_space_planning: true
+preferred_c3_surface_pair_is_soft_teacher_preference: true
+alternative_unoccupied_surface_pair_allowed: true
+deterministic_teacher_override_applied_before_search: true
+
+joint_limit_reserve_projection_enabled: true
+minimum_normalized_joint_limit_reserve: 0.01
+grasp_point_position_error_metric: three_dimensional_euclidean_distance
+maximum_grasp_point_position_error_m: 0.030
+per_axis_plus_minus_30mm_contract: false
+maximum_grasp_point_attitude_error_rad: 0.10
+recheck_object_support_self_collision: true
+recheck_joint_rate: true
+fail_closed_on_projection_or_recheck_failure: true
+
+reuse_base_four_level_numeric_ladder: true
+reuse_base_case_enumeration: true
+reuse_base_train_selection_buckets: true
+reuse_base_validation_confirmation_buckets: true
+selection_bucket_count: 22
+confirmation_bucket_count: 14
+candidate_count_per_bucket: 31
+replay_count_per_screen_accepted_candidate: 2
+stop_after_first_failed_level: true
+confirm_largest_passing_level_once: true
+confirmation_failure_rejects_protocol: true
+
+calibration_evidence_training_eligible: false
+c3_promotion_evidence_eligible: false
+formal_teacher_collection_authorized_by_protocol_alone: false
+output_root: artifacts/p4_full/order9/r1_teacher/calibration_v6_early_tilt_teacher

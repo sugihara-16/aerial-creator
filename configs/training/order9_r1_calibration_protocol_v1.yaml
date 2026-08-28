@@ -1,0 +1,115 @@
+# APPROVED 2026-08-24. Authorization is limited to the hash-bound procedure
+# recorded in for_codex/R1_CALIBRATION_PROTOCOL_V1_APPROVAL.json.
+protocol_version: order9_r1_calibration_protocol_v1
+calibration_gate_id: r1-calibration-gate-v1
+status: approved
+approval_record: for_codex/R1_CALIBRATION_PROTOCOL_V1_APPROVAL.json
+stage_id: r1_teacher_trajectory_collection
+distribution_id: reachable_pose_expansion
+
+source_c3_release_id: c3_pi_l_promoted_update18_v1
+source_c3_checkpoint_sha256: 6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b
+source_c3_promotion_manifest_sha256: 366ff7eeb32885db296d8ffbfc0aa61826ecbf93ef3404adc69f05baf33eb923
+curriculum_schedule_hash: 47e7fb64303333c5207192382dfbb7c85c497d96c6df7e4070988534667f81bd
+physical_model_hash: 23dfd5a15d170b356e00a188f952afe98b5646b728a245493c36de36f789591a
+source_bucket_manifest:
+  artifact_kind: c3_accepted_bucket_manifest
+  path: artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/runtime/rollout_buckets_current_lineage_v5/manifest_c3_release_smooth_clear300_current_config_min2_preload_screened_v2.json
+  sha256: ee0001c7c7bc9f5d71ad08219ae73907b5ef4022f82fd90505e3c4642ba291a6
+source_bucket_count: 36
+source_module_counts: [2, 3, 4, 5, 6, 7, 8]
+
+# Select only on the 22 train-owned buckets. Confirm the selected level once
+# on the untouched 14 validation-owned buckets; confirmation failure rejects
+# this v1 result and cannot be used to step back to a smaller level.
+selection_split: train
+selection_bucket_count: 22
+confirmation_split: validation
+confirmation_bucket_count: 14
+confirmation_failure_invalidates_protocol: true
+
+# Only object start/goal planar position and yaw change.
+coordinate_frame: world
+envelope_center: base_task_object_pose_world
+sampling_method: independent_uniform_v1
+support_geometry_preserved: true
+support_pose_preserved: true
+robot_reset_preserved: true
+calibration_seed: 19009
+case_enumeration: level_split_bucket_sample_replay_lexicographic_v1
+random_interior_seed_derivation: r1_derived_seed_v1
+
+calibration_levels:
+  - level_id: r1_l1_10mm_5deg
+    position_half_span_m: 0.010
+    yaw_half_span_rad: 0.08726646259971647
+  - level_id: r1_l2_20mm_10deg
+    position_half_span_m: 0.020
+    yaw_half_span_rad: 0.17453292519943295
+  - level_id: r1_l3_30mm_15deg
+    position_half_span_m: 0.030
+    yaw_half_span_rad: 0.2617993877991494
+  - level_id: r1_l4_40mm_20deg
+    position_half_span_m: 0.040
+    yaw_half_span_rad: 0.3490658503988659
+
+lattice_point_count_per_bucket: 27
+random_interior_samples_per_bucket: 4
+
+# Every resolved teacher+IK path must pass this CPU-only scan before C3 pi_L,
+# QPID/QP, local servo, or Isaac is permitted to run.
+fast_screen_version: order9_r1_exact_tracking_fast_screen_v1
+fast_screen_execution_model: resolved_pi_h_ik_exact_tracking_to_grasp_pose_v1
+fast_screen_phases: [approach, contact_acquisition]
+fast_screen_reuses_resolved_trajectory: true
+fast_screen_isaac_forbidden: true
+fast_screen_controller_layers_forbidden: true
+fast_screen_ik_resolve_forbidden: true
+fast_screen_trajectory_optimization_forbidden: true
+fast_screen_applies_to_calibration_and_collection: true
+full_control_test_requires_fast_screen_pass: true
+minimum_normalized_joint_limit_reserve: 0.01
+maximum_body_tilt_rad: 1.0471975511965976
+
+isaac_replays_per_lattice_case: 2
+isaac_replays_per_interior_case: 2
+
+minimum_lattice_pass_rate: 1.0
+minimum_teacher_feasibility_rate: 0.95
+minimum_fast_screen_pass_rate: 0.95
+minimum_isaac_success_rate: 0.95
+minimum_interior_teacher_feasibility_rate: 0.95
+minimum_interior_fast_screen_pass_rate: 0.95
+minimum_interior_isaac_success_rate: 0.95
+minimum_support_projected_com_margin_m: 0.0
+maximum_safety_failure_count: 0
+maximum_fallback_rate: 0.0
+stop_on_first_failed_level: true
+accept_largest_consecutive_passing_level: true
+extrapolation_beyond_ladder_forbidden: true
+calibration_records_training_eligible: false
+
+# Formal collection begins only after calibration acceptance and a separately
+# published, hash-bound accepted distribution manifest.
+collection_episode_count: 140
+collection_train_episode_count: 98
+collection_validation_episode_count: 21
+collection_held_out_episode_count: 21
+collection_per_module_episode_count: 20
+collection_train_per_module_episode_count: 14
+collection_validation_per_module_episode_count: 3
+collection_held_out_per_module_episode_count: 3
+collection_seed_start: 29009
+collection_seed_derivation: sequential_seed_start_plus_episode_index_v1
+collection_minimum_success_rate: 0.95
+collection_minimum_split_module_success_rate: 0.95
+collection_maximum_safety_failure_count: 0
+collection_maximum_fallback_rate: 0.0
+collection_task_id_uniqueness_required: true
+collection_seed_uniqueness_required: true
+collection_pose_hash_uniqueness_required: true
+collection_cross_split_pose_disjoint_required: true
+collection_split_module_gate_required: true
+
+minimum_free_gib: 128.0
+output_root: artifacts/p4_full/order9/r1_teacher/calibration_v1

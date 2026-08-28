@@ -1,0 +1,33 @@
+{
+  "record_version": "order9_r1_nominal_calibration_approval_record_v4",
+  "decision": "approved",
+  "approved_by": "repository_user",
+  "approved_on": "2026-08-25",
+  "calibration_gate_id": "r1-nominal-early-safe-teacher-gate-v4",
+  "approved_protocol": {
+    "artifact_kind": "approved_early_safe_teacher_calibration_protocol",
+    "path": "configs/training/order9_r1_nominal_calibration_protocol_v4.yaml",
+    "sha256": "59b5f9478b6f559b04eb7f378acb458d918aff16a3d656e851aa3ae6d33184ef"
+  },
+  "source_c3_release_id": "c3_pi_l_promoted_update18_v1",
+  "source_c3_checkpoint_sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b",
+  "approval_scope": [
+    "teacher_failures_handled_internally",
+    "deterministic_ad_hoc_teacher_surface_selection_allowed",
+    "contact_solution_body_tilt_60deg_hard_boundary",
+    "extreme_contact_solution_removed_before_dense_path",
+    "alternative_unoccupied_surface_pair_allowed",
+    "three_dimensional_grasp_point_distance_30mm",
+    "one_percent_joint_limit_reserve_projection",
+    "fast_screen_before_isaac",
+    "nominal_qpid_qp_local_servo_standard_path",
+    "pi_l_retained_but_not_applied",
+    "reuse_four_level_numeric_ladder",
+    "selection_on_22_train_buckets",
+    "single_confirmation_on_14_validation_buckets",
+    "two_isaac_replays_per_screen_accepted_candidate",
+    "stop_after_first_failed_level",
+    "no_learning_by_protocol_alone"
+  ],
+  "statement": "The repository user directed Codex to handle teacher-trajectory construction internally, permitted deterministic ad-hoc teacher methods, and requested completion of the calibration work."
+}

@@ -1,0 +1,87 @@
+{
+  "ledger_version": "order9_r1_nominal_calibration_v5_result_ledger_v1",
+  "decision": "rejected",
+  "calibration_gate_id": "r1-nominal-identical-path-retime-gate-v5",
+  "accepted_level_id": null,
+  "formal_teacher_collection_authorized": false,
+  "training_eligible": false,
+  "completed_within_approved_wall_time": true,
+  "maximum_wall_time_s": 36000.0,
+  "measured_wall_time_s": 843.0540338029969,
+  "controller_free_screen": {
+    "attempt_count": 682,
+    "success_count": 682
+  },
+  "isaac": {
+    "attempt_count": 12,
+    "success_count": 6,
+    "safety_failure_count": 6,
+    "fallback_count": 0
+  },
+  "retime_contract": {
+    "geometric_path_changed": false,
+    "endpoint_configuration_changed": false,
+    "contact_assignments_changed": false,
+    "phase_time_scales": {
+      "approach": 0.5,
+      "contact_acquisition": 0.5,
+      "lift": 0.1,
+      "transport": 0.1,
+      "place": 0.1,
+      "release": 0.1,
+      "retreat": 0.1,
+      "settle": 0.1
+    },
+    "joint_rate_limit_rechecked": true
+  },
+  "controller_contract": {
+    "pi_l_system_retained": true,
+    "pi_l_actor_command_applied": false,
+    "nominal_preload_applied": true,
+    "qpid_qp_applied": true,
+    "local_servo_applied": true,
+    "deterministic_safety_applied": true
+  },
+  "bindings": {
+    "formal_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v7_identical_path_retime/calibration_result_v5.json",
+      "sha256": "b11713024799f6ca78ab9b5f402eefe354e9d92c36c573b32ae9ccd75723d044"
+    },
+    "approved_protocol": {
+      "path": "configs/training/order9_r1_nominal_calibration_protocol_v5.yaml",
+      "sha256": "713c69a31017f5280e06e9a35eb3793cfbb12d1cd4f3d9a81fa756e7b213948e"
+    },
+    "approval_record": {
+      "path": "for_codex/R1_NOMINAL_CALIBRATION_PROTOCOL_V5_APPROVAL.json",
+      "sha256": "0583371f4553d13a4ba9311aae480e497e44ae028253be37f29b67f05f4e2da0"
+    },
+    "teacher_overrides_used": {
+      "path": "configs/training/order9_r1_teacher_overrides_v2.json",
+      "sha256": "9fdf852bc821c3e11a51d6b3af3b026585cd8eeaa4592b25478efc224d496082"
+    },
+    "retime_implementation": {
+      "path": "amsrr/training/order9_r1_nominal_retime.py",
+      "sha256": "e377c35bcf0cdc9878887add5cfebbd9522ac42ec45836d8cc83b046a760e131"
+    },
+    "isaac_materialization_implementation": {
+      "path": "amsrr/training/order9_r1_isaac_calibration.py",
+      "sha256": "e142c86b5e1f1a1f92205f5e9cc6886eb199123a911dbf67fe7fed00dce2d6e8"
+    },
+    "calibration_implementation": {
+      "path": "amsrr/training/order9_r1_nominal_calibration_v5.py",
+      "sha256": "867ece6ad60b533e7ada6e91fbac23f5648a04627461331fae3857b2d80207c8"
+    },
+    "runner": {
+      "path": "scripts/order9_run_r1_nominal_calibration_v5.py",
+      "sha256": "5e9d504e19abaf4c5eacbb0ab7a571860a85f3e611ff586a80b42a231a6bff4c"
+    },
+    "protected_c3_checkpoint": {
+      "path": "artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt",
+      "sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b"
+    },
+    "protected_c3_rollout": {
+      "path": "scripts/order9_vectorized_isaac_rollout.py",
+      "sha256": "e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2"
+    }
+  }
+}

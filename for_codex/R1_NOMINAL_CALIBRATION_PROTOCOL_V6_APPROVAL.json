@@ -1,0 +1,38 @@
+{
+  "record_version": "order9_r1_nominal_calibration_approval_record_v6",
+  "decision": "approved",
+  "approved_by": "repository_user",
+  "approved_on": "2026-08-26",
+  "calibration_gate_id": "r1-nominal-closed-loop-safe-timing-gate-v6",
+  "approved_protocol": {
+    "artifact_kind": "approved_short_retreat_safe_timing_calibration_protocol",
+    "path": "configs/training/order9_r1_nominal_calibration_protocol_v6.yaml",
+    "sha256": "271c2f6791761ce608dc0160acafb0d7daa2b1c538e0da538f18bda70c6d5614"
+  },
+  "source_c3_release_id": "c3_pi_l_promoted_update18_v1",
+  "source_c3_checkpoint_sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b",
+  "approval_scope": [
+    "replace_unsafe_universal_retime",
+    "module_count_conditioned_physical_timing",
+    "closed_loop_isaac_evidence_for_each_timing_profile",
+    "short_task_offset_retreat_after_release",
+    "grasp_path_preserved",
+    "retreat_reauthored_and_isaac_validated",
+    "complete_eight_phase_semantic_audit_before_isaac",
+    "retreat_parameter_effect_test",
+    "explicit_materializer_selection",
+    "same_controller_free_screen_before_isaac",
+    "same_contact_assignments",
+    "joint_rate_recheck_after_retime",
+    "nominal_qpid_qp_local_servo_standard_path",
+    "pi_l_retained_but_not_applied",
+    "completion_within_ten_hours",
+    "reuse_four_level_numeric_ladder",
+    "selection_on_22_train_buckets",
+    "single_confirmation_on_14_validation_buckets",
+    "two_isaac_replays_per_screen_accepted_candidate",
+    "stop_after_first_failed_level",
+    "no_learning_by_protocol_alone"
+  ],
+  "statement": "The repository user requested root-cause resolution without slowing the computation. R1 therefore preserves the screened grasp path, repairs only the erroneous post-release retreat to the required 0.10 m, and uses module-count-specific timing backed by 14 successful Isaac episodes. Full calibration remains required before teacher collection is authorized."
+}

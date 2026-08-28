@@ -1,0 +1,40 @@
+{
+  "ledger_version": "order9_r1_nominal_calibration_v4_result_ledger_v1",
+  "decision": "rejected",
+  "calibration_gate_id": "r1-nominal-early-safe-teacher-gate-v4",
+  "accepted_level_id": null,
+  "formal_teacher_collection_authorized": false,
+  "training_eligible": false,
+  "controller_free_screen": {
+    "attempt_count": 682,
+    "success_count": 682
+  },
+  "isaac": {
+    "attempt_count": 10,
+    "success_count": 8,
+    "safety_failure_count": 0,
+    "fallback_count": 0
+  },
+  "bindings": {
+    "formal_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v6_early_tilt_teacher/calibration_result_v4.json",
+      "sha256": "881b405c5e739e9939b7885f4f9e22a21c1e747734b65b84cfba77a58aeec0e7"
+    },
+    "approved_protocol": {
+      "path": "configs/training/order9_r1_nominal_calibration_protocol_v4.yaml",
+      "sha256": "59b5f9478b6f559b04eb7f378acb458d918aff16a3d656e851aa3ae6d33184ef"
+    },
+    "approval_record": {
+      "path": "for_codex/R1_NOMINAL_CALIBRATION_PROTOCOL_V4_APPROVAL.json",
+      "sha256": "ca81c4c79a6821b74d77d72d1255f9c21ee36c5694907a45ff4258b37207eced"
+    },
+    "teacher_overrides_used": {
+      "path": "configs/training/order9_r1_teacher_overrides_v1.json",
+      "sha256": "a76f9e90efe3c9bf36a8e864f5640167a41a9210ee024c63ba3b075a6a32ae07"
+    },
+    "protected_c3_checkpoint": {
+      "path": "artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt",
+      "sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b"
+    }
+  }
+}

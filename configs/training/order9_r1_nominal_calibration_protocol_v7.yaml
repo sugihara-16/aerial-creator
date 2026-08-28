@@ -1,0 +1,102 @@
+# APPROVED 2026-08-27 by the repository user. This minimum-level replay keeps
+# every v6 teacher/IK trajectory and contact assignment byte-identical. It
+# changes only nominal joint targets at runtime: +5 mm contact-normal
+# compression for train-000004-190f3a425b3e and +0 mm for every other bucket.
+protocol_version: order9_r1_nominal_calibration_protocol_v7
+calibration_gate_id: r1-nominal-bucket-local-compression-gate-v7
+status: approved
+approval_record: for_codex/R1_NOMINAL_CALIBRATION_PROTOCOL_V7_APPROVAL.json
+
+base_v6_protocol:
+  artifact_kind: rejected_parent_protocol
+  path: configs/training/order9_r1_nominal_calibration_protocol_v6.yaml
+  sha256: 271c2f6791761ce608dc0160acafb0d7daa2b1c538e0da538f18bda70c6d5614
+base_v6_approval:
+  artifact_kind: parent_protocol_approval
+  path: for_codex/R1_NOMINAL_CALIBRATION_PROTOCOL_V6_APPROVAL.json
+  sha256: 8e42cf53209982afc83315741bbe1245f7085385bd9575306dac666987d4265c
+base_v6_result_ledger:
+  artifact_kind: rejected_parent_result_ledger
+  path: for_codex/R1_NOMINAL_CALIBRATION_V6_RESULT_LEDGER.json
+  sha256: 1da48a4d10224773aeb86461ece665be40cc2cbc044bdbde2b751ceff04a4da9
+base_numeric_protocol:
+  artifact_kind: approved_calibration_protocol
+  path: configs/training/order9_r1_calibration_protocol_v1.yaml
+  sha256: dfd947b877636a31b0a7d6cd632e42e4f054e3ae1a8a8746bc6d9db7b78418c9
+
+protected_c3_curriculum:
+  artifact_kind: protected_c3_curriculum
+  path: configs/training/order9_learning_curriculum.yaml
+  sha256: 965b1abc180d3dab80369c150c55a774c4ceee186befda68f3093c22f7d6f9d4
+protected_c3_checkpoint:
+  artifact_kind: c3_promoted_pi_l_checkpoint_retained_not_applied
+  path: artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt
+  sha256: 6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b
+protected_c3_rollout:
+  artifact_kind: c3_protected_rollout_implementation
+  path: scripts/order9_vectorized_isaac_rollout.py
+  sha256: e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2
+protected_c3_release_ledger:
+  artifact_kind: c3_promoted_release_ledger
+  path: for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json
+  sha256: 7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729
+
+compression_wrapper_implementation:
+  artifact_kind: deterministic_bucket_local_nominal_compression_wrapper
+  path: scripts/order9_r1_nominal_compression_sweep_rollout.py
+  sha256: 87ed7a206d251e708ce9acd248f96ae7c3ececf22a9f0299ea7687e83903993d
+v7_calibration_implementation:
+  artifact_kind: r1_nominal_v7_contract_and_executor
+  path: amsrr/training/order9_r1_nominal_calibration_v7.py
+  sha256: 6acb440579eed137450c0ffc9a764ccb9615827b7471d02a273c494a4bcf9ef5
+v7_runner_implementation:
+  artifact_kind: r1_nominal_v7_minimum_level_runner
+  path: scripts/order9_run_r1_nominal_calibration_v7.py
+  sha256: 6faf64996114e1be17790abab2ecfba67935f1c85fedf52be27c29e8e79b79d0
+
+selected_repair_raw_evidence:
+  artifact_kind: selected_y_face_five_mm_repair_raw_rollout
+  path: artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_y_face_nominal_compression_5mm_v1/r1_l1_10mm_5deg__train__train-000004-190f3a425b3e__lattice_02/evaluation_rollout.pt
+  sha256: 734f5d402d20682bc73188d20092d4a65dd762842d9e94dbf241017920bfad85
+selected_repair_episode_evidence:
+  artifact_kind: selected_y_face_five_mm_repair_episode_records
+  path: artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_y_face_nominal_compression_5mm_v1/r1_l1_10mm_5deg__train__train-000004-190f3a425b3e__lattice_02/evaluation_episodes.jsonl
+  sha256: 3ab65ba103434168f7beee37b46d50d80913dc50953a301c796cea99209ae86f
+
+execution_contract: deterministic_teacher_v6_path_bucket_local_5mm_nominal_compression_qpid_qp_local_servo_isaac_v7
+base_level_id: r1_l1_10mm_5deg
+base_split: train
+source_bucket_count: 22
+candidate_count_per_bucket: 31
+replay_count_per_candidate: 2
+source_v6_level_root: artifacts/p4_full/order9/r1_teacher/calibration_v8_short_retreat_safe_timing/selection/r1_l1_10mm_5deg
+output_root: artifacts/p4_full/order9/r1_teacher/calibration_v9_nominal_compression_v7/selection/r1_l1_10mm_5deg
+interrupted_attempt_quarantine_root: artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_interrupted_formal_attempts
+
+default_additional_compression_mm: 0.0
+additional_compression_mm_by_source_bucket:
+  train-000004-190f3a425b3e: 5.0
+compression_ramp: smooth_attach_hold_smooth_release
+compression_coordinate: contact_normal
+v6_teacher_trajectory_bytes_reused: true
+contact_assignments_changed: false
+teacher_geometry_changed: false
+
+maximum_wall_time_s: 36000.0
+maximum_parallel_process_count: 4
+maximum_jobs_per_process: 31
+persistent_morphology_coalescing: true
+reuse_v6_fast_screen_results: true
+reuse_v6_case_inputs: true
+rerun_all_minimum_level_cases_in_isaac: true
+
+pi_l_system_retained: true
+pi_l_actor_command_applied: false
+nominal_preload_applied: true
+qpid_qp_applied: true
+local_servo_applied: true
+deterministic_safety_applied: true
+isaac_required: true
+minimum_level_result_authorizes_collection: false
+calibration_evidence_training_eligible: false
+formal_teacher_collection_authorized_by_protocol_alone: false

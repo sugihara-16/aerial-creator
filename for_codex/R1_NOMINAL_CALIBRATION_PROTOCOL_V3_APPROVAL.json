@@ -1,0 +1,33 @@
+{
+  "record_version": "order9_r1_nominal_calibration_approval_record_v3",
+  "decision": "approved",
+  "approved_by": "repository_user",
+  "approved_on": "2026-08-25",
+  "calibration_gate_id": "r1-nominal-joint-reserve-30mm-gate-v3",
+  "approved_protocol": {
+    "artifact_kind": "approved_nominal_joint_reserve_calibration_protocol",
+    "path": "configs/training/order9_r1_nominal_calibration_protocol_v3.yaml",
+    "sha256": "e0dfee539548a508426848a855122a95b9b45456c459f8ee4bc7102e7edae63c"
+  },
+  "base_nominal_protocol_sha256": "f6f4a42bc0a3f6297162f25c3a321aa30b2e74f3f389ca7b058a1d209ae158c3",
+  "base_numeric_protocol_sha256": "dfd947b877636a31b0a7d6cd632e42e4f054e3ae1a8a8746bc6d9db7b78418c9",
+  "source_c3_release_id": "c3_pi_l_promoted_update18_v1",
+  "source_c3_checkpoint_sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b",
+  "approval_scope": [
+    "three_dimensional_grasp_point_distance_30mm",
+    "not_per_axis_plus_minus_30mm",
+    "one_percent_joint_limit_reserve_projection",
+    "fail_closed_anchor_collision_and_joint_rate_recheck",
+    "reuse_four_level_numeric_ladder",
+    "selection_on_22_train_buckets",
+    "single_confirmation_on_14_validation_buckets",
+    "fast_screen_before_isaac",
+    "nominal_qpid_qp_local_servo_standard_path",
+    "pi_l_retained_but_not_applied",
+    "reuse_v2_nominal_isaac_runtime_contract",
+    "two_isaac_replays_per_screen_accepted_candidate",
+    "stop_after_first_failed_level",
+    "no_teacher_collection_or_learning_by_protocol_alone"
+  ],
+  "statement": "The repository user explicitly selected a three-dimensional 30 mm grasp-point distance, then approved creating a new hash-bound contract and rerunning the R1 nominal calibration from the beginning."
+}

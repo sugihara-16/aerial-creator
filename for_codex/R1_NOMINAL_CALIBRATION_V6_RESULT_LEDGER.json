@@ -1,0 +1,119 @@
+{
+  "ledger_version": "order9_r1_nominal_calibration_v6_result_ledger_v1",
+  "decision": "rejected",
+  "calibration_gate_id": "r1-nominal-short-retreat-safe-timing-gate-v6",
+  "accepted_level_id": null,
+  "formal_teacher_collection_authorized": false,
+  "formal_teacher_trajectory_count": 0,
+  "training_eligible": false,
+  "completed_within_approved_wall_time": true,
+  "maximum_wall_time_s": 36000.0,
+  "measured_wall_time_s": 12348.749903202057,
+  "controller_free_screen": {
+    "planned_case_count": 682,
+    "attempt_count": 682,
+    "success_count": 682,
+    "complete_task_semantic_audit_required": true
+  },
+  "isaac": {
+    "attempt_count": 50,
+    "success_count": 48,
+    "safety_failure_count": 0,
+    "fallback_count": 0,
+    "decisive_failure_count": 2,
+    "decisive_failure_reason": "phase_timeout",
+    "decisive_terminal_phase_index": 3,
+    "decisive_terminal_phase": "transport"
+  },
+  "selection": {
+    "attempted_level_id": "r1_l1_10mm_5deg",
+    "attempted_split": "train",
+    "lattice_case_count": 594,
+    "completed_lattice_candidate_count": 25,
+    "passed_lattice_candidate_count": 24,
+    "lattice_success_required": true,
+    "higher_level_count_executed": 0,
+    "held_out_confirmation_attempt_count": 0,
+    "stop_reason": "irrecoverable_lattice_pass_rate_failure"
+  },
+  "controller_contract": {
+    "pi_l_system_retained": true,
+    "pi_l_actor_command_applied": false,
+    "nominal_preload_applied": true,
+    "qpid_qp_applied": true,
+    "local_servo_applied": true,
+    "deterministic_safety_applied": true
+  },
+  "execution_control": {
+    "corner_first_ordering": true,
+    "candidate_set_changed": false,
+    "acceptance_gates_changed": false,
+    "replays_per_candidate": 2,
+    "persistent_wall_time_window": true,
+    "resume_resets_wall_time_window": false,
+    "deadline_stops_process_group": true,
+    "preexisting_decisive_failure_stops_new_isaac": true
+  },
+  "bindings": {
+    "formal_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v8_short_retreat_safe_timing/calibration_result_v6.json",
+      "sha256": "a9ca1d633d2fa42a960a798545ac34d45fafa4dae5e8e3c201f233aa465441e4"
+    },
+    "formal_execution_window": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v8_short_retreat_safe_timing/formal_execution_window_v6.json",
+      "sha256": "08b9aa6be057c5b1cdb97b7ad38f4b452f58bb24d0ddcd39df6fd1cec09322cf"
+    },
+    "level_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v8_short_retreat_safe_timing/selection/r1_l1_10mm_5deg/level_result_v6.json",
+      "sha256": "354e8e39fe399dceb3c9c015912cb8b87f9e16ce4b14e32b26b425c39d8da1cf"
+    },
+    "decisive_case_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v8_short_retreat_safe_timing/selection/r1_l1_10mm_5deg/r1_l1_10mm_5deg__train__train-000004-190f3a425b3e__lattice_02/nominal_result_v6.json",
+      "sha256": "f02e4efff98ab728061cc9a5097c007d59c7bac9178cf87cb6127ff5e8314e1b"
+    },
+    "decisive_episode_records": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v8_short_retreat_safe_timing/selection/r1_l1_10mm_5deg/r1_l1_10mm_5deg__train__train-000004-190f3a425b3e__lattice_02/isaac/evaluation_episodes.jsonl",
+      "sha256": "55952bbe38025dd44676d9929cee315935b481b7d1c7db1ab672ad590d85040a"
+    },
+    "approved_protocol": {
+      "path": "configs/training/order9_r1_nominal_calibration_protocol_v6.yaml",
+      "sha256": "271c2f6791761ce608dc0160acafb0d7daa2b1c538e0da538f18bda70c6d5614"
+    },
+    "approval_record": {
+      "path": "for_codex/R1_NOMINAL_CALIBRATION_PROTOCOL_V6_APPROVAL.json",
+      "sha256": "8e42cf53209982afc83315741bbe1245f7085385bd9575306dac666987d4265c"
+    },
+    "calibration_implementation": {
+      "path": "amsrr/training/order9_r1_nominal_calibration_v6.py",
+      "sha256": "e2d9853627e9cb9a068df5a3cc63736645a55dc9ab44438ef8e1ba26cedc6910"
+    },
+    "base_runner_with_ordering": {
+      "path": "scripts/order9_run_r1_nominal_calibration_v2.py",
+      "sha256": "fa62a931f80f660695998557eac97d4738cdc06e9f2ac790b64e7abd0299d125"
+    },
+    "runner": {
+      "path": "scripts/order9_run_r1_nominal_calibration_v6.py",
+      "sha256": "a3c6913a0ea26855529aa9a0f2f79de4006858fe4ea4152b3b5f4d86fa2d2556"
+    },
+    "base_v5_result_ledger": {
+      "path": "for_codex/R1_NOMINAL_CALIBRATION_V5_RESULT_LEDGER.json",
+      "sha256": "1fbb9b071d7c1ad5966a3a071c74e0ec0ec6d26030ec26a8b8be17d320131991"
+    },
+    "protected_c3_checkpoint": {
+      "path": "artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt",
+      "sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b"
+    },
+    "protected_c3_rollout": {
+      "path": "scripts/order9_vectorized_isaac_rollout.py",
+      "sha256": "e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2"
+    },
+    "protected_curriculum": {
+      "path": "configs/training/order9_learning_curriculum.yaml",
+      "sha256": "965b1abc180d3dab80369c150c55a774c4ceee186befda68f3093c22f7d6f9d4"
+    },
+    "c3_release_ledger": {
+      "path": "for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json",
+      "sha256": "7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729"
+    }
+  }
+}

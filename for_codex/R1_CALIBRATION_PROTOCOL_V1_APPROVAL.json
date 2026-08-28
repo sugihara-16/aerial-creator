@@ -1,0 +1,31 @@
+{
+  "record_version": "order9_r1_calibration_approval_record_v1",
+  "decision": "approved",
+  "approved_by": "repository_user",
+  "approved_on": "2026-08-24",
+  "calibration_gate_id": "r1-calibration-gate-v1",
+  "stage_id": "r1_teacher_trajectory_collection",
+  "approved_protocol": {
+    "artifact_kind": "approved_calibration_protocol",
+    "path": "configs/training/order9_r1_calibration_protocol_v1.yaml",
+    "sha256": "dfd947b877636a31b0a7d6cd632e42e4f054e3ae1a8a8746bc6d9db7b78418c9"
+  },
+  "source_proposal": {
+    "artifact_kind": "calibration_protocol_proposal",
+    "path": "configs/training/order9_r1_calibration_protocol_v1_proposal.yaml",
+    "sha256": "c433559b2b0528bacf8c53e328174d3ea54f3902585e26f17e2bbd28855a70f6"
+  },
+  "source_c3_release_id": "c3_pi_l_promoted_update18_v1",
+  "source_c3_checkpoint_sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b",
+  "approval_scope": [
+    "four_level_numeric_ladder",
+    "selection_on_22_train_buckets",
+    "single_confirmation_on_14_validation_buckets",
+    "confirmation_failure_rejects_v1",
+    "fast_screen_before_full_control",
+    "one_percent_joint_limit_reserve",
+    "sixty_degree_body_tilt_ceiling",
+    "formal_collection_140_episodes"
+  ],
+  "statement": "Repository user approved the reviewed R1 v1 package and requested implementation of the annotated four-level selection and confirmation procedure."
+}

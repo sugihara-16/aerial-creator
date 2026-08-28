@@ -1,0 +1,144 @@
+{
+  "ledger_version": "order9_r1_nominal_calibration_v2_result_ledger_v1",
+  "result_id": "r1_nominal_calibration_v2_rejected_l1_joint_reserve_v1",
+  "recorded_at": "2026-08-25",
+  "status": "rejected",
+  "execution_contract": "deterministic_teacher_ik_nominal_qpid_qp_local_servo_isaac_v1",
+  "pi_l_system_retained": true,
+  "pi_l_actor_command_applied": false,
+  "decision": {
+    "first_attempted_level_id": "r1_l1_10mm_5deg",
+    "first_attempted_position_half_span_m": 0.01,
+    "first_attempted_yaw_half_span_rad": 0.08726646259971647,
+    "planned_case_count": 682,
+    "cpu_preparation_attempt_count": 24,
+    "cpu_preparation_success_count": 22,
+    "cpu_preparation_rejection_count": 2,
+    "lattice_00_bucket_count": 22,
+    "lattice_00_success_count": 20,
+    "lattice_00_rejection_count": 2,
+    "additional_in_flight_success_count": 2,
+    "termination_reason": "lattice_cpu_gate_cannot_reach_100_percent",
+    "formal_isaac_attempt_count": 0,
+    "selection_level_ids_not_attempted": [
+      "r1_l2_20mm_10deg",
+      "r1_l3_30mm_15deg",
+      "r1_l4_40mm_20deg"
+    ],
+    "selected_level_id": null,
+    "confirmation_attempt_count": 0,
+    "accepted_level_id": null,
+    "formal_teacher_collection_authorized": false,
+    "training_eligible": false
+  },
+  "rejections": [
+    {
+      "candidate_id": "r1_l1_10mm_5deg__train__train-000003-3b95da871f01__lattice_00",
+      "source_bucket_id": "train-000003-3b95da871f01",
+      "module_count": 5,
+      "x_offset_m": -0.01,
+      "y_offset_m": -0.01,
+      "yaw_offset_rad": -0.08726646259971647,
+      "violation_code": "E_R1_FAST_SCREEN_JOINT_LIMIT_RESERVE",
+      "minimum_normalized_joint_limit_reserve": 8.268757739461376e-07,
+      "required_minimum_normalized_joint_limit_reserve": 0.01,
+      "maximum_collision_violating_pair_count": 0,
+      "minimum_collision_clearance_m": 0.004838264374151635,
+      "grasp_pose_reached": true
+    },
+    {
+      "candidate_id": "r1_l1_10mm_5deg__train__train-000026-a8ced2acf24c__lattice_00",
+      "source_bucket_id": "train-000026-a8ced2acf24c",
+      "module_count": 7,
+      "x_offset_m": -0.01,
+      "y_offset_m": -0.01,
+      "yaw_offset_rad": -0.08726646259971647,
+      "violation_code": "E_R1_FAST_SCREEN_JOINT_LIMIT_RESERVE",
+      "minimum_normalized_joint_limit_reserve": 0.0,
+      "required_minimum_normalized_joint_limit_reserve": 0.01,
+      "maximum_collision_violating_pair_count": 0,
+      "minimum_collision_clearance_m": 0.00480357507055873,
+      "grasp_pose_reached": true
+    }
+  ],
+  "integration_smoke": {
+    "acceptance_eligible": false,
+    "candidate_id": "r1_l1_10mm_5deg__train__train-000000-5fecfad4f44f__lattice_00",
+    "episode_count": 2,
+    "success_count": 2,
+    "safety_failure_count": 0,
+    "fallback_count": 0,
+    "all_pi_l_action_tensors_exactly_zero": true,
+    "purpose": "runtime_contract_and_evidence_path_verification_only"
+  },
+  "bindings": {
+    "nominal_protocol": {
+      "path": "configs/training/order9_r1_nominal_calibration_protocol_v2.yaml",
+      "sha256": "f6f4a42bc0a3f6297162f25c3a321aa30b2e74f3f389ca7b058a1d209ae158c3"
+    },
+    "nominal_approval": {
+      "path": "for_codex/R1_NOMINAL_CALIBRATION_PROTOCOL_V2_APPROVAL.json",
+      "sha256": "b6d34d7c6c5814efe86f1f9daeafe5a1cd20a1985bcb90a81c3c9167f5d4515d"
+    },
+    "base_numeric_protocol": {
+      "path": "configs/training/order9_r1_calibration_protocol_v1.yaml",
+      "sha256": "dfd947b877636a31b0a7d6cd632e42e4f054e3ae1a8a8746bc6d9db7b78418c9"
+    },
+    "base_numeric_approval": {
+      "path": "for_codex/R1_CALIBRATION_PROTOCOL_V1_APPROVAL.json",
+      "sha256": "b49490f1b3638797b53c2ccf98ce39b884e19d879e85a683f29e7a77be9d4759"
+    },
+    "runtime_implementation": {
+      "path": "amsrr/training/order9_r1_nominal_calibration.py",
+      "sha256": "0075c9b18fb8c28c6a7ec1c17e677a89a6911896f46f43cfd02e7a26c884bff1"
+    },
+    "runner": {
+      "path": "scripts/order9_run_r1_nominal_calibration_v2.py",
+      "sha256": "56849e006c4fcb6c8b0b8bf8eae8ee94fcfab24d434817ceff7708678b47c581"
+    },
+    "run_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v4_nominal_standard/calibration_result.json",
+      "sha256": "6735cd422a55511396d8fee918ceb71d0d4149d6e15ee97af9badfacce28da96"
+    },
+    "level_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v4_nominal_standard/selection/r1_l1_10mm_5deg/level_result.json",
+      "sha256": "825313decc732b0ec5d43bd08a7873062bdbdf846d9bba39da2a7aeb3122b2a7"
+    },
+    "rejection_module_5": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v4_nominal_standard/selection/r1_l1_10mm_5deg/cpu_rejections/r1_l1_10mm_5deg__train__train-000003-3b95da871f01__lattice_00.json",
+      "sha256": "c7e14a8007fc321b7ffb38f12889ee102ad40d22e9d953d6265050e5c8acdb1b"
+    },
+    "rejection_module_7": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v4_nominal_standard/selection/r1_l1_10mm_5deg/cpu_rejections/r1_l1_10mm_5deg__train__train-000026-a8ced2acf24c__lattice_00.json",
+      "sha256": "f59a9d04d1f08411dfa95eebbd584ccca5b2ebb8442184f343cfa488c6b7d9a0"
+    },
+    "integration_smoke_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v4_nominal_standard/integration_smoke_v1/r1_l1_10mm_5deg__train__train-000000-5fecfad4f44f__lattice_00/nominal_result.json",
+      "sha256": "342e3d0171b1b4f799447ce6a7fd50d1b7a444443058766b76b22e22e8169032"
+    },
+    "integration_smoke_raw": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v4_nominal_standard/integration_smoke_v1/r1_l1_10mm_5deg__train__train-000000-5fecfad4f44f__lattice_00/isaac/evaluation_rollout.pt",
+      "sha256": "66e943b0783510e3951879ccb293fb5ab932ada3da98e6214ca6cd0b3c4b08f7"
+    },
+    "integration_smoke_episodes": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v4_nominal_standard/integration_smoke_v1/r1_l1_10mm_5deg__train__train-000000-5fecfad4f44f__lattice_00/isaac/evaluation_episodes.jsonl",
+      "sha256": "dfcc802013b0747b7c6c6bb3565f797db7632f87ecdf7979efd0631bb82b4f5b"
+    },
+    "protected_c3_curriculum": {
+      "path": "configs/training/order9_learning_curriculum.yaml",
+      "sha256": "965b1abc180d3dab80369c150c55a774c4ceee186befda68f3093c22f7d6f9d4"
+    },
+    "protected_c3_rollout": {
+      "path": "scripts/order9_vectorized_isaac_rollout.py",
+      "sha256": "e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2"
+    },
+    "protected_c3_checkpoint": {
+      "path": "artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt",
+      "sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b"
+    },
+    "protected_c3_release_ledger": {
+      "path": "for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json",
+      "sha256": "7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729"
+    }
+  }
+}

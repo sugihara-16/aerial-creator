@@ -1,0 +1,62 @@
+# APPROVED 2026-08-25 by the repository user.  This additive protocol keeps
+# the protected C3 curriculum/checkpoint byte-identical and changes only the
+# R1 calibration execution path from applied pi_L to deterministic nominal
+# intent plus QPID/QP and local servos.
+protocol_version: order9_r1_nominal_calibration_protocol_v2
+calibration_gate_id: r1-nominal-calibration-gate-v2
+status: approved
+approval_record: for_codex/R1_NOMINAL_CALIBRATION_PROTOCOL_V2_APPROVAL.json
+
+base_numeric_protocol:
+  artifact_kind: approved_calibration_protocol
+  path: configs/training/order9_r1_calibration_protocol_v1.yaml
+  sha256: dfd947b877636a31b0a7d6cd632e42e4f054e3ae1a8a8746bc6d9db7b78418c9
+base_numeric_approval:
+  artifact_kind: calibration_gate_approval
+  path: for_codex/R1_CALIBRATION_PROTOCOL_V1_APPROVAL.json
+  sha256: b49490f1b3638797b53c2ccf98ce39b884e19d879e85a683f29e7a77be9d4759
+
+protected_c3_curriculum:
+  artifact_kind: protected_c3_curriculum
+  path: configs/training/order9_learning_curriculum.yaml
+  sha256: 965b1abc180d3dab80369c150c55a774c4ceee186befda68f3093c22f7d6f9d4
+protected_c3_checkpoint:
+  artifact_kind: c3_promoted_pi_l_checkpoint_retained_not_applied
+  path: artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt
+  sha256: 6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b
+protected_c3_rollout:
+  artifact_kind: c3_protected_rollout_implementation
+  path: scripts/order9_vectorized_isaac_rollout.py
+  sha256: e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2
+protected_c3_release_ledger:
+  artifact_kind: c3_promoted_release_ledger
+  path: for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json
+  sha256: 7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729
+
+execution_contract: deterministic_teacher_ik_nominal_qpid_qp_local_servo_isaac_v1
+pi_l_system_retained: true
+pi_l_checkpoint_loaded_for_protected_runtime_compatibility: true
+pi_l_actor_command_applied: false
+nominal_preload_applied: true
+qpid_qp_applied: true
+local_servo_applied: true
+deterministic_safety_applied: true
+isaac_required_after_fast_screen: true
+
+reuse_base_four_level_numeric_ladder: true
+reuse_base_case_enumeration: true
+reuse_base_train_selection_buckets: true
+reuse_base_validation_confirmation_buckets: true
+reuse_base_fast_screen_and_thresholds: true
+selection_bucket_count: 22
+confirmation_bucket_count: 14
+candidate_count_per_bucket: 31
+replay_count_per_screen_accepted_candidate: 2
+stop_after_first_failed_level: true
+confirm_largest_passing_level_once: true
+confirmation_failure_rejects_protocol: true
+
+calibration_evidence_training_eligible: false
+c3_promotion_evidence_eligible: false
+formal_teacher_collection_authorized_by_protocol_alone: false
+output_root: artifacts/p4_full/order9/r1_teacher/calibration_v4_nominal_standard

@@ -1,0 +1,27 @@
+{
+  "record_version": "order9_r1_nominal_calibration_approval_record_v2",
+  "decision": "approved",
+  "approved_by": "repository_user",
+  "approved_on": "2026-08-25",
+  "calibration_gate_id": "r1-nominal-calibration-gate-v2",
+  "approved_protocol": {
+    "artifact_kind": "approved_nominal_calibration_protocol",
+    "path": "configs/training/order9_r1_nominal_calibration_protocol_v2.yaml",
+    "sha256": "f6f4a42bc0a3f6297162f25c3a321aa30b2e74f3f389ca7b058a1d209ae158c3"
+  },
+  "base_numeric_protocol_sha256": "dfd947b877636a31b0a7d6cd632e42e4f054e3ae1a8a8746bc6d9db7b78418c9",
+  "source_c3_release_id": "c3_pi_l_promoted_update18_v1",
+  "source_c3_checkpoint_sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b",
+  "approval_scope": [
+    "reuse_four_level_numeric_ladder",
+    "selection_on_22_train_buckets",
+    "single_confirmation_on_14_validation_buckets",
+    "fast_screen_before_isaac",
+    "nominal_qpid_qp_local_servo_standard_path",
+    "pi_l_retained_but_not_applied",
+    "two_isaac_replays_per_screen_accepted_candidate",
+    "stop_after_first_failed_level",
+    "no_teacher_collection_or_learning_by_protocol_alone"
+  ],
+  "statement": "The repository user approved retaining pi_L as a system while deferring its application, then explicitly requested execution of the previously approved four-level R1 calibration under the nominal control path."
+}

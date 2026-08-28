@@ -1,0 +1,28 @@
+{
+  "record_version": "order9_r1_nominal_calibration_approval_record_v7",
+  "decision": "approved",
+  "approved_by": "repository_user",
+  "approved_on": "2026-08-27",
+  "calibration_gate_id": "r1-nominal-bucket-local-compression-gate-v7",
+  "approved_protocol": {
+    "artifact_kind": "approved_bucket_local_nominal_compression_protocol",
+    "path": "configs/training/order9_r1_nominal_calibration_protocol_v7.yaml",
+    "sha256": "91c2b327d62f1a66e58067f7d7b02947fb44b2731b209375db0a3ffa8c54ff05"
+  },
+  "source_c3_release_id": "c3_pi_l_promoted_update18_v1",
+  "source_c3_checkpoint_sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b",
+  "approval_scope": [
+    "preserve_v6_teacher_and_ik_trajectory_bytes",
+    "preserve_v6_contact_assignments",
+    "apply_five_mm_nominal_compression_only_to_train_000004",
+    "default_zero_additional_compression",
+    "nominal_qpid_qp_local_servo_standard_path",
+    "pi_l_retained_but_not_applied",
+    "reuse_all_682_v6_fast_screen_admissions",
+    "rerun_all_682_minimum_level_cases_in_isaac",
+    "two_isaac_replays_per_candidate",
+    "quarantine_invalid_interrupted_outputs_before_retry",
+    "no_learning_or_teacher_collection_by_minimum_level_result_alone"
+  ],
+  "statement": "The repository user approved the root-cause repair and requested completion through Isaac. The repair preserves every v6 teacher/IK path and contact assignment, applies deterministic +5 mm contact-normal nominal compression only to train-000004-190f3a425b3e, applies +0 mm elsewhere, and reruns all 682 minimum-level cases. Passing this level alone does not authorize teacher collection."
+}

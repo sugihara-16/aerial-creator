@@ -1,0 +1,151 @@
+{
+  "ledger_version": "order9_r1_nominal_calibration_v3_result_ledger_v1",
+  "result_id": "r1_nominal_calibration_v3_rejected_l1_body_tilt_v1",
+  "recorded_at": "2026-08-25",
+  "status": "rejected",
+  "execution_contract": "deterministic_teacher_ik_joint_reserve_30mm_nominal_qpid_qp_local_servo_isaac_v2",
+  "joint_limit_reserve_projection_enabled": true,
+  "minimum_normalized_joint_limit_reserve": 0.01,
+  "grasp_point_position_error_metric": "three_dimensional_euclidean_distance",
+  "maximum_grasp_point_position_error_m": 0.03,
+  "per_axis_plus_minus_30mm_contract": false,
+  "pi_l_system_retained": true,
+  "pi_l_actor_command_applied": false,
+  "decision": {
+    "first_attempted_level_id": "r1_l1_10mm_5deg",
+    "first_attempted_position_half_span_m": 0.01,
+    "first_attempted_yaw_half_span_rad": 0.08726646259971647,
+    "planned_case_count": 682,
+    "cpu_preparation_attempt_count": 61,
+    "cpu_preparation_success_count": 60,
+    "cpu_preparation_rejection_count": 1,
+    "unattempted_after_decisive_cpu_rejection_count": 621,
+    "lattice_00_attempt_count": 22,
+    "lattice_00_success_count": 22,
+    "lattice_01_attempt_count": 22,
+    "lattice_01_success_count": 21,
+    "lattice_01_rejection_count": 1,
+    "lattice_02_in_flight_attempt_count": 17,
+    "lattice_02_in_flight_success_count": 17,
+    "termination_reason": "lattice_cpu_gate_cannot_reach_100_percent",
+    "formal_isaac_attempt_count": 0,
+    "formal_isaac_skip_reason": "candidate_failed_required_fast_screen_before_isaac",
+    "selection_level_ids_not_attempted": [
+      "r1_l2_20mm_10deg",
+      "r1_l3_30mm_15deg",
+      "r1_l4_40mm_20deg"
+    ],
+    "selected_level_id": null,
+    "confirmation_attempt_count": 0,
+    "accepted_level_id": null,
+    "formal_teacher_collection_authorized": false,
+    "training_eligible": false
+  },
+  "accepted_fast_screen_summary": {
+    "case_count": 60,
+    "minimum_normalized_joint_limit_reserve": 0.010000000999999994,
+    "minimum_collision_clearance_m": 0.004800088789033596,
+    "maximum_collision_violating_pair_count": 0,
+    "maximum_body_tilt_rad": 1.0286114474630543,
+    "maximum_joint_rate_rad_s": 1.0519939943569967,
+    "isaac_invoked_count": 0,
+    "controller_layers_invoked_count": 0
+  },
+  "rejections": [
+    {
+      "candidate_id": "r1_l1_10mm_5deg__train__train-000016-a9b26f370bba__lattice_01",
+      "source_bucket_id": "train-000016-a9b26f370bba",
+      "module_count": 4,
+      "x_offset_m": -0.01,
+      "y_offset_m": -0.01,
+      "yaw_offset_rad": 0.0,
+      "violation_code": "E_R1_FAST_SCREEN_BODY_TILT",
+      "maximum_body_tilt_rad": 1.5990674555749813,
+      "allowed_maximum_body_tilt_rad": 1.0471975511965976,
+      "minimum_normalized_joint_limit_reserve": 0.010000000999999994,
+      "required_minimum_normalized_joint_limit_reserve": 0.01,
+      "maximum_collision_violating_pair_count": 0,
+      "minimum_collision_clearance_m": 0.004809559738795155,
+      "maximum_joint_rate_rad_s": 0.2744444444444447,
+      "minimum_joint_rate_margin_rad_s": 2.4255555555555555,
+      "grasp_pose_reached": true,
+      "final_maintained_contact_count": 2
+    }
+  ],
+  "execution_notes": {
+    "resumable_execution_used": true,
+    "initial_preparation_process_count": 8,
+    "resumed_preparation_process_count": 24,
+    "isaac_parallel_process_count": 2,
+    "isaac_case_batch_size": 2,
+    "result_reported_wall_time_s_excludes_initial_resumable_prefix": true,
+    "result_reported_wall_time_s": 531.7265931650181,
+    "evidence_semantics_unchanged_across_resume": true
+  },
+  "bindings": {
+    "nominal_v3_protocol": {
+      "path": "configs/training/order9_r1_nominal_calibration_protocol_v3.yaml",
+      "sha256": "e0dfee539548a508426848a855122a95b9b45456c459f8ee4bc7102e7edae63c"
+    },
+    "nominal_v3_approval": {
+      "path": "for_codex/R1_NOMINAL_CALIBRATION_PROTOCOL_V3_APPROVAL.json",
+      "sha256": "b589fc3db1f90e94f4c8a6e77a055c2759839e7701be24d023e94906f4cbb27d"
+    },
+    "base_nominal_protocol": {
+      "path": "configs/training/order9_r1_nominal_calibration_protocol_v2.yaml",
+      "sha256": "f6f4a42bc0a3f6297162f25c3a321aa30b2e74f3f389ca7b058a1d209ae158c3"
+    },
+    "base_numeric_protocol": {
+      "path": "configs/training/order9_r1_calibration_protocol_v1.yaml",
+      "sha256": "dfd947b877636a31b0a7d6cd632e42e4f054e3ae1a8a8746bc6d9db7b78418c9"
+    },
+    "joint_reserve_projection_implementation": {
+      "path": "amsrr/training/order9_r1_joint_reserve.py",
+      "sha256": "3742ea763cabef58f5f885fad11896e99d572572e69712db46736ddbbce69ff0"
+    },
+    "teacher_screen_pipeline_implementation": {
+      "path": "amsrr/training/order9_r1_calibration_runner.py",
+      "sha256": "1e48c704def43c4abd1b047c36b1ef481f6ea746a7d520f518ddab5ace7a2bf5"
+    },
+    "nominal_v3_runtime_overlay": {
+      "path": "amsrr/training/order9_r1_nominal_calibration_v3.py",
+      "sha256": "08f75659ba1260bc0b35d48eb89f53014ff6b8efaee9cd55fe1c6a8398b2be41"
+    },
+    "runner": {
+      "path": "scripts/order9_run_r1_nominal_calibration_v3.py",
+      "sha256": "708daac2076b267406f343bb384e91c402ef61e4abf861ae8d741115912d6f2e"
+    },
+    "run_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v5_joint_reserve_30mm/calibration_result_v3.json",
+      "sha256": "1ac95e6884f8c8e04b5eb1300e2afde8da6b5391356df50cde7fcb136af2c086"
+    },
+    "level_result_v3": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v5_joint_reserve_30mm/selection/r1_l1_10mm_5deg/level_result_v3.json",
+      "sha256": "d6e9587a9dfcbb42141144b12d4bab9bdf1356f104f5118127daa0d23f29c022"
+    },
+    "base_level_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v5_joint_reserve_30mm/selection/r1_l1_10mm_5deg/level_result.json",
+      "sha256": "f7114dc507131663f10bc79f28e5945169bf39c7ab3c643d3fc89382629ba84f"
+    },
+    "body_tilt_rejection": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v5_joint_reserve_30mm/selection/r1_l1_10mm_5deg/cpu_rejections/r1_l1_10mm_5deg__train__train-000016-a9b26f370bba__lattice_01.json",
+      "sha256": "38ac8d3919578933b965ca67856be3f0af898f1589c6491f62a24fc8c3a1609f"
+    },
+    "protected_c3_curriculum": {
+      "path": "configs/training/order9_learning_curriculum.yaml",
+      "sha256": "965b1abc180d3dab80369c150c55a774c4ceee186befda68f3093c22f7d6f9d4"
+    },
+    "protected_c3_rollout": {
+      "path": "scripts/order9_vectorized_isaac_rollout.py",
+      "sha256": "e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2"
+    },
+    "protected_c3_checkpoint": {
+      "path": "artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt",
+      "sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b"
+    },
+    "protected_c3_release_ledger": {
+      "path": "for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json",
+      "sha256": "7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729"
+    }
+  }
+}

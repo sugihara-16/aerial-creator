@@ -1,0 +1,33 @@
+{
+  "record_version": "order9_r1_nominal_calibration_approval_record_v5",
+  "decision": "approved",
+  "approved_by": "repository_user",
+  "approved_on": "2026-08-26",
+  "calibration_gate_id": "r1-nominal-identical-path-retime-gate-v5",
+  "approved_protocol": {
+    "artifact_kind": "approved_identical_path_retime_calibration_protocol",
+    "path": "configs/training/order9_r1_nominal_calibration_protocol_v5.yaml",
+    "sha256": "713c69a31017f5280e06e9a35eb3793cfbb12d1cd4f3d9a81fa756e7b213948e"
+  },
+  "source_c3_release_id": "c3_pi_l_promoted_update18_v1",
+  "source_c3_checkpoint_sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b",
+  "approval_scope": [
+    "completion_within_ten_hours",
+    "same_controller_free_screen_before_isaac",
+    "identical_geometric_path_time_reparameterization",
+    "same_endpoint_configuration",
+    "same_contact_assignments",
+    "joint_rate_recheck_after_retime",
+    "collision_admission_only_for_identical_geometry",
+    "representative_two_replay_isaac_admission",
+    "nominal_qpid_qp_local_servo_standard_path",
+    "pi_l_retained_but_not_applied",
+    "reuse_four_level_numeric_ladder",
+    "selection_on_22_train_buckets",
+    "single_confirmation_on_14_validation_buckets",
+    "two_isaac_replays_per_screen_accepted_candidate",
+    "stop_after_first_failed_level",
+    "no_learning_by_protocol_alone"
+  ],
+  "statement": "The repository user required full completion within ten hours. The approved acceleration changes only trajectory timing after the unchanged controller-free geometric screen and retains the full Isaac and controller gates."
+}
