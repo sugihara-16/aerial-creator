@@ -1,0 +1,13 @@
+{
+  "config_version": "order9_r1_preload_collision_repair_v1",
+  "reason": "raise_grasp_and_place_path_30mm_after_non_grasp_body_contacted_support_during_place",
+  "candidates": {
+    "r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_12": {
+      "selected_surface_port_ids": [19, 22],
+      "selected_candidate_group_id": "slot_0:grasp_pair:0",
+      "pregrasp_clearance_m": 0.12,
+      "collision_margin_m": 0.007,
+      "grasp_contact_height_offset_m": 0.03
+    }
+  }
+}

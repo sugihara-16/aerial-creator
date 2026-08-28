@@ -65,7 +65,6 @@ from amsrr.training.order9_c3_teacher import (
 )
 from amsrr.utils.hashing import hash_file, stable_hash
 
-
 ORDER9_C3_NOMINAL_TRAJECTORY_VERSION = (
     "order9_c3_nominal_configuration_space_v6_complete_task_phases"
 )
@@ -73,9 +72,7 @@ ORDER9_C3_NOMINAL_TRAJECTORY_SET_VERSION = (
     "order9_c3_nominal_trajectory_set_v6_complete_task_phases"
 )
 _PHASES_TO_GRASP = ("approach", "contact_acquisition")
-_COMPLETE_TASK_PHASES = tuple(
-    phase.value for phase in ORDER9_OBJECT_TASK_PHASES
-)
+_COMPLETE_TASK_PHASES = tuple(phase.value for phase in ORDER9_OBJECT_TASK_PHASES)
 
 
 @dataclass(frozen=True)
@@ -127,9 +124,7 @@ class Order9C3NominalWindowArtifact(SchemaBase):
 
     def validate(self) -> None:
         if self.window_index < 0:
-            raise SchemaValidationError(
-                "nominal window index must be non-negative"
-            )
+            raise SchemaValidationError("nominal window index must be non-negative")
         require_non_empty(self.phase, "Order9C3NominalWindowArtifact.phase")
         if (
             not math.isfinite(float(self.global_start_time_s))
@@ -213,9 +208,7 @@ class Order9C3NominalPhaseArtifact(SchemaBase):
             "pending_offline_admission",
             "accepted_offline_admission",
         }:
-            raise SchemaValidationError(
-                "C3 nominal phase collision status is invalid"
-            )
+            raise SchemaValidationError("C3 nominal phase collision status is invalid")
 
 
 @dataclass
@@ -288,9 +281,7 @@ class Order9C3NominalTrajectoryArtifact(SchemaBase):
                 "C3 nominal trajectory duration must be positive"
             )
         if not self.windows:
-            raise SchemaValidationError(
-                "C3 nominal trajectory must contain windows"
-            )
+            raise SchemaValidationError("C3 nominal trajectory must contain windows")
         if [value.window_index for value in self.windows] != list(
             range(len(self.windows))
         ):
@@ -341,9 +332,7 @@ class Order9C3NominalTrajectorySetEntry(SchemaBase):
             "Order9C3NominalTrajectorySetEntry.bucket_id",
         )
         if not 2 <= self.module_count <= 8:
-            raise SchemaValidationError(
-                "C3 nominal set module count must be in [2, 8]"
-            )
+            raise SchemaValidationError("C3 nominal set module count must be in [2, 8]")
         for name in ("structural_hash", "artifact_sha256"):
             _require_sha256(str(getattr(self, name)), name)
         require_non_empty(
@@ -378,9 +367,7 @@ class Order9C3NominalTrajectorySetManifest(SchemaBase):
 
     def validate(self) -> None:
         if self.manifest_version != ORDER9_C3_NOMINAL_TRAJECTORY_SET_VERSION:
-            raise SchemaValidationError(
-                "C3 nominal trajectory set version mismatch"
-            )
+            raise SchemaValidationError("C3 nominal trajectory set version mismatch")
         require_non_empty(
             self.bucket_manifest_path,
             "Order9C3NominalTrajectorySetManifest.bucket_manifest_path",
@@ -391,14 +378,10 @@ class Order9C3NominalTrajectorySetManifest(SchemaBase):
         )
         _require_sha256(self.physical_model_hash, "physical_model_hash")
         if not self.entries:
-            raise SchemaValidationError(
-                "C3 nominal trajectory set cannot be empty"
-            )
+            raise SchemaValidationError("C3 nominal trajectory set cannot be empty")
         ids = [value.bucket_id for value in self.entries]
         if len(ids) != len(set(ids)):
-            raise SchemaValidationError(
-                "C3 nominal trajectory set bucket ids repeat"
-            )
+            raise SchemaValidationError("C3 nominal trajectory set bucket ids repeat")
 
 
 @dataclass(frozen=True)
@@ -430,13 +413,18 @@ def generate_order9_c3_nominal_grasp_trajectory(
     enforce_proxy_collision_during_generation: bool = True,
     collision_margin_m: float = 0.005,
     grasp_contact_height_offset_m: float = 0.0,
+    grasp_contact_tangent_offset_world_m: tuple[float, float, float] = (
+        0.0,
+        0.0,
+        0.0,
+    ),
     pregrasp_clearance_m: float = 0.08,
+    minimum_normalized_joint_limit_reserve: float = 0.0,
+    maximum_contact_solution_body_tilt_rad: float | None = None,
     preferred_surface_port_ids: tuple[int, int] | None = None,
     preferred_candidate_group_id: str | None = None,
     excluded_surface_port_id_pairs: tuple[tuple[int, int], ...] = (),
-    contact_goal_joint_seed_positions_rad: (
-        Mapping[str, float] | None
-    ) = None,
+    contact_goal_joint_seed_positions_rad: Mapping[str, float] | None = None,
     progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> Order9C3NominalTrajectory:
     """Search contact groups until the complete local grasp path succeeds."""
@@ -452,7 +440,16 @@ def generate_order9_c3_nominal_grasp_trajectory(
             ),
             collision_margin_m=collision_margin_m,
             grasp_contact_height_offset_m=grasp_contact_height_offset_m,
+            grasp_contact_tangent_offset_world_m=(
+                grasp_contact_tangent_offset_world_m
+            ),
             pregrasp_clearance_m=pregrasp_clearance_m,
+            minimum_normalized_joint_limit_reserve=(
+                minimum_normalized_joint_limit_reserve
+            ),
+            maximum_contact_solution_body_tilt_rad=(
+                maximum_contact_solution_body_tilt_rad
+            ),
             preferred_surface_port_ids=preferred_surface_port_ids,
             preferred_candidate_group_id=preferred_candidate_group_id,
             excluded_surface_port_id_pairs=excluded_surface_port_id_pairs,
@@ -476,16 +473,21 @@ def generate_order9_c3_nominal_grasp_trajectory(
             excluded_surface_port_id_pairs=excluded_surface_port_id_pairs,
             collision_margin_m=collision_margin_m,
             grasp_contact_height_offset_m=grasp_contact_height_offset_m,
+            grasp_contact_tangent_offset_world_m=(
+                grasp_contact_tangent_offset_world_m
+            ),
             pregrasp_clearance_m=pregrasp_clearance_m,
+            minimum_normalized_joint_limit_reserve=(
+                minimum_normalized_joint_limit_reserve
+            ),
+            maximum_contact_solution_body_tilt_rad=(
+                maximum_contact_solution_body_tilt_rad
+            ),
         ),
         collision_object=(
-            collision_object
-            if enforce_proxy_collision_during_generation
-            else None
+            collision_object if enforce_proxy_collision_during_generation else None
         ),
-        contact_goal_joint_seed_positions_rad=(
-            contact_goal_joint_seed_positions_rad
-        ),
+        contact_goal_joint_seed_positions_rad=(contact_goal_joint_seed_positions_rad),
     )
     first_group_id = probe.trajectory_plan.candidate_group_id
     group_ids = tuple(
@@ -506,12 +508,19 @@ def generate_order9_c3_nominal_grasp_trajectory(
                 ),
                 collision_margin_m=collision_margin_m,
                 grasp_contact_height_offset_m=grasp_contact_height_offset_m,
+                grasp_contact_tangent_offset_world_m=(
+                    grasp_contact_tangent_offset_world_m
+                ),
                 pregrasp_clearance_m=pregrasp_clearance_m,
+                minimum_normalized_joint_limit_reserve=(
+                    minimum_normalized_joint_limit_reserve
+                ),
+                maximum_contact_solution_body_tilt_rad=(
+                    maximum_contact_solution_body_tilt_rad
+                ),
                 preferred_surface_port_ids=preferred_surface_port_ids,
                 preferred_candidate_group_id=group_id,
-                excluded_surface_port_id_pairs=(
-                    excluded_surface_port_id_pairs
-                ),
+                excluded_surface_port_id_pairs=(excluded_surface_port_id_pairs),
                 contact_goal_joint_seed_positions_rad=(
                     contact_goal_joint_seed_positions_rad
                 ),
@@ -534,13 +543,18 @@ def _generate_order9_c3_nominal_grasp_trajectory_once(
     enforce_proxy_collision_during_generation: bool = True,
     collision_margin_m: float = 0.005,
     grasp_contact_height_offset_m: float = 0.0,
+    grasp_contact_tangent_offset_world_m: tuple[float, float, float] = (
+        0.0,
+        0.0,
+        0.0,
+    ),
     pregrasp_clearance_m: float = 0.08,
+    minimum_normalized_joint_limit_reserve: float = 0.0,
+    maximum_contact_solution_body_tilt_rad: float | None = None,
     preferred_surface_port_ids: tuple[int, int] | None = None,
     preferred_candidate_group_id: str | None = None,
     excluded_surface_port_id_pairs: tuple[tuple[int, int], ...] = (),
-    contact_goal_joint_seed_positions_rad: (
-        Mapping[str, float] | None
-    ) = None,
+    contact_goal_joint_seed_positions_rad: Mapping[str, float] | None = None,
     progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> Order9C3NominalTrajectory:
     """Chain ideal resolved endpoints from approach through grasp contact."""
@@ -563,16 +577,21 @@ def _generate_order9_c3_nominal_grasp_trajectory_once(
             excluded_surface_port_id_pairs=excluded_surface_port_id_pairs,
             collision_margin_m=collision_margin_m,
             grasp_contact_height_offset_m=grasp_contact_height_offset_m,
+            grasp_contact_tangent_offset_world_m=(
+                grasp_contact_tangent_offset_world_m
+            ),
             pregrasp_clearance_m=pregrasp_clearance_m,
+            minimum_normalized_joint_limit_reserve=(
+                minimum_normalized_joint_limit_reserve
+            ),
+            maximum_contact_solution_body_tilt_rad=(
+                maximum_contact_solution_body_tilt_rad
+            ),
         ),
         collision_object=(
-            collision_object
-            if enforce_proxy_collision_during_generation
-            else None
+            collision_object if enforce_proxy_collision_during_generation else None
         ),
-        contact_goal_joint_seed_positions_rad=(
-            contact_goal_joint_seed_positions_rad
-        ),
+        contact_goal_joint_seed_positions_rad=(contact_goal_joint_seed_positions_rad),
     )
     built = IRGBuilder().build_with_scene_graph(task_spec)
     envelope = InteractionEnvelopeExtractor().extract(built.irg)
@@ -586,21 +605,22 @@ def _generate_order9_c3_nominal_grasp_trajectory_once(
     teacher = Order9ArticulatedTrajectoryTeacher(
         physical_model,
         config=Order9ArticulatedTeacherConfig(
-            preferred_candidate_group_id=(
-                selection.trajectory_plan.candidate_group_id
-            ),
+            preferred_candidate_group_id=(selection.trajectory_plan.candidate_group_id),
             collision_margin_m=collision_margin_m,
             pregrasp_clearance_m=pregrasp_clearance_m,
+            minimum_normalized_joint_limit_reserve=(
+                minimum_normalized_joint_limit_reserve
+            ),
+            maximum_contact_solution_body_tilt_rad=(
+                maximum_contact_solution_body_tilt_rad
+            ),
         ),
         collision_object=(
-            collision_object
-            if enforce_proxy_collision_during_generation
-            else None
+            collision_object if enforce_proxy_collision_during_generation else None
         ),
     )
     initial_object_poses = {
-        value.object_id: value.pose_world
-        for value in task_spec.scene.objects
+        value.object_id: value.pose_world for value in task_spec.scene.objects
     }
     windows: list[Order9C3NominalWindow] = []
     global_time_s = 0.0
@@ -632,10 +652,7 @@ def _generate_order9_c3_nominal_grasp_trajectory_once(
                 raise SchemaValidationError(
                     "C3 nominal teacher returned an unexpected task phase"
                 )
-            if (
-                plan.candidate_group_id
-                != selection.trajectory_plan.candidate_group_id
-            ):
+            if plan.candidate_group_id != selection.trajectory_plan.candidate_group_id:
                 raise SchemaValidationError(
                     "C3 nominal rolling plan changed the selected contact group"
                 )
@@ -662,46 +679,24 @@ def _generate_order9_c3_nominal_grasp_trajectory_once(
                         "phase_window_index": _phase_window_index,
                         "phase": phase,
                         "phase_target_reached": plan.phase_target_reached,
-                        "configuration_plan_method": (
-                            configuration_plan.method
-                        ),
+                        "configuration_plan_method": (configuration_plan.method),
                         "configuration_plan_state_count": len(
                             configuration_plan.states
                         ),
                         "configuration_plan_collision_check_count": (
                             configuration_plan.collision_check_count
                         ),
-                        "start_base_pose_world": list(
-                            plan_start.base_pose_world
-                        ),
-                        "next_base_pose_world": list(
-                            plan_next.base_pose_world
-                        ),
-                        "goal_base_pose_world": list(
-                            plan_goal.base_pose_world
-                        ),
-                        "start_joint_hash": stable_hash(
-                            plan_start.joint_positions_rad
-                        ),
-                        "next_joint_hash": stable_hash(
-                            plan_next.joint_positions_rad
-                        ),
-                        "goal_joint_hash": stable_hash(
-                            plan_goal.joint_positions_rad
-                        ),
+                        "start_base_pose_world": list(plan_start.base_pose_world),
+                        "next_base_pose_world": list(plan_next.base_pose_world),
+                        "goal_base_pose_world": list(plan_goal.base_pose_world),
+                        "start_joint_hash": stable_hash(plan_start.joint_positions_rad),
+                        "next_joint_hash": stable_hash(plan_next.joint_positions_rad),
+                        "goal_joint_hash": stable_hash(plan_goal.joint_positions_rad),
                         "maximum_start_next_joint_delta_rad": max(
                             (
                                 abs(
-                                    float(
-                                        plan_next.joint_positions_rad[
-                                            joint_id
-                                        ]
-                                    )
-                                    - float(
-                                        plan_start.joint_positions_rad[
-                                            joint_id
-                                        ]
-                                    )
+                                    float(plan_next.joint_positions_rad[joint_id])
+                                    - float(plan_start.joint_positions_rad[joint_id])
                                 )
                                 for joint_id in ordered_ids
                             ),
@@ -710,16 +705,8 @@ def _generate_order9_c3_nominal_grasp_trajectory_once(
                         "maximum_start_goal_joint_delta_rad": max(
                             (
                                 abs(
-                                    float(
-                                        plan_goal.joint_positions_rad[
-                                            joint_id
-                                        ]
-                                    )
-                                    - float(
-                                        plan_start.joint_positions_rad[
-                                            joint_id
-                                        ]
-                                    )
+                                    float(plan_goal.joint_positions_rad[joint_id])
+                                    - float(plan_start.joint_positions_rad[joint_id])
                                 )
                                 for joint_id in ordered_ids
                             ),
@@ -796,9 +783,7 @@ def materialize_order9_c3_complete_task_phases(
         not math.isfinite(float(value)) or float(value) <= 0.0
         for value in durations.values()
     ):
-        raise SchemaValidationError(
-            "C3 complete-task phase durations are invalid"
-        )
+        raise SchemaValidationError("C3 complete-task phase durations are invalid")
     for name, value in (
         ("lift_clearance_m", lift_clearance_m),
         ("retreat_offset_m", retreat_offset_m),
@@ -807,9 +792,7 @@ def materialize_order9_c3_complete_task_phases(
         if not math.isfinite(float(value)) or float(value) <= 0.0:
             raise SchemaValidationError(f"C3 complete-task {name} is invalid")
     approach = phase_trajectories[Order9ObjectTaskPhase.APPROACH.value]
-    contact = phase_trajectories[
-        Order9ObjectTaskPhase.CONTACT_ACQUISITION.value
-    ]
+    contact = phase_trajectories[Order9ObjectTaskPhase.CONTACT_ACQUISITION.value]
     approach.validate()
     contact.validate()
     contact_start = contact.knots[0]
@@ -854,9 +837,7 @@ def materialize_order9_c3_complete_task_phases(
     )
     lift = float(lift_clearance_m)
     del retreat_offset_m
-    object_to_grasp_body = compose_pose(
-        inverse_pose(object_start), grasp_body
-    )
+    object_to_grasp_body = compose_pose(inverse_pose(object_start), grasp_body)
     grasp_lifted = _translated_pose(grasp_body, z=lift)
     body_at_goal = compose_pose(
         object_goal,
@@ -953,33 +934,25 @@ def materialize_order9_c3_complete_task_phases(
     )
     result[Order9ObjectTaskPhase.RELEASE.value] = release
     result[Order9ObjectTaskPhase.RETREAT.value] = retreat
-    retreat_end_body, _, retreat_end_q, _ = _complete_task_knot_state(
-        retreat.knots[-1]
-    )
-    result[Order9ObjectTaskPhase.SETTLE.value] = (
-        _build_complete_task_phase_trajectory(
-            template=retreat.knots[-1],
-            phase=Order9ObjectTaskPhase.SETTLE.value,
-            duration_s=float(
-                durations[Order9ObjectTaskPhase.SETTLE.value]
-            ),
-            dt_s=float(nominal_dt_s),
-            body_start=retreat_end_body,
-            body_end=retreat_end_body,
-            q_start=retreat_end_q,
-            q_end=retreat_end_q,
-            object_id=object_id,
-            object_start=object_goal,
-            object_end=object_goal,
-            contact_schedule_state="inactive",
-            anchor_pose_translation_origin=object_goal,
-            contract_version=contact.contract_version,
-        )
+    retreat_end_body, _, retreat_end_q, _ = _complete_task_knot_state(retreat.knots[-1])
+    result[Order9ObjectTaskPhase.SETTLE.value] = _build_complete_task_phase_trajectory(
+        template=retreat.knots[-1],
+        phase=Order9ObjectTaskPhase.SETTLE.value,
+        duration_s=float(durations[Order9ObjectTaskPhase.SETTLE.value]),
+        dt_s=float(nominal_dt_s),
+        body_start=retreat_end_body,
+        body_end=retreat_end_body,
+        q_start=retreat_end_q,
+        q_end=retreat_end_q,
+        object_id=object_id,
+        object_start=object_goal,
+        object_end=object_goal,
+        contact_schedule_state="inactive",
+        anchor_pose_translation_origin=object_goal,
+        contract_version=contact.contract_version,
     )
     if tuple(result) != _COMPLETE_TASK_PHASES:
-        raise SchemaValidationError(
-            "C3 complete-task trajectory phase order changed"
-        )
+        raise SchemaValidationError("C3 complete-task trajectory phase order changed")
     return result
 
 
@@ -1046,9 +1019,7 @@ def _build_reversed_accepted_phase_trajectory(
             lower_index = upper_index - 1
         lower = source.knots[lower_index]
         upper = source.knots[upper_index]
-        span = max(
-            float(upper.t_rel_s) - float(lower.t_rel_s), 1.0e-12
-        )
+        span = max(float(upper.t_rel_s) - float(lower.t_rel_s), 1.0e-12)
         alpha = min(
             max((source_time - float(lower.t_rel_s)) / span, 0.0),
             1.0,
@@ -1061,19 +1032,15 @@ def _build_reversed_accepted_phase_trajectory(
                 + alpha * float(upper_pose[axis])
                 for axis in range(3)
             ],
-            *_normalized_quaternion_lerp(
-                lower_pose[3:7], upper_pose[3:7], alpha
-            ),
+            *_normalized_quaternion_lerp(lower_pose[3:7], upper_pose[3:7], alpha),
         )
         body_pose = list(compose_pose(object_delta, source_pose))
-        clearance = (
-            (1.0 - progress) * float(added_clearance_start_m)
-            + progress * float(added_clearance_end_m)
-        )
+        clearance = (1.0 - progress) * float(
+            added_clearance_start_m
+        ) + progress * float(added_clearance_end_m)
         body_pose[2] += clearance
         q = {
-            key: (1.0 - alpha) * float(value)
-            + alpha * float(upper_q[key])
+            key: (1.0 - alpha) * float(value) + alpha * float(upper_q[key])
             for key, value in lower_q.items()
         }
         payload = lower.to_dict()
@@ -1110,9 +1077,7 @@ def _build_reversed_accepted_phase_trajectory(
         payload["object_targets"] = [
             {
                 "object_id": source.knots[0].object_targets[0].object_id,
-                "pose_target_world": [
-                    float(value) for value in target_object_pose
-                ],
+                "pose_target_world": [float(value) for value in target_object_pose],
                 "twist_target_world": [0.0] * 6,
             }
         ]
@@ -1122,9 +1087,7 @@ def _build_reversed_accepted_phase_trajectory(
         horizon_s=duration_s,
         dt_s=actual_dt_s,
         knots=knots,
-        derived_mode_label=(
-            f"order9_c3_reversed_accepted_clearance_phase:{phase}"
-        ),
+        derived_mode_label=(f"order9_c3_reversed_accepted_clearance_phase:{phase}"),
         contract_version=source.contract_version,
     )
     trajectory.validate()
@@ -1152,17 +1115,12 @@ def _build_complete_task_phase_trajectory(
     knot_count = max(2, int(math.ceil(duration_s / dt_s)) + 1)
     actual_dt_s = duration_s / float(knot_count - 1)
     body_delta = [
-        float(body_end[index]) - float(body_start[index])
-        for index in range(3)
+        float(body_end[index]) - float(body_start[index]) for index in range(3)
     ]
     object_delta = [
-        float(object_end[index]) - float(object_start[index])
-        for index in range(3)
+        float(object_end[index]) - float(object_start[index]) for index in range(3)
     ]
-    q_delta = {
-        key: float(q_end[key]) - float(value)
-        for key, value in q_start.items()
-    }
+    q_delta = {key: float(q_end[key]) - float(value) for key, value in q_start.items()}
     if set(q_delta) != set(q_end):
         raise SchemaValidationError(
             "C3 complete-task joint identities changed within a phase"
@@ -1178,33 +1136,19 @@ def _build_complete_task_phase_trajectory(
         smooth = progress * progress * (3.0 - 2.0 * progress)
         derivative = 6.0 * progress * (1.0 - progress)
         body_pose = [
-            float(body_start[axis]) + smooth * body_delta[axis]
-            for axis in range(3)
-        ] + list(
-            _normalized_quaternion_lerp(
-                body_start[3:7], body_end[3:7], smooth
-            )
-        )
+            float(body_start[axis]) + smooth * body_delta[axis] for axis in range(3)
+        ] + list(_normalized_quaternion_lerp(body_start[3:7], body_end[3:7], smooth))
         object_pose = [
-            float(object_start[axis]) + smooth * object_delta[axis]
-            for axis in range(3)
+            float(object_start[axis]) + smooth * object_delta[axis] for axis in range(3)
         ] + list(
-            _normalized_quaternion_lerp(
-                object_start[3:7], object_end[3:7], smooth
-            )
+            _normalized_quaternion_lerp(object_start[3:7], object_end[3:7], smooth)
         )
         if body_relative_to_object is not None:
-            body_pose = list(
-                compose_pose(tuple(object_pose), body_relative_to_object)
-            )
+            body_pose = list(compose_pose(tuple(object_pose), body_relative_to_object))
         q = {
-            key: float(value) + smooth * q_delta[key]
-            for key, value in q_start.items()
+            key: float(value) + smooth * q_delta[key] for key, value in q_start.items()
         }
-        qdot = {
-            key: q_delta[key] / duration_s * derivative
-            for key in q_start
-        }
+        qdot = {key: q_delta[key] / duration_s * derivative for key in q_start}
         payload = template.to_dict()
         payload["t_rel_s"] = index * actual_dt_s
         centroidal = dict(payload.get("centroidal_target") or {})
@@ -1249,10 +1193,7 @@ def _build_complete_task_phase_trajectory(
                 "object_id": object_id,
                 "pose_target_world": object_pose,
                 "twist_target_world": [
-                    *[
-                        value / duration_s * derivative
-                        for value in object_delta
-                    ],
+                    *[value / duration_s * derivative for value in object_delta],
                     0.0,
                     0.0,
                     0.0,
@@ -1296,10 +1237,7 @@ def _complete_task_knot_state(
     return (
         tuple(float(value) for value in centroidal.com_pos_world)
         + tuple(float(value) for value in centroidal.body_orientation_world),
-        tuple(
-            float(value)
-            for value in (centroidal.com_vel_world or (0.0, 0.0, 0.0))
-        )
+        tuple(float(value) for value in (centroidal.com_vel_world or (0.0, 0.0, 0.0)))
         + (0.0, 0.0, 0.0),
         {str(key): float(value) for key, value in posture.joint_pos_target.items()},
         {str(key): float(value) for key, value in posture.joint_vel_target.items()},
@@ -1330,10 +1268,7 @@ def _normalized_quaternion_lerp(
     right = [float(value) for value in end]
     if sum(a * b for a, b in zip(left, right)) < 0.0:
         right = [-value for value in right]
-    value = [
-        (1.0 - progress) * a + progress * b
-        for a, b in zip(left, right)
-    ]
+    value = [(1.0 - progress) * a + progress * b for a, b in zip(left, right)]
     norm = math.sqrt(sum(item * item for item in value))
     if norm <= 1.0e-12:
         raise SchemaValidationError("C3 complete-task quaternion is singular")
@@ -1398,9 +1333,7 @@ def write_order9_c3_nominal_trajectory_artifact(
 
     destination = Path(output_dir).resolve()
     if destination.exists():
-        raise FileExistsError(
-            f"C3 nominal trajectory output exists: {destination}"
-        )
+        raise FileExistsError(f"C3 nominal trajectory output exists: {destination}")
     destination.mkdir(parents=True)
     urdf_path = Path(robot_urdf_path).resolve()
     if not urdf_path.is_file():
@@ -1422,20 +1355,16 @@ def write_order9_c3_nominal_trajectory_artifact(
     )
     complete_timeline = _flatten_complete_phase_trajectories(complete_phases)
     complete_duration_s = sum(
-        float(complete_phases[phase].horizon_s)
-        for phase in _COMPLETE_TASK_PHASES
+        float(complete_phases[phase].horizon_s) for phase in _COMPLETE_TASK_PHASES
     )
     _write_new_text(
         morphology_path,
-        result.selection_bundle.design_output.target_morphology.to_json(
-            indent=2
-        )
+        result.selection_bundle.design_output.target_morphology.to_json(indent=2)
         + "\n",
     )
     _write_new_text(
         candidates_path,
-        result.selection_bundle.contact_candidate_set.to_json(indent=2)
-        + "\n",
+        result.selection_bundle.contact_candidate_set.to_json(indent=2) + "\n",
     )
     _write_new_text(
         timeline_path,
@@ -1489,29 +1418,17 @@ def write_order9_c3_nominal_trajectory_artifact(
                 phase_target_reached=window.plan.phase_target_reached,
                 raw_trajectory_path=_relative(raw_path, destination),
                 raw_trajectory_sha256=hash_file(raw_path),
-                raw_trajectory_hash=stable_hash(
-                    window.plan.raw_trajectory.to_dict()
-                ),
-                resolved_trajectory_path=_relative(
-                    resolved_path, destination
-                ),
+                raw_trajectory_hash=stable_hash(window.plan.raw_trajectory.to_dict()),
+                resolved_trajectory_path=_relative(resolved_path, destination),
                 resolved_trajectory_sha256=hash_file(resolved_path),
-                resolved_trajectory_hash=stable_hash(
-                    window.plan.trajectory.to_dict()
-                ),
-                resolver_evidence_path=_relative(
-                    evidence_path, destination
-                ),
+                resolved_trajectory_hash=stable_hash(window.plan.trajectory.to_dict()),
+                resolver_evidence_path=_relative(evidence_path, destination),
                 resolver_evidence_sha256=hash_file(evidence_path),
                 raw_knot_count=len(window.plan.raw_trajectory.knots),
                 resolved_knot_count=len(window.plan.trajectory.knots),
-                configuration_planner_version=(
-                    configuration_plan.planner_version
-                ),
+                configuration_planner_version=(configuration_plan.planner_version),
                 configuration_plan_method=configuration_plan.method,
-                configuration_plan_state_count=len(
-                    configuration_plan.states
-                ),
+                configuration_plan_state_count=len(configuration_plan.states),
                 configuration_plan_collision_check_count=(
                     configuration_plan.collision_check_count
                 ),
@@ -1547,16 +1464,12 @@ def write_order9_c3_nominal_trajectory_artifact(
         structural_hash=structural_hash,
         robot_urdf_path=str(urdf_path),
         robot_urdf_sha256=hash_file(urdf_path),
-        task_conditioned_morphology_path=_relative(
-            morphology_path, destination
-        ),
+        task_conditioned_morphology_path=_relative(morphology_path, destination),
         task_conditioned_morphology_sha256=hash_file(morphology_path),
         task_conditioned_morphology_hash=(
             result.selection_bundle.design_output.target_morphology.stable_hash()
         ),
-        contact_candidate_set_path=_relative(
-            candidates_path, destination
-        ),
+        contact_candidate_set_path=_relative(candidates_path, destination),
         contact_candidate_set_sha256=hash_file(candidates_path),
         contact_candidate_set_hash=stable_hash(
             result.selection_bundle.contact_candidate_set.to_dict()
@@ -1572,23 +1485,17 @@ def write_order9_c3_nominal_trajectory_artifact(
         duration_s=complete_duration_s,
         final_phase=Order9ObjectTaskPhase.SETTLE.value,
         final_phase_target_reached=True,
-        proxy_collision_validation_status=(
-            result.proxy_collision_validation_status
-        ),
+        proxy_collision_validation_status=(result.proxy_collision_validation_status),
         windows=window_artifacts,
         phase_trajectories=phase_artifacts,
-        selection_evidence=order9_c3_teacher_evidence(
-            result.selection_bundle
-        ),
+        selection_evidence=order9_c3_teacher_evidence(result.selection_bundle),
     )
     manifest.validate()
     _write_new_text(
         destination / "manifest.json",
         manifest.to_json(indent=2) + "\n",
     )
-    validate_order9_c3_nominal_trajectory_artifact_bytes(
-        destination / "manifest.json"
-    )
+    validate_order9_c3_nominal_trajectory_artifact_bytes(destination / "manifest.json")
     return manifest
 
 
@@ -1641,9 +1548,7 @@ def validate_order9_c3_nominal_trajectory_artifact_bytes(
         )
     for path, expected in checks:
         if not path.is_file() or hash_file(path) != expected:
-            raise SchemaValidationError(
-                f"C3 nominal trajectory bytes changed: {path}"
-            )
+            raise SchemaValidationError(f"C3 nominal trajectory bytes changed: {path}")
     return artifact
 
 
@@ -1692,9 +1597,7 @@ def validate_order9_c3_nominal_trajectory_set_bytes(
             raise SchemaValidationError(
                 f"C3 nominal artifact hash changed: {entry.bucket_id}"
             )
-        artifact = validate_order9_c3_nominal_trajectory_artifact_bytes(
-            artifact_path
-        )
+        artifact = validate_order9_c3_nominal_trajectory_artifact_bytes(artifact_path)
         if (
             artifact.bucket_id != entry.bucket_id
             or artifact.split != entry.split
@@ -1775,9 +1678,7 @@ def load_order9_c3_accepted_nominal_bundle(
     root = artifact_path.parent
     morphology_path = root / artifact.task_conditioned_morphology_path
     candidates_path = root / artifact.contact_candidate_set_path
-    morphology = MorphologyGraph.from_json(
-        morphology_path.read_text(encoding="utf-8")
-    )
+    morphology = MorphologyGraph.from_json(morphology_path.read_text(encoding="utf-8"))
     candidates = ContactCandidateSet.from_json(
         candidates_path.read_text(encoding="utf-8")
     )
@@ -1813,9 +1714,7 @@ def load_order9_c3_accepted_nominal_bundle(
             "artifact_sha256": entry.artifact_sha256,
             "timeline_sha256": artifact.timeline_sha256,
             "nominal_knot_dt_s": float(trajectory.dt_s),
-            "selected_surface_port_ids": list(
-                artifact.selected_surface_port_ids
-            ),
+            "selected_surface_port_ids": list(artifact.selected_surface_port_ids),
         },
     )
 
@@ -1827,18 +1726,13 @@ def _load_nominal_phase_trajectories(
     phase_trajectories = {}
     for phase_artifact in artifact.phase_trajectories:
         path = root / phase_artifact.trajectory_path
-        trajectory = ContactWrenchTrajectory.from_json(
-            path.read_text(encoding="utf-8")
-        )
+        trajectory = ContactWrenchTrajectory.from_json(path.read_text(encoding="utf-8"))
         trajectory.validate()
         if (
-            stable_hash(trajectory.to_dict())
-            != phase_artifact.trajectory_hash
+            stable_hash(trajectory.to_dict()) != phase_artifact.trajectory_hash
             or len(trajectory.knots) != phase_artifact.knot_count
         ):
-            raise SchemaValidationError(
-                "C3 nominal complete phase trajectory changed"
-            )
+            raise SchemaValidationError("C3 nominal complete phase trajectory changed")
         phase_trajectories[phase_artifact.phase] = trajectory
     if tuple(phase_trajectories) != _COMPLETE_TASK_PHASES:
         raise SchemaValidationError(
@@ -1863,9 +1757,11 @@ def _join_phase_windows(
         for global_start, trajectory in windows:
             for knot_index, knot in enumerate(trajectory.knots):
                 time_s = global_start - origin + float(knot.t_rel_s)
-                if knots and knot_index == 0 and abs(
-                    float(knots[-1].t_rel_s) - time_s
-                ) <= 1.0e-9:
+                if (
+                    knots
+                    and knot_index == 0
+                    and abs(float(knots[-1].t_rel_s) - time_s) <= 1.0e-9
+                ):
                     continue
                 payload = knot.to_dict()
                 payload["t_rel_s"] = time_s
@@ -1876,14 +1772,9 @@ def _join_phase_windows(
             )
         value = ContactWrenchTrajectory(
             horizon_s=float(knots[-1].t_rel_s),
-            dt_s=min(
-                float(trajectory.dt_s) for _, trajectory in windows
-            ),
+            dt_s=min(float(trajectory.dt_s) for _, trajectory in windows),
             knots=knots,
-            derived_mode_label=(
-                "order9_c3_accepted_nominal_phase_replay:"
-                f"{phase}"
-            ),
+            derived_mode_label=("order9_c3_accepted_nominal_phase_replay:" f"{phase}"),
             contract_version=windows[0][1].contract_version,
         )
         value.validate()
@@ -2000,24 +1891,15 @@ def _ideal_endpoint_observation(
         raise SchemaValidationError(
             "C3 nominal resolved endpoint lacks joint/centroidal targets"
         )
-    q = {
-        str(key): float(value)
-        for key, value in posture.joint_pos_target.items()
-    }
-    qdot = {
-        str(key): float(value)
-        for key, value in posture.joint_vel_target.items()
-    }
+    q = {str(key): float(value) for key, value in posture.joint_pos_target.items()}
+    qdot = {str(key): float(value) for key, value in posture.joint_vel_target.items()}
     kinematics = WholeStructureKinematics()
     base_pose = base_pose_for_centroidal_target(
         context.morphology_graph,
         physical_model,
         q,
         tuple(float(value) for value in centroidal.com_pos_world),
-        tuple(
-            float(value)
-            for value in centroidal.body_orientation_world
-        ),
+        tuple(float(value) for value in centroidal.body_orientation_world),
         kinematics=kinematics,
     )
     fk = kinematics.forward(
@@ -2028,13 +1910,9 @@ def _ideal_endpoint_observation(
         (),
     )
     linear_velocity = tuple(
-        float(value)
-        for value in (centroidal.com_vel_world or (0.0, 0.0, 0.0))
+        float(value) for value in (centroidal.com_vel_world or (0.0, 0.0, 0.0))
     )
-    object_targets = {
-        target.object_id: target
-        for target in endpoint.object_targets
-    }
+    object_targets = {target.object_id: target for target in endpoint.object_targets}
     object_states = []
     for state in previous.object_states:
         target = object_targets.get(state.object_id)
@@ -2111,22 +1989,17 @@ def _flatten_nominal_windows(
                 {
                     "sample_index": len(records),
                     "global_time_s": (
-                        float(window.global_start_time_s)
-                        + float(knot.t_rel_s)
+                        float(window.global_start_time_s) + float(knot.t_rel_s)
                     ),
                     "window_index": window.window_index,
                     "window_local_time_s": float(knot.t_rel_s),
                     "phase": window.phase,
-                    "phase_target_reached": (
-                        window.plan.phase_target_reached
-                    ),
+                    "phase_target_reached": (window.plan.phase_target_reached),
                     "knot": knot.to_dict(),
                 }
             )
     if len(records) < 2:
-        raise SchemaValidationError(
-            "C3 nominal flattened timeline is incomplete"
-        )
+        raise SchemaValidationError("C3 nominal flattened timeline is incomplete")
     return tuple(records)
 
 
@@ -2145,12 +2018,15 @@ def _write_new_text(path: Path, payload: str) -> None:
 def _json_payload(value: Mapping[str, Any]) -> str:
     import json
 
-    return json.dumps(
-        value,
-        indent=2,
-        sort_keys=True,
-        ensure_ascii=True,
-    ) + "\n"
+    return (
+        json.dumps(
+            value,
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=True,
+        )
+        + "\n"
+    )
 
 
 def _require_sha256(value: str, name: str) -> None:

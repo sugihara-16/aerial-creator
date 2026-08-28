@@ -1,0 +1,31 @@
+{
+  "config_version": "order9_r1_rotation_stability_overrides_v4",
+  "base_overrides": {
+    "path": "configs/training/order9_r1_teacher_overrides_v3.json",
+    "sha256": "d3f374d89df362f104a48b2b03e01270f32f3e4b13b95878891989811c677ff7"
+  },
+  "rotation_stability_overrides": {
+    "train-000003-3b95da871f01": {
+      "selected_surface_port_ids": [4, 16],
+      "preferred_candidate_group_ids": [
+        "slot_0:grasp_pair:0"
+      ],
+      "pregrasp_clearance_m": 0.12,
+      "collision_margin_m": 0.007,
+      "grasp_contact_height_offset_m": 0.0,
+      "required_rotation_axis_object": [0.0, 1.0, 0.0],
+      "minimum_force_moment_arm_m": 0.10,
+      "reason": "reuse_original_collision_clear_grippers_with_x_face_pinch_for_payload_y_rotation"
+    }
+  },
+  "failure_evidence": {
+    "raw_rollout": {
+      "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v8_phase_duration_repair_v1/r1_l1_10mm_5deg__train__train-000003-3b95da871f01__lattice_09/isaac/evaluation_rollout.pt",
+      "sha256": "731dc4d56b25305a99d4b7324c197efc47bb6daad691b816a7d9e2ccda8098e9"
+    },
+    "episode_records": {
+      "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v8_phase_duration_repair_v1/r1_l1_10mm_5deg__train__train-000003-3b95da871f01__lattice_09/isaac/evaluation_episodes.jsonl",
+      "sha256": "459787e982569c75b87b2fc10e7db2f6f571bc6098a10569e32b594810727dad"
+    }
+  }
+}

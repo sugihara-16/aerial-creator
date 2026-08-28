@@ -1,0 +1,18 @@
+{
+  "config_version": "order9_r1_preload_collision_repair_v1",
+  "reason": "ordered_alternate_module_pair_search_after_opposed_face_grasps_collided_during_place",
+  "candidates": {
+    "r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_12": {
+      "selected_surface_port_ids": [20, 29], "selected_candidate_group_id": "slot_0:grasp_pair:0", "pregrasp_clearance_m": 0.12, "collision_margin_m": 0.01, "grasp_contact_height_offset_m": 0.03,
+      "fallback_contact_options": [
+        {"selected_surface_port_ids": [20, 30], "selected_candidate_group_id": "slot_0:grasp_pair:0", "pregrasp_clearance_m": 0.12, "collision_margin_m": 0.01, "grasp_contact_height_offset_m": 0.03},
+        {"selected_surface_port_ids": [20, 31], "selected_candidate_group_id": "slot_0:grasp_pair:0", "pregrasp_clearance_m": 0.12, "collision_margin_m": 0.01, "grasp_contact_height_offset_m": 0.03},
+        {"selected_surface_port_ids": [21, 30], "selected_candidate_group_id": "slot_0:grasp_pair:0", "pregrasp_clearance_m": 0.12, "collision_margin_m": 0.01, "grasp_contact_height_offset_m": 0.03},
+        {"selected_surface_port_ids": [21, 31], "selected_candidate_group_id": "slot_0:grasp_pair:0", "pregrasp_clearance_m": 0.12, "collision_margin_m": 0.01, "grasp_contact_height_offset_m": 0.03},
+        {"selected_surface_port_ids": [22, 29], "selected_candidate_group_id": "slot_0:grasp_pair:0", "pregrasp_clearance_m": 0.12, "collision_margin_m": 0.01, "grasp_contact_height_offset_m": 0.03},
+        {"selected_surface_port_ids": [22, 30], "selected_candidate_group_id": "slot_0:grasp_pair:0", "pregrasp_clearance_m": 0.12, "collision_margin_m": 0.01, "grasp_contact_height_offset_m": 0.03},
+        {"selected_surface_port_ids": [22, 31], "selected_candidate_group_id": "slot_0:grasp_pair:0", "pregrasp_clearance_m": 0.12, "collision_margin_m": 0.01, "grasp_contact_height_offset_m": 0.03}
+      ]
+    }
+  }
+}

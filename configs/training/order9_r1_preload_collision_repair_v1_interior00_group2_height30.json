@@ -1,0 +1,13 @@
+{
+  "config_version": "order9_r1_preload_collision_repair_v1",
+  "reason": "interior00_group2_height_search_after_group0_isaac_collision",
+  "candidates": {
+    "r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__interior_00": {
+      "selected_surface_port_ids": [21, 29],
+      "selected_candidate_group_id": "slot_0:grasp_pair:2",
+      "pregrasp_clearance_m": 0.12,
+      "collision_margin_m": 0.007,
+      "grasp_contact_height_offset_m": 0.03
+    }
+  }
+}

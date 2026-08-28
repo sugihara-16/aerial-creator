@@ -1,0 +1,48 @@
+{
+  "config_version": "order9_r1_preload_collision_repair_v1",
+  "reason": "replace_contact_geometry_after_bounded_four_hard_collision_before_single_confirmation",
+  "candidates": {
+    "r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__interior_00": {
+      "selected_surface_port_ids": [21, 29],
+      "selected_candidate_group_id": "slot_0:grasp_pair:3",
+      "pregrasp_clearance_m": 0.12,
+      "collision_margin_m": 0.007
+    },
+    "r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__interior_02": {
+      "selected_surface_port_ids": [21, 29],
+      "selected_candidate_group_id": "slot_0:grasp_pair:3",
+      "pregrasp_clearance_m": 0.12,
+      "collision_margin_m": 0.007
+    },
+    "r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__interior_03": {
+      "selected_surface_port_ids": [19, 22],
+      "selected_candidate_group_id": "slot_0:grasp_pair:0",
+      "pregrasp_clearance_m": 0.12,
+      "collision_margin_m": 0.007
+    },
+    "r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_21": {
+      "selected_surface_port_ids": [19, 22],
+      "selected_candidate_group_id": "slot_0:grasp_pair:0",
+      "pregrasp_clearance_m": 0.12,
+      "collision_margin_m": 0.007
+    },
+    "r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_23": {
+      "selected_surface_port_ids": [21, 29],
+      "selected_candidate_group_id": "slot_0:grasp_pair:3",
+      "pregrasp_clearance_m": 0.12,
+      "collision_margin_m": 0.007
+    },
+    "r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_25": {
+      "selected_surface_port_ids": [19, 22],
+      "selected_candidate_group_id": "slot_0:grasp_pair:0",
+      "pregrasp_clearance_m": 0.12,
+      "collision_margin_m": 0.007
+    },
+    "r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_26": {
+      "selected_surface_port_ids": [19, 22],
+      "selected_candidate_group_id": "slot_0:grasp_pair:0",
+      "pregrasp_clearance_m": 0.12,
+      "collision_margin_m": 0.007
+    }
+  }
+}

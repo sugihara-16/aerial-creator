@@ -82,10 +82,32 @@ def test_c3_teacher_config_accepts_bounded_grasp_height_offset() -> None:
     assert config.grasp_contact_height_offset_m == pytest.approx(0.04)
 
 
+def test_c3_teacher_config_accepts_bounded_grasp_tangent_offset() -> None:
+    config = Order9C3TeacherConfig(
+        grasp_contact_tangent_offset_world_m=(0.0, 0.02, 0.0)
+    )
+
+    assert config.grasp_contact_tangent_offset_world_m == (0.0, 0.02, 0.0)
+
+
 def test_c3_teacher_config_accepts_mesh_clear_pregrasp() -> None:
     config = Order9C3TeacherConfig(pregrasp_clearance_m=0.15)
 
     assert config.pregrasp_clearance_m == pytest.approx(0.15)
+
+
+def test_c3_teacher_config_accepts_optional_contact_solution_tilt() -> None:
+    config = Order9C3TeacherConfig(maximum_contact_solution_body_tilt_rad=1.0)
+
+    assert config.maximum_contact_solution_body_tilt_rad == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("value", [0.0, 3.2, float("nan")])
+def test_c3_teacher_config_rejects_invalid_contact_solution_tilt(
+    value: float,
+) -> None:
+    with pytest.raises(ValueError, match="maximum_contact_solution_body_tilt"):
+        Order9C3TeacherConfig(maximum_contact_solution_body_tilt_rad=value)
 
 
 @pytest.mark.parametrize("value", [-0.001, 0.101, float("nan")])
@@ -94,6 +116,13 @@ def test_c3_teacher_config_rejects_invalid_grasp_height_offset(
 ) -> None:
     with pytest.raises(ValueError, match="grasp_contact_height_offset_m"):
         Order9C3TeacherConfig(grasp_contact_height_offset_m=value)
+
+
+def test_c3_teacher_config_rejects_oversize_grasp_tangent_offset() -> None:
+    with pytest.raises(ValueError, match="grasp_contact_tangent_offset_world_m"):
+        Order9C3TeacherConfig(
+            grasp_contact_tangent_offset_world_m=(0.0, 0.031, 0.0)
+        )
 
 
 @pytest.mark.parametrize("value", [0.049, 0.301, float("nan")])
@@ -134,6 +163,41 @@ def test_c3_grasp_height_offset_moves_side_contacts_only(
     assert shifted_count > 0
 
 
+def test_c3_grasp_tangent_offset_stays_on_each_side_face(
+    grasp_carry_dict: dict,
+) -> None:
+    task, physical, context = _system(grasp_carry_dict)
+    del task, physical
+    original = context.contact_candidate_set
+    shifted = _offset_horizontal_grasp_candidates(
+        original,
+        height_offset_m=0.0,
+        tangent_offset_world_m=(0.0, 0.02, 0.0),
+    )
+    original_by_id = {
+        candidate.candidate_id: candidate for candidate in original.candidates
+    }
+    shifted_count = 0
+    for candidate in shifted.candidates:
+        source = original_by_id[candidate.candidate_id]
+        if (
+            candidate.contact_mode.value != "grasp"
+            or abs(float(candidate.normal_world[2])) > 0.25
+        ):
+            continue
+        displacement = tuple(
+            float(candidate.contact_pose_world[index])
+            - float(source.contact_pose_world[index])
+            for index in range(3)
+        )
+        assert sum(
+            displacement[index] * float(candidate.normal_world[index])
+            for index in range(3)
+        ) == pytest.approx(0.0, abs=1.0e-9)
+        shifted_count += int(any(abs(value) > 1.0e-9 for value in displacement))
+    assert shifted_count > 0
+
+
 @pytest.mark.parametrize(
     "surface_ids",
     [
@@ -145,9 +209,7 @@ def test_c3_teacher_config_rejects_invalid_pinned_surface_pair(
     surface_ids: tuple[int, int],
 ) -> None:
     with pytest.raises(ValueError, match="two distinct"):
-        Order9C3TeacherConfig(
-            preferred_surface_port_ids=surface_ids
-        )
+        Order9C3TeacherConfig(preferred_surface_port_ids=surface_ids)
 
 
 def test_c3_teacher_config_rejects_empty_pinned_group() -> None:
@@ -173,8 +235,7 @@ def test_human_posture_rejections_bind_three_current_lineage_buckets() -> None:
 
     overrides = _load_posture_rejection_overrides(
         Path(
-            "configs/training/"
-            "order9_c3_human_posture_rejections_v1.json"
+            "configs/training/" "order9_c3_human_posture_rejections_v1.json"
         ).resolve(),
         buckets=selected,
         bucket_manifest_path=manifest_path.resolve(),
@@ -189,25 +250,14 @@ def test_human_posture_rejections_bind_three_current_lineage_buckets() -> None:
 
 def test_contact_penetration_review_batch_is_five_hash_pinned_cases() -> None:
     config = _load_config(
-        Path(
-            "configs/training/"
-            "order9_c3a_contact_penetration_batch_001.yaml"
-        )
+        Path("configs/training/" "order9_c3a_contact_penetration_batch_001.yaml")
     )
 
-    assert config["version"] == (
-        "order9_c3a_contact_penetration_review_batch_v1"
-    )
+    assert config["version"] == ("order9_c3a_contact_penetration_review_batch_v1")
     assert len(config["cases"]) == 5
-    assert len(
-        {
-            str(case["structural_hash"])
-            for case in config["cases"]
-        }
-    ) == 5
+    assert len({str(case["structural_hash"]) for case in config["cases"]}) == 5
     assert all(
-        len(case["surface_port_ids"]) == 2
-        and case["candidate_group_id"]
+        len(case["surface_port_ids"]) == 2 and case["candidate_group_id"]
         for case in config["cases"]
     )
 
@@ -223,9 +273,7 @@ def test_c3_overhead_start_and_bucket_support_share_scene_height(
         task,
     )
     support = collision.environment_boxes[0]
-    support_top_z = (
-        float(support.pose_world[2]) + 0.5 * float(support.size_m[2])
-    )
+    support_top_z = float(support.pose_world[2]) + 0.5 * float(support.size_m[2])
     movable = next(value for value in task.scene.objects if value.movable)
     geometry = next(
         value
@@ -233,21 +281,15 @@ def test_c3_overhead_start_and_bucket_support_share_scene_height(
         if value.geometry_id == movable.geometry_id
     )
     object_top_z = float(movable.pose_world[2]) + 0.5 * (
-        float(geometry.primitive_params["size_m"][2])
-        * float(geometry.scale[2])
+        float(geometry.primitive_params["size_m"][2]) * float(geometry.scale[2])
     )
 
     movable_goal = next(
-        goal
-        for goal in task.goals
-        if goal.target_entity_id == movable.object_id
+        goal for goal in task.goals if goal.target_entity_id == movable.object_id
     )
     assert support.box_id == "order9_bucket_object_support"
     assert support.size_m[0] == pytest.approx(
-        abs(
-            movable_goal.target_pose_world[0]
-            - movable.pose_world[0]
-        )
+        abs(movable_goal.target_pose_world[0] - movable.pose_world[0])
         + float(geometry.primitive_params["size_m"][0])
         + 0.05
     )

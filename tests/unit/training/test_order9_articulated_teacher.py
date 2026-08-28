@@ -4,8 +4,10 @@ import pytest
 
 from amsrr.feasibility.articulated_reachability import (
     REACHABILITY_JOINT_LIMIT_CODE,
+    ArticulatedIKSolution,
     ArticulatedTrajectoryReachabilityEvaluator,
 )
+from amsrr.training import order9_articulated_teacher as teacher_module
 from amsrr.feasibility.contact_wrench_trajectory import (
     ContactWrenchTrajectoryCheckerConfig,
     ContactWrenchTrajectoryFeasibilityChecker,
@@ -31,10 +33,12 @@ from amsrr.training.order9_articulated_teacher import (
     _ConfigurationRouteCache,
     _approach_vertical_speed_limit_mps,
     _candidate_group_attempts,
+    _contact_solution_body_tilt_admitted,
     _point_to_segment_distance,
     _phase_assignment_states,
     _resume_configuration_route,
     _rolling_progress_fraction,
+    _solve_contact_with_joint_limit_reserve_fallback,
     _validated_contact_goal_joint_seed,
 )
 from amsrr.training.order9_configuration_space_planner import (
@@ -86,9 +90,52 @@ def test_rolling_progress_accounts_for_cubic_peak_and_vertical_limit() -> None:
 
 def test_articulated_teacher_rejects_subunit_interpolation_peak_scale() -> None:
     with pytest.raises(ValueError, match="peak_rate_scale"):
-        Order9ArticulatedTeacherConfig(
-            trajectory_interpolation_peak_rate_scale=0.99
-        )
+        Order9ArticulatedTeacherConfig(trajectory_interpolation_peak_rate_scale=0.99)
+
+
+def test_contact_solution_tilt_gate_runs_on_ik_solution_pose() -> None:
+    upright = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+    ninety_degrees = (
+        0.0,
+        0.0,
+        0.0,
+        2.0**-0.5,
+        0.0,
+        0.0,
+        2.0**-0.5,
+    )
+    solution = ArticulatedIKSolution(
+        feasible=True,
+        joint_positions_rad={},
+        base_pose_world=ninety_degrees,
+        centroidal_pose_world=ninety_degrees,
+        anchor_poses_world={},
+        maximum_position_error_m=0.0,
+        maximum_normal_error_rad=0.0,
+        iterations=1,
+    )
+
+    assert _contact_solution_body_tilt_admitted(solution, None) is True
+    assert _contact_solution_body_tilt_admitted(solution, 1.0) is False
+    upright_solution = ArticulatedIKSolution(
+        feasible=True,
+        joint_positions_rad={},
+        base_pose_world=upright,
+        centroidal_pose_world=upright,
+        anchor_poses_world={},
+        maximum_position_error_m=0.0,
+        maximum_normal_error_rad=0.0,
+        iterations=1,
+    )
+    assert _contact_solution_body_tilt_admitted(upright_solution, 1.0) is True
+
+
+@pytest.mark.parametrize("value", [0.0, 3.2, float("nan")])
+def test_articulated_teacher_rejects_invalid_contact_solution_tilt(
+    value: float,
+) -> None:
+    with pytest.raises(ValueError, match="maximum_contact_solution_body_tilt"):
+        Order9ArticulatedTeacherConfig(maximum_contact_solution_body_tilt_rad=value)
 
 
 def test_approach_vertical_speed_transitions_into_terminal_zone() -> None:
@@ -142,13 +189,114 @@ def test_articulated_teacher_rejects_terminal_speed_above_cruise() -> None:
         )
 
 
+def test_joint_reserve_fallback_does_not_retry_a_feasible_primary(
+    monkeypatch,
+) -> None:
+    calls = 0
+    primary = ArticulatedIKSolution(
+        feasible=True,
+        joint_positions_rad={"module_0:yaw": -0.96},
+        base_pose_world=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+        centroidal_pose_world=(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+        anchor_poses_world={},
+        maximum_position_error_m=0.0,
+        maximum_normal_error_rad=0.0,
+        iterations=1,
+    )
+
+    class Solver:
+        def solve(self, **_kwargs):
+            nonlocal calls
+            calls += 1
+            return primary
+
+    monkeypatch.setattr(
+        teacher_module,
+        "ordered_global_dock_joint_ids",
+        lambda _morphology, _physical: ("module_0:yaw",),
+    )
+    monkeypatch.setattr(
+        teacher_module,
+        "_global_joint_limits",
+        lambda _morphology, _physical, _ordered: {"module_0:yaw": (-1.0, 1.0)},
+    )
+
+    result = _solve_contact_with_joint_limit_reserve_fallback(
+        solver=Solver(),
+        morphology=object(),
+        physical_model=object(),
+        assignments=(),
+        candidates={},
+        initial_joint_positions_rad=None,
+        minimum_normalized_joint_limit_reserve=0.01,
+    )
+
+    assert result is primary
+    assert calls == 1
+
+
+def test_joint_reserve_fallback_selects_largest_reserve_after_failure(
+    monkeypatch,
+) -> None:
+    pose = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+
+    def solution(feasible: bool, q: float) -> ArticulatedIKSolution:
+        return ArticulatedIKSolution(
+            feasible=feasible,
+            joint_positions_rad={"module_0:yaw": q},
+            base_pose_world=pose,
+            centroidal_pose_world=pose,
+            anchor_poses_world={},
+            maximum_position_error_m=0.0 if feasible else 1.0,
+            maximum_normal_error_rad=0.0 if feasible else 1.0,
+            iterations=1,
+        )
+
+    attempts = iter(
+        (
+            solution(False, 0.0),
+            solution(True, -0.6),
+            solution(True, 0.2),
+        )
+    )
+    calls = 0
+
+    class Solver:
+        def solve(self, **_kwargs):
+            nonlocal calls
+            calls += 1
+            return next(attempts)
+
+    monkeypatch.setattr(
+        teacher_module,
+        "ordered_global_dock_joint_ids",
+        lambda _morphology, _physical: ("module_0:yaw",),
+    )
+    monkeypatch.setattr(
+        teacher_module,
+        "_global_joint_limits",
+        lambda _morphology, _physical, _ordered: {"module_0:yaw": (-1.0, 1.0)},
+    )
+
+    result = _solve_contact_with_joint_limit_reserve_fallback(
+        solver=Solver(),
+        morphology=object(),
+        physical_model=object(),
+        assignments=(),
+        candidates={},
+        initial_joint_positions_rad=None,
+        minimum_normalized_joint_limit_reserve=0.01,
+    )
+
+    assert calls == 3
+    assert result.joint_positions_rad["module_0:yaw"] == pytest.approx(0.2)
+
+
 def _system(grasp_carry_dict: dict):
     task = TaskSpec.from_dict(grasp_carry_dict)
     built = IRGBuilder().build_with_scene_graph(task)
     envelope = InteractionEnvelopeExtractor().extract(built.irg)
-    physical = build_physical_model_from_config(
-        "configs/robot/robot_model.yaml"
-    )
+    physical = build_physical_model_from_config("configs/robot/robot_model.yaml")
     design = build_grasp_carry_variant_design_output(
         task,
         built.irg,
@@ -203,14 +351,15 @@ def test_contact_goal_joint_seed_is_morphology_bound(
 
     assert zero_seed
     assert set(zero_seed.values()) == {0.0}
-    reviewed_seed = {
-        joint_id: 0.125 for joint_id in zero_seed
-    }
-    assert _validated_contact_goal_joint_seed(
-        context,
-        physical,
-        reviewed_seed,
-    ) == reviewed_seed
+    reviewed_seed = {joint_id: 0.125 for joint_id in zero_seed}
+    assert (
+        _validated_contact_goal_joint_seed(
+            context,
+            physical,
+            reviewed_seed,
+        )
+        == reviewed_seed
+    )
 
     with pytest.raises(
         SchemaValidationError,
@@ -310,21 +459,18 @@ def test_articulated_teacher_emits_complete_joint_com_and_anchor_targets(
         and knot.posture_target.joint_vel_target is None
         for knot in plan.raw_trajectory.knots
     )
-    assert (
-        plan.posture_resolution.evidence.raw_trajectory_hash
-        == stable_hash(plan.raw_trajectory.to_dict())
+    assert plan.posture_resolution.evidence.raw_trajectory_hash == stable_hash(
+        plan.raw_trajectory.to_dict()
     )
-    assert (
-        plan.posture_resolution.evidence.resolved_trajectory_hash
-        == stable_hash(plan.trajectory.to_dict())
+    assert plan.posture_resolution.evidence.resolved_trajectory_hash == stable_hash(
+        plan.trajectory.to_dict()
     )
     assert (
         plan.posture_resolution.evidence.maximum_joint_rate_rad_s
         <= plan.posture_resolution.evidence.joint_rate_limit_rad_s
     )
     assert (
-        plan.posture_resolution.evidence.nominal_joint_seed_trajectory_hash
-        is not None
+        plan.posture_resolution.evidence.nominal_joint_seed_trajectory_hash is not None
     )
     expected_joint_ids = set(plan.ik_solution.joint_positions_rad)
     approach_joint_reference = dict(
@@ -339,10 +485,7 @@ def test_articulated_teacher_emits_complete_joint_com_and_anchor_targets(
         assert set(knot.posture_target.joint_vel_target or {}) == expected_joint_ids
     assert plan.configuration_space_plan is not None
     assert plan.configuration_space_plan.collision_check_count > 0
-    assert (
-        plan.posture_resolution.evidence.collision_gate_status
-        == "accepted"
-    )
+    assert plan.posture_resolution.evidence.collision_gate_status == "accepted"
     joint_configuration_changed = any(
         knot.posture_target.joint_pos_target
         != pytest.approx(approach_joint_reference, abs=1.0e-9)
@@ -350,8 +493,10 @@ def test_articulated_teacher_emits_complete_joint_com_and_anchor_targets(
     )
     planned_states = plan.configuration_space_plan.states
     base_configuration_changed = any(
-        abs(float(planned_states[-1].base_pose_world[index])
-            - float(planned_states[0].base_pose_world[index]))
+        abs(
+            float(planned_states[-1].base_pose_world[index])
+            - float(planned_states[0].base_pose_world[index])
+        )
         > 1.0e-9
         for index in range(7)
     )
@@ -403,9 +548,7 @@ def test_articulated_teacher_emits_complete_joint_com_and_anchor_targets(
         checked_context,
     )
     assert hard_gate_result.feasible
-    assert len(hard_gate_result.knot_results) == len(
-        plan.raw_trajectory.knots
-    )
+    assert len(hard_gate_result.knot_results) == len(plan.raw_trajectory.knots)
     assert len(execution.knots) > len(plan.raw_trajectory.knots)
     assert stable_hash(plan.raw_trajectory.to_dict()) == raw_hash
     assert hard_gate_result.metadata["raw_proposal_mutated"] is False
@@ -422,9 +565,7 @@ def test_articulated_teacher_emits_complete_joint_com_and_anchor_targets(
         ).solver_cache_hits
     )
 
-    invalid_raw = ContactWrenchTrajectory.from_dict(
-        plan.raw_trajectory.to_dict()
-    )
+    invalid_raw = ContactWrenchTrajectory.from_dict(plan.raw_trajectory.to_dict())
     invalid_raw.knots[0].posture_target.joint_pos_target = {
         joint_id: 0.0 for joint_id in expected_joint_ids
     }
@@ -436,8 +577,7 @@ def test_articulated_teacher_emits_complete_joint_com_and_anchor_targets(
             context=context,
             raw_trajectory=invalid_raw,
             initial_joint_positions_rad=dict(
-                plan.trajectory.knots[0]
-                .posture_target.joint_pos_target
+                plan.trajectory.knots[0].posture_target.joint_pos_target
             ),
         )
 
@@ -476,8 +616,7 @@ def test_reachability_checker_rejects_mutated_teacher_joint_target(
     )
 
     assert any(
-        REACHABILITY_JOINT_LIMIT_CODE in value.violation_codes
-        for value in evaluations
+        REACHABILITY_JOINT_LIMIT_CODE in value.violation_codes for value in evaluations
     )
 
 
@@ -500,10 +639,9 @@ def test_articulated_teacher_can_pin_one_candidate_group(
 
     assert len(attempts) == 1
     assert attempts[0][0] == available[0]
-    assert [
-        proposal.group_id
-        for proposal in attempts[0][1].group_proposals
-    ] == [available[0]]
+    assert [proposal.group_id for proposal in attempts[0][1].group_proposals] == [
+        available[0]
+    ]
     with pytest.raises(
         SchemaValidationError,
         match="candidate group is unavailable",
@@ -514,9 +652,7 @@ def test_articulated_teacher_can_pin_one_candidate_group(
             preferred_group_id="missing-group",
         )
     with pytest.raises(ValueError, match="must be non-empty"):
-        Order9ArticulatedTeacherConfig(
-            preferred_candidate_group_id=""
-        )
+        Order9ArticulatedTeacherConfig(preferred_candidate_group_id="")
 
 
 def test_contact_acquisition_uses_attach_schedule_during_articulation() -> None:
@@ -542,23 +678,16 @@ def test_rolling_teacher_preserves_previous_nominal_reference(
 ) -> None:
     task, physical, context = _system(grasp_carry_dict)
     teacher = _production_teacher(task, physical)
-    initial_object_poses = {
-        obj.object_id: obj.pose_world for obj in task.scene.objects
-    }
+    initial_object_poses = {obj.object_id: obj.pose_world for obj in task.scene.objects}
     initial = teacher.plan(
         context,
         initial_object_poses_world=initial_object_poses,
     )
-    measured = dict(
-        initial.trajectory.knots[0]
-        .posture_target.joint_pos_target
-    )
+    measured = dict(initial.trajectory.knots[0].posture_target.joint_pos_target)
     nominal = dict(measured)
     changed_joint = max(
         initial.ik_solution.joint_positions_rad,
-        key=lambda joint_id: abs(
-            initial.ik_solution.joint_positions_rad[joint_id]
-        ),
+        key=lambda joint_id: abs(initial.ik_solution.joint_positions_rad[joint_id]),
     )
     nominal[changed_joint] += 0.01
 
@@ -568,11 +697,9 @@ def test_rolling_teacher_preserves_previous_nominal_reference(
         nominal_start_joint_positions_rad=nominal,
     )
 
-    assert (
-        replanned.trajectory.knots[0]
-        .posture_target.joint_pos_target
-        == pytest.approx(nominal, abs=1.0e-6)
-    )
+    assert replanned.trajectory.knots[
+        0
+    ].posture_target.joint_pos_target == pytest.approx(nominal, abs=1.0e-6)
     assert (
         replanned.posture_resolution.evidence.initial_joint_state_hash
         == stable_hash(nominal)
@@ -601,18 +728,14 @@ def test_release_teacher_resolves_an_explicit_open_anchor_reference(
             initial_pose_world=tuple(target.pose_world),
         ),
     )
-    initial_object_poses = {
-        obj.object_id: obj.pose_world for obj in task.scene.objects
-    }
+    initial_object_poses = {obj.object_id: obj.pose_world for obj in task.scene.objects}
     approach = teacher.plan(
         context,
         initial_object_poses_world=initial_object_poses,
     )
     closed = dict(approach.ik_solution.joint_positions_rad)
     opened = {joint_id: 0.0 for joint_id in closed}
-    observation = RuntimeObservation.from_dict(
-        context.runtime_observation.to_dict()
-    )
+    observation = RuntimeObservation.from_dict(context.runtime_observation.to_dict())
     for module_state in observation.module_states:
         prefix = f"module_{module_state.module_id}:"
         module_state.joint_positions = {
@@ -659,11 +782,10 @@ def test_release_teacher_resolves_an_explicit_open_anchor_reference(
     terminal = release.trajectory.knots[-1].posture_target
     assert terminal is not None
     assert set(terminal.joint_pos_target) == set(opened)
-    assert sum(
-        abs(float(value)) for value in terminal.joint_pos_target.values()
-    ) < sum(abs(float(value)) for value in closed.values())
+    assert sum(abs(float(value)) for value in terminal.joint_pos_target.values()) < sum(
+        abs(float(value)) for value in closed.values()
+    )
     assert (
-        release.posture_resolution.evidence
-        .maximum_anchor_position_error_m
+        release.posture_resolution.evidence.maximum_anchor_position_error_m
         <= teacher.config.posture_anchor_position_tolerance_m
     )

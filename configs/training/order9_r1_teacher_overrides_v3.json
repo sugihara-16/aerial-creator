@@ -1,0 +1,35 @@
+{
+  "config_version": "order9_r1_rotational_teacher_overrides_v3",
+  "base_overrides": {
+    "path": "configs/training/order9_r1_teacher_overrides_v2.json",
+    "sha256": "9fdf852bc821c3e11a51d6b3af3b026585cd8eeaa4592b25478efc224d496082"
+  },
+  "rotation_stability_overrides": {
+    "train-000004-190f3a425b3e": {
+      "selected_surface_port_ids": [14, 18],
+      "preferred_candidate_group_ids": [
+        "slot_0:grasp_pair:0",
+        "slot_0:grasp_pair:1"
+      ],
+      "pregrasp_clearance_m": 0.12,
+      "collision_margin_m": 0.007,
+      "required_rotation_axis_object": [0.0, 1.0, 0.0],
+      "minimum_force_moment_arm_m": 0.10,
+      "reason": "v6_transport_payload_pitch_slip_with_y_face_pinch"
+    }
+  },
+  "failure_evidence": {
+    "case_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v8_short_retreat_safe_timing/selection/r1_l1_10mm_5deg/r1_l1_10mm_5deg__train__train-000004-190f3a425b3e__lattice_02/nominal_result_v6.json",
+      "sha256": "f02e4efff98ab728061cc9a5097c007d59c7bac9178cf87cb6127ff5e8314e1b"
+    },
+    "episode_records": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v8_short_retreat_safe_timing/selection/r1_l1_10mm_5deg/r1_l1_10mm_5deg__train__train-000004-190f3a425b3e__lattice_02/isaac/evaluation_episodes.jsonl",
+      "sha256": "55952bbe38025dd44676d9929cee315935b481b7d1c7db1ab672ad590d85040a"
+    },
+    "raw_rollout": {
+      "path": "artifacts/p4_full/order9/r1_teacher/calibration_v8_short_retreat_safe_timing/selection/r1_l1_10mm_5deg/r1_l1_10mm_5deg__train__train-000004-190f3a425b3e__lattice_02/isaac/evaluation_rollout.pt",
+      "sha256": "9d3d191aaa507bfb7e74acca657c540f54a2bd9709abb3e4525fa332c78a53c7"
+    }
+  }
+}

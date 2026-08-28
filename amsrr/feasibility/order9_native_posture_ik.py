@@ -14,6 +14,7 @@ from amsrr.feasibility.articulated_reachability import (
     CentroidalPostureIKSolver,
     _clip_joint_map,
     _global_joint_limits,
+    _joint_limits_with_normalized_reserve,
     _global_pitch_joint_ids,
     _validate_pose7d,
     resolve_mesh_backed_anchor_references,
@@ -55,20 +56,15 @@ class CppWholeStructureKinematics(BatchedWholeStructureKinematics):
             if enable_exact_collision_geometry is None
             else enable_exact_collision_geometry
         )
-        self._nominal_collision_pair_manifest = (
-            nominal_collision_pair_manifest
-        )
+        self._nominal_collision_pair_manifest = nominal_collision_pair_manifest
         if (
             self._enable_exact_collision_geometry
             and not self._enable_collision_geometry
         ):
-            raise ValueError(
-                "exact collision geometry requires collision geometry"
-            )
+            raise ValueError("exact collision geometry requires collision geometry")
         self.collision_geometry = None
         self._link_index = {
-            link.link_id: index
-            for index, link in enumerate(self.physical_model.links)
+            link.link_id: index for index, link in enumerate(self.physical_model.links)
         }
 
     def _ensure_graph(self, morphology: MorphologyGraph) -> None:
@@ -95,9 +91,7 @@ class CppWholeStructureKinematics(BatchedWholeStructureKinematics):
                 if edge.src_module_id == parent:
                     parent_port_id = edge.src_port_id
                     child_port_id = edge.dst_port_id
-                    relation_r, relation_p = _pose_arrays(
-                        FACE_TO_FACE_DOCK_RELATION
-                    )
+                    relation_r, relation_p = _pose_arrays(FACE_TO_FACE_DOCK_RELATION)
                 else:
                     parent_port_id = edge.dst_port_id
                     child_port_id = edge.src_port_id
@@ -136,17 +130,11 @@ class CppWholeStructureKinematics(BatchedWholeStructureKinematics):
                 dtype=np.int32,
             ),
             np.asarray(
-                [
-                    self._link_index[value.child_link]
-                    for value in self._compiled_joints
-                ],
+                [self._link_index[value.child_link] for value in self._compiled_joints],
                 dtype=np.int32,
             ),
             np.asarray(
-                [
-                    joint_type[value.joint.joint_type]
-                    for value in self._compiled_joints
-                ],
+                [joint_type[value.joint.joint_type] for value in self._compiled_joints],
                 dtype=np.int32,
             ),
             np.asarray(
@@ -161,17 +149,11 @@ class CppWholeStructureKinematics(BatchedWholeStructureKinematics):
                 dtype=np.int32,
             ),
             np.asarray(
-                [
-                    value.origin_rotation
-                    for value in self._compiled_joints
-                ],
+                [value.origin_rotation for value in self._compiled_joints],
                 dtype=np.float64,
             ),
             np.asarray(
-                [
-                    value.origin_translation
-                    for value in self._compiled_joints
-                ],
+                [value.origin_translation for value in self._compiled_joints],
                 dtype=np.float64,
             ),
             np.asarray(
@@ -203,12 +185,8 @@ class CppWholeStructureKinematics(BatchedWholeStructureKinematics):
                 physical_model=self.physical_model,
                 link_index=self._link_index,
                 repository_root=Path(__file__).resolve().parents[2],
-                load_exact_geometry=(
-                    self._enable_exact_collision_geometry
-                ),
-                nominal_collision_pair_manifest=(
-                    self._nominal_collision_pair_manifest
-                ),
+                load_exact_geometry=(self._enable_exact_collision_geometry),
+                nominal_collision_pair_manifest=(self._nominal_collision_pair_manifest),
             )
         self._cpp_morphology = morphology
 
@@ -224,9 +202,7 @@ class CppWholeStructureKinematics(BatchedWholeStructureKinematics):
         assert self._cpp_kernel is not None
         batch = len(q_samples)
         self.stats.batch_evaluations += 1
-        self.stats.maximum_batch_size = max(
-            self.stats.maximum_batch_size, batch
-        )
+        self.stats.maximum_batch_size = max(self.stats.maximum_batch_size, batch)
         q_matrix = self._q_matrix(q_samples).reshape(
             batch, len(self._module_ids), len(self._joint_ids)
         )
@@ -246,12 +222,12 @@ class CppWholeStructureKinematics(BatchedWholeStructureKinematics):
             dtype=np.int32,
         )
         local = [_pose_arrays(reference.anchor.local_pose) for reference in references]
-        local_r = np.asarray(
-            [value[0] for value in local], dtype=np.float64
-        ).reshape((-1, 3, 3))
-        local_p = np.asarray(
-            [value[1] for value in local], dtype=np.float64
-        ).reshape((-1, 3))
+        local_r = np.asarray([value[0] for value in local], dtype=np.float64).reshape(
+            (-1, 3, 3)
+        )
+        local_p = np.asarray([value[1] for value in local], dtype=np.float64).reshape(
+            (-1, 3)
+        )
         roots_r, roots_p, anchors_r, anchors_p, com = self._cpp_kernel.evaluate(
             q_matrix,
             base_r,
@@ -307,13 +283,11 @@ def install_cpp_centroidal_pose_patch(
                 _builder,
             )
         base_pose = module_root_poses[morphology.base_module_id]
-        _roots_r, _roots_p, _anchors_r, _anchors_p, com = (
-            kinematics._evaluate_batch(
-                morphology=morphology,
-                q_samples=[q],
-                base_pose_world=base_pose,
-                references=(),
-            )
+        _roots_r, _roots_p, _anchors_r, _anchors_p, com = kinematics._evaluate_batch(
+            morphology=morphology,
+            q_samples=[q],
+            base_pose_world=base_pose,
+            references=(),
         )
         return (
             float(com[0, 0]),
@@ -332,9 +306,7 @@ def install_cpp_centroidal_pose_patch(
 class NativeCentroidalPostureIKSolver(CentroidalPostureIKSolver):
     """Run the complete deterministic IK iteration inside C++/Eigen."""
 
-    solver_version = (
-        "centroidal_posture_ik_cpp_eigen_v3_continuous_seed"
-    )
+    solver_version = "centroidal_posture_ik_cpp_eigen_v3_continuous_seed"
 
     def __init__(
         self,
@@ -365,11 +337,11 @@ class NativeCentroidalPostureIKSolver(CentroidalPostureIKSolver):
         _validate_pose7d(centroidal_pose_world, "centroidal_pose_world")
         self.kinematics._ensure_graph(morphology)
         assert self.kinematics._cpp_kernel is not None
-        ordered_ids = ordered_global_dock_joint_ids(
-            morphology, self.physical_model
-        )
-        limits = _global_joint_limits(
-            morphology, self.physical_model, ordered_ids
+        ordered_ids = ordered_global_dock_joint_ids(morphology, self.physical_model)
+        limits = _global_joint_limits(morphology, self.physical_model, ordered_ids)
+        seed_limits = _joint_limits_with_normalized_reserve(
+            limits,
+            self.config.minimum_normalized_joint_limit_reserve,
         )
         reference_q = {
             joint_id: float(
@@ -379,21 +351,16 @@ class NativeCentroidalPostureIKSolver(CentroidalPostureIKSolver):
             )
             for joint_id in ordered_ids
         }
-        reference_q = _clip_joint_map(reference_q, limits)
-        target_ids = tuple(
-            sorted(int(value) for value in anchor_pose_targets_world)
-        )
+        reference_q = _clip_joint_map(reference_q, seed_limits)
+        target_ids = tuple(sorted(int(value) for value in anchor_pose_targets_world))
         targets = {
             anchor_id: tuple(
-                float(value)
-                for value in anchor_pose_targets_world[anchor_id]
+                float(value) for value in anchor_pose_targets_world[anchor_id]
             )
             for anchor_id in target_ids
         }
         for anchor_id, target in targets.items():
-            _validate_pose7d(
-                target, f"anchor_pose_targets_world[{anchor_id}]"
-            )
+            _validate_pose7d(target, f"anchor_pose_targets_world[{anchor_id}]")
         references = resolve_mesh_backed_anchor_references(
             morphology, self.physical_model, target_ids
         )
@@ -421,44 +388,33 @@ class NativeCentroidalPostureIKSolver(CentroidalPostureIKSolver):
             [limits[joint_id][1] for joint_id in ordered_ids],
             dtype=np.float64,
         ).reshape(module_count, local_count)
-        pitch_ids = _global_pitch_joint_ids(
-            ordered_ids, self.physical_model
-        )
+        pitch_ids = _global_pitch_joint_ids(ordered_ids, self.physical_model)
         pitch_mask = np.asarray(
             [1 if joint_id in pitch_ids else 0 for joint_id in ordered_ids],
             dtype=np.int32,
         ).reshape(module_count, local_count)
-        centroidal_r, centroidal_p = _pose_arrays(
-            tuple(centroidal_pose_world)
-        )
+        centroidal_r, centroidal_p = _pose_arrays(tuple(centroidal_pose_world))
         anchor_modules = np.asarray(
             [
-                self.kinematics._module_index[
-                    reference.anchor.module_id
-                ]
+                self.kinematics._module_index[reference.anchor.module_id]
                 for reference in references
             ],
             dtype=np.int32,
         )
         anchor_links = np.asarray(
             [
-                self.kinematics._link_index[
-                    reference.surface.mechanism_link_id
-                ]
+                self.kinematics._link_index[reference.surface.mechanism_link_id]
                 for reference in references
             ],
             dtype=np.int32,
         )
-        local = [
-            _pose_arrays(reference.anchor.local_pose)
-            for reference in references
-        ]
-        local_r = np.asarray(
-            [value[0] for value in local], dtype=np.float64
-        ).reshape((-1, 3, 3))
-        local_p = np.asarray(
-            [value[1] for value in local], dtype=np.float64
-        ).reshape((-1, 3))
+        local = [_pose_arrays(reference.anchor.local_pose) for reference in references]
+        local_r = np.asarray([value[0] for value in local], dtype=np.float64).reshape(
+            (-1, 3, 3)
+        )
+        local_p = np.asarray([value[1] for value in local], dtype=np.float64).reshape(
+            (-1, 3)
+        )
         target_arrays = [
             _pose_arrays(targets[reference.anchor.anchor_id])
             for reference in references
@@ -508,12 +464,8 @@ class NativeCentroidalPostureIKSolver(CentroidalPostureIKSolver):
         )
         self.native_solve_calls += 1
         self.last_native_collision_metrics = {
-            "minimum_proxy_clearance_m": float(
-                native["minimum_proxy_clearance"]
-            ),
-            "active_proxy_pair_count": int(
-                native["active_proxy_pair_count"]
-            ),
+            "minimum_proxy_clearance_m": float(native["minimum_proxy_clearance"]),
+            "active_proxy_pair_count": int(native["active_proxy_pair_count"]),
         }
         solved_q_values = np.asarray(native["q"]).reshape(-1)
         solved_q = {
@@ -546,12 +498,8 @@ class NativeCentroidalPostureIKSolver(CentroidalPostureIKSolver):
             base_pose_world=base_pose,
             centroidal_pose_world=centroidal,
             anchor_poses_world=anchor_poses,
-            maximum_position_error_m=float(
-                native["maximum_position_error"]
-            ),
-            maximum_attitude_error_rad=float(
-                native["maximum_attitude_error"]
-            ),
+            maximum_position_error_m=float(native["maximum_position_error"]),
+            maximum_attitude_error_rad=float(native["maximum_attitude_error"]),
             iterations=(
                 int(native["iterations"])
                 if cached_iterations is None
@@ -594,8 +542,6 @@ class NativeCentroidalPostureIKSolver(CentroidalPostureIKSolver):
                     morphology=morphology,
                     centroidal_pose_world=centroidal_pose_world,
                     anchor_pose_targets_world=anchor_pose_targets_world,
-                    initial_joint_positions_rad=(
-                        bootstrap.joint_positions_rad
-                    ),
+                    initial_joint_positions_rad=(bootstrap.joint_positions_rad),
                 )
         return solution

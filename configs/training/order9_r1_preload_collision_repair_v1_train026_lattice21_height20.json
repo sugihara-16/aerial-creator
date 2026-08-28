@@ -1,0 +1,13 @@
+{
+  "config_version": "order9_r1_preload_collision_repair_v1",
+  "reason": "Raise the train026 lattice21 grasp point within the approved 30 mm positional allowance to improve realized two-anchor preload.",
+  "candidates": {
+    "r1_l1_10mm_5deg__train__train-000026-a8ced2acf24c__lattice_21": {
+      "selected_surface_port_ids": [18, 22],
+      "selected_candidate_group_id": "slot_0:grasp_pair:0",
+      "pregrasp_clearance_m": 0.15,
+      "collision_margin_m": 0.01,
+      "grasp_contact_height_offset_m": 0.02
+    }
+  }
+}

@@ -10,8 +10,11 @@ from amsrr.controllers.rigid_body_model import RigidBodyControlModelBuilder
 from amsrr.feasibility.articulated_reachability import (
     ARTICULATED_IK_TEACHER_VERSION,
     ArticulatedContactIKSolver,
+    ArticulatedIKConfig,
     ArticulatedIKSolution,
     _global_joint_limits,
+    _joint_limit_branch_seeds,
+    _minimum_normalized_joint_limit_reserve,
     base_pose_for_centroidal_target,
     resolve_mesh_backed_anchor_references,
 )
@@ -54,7 +57,6 @@ from amsrr.training.order9_posture_resolver import (
     Order9ResolvedPostureTrajectory,
 )
 from amsrr.utils.hashing import stable_hash
-
 
 ORDER9_ARTICULATED_TRAJECTORY_TEACHER_VERSION = (
     "order9_articulated_trajectory_teacher_v19_mesh_clear_pregrasp"
@@ -142,16 +144,34 @@ class Order9ArticulatedTeacherConfig:
     # edge.
     posture_anchor_position_tolerance_m: float = 0.011
     collision_margin_m: float = 0.005
+    minimum_normalized_joint_limit_reserve: float = 0.0
+    # Optional caller-owned admission boundary.  R1 uses this to discard a
+    # contact IK solution before configuration-space planning and dense
+    # trajectory resolution when the solution itself already requires an
+    # extreme body attitude.  None preserves the established C3 contract.
+    maximum_contact_solution_body_tilt_rad: float | None = None
 
     def __post_init__(self) -> None:
         if self.maximum_candidate_group_attempts < 1:
             raise ValueError("maximum_candidate_group_attempts must be positive")
+        reserve = float(self.minimum_normalized_joint_limit_reserve)
+        if not math.isfinite(reserve) or not 0.0 <= reserve < 0.5:
+            raise ValueError(
+                "minimum_normalized_joint_limit_reserve must be finite and "
+                "in [0, 0.5)"
+            )
+        tilt = self.maximum_contact_solution_body_tilt_rad
+        if tilt is not None and (
+            not math.isfinite(float(tilt)) or not 0.0 < float(tilt) < math.pi
+        ):
+            raise ValueError(
+                "maximum_contact_solution_body_tilt_rad must be None or "
+                "finite and in (0, pi)"
+            )
         if not 0.0 < self.joint_velocity_fraction <= 1.0:
             raise ValueError("joint_velocity_fraction must be in (0, 1]")
         if not 0.0 < self.posture_retime_reserve_fraction <= 1.0:
-            raise ValueError(
-                "posture_retime_reserve_fraction must be in (0, 1]"
-            )
+            raise ValueError("posture_retime_reserve_fraction must be in (0, 1]")
         if (
             not math.isfinite(self.minimum_pregrasp_duration_s)
             or self.minimum_pregrasp_duration_s <= 0.0
@@ -219,16 +239,12 @@ class Order9ArticulatedTeacherConfig:
             not math.isfinite(self.approach_joint_speed_limit_rad_s)
             or self.approach_joint_speed_limit_rad_s <= 0.0
         ):
-            raise ValueError(
-                "approach_joint_speed_limit_rad_s must be positive"
-            )
+            raise ValueError("approach_joint_speed_limit_rad_s must be positive")
         if (
             not math.isfinite(self.posture_anchor_position_tolerance_m)
             or self.posture_anchor_position_tolerance_m <= 0.0
         ):
-            raise ValueError(
-                "posture_anchor_position_tolerance_m must be positive"
-            )
+            raise ValueError("posture_anchor_position_tolerance_m must be positive")
 
 
 @dataclass(frozen=True)
@@ -258,6 +274,76 @@ class _ConfigurationRouteCache:
         self.source_method = ""
 
 
+def _solve_contact_with_joint_limit_reserve_fallback(
+    *,
+    solver: ArticulatedContactIKSolver,
+    morphology,
+    physical_model: PhysicalModel,
+    assignments,
+    candidates,
+    initial_joint_positions_rad: Mapping[str, float] | None,
+    minimum_normalized_joint_limit_reserve: float,
+    primary_solution: ArticulatedIKSolution | None = None,
+) -> ArticulatedIKSolution:
+    """Retry alternate branches only after the ordinary search is exhausted."""
+
+    primary = (
+        primary_solution
+        if primary_solution is not None
+        else solver.solve(
+            morphology=morphology,
+            assignments=assignments,
+            candidates=candidates,
+            initial_joint_positions_rad=initial_joint_positions_rad,
+        )
+    )
+    required = float(minimum_normalized_joint_limit_reserve)
+    if required <= 0.0:
+        return primary
+    ordered_ids = ordered_global_dock_joint_ids(morphology, physical_model)
+    physical_limits = _global_joint_limits(morphology, physical_model, ordered_ids)
+    if primary.feasible:
+        return primary
+
+    attempts = [primary]
+    inset_limits = {
+        joint_id: (
+            lower + required * (upper - lower),
+            upper - required * (upper - lower),
+        )
+        for joint_id, (lower, upper) in physical_limits.items()
+    }
+    for seed in _joint_limit_branch_seeds(inset_limits):
+        attempts.append(
+            solver.solve(
+                morphology=morphology,
+                assignments=assignments,
+                candidates=candidates,
+                initial_joint_positions_rad=seed,
+            )
+        )
+    feasible = [solution for solution in attempts if solution.feasible]
+    if not feasible:
+        return min(
+            attempts,
+            key=lambda solution: (
+                solution.maximum_position_error_m,
+                solution.maximum_normal_error_rad,
+            ),
+        )
+    return max(
+        feasible,
+        key=lambda solution: (
+            _minimum_normalized_joint_limit_reserve(
+                solution.joint_positions_rad,
+                physical_limits,
+            ),
+            -solution.maximum_position_error_m,
+            -solution.maximum_normal_error_rad,
+        ),
+    )
+
+
 class Order9ArticulatedTrajectoryTeacher:
     """Generate one measured-state-anchored, phase-local rolling plan."""
 
@@ -276,7 +362,10 @@ class Order9ArticulatedTrajectoryTeacher:
     ) -> None:
         self.physical_model = physical_model
         self.config = config or Order9ArticulatedTeacherConfig()
-        self.ik_solver = ik_solver or ArticulatedContactIKSolver(physical_model)
+        self.ik_solver = ik_solver or ArticulatedContactIKSolver(
+            physical_model,
+            config=ArticulatedIKConfig(),
+        )
         self.collision_object = collision_object
         self.configuration_space_planner = (
             configuration_space_planner
@@ -292,9 +381,7 @@ class Order9ArticulatedTrajectoryTeacher:
         initial_object_poses_world: Mapping[str, Pose7D] | None = None,
         nominal_start_joint_positions_rad: Mapping[str, float] | None = None,
         release_joint_positions_rad: Mapping[str, float] | None = None,
-        contact_goal_joint_seed_positions_rad: (
-            Mapping[str, float] | None
-        ) = None,
+        contact_goal_joint_seed_positions_rad: Mapping[str, float] | None = None,
     ) -> Order9ArticulatedTeacherPlan:
         contact_goal_joint_seed = _validated_contact_goal_joint_seed(
             context,
@@ -308,6 +395,7 @@ class Order9ArticulatedTrajectoryTeacher:
         )
         failures: list[str] = []
         feasible_attempts: list[tuple] = []
+        reserve_retry_attempts: list[tuple] = []
         for group_id, candidate_set in candidate_groups:
             attempt_context = replace(
                 context,
@@ -326,13 +414,14 @@ class Order9ArticulatedTrajectoryTeacher:
                         for assignment in knot.contact_assignments
                     )
                 )
+                candidate_mapping = {
+                    candidate.candidate_id: candidate
+                    for candidate in candidate_set.candidates
+                }
                 solution = self.ik_solver.solve(
                     morphology=attempt_context.morphology_graph,
                     assignments=active_knot.contact_assignments,
-                    candidates={
-                        candidate.candidate_id: candidate
-                        for candidate in candidate_set.candidates
-                    },
+                    candidates=candidate_mapping,
                     # The contact IK is a deterministic teacher reference for
                     # one assignment, not a state estimator.  A fixed,
                     # hash-bound reviewed seed preserves an accepted solution
@@ -351,6 +440,26 @@ class Order9ArticulatedTrajectoryTeacher:
                     f"position={solution.maximum_position_error_m:.6g},"
                     f"normal={solution.maximum_normal_error_rad:.6g}"
                 )
+                reserve_retry_attempts.append(
+                    (
+                        group_id,
+                        candidate_set,
+                        attempt_context,
+                        baseline,
+                        active_knot,
+                        candidate_mapping,
+                        solution,
+                    )
+                )
+                continue
+            if not _contact_solution_body_tilt_admitted(
+                solution,
+                self.config.maximum_contact_solution_body_tilt_rad,
+            ):
+                failures.append(
+                    f"{group_id or 'fallback'}:body_tilt="
+                    f"{_contact_solution_body_tilt_rad(solution):.6g}"
+                )
                 continue
             feasible_attempts.append(
                 (
@@ -364,6 +473,54 @@ class Order9ArticulatedTrajectoryTeacher:
                     solution,
                 )
             )
+        if (
+            not feasible_attempts
+            and self.config.minimum_normalized_joint_limit_reserve > 0.0
+        ):
+            for (
+                group_id,
+                candidate_set,
+                attempt_context,
+                baseline,
+                active_knot,
+                candidate_mapping,
+                primary_solution,
+            ) in reserve_retry_attempts:
+                solution = _solve_contact_with_joint_limit_reserve_fallback(
+                    solver=self.ik_solver,
+                    morphology=attempt_context.morphology_graph,
+                    physical_model=self.physical_model,
+                    assignments=active_knot.contact_assignments,
+                    candidates=candidate_mapping,
+                    initial_joint_positions_rad=contact_goal_joint_seed,
+                    minimum_normalized_joint_limit_reserve=(
+                        self.config.minimum_normalized_joint_limit_reserve
+                    ),
+                    primary_solution=primary_solution,
+                )
+                if not solution.feasible:
+                    continue
+                if not _contact_solution_body_tilt_admitted(
+                    solution,
+                    self.config.maximum_contact_solution_body_tilt_rad,
+                ):
+                    failures.append(
+                        f"{group_id or 'fallback'}:reserve_body_tilt="
+                        f"{_contact_solution_body_tilt_rad(solution):.6g}"
+                    )
+                    continue
+                feasible_attempts.append(
+                    (
+                        _candidate_attempt_cost(attempt_context, solution),
+                        "" if group_id is None else group_id,
+                        group_id,
+                        candidate_set,
+                        attempt_context,
+                        baseline,
+                        active_knot,
+                        solution,
+                    )
+                )
         for (
             _cost,
             _group_sort_key,
@@ -401,16 +558,10 @@ class Order9ArticulatedTrajectoryTeacher:
                         nominal_start_joint_positions_rad
                     ),
                     release_joint_positions_rad=release_joint_positions_rad,
-                    contact_goal_joint_seed_positions_rad=(
-                        contact_goal_joint_seed
-                    ),
+                    contact_goal_joint_seed_positions_rad=(contact_goal_joint_seed),
                     collision_object=self.collision_object,
-                    configuration_space_planner=(
-                        self.configuration_space_planner
-                    ),
-                    configuration_route_cache=(
-                        self._configuration_route_cache
-                    ),
+                    configuration_space_planner=(self.configuration_space_planner),
+                    configuration_route_cache=(self._configuration_route_cache),
                     planner_collision_resolver=(
                         self._configuration_space_collision_resolver()
                         if self.collision_object is not None
@@ -434,9 +585,7 @@ class Order9ArticulatedTrajectoryTeacher:
                 SchemaValidationError,
                 ValueError,
             ) as error:
-                failures.append(
-                    f"{group_id or 'fallback'}:resolved:{error}"
-                )
+                failures.append(f"{group_id or 'fallback'}:resolved:{error}")
                 continue
             return Order9ArticulatedTeacherPlan(
                 raw_trajectory=resolution.raw_trajectory,
@@ -445,9 +594,7 @@ class Order9ArticulatedTrajectoryTeacher:
                 posture_resolution=resolution,
                 candidate_group_id=group_id,
                 task_phase=task_phase,
-                phase_target_reached=_phase_target_reached(
-                    resolution.raw_trajectory
-                ),
+                phase_target_reached=_phase_target_reached(resolution.raw_trajectory),
                 configuration_space_plan=configuration_space_plan,
             )
         detail = "; ".join(failures[:8])
@@ -464,22 +611,18 @@ class Order9ArticulatedTrajectoryTeacher:
                 "configuration-space planning requires a collision object"
             )
         if self._planner_collision_resolver is None:
-            self._planner_collision_resolver = (
-                Order9PostureTrajectoryResolver(
-                    self.physical_model,
-                    config=Order9PostureResolverConfig(
-                        output_rate_hz=self.config.posture_output_rate_hz,
-                        joint_velocity_fraction=(
-                            self.config.joint_velocity_fraction
-                        ),
-                        enforce_joint_rate=False,
-                        anchor_position_tolerance_m=(
-                            self.config.posture_anchor_position_tolerance_m
-                        ),
-                        collision_margin_m=self.config.collision_margin_m,
+            self._planner_collision_resolver = Order9PostureTrajectoryResolver(
+                self.physical_model,
+                config=Order9PostureResolverConfig(
+                    output_rate_hz=self.config.posture_output_rate_hz,
+                    joint_velocity_fraction=(self.config.joint_velocity_fraction),
+                    enforce_joint_rate=False,
+                    anchor_position_tolerance_m=(
+                        self.config.posture_anchor_position_tolerance_m
                     ),
-                    collision_object=self.collision_object,
-                )
+                    collision_margin_m=self.config.collision_margin_m,
+                ),
+                collision_object=self.collision_object,
             )
         return self._planner_collision_resolver
 
@@ -508,10 +651,7 @@ def _candidate_attempt_cost(
     current_base_pose = matches[0].pose_world
     translation_distance = math.sqrt(
         sum(
-            (
-                float(solution.base_pose_world[index])
-                - float(current_base_pose[index])
-            )
+            (float(solution.base_pose_world[index]) - float(current_base_pose[index]))
             ** 2
             for index in range(3)
         )
@@ -521,16 +661,44 @@ def _candidate_attempt_cost(
         solution.base_pose_world[3:],
     )
     joint_norm = math.sqrt(
-        sum(
-            float(value) ** 2
-            for value in solution.joint_positions_rad.values()
-        )
+        sum(float(value) ** 2 for value in solution.joint_positions_rad.values())
     )
     return (
         translation_distance + 0.10 * orientation_distance + 0.02 * joint_norm,
         translation_distance,
         joint_norm,
     )
+
+
+def _contact_solution_body_tilt_admitted(
+    solution: ArticulatedIKSolution,
+    maximum_body_tilt_rad: float | None,
+) -> bool:
+    if maximum_body_tilt_rad is None:
+        return True
+    return _contact_solution_body_tilt_rad(solution) <= (
+        float(maximum_body_tilt_rad) + 1.0e-9
+    )
+
+
+def _contact_solution_body_tilt_rad(
+    solution: ArticulatedIKSolution,
+) -> float:
+    return max(
+        _quaternion_body_tilt_rad(solution.base_pose_world[3:]),
+        _quaternion_body_tilt_rad(solution.centroidal_pose_world[3:]),
+    )
+
+
+def _quaternion_body_tilt_rad(quaternion_xyzw: Sequence[float]) -> float:
+    if len(quaternion_xyzw) != 4:
+        raise ValueError("body orientation must be a quaternion")
+    x, y, _z, w = (float(value) for value in quaternion_xyzw)
+    norm_sq = sum(float(value) ** 2 for value in quaternion_xyzw)
+    if not math.isfinite(norm_sq) or norm_sq <= 1.0e-12:
+        raise ValueError("body orientation quaternion is invalid")
+    body_up_world_z = 1.0 - 2.0 * (x * x + y * y) / norm_sq
+    return math.acos(max(-1.0, min(1.0, body_up_world_z)))
 
 
 def _candidate_group_attempts(
@@ -592,13 +760,9 @@ def _validated_contact_goal_joint_seed(
         raise SchemaValidationError(
             "contact goal joint seed identities differ from the morphology"
         )
-    values = {
-        joint_id: float(seed[joint_id]) for joint_id in ordered_ids
-    }
+    values = {joint_id: float(seed[joint_id]) for joint_id in ordered_ids}
     if any(not math.isfinite(value) for value in values.values()):
-        raise SchemaValidationError(
-            "contact goal joint seed values must be finite"
-        )
+        raise SchemaValidationError("contact goal joint seed values must be finite")
     return values
 
 
@@ -612,17 +776,13 @@ def _decorate_raw_trajectory(
     config: Order9ArticulatedTeacherConfig,
     nominal_start_joint_positions_rad: Mapping[str, float] | None = None,
     release_joint_positions_rad: Mapping[str, float] | None = None,
-    contact_goal_joint_seed_positions_rad: (
-        Mapping[str, float] | None
-    ) = None,
+    contact_goal_joint_seed_positions_rad: Mapping[str, float] | None = None,
     collision_object: Order9PostureCollisionObject | None = None,
     configuration_space_planner: (
         DeterministicOrder9ConfigurationSpacePlanner | None
     ) = None,
     configuration_route_cache: _ConfigurationRouteCache | None = None,
-    planner_collision_resolver: (
-        Order9PostureTrajectoryResolver | None
-    ) = None,
+    planner_collision_resolver: Order9PostureTrajectoryResolver | None = None,
 ) -> tuple[
     ContactWrenchTrajectory,
     Order9ConfigurationSpacePlan | None,
@@ -644,9 +804,7 @@ def _decorate_raw_trajectory(
         measured_start_q,
         nominal_start_joint_positions_rad,
     )
-    module_states = {
-        state.module_id: state for state in observation.module_states
-    }
+    module_states = {state.module_id: state for state in observation.module_states}
     base_state = module_states.get(context.morphology_graph.base_module_id)
     if base_state is None:
         raise SchemaValidationError(
@@ -710,9 +868,7 @@ def _decorate_raw_trajectory(
                 "articulated teacher could not resolve its collision-clear "
                 "pregrasp configuration"
             )
-        approach_terminal_base_z = float(
-            pregrasp_solution.base_pose_world[2]
-        )
+        approach_terminal_base_z = float(pregrasp_solution.base_pose_world[2])
         if (
             collision_object is None
             or configuration_space_planner is None
@@ -838,17 +994,13 @@ def _decorate_raw_trajectory(
     approach_vertical_speed_limit = None
     if phase == "approach":
         if approach_terminal_base_z is None:
-            raise SchemaValidationError(
-                "approach terminal height was not resolved"
-            )
-        approach_vertical_speed_limit = (
-            _approach_vertical_speed_limit_mps(
-                start_base_z=float(start_base_pose[2]),
-                target_base_z=float(target_base_pose[2]),
-                terminal_base_z=approach_terminal_base_z,
-                horizon_s=config.rolling_horizon_s,
-                config=config,
-            )
+            raise SchemaValidationError("approach terminal height was not resolved")
+        approach_vertical_speed_limit = _approach_vertical_speed_limit_mps(
+            start_base_z=float(start_base_pose[2]),
+            target_base_z=float(target_base_pose[2]),
+            terminal_base_z=approach_terminal_base_z,
+            horizon_s=config.rolling_horizon_s,
+            config=config,
         )
     progress = _rolling_progress_fraction(
         start_q=start_q,
@@ -859,16 +1011,10 @@ def _decorate_raw_trajectory(
         joint_velocity_limit_rad_s=(
             velocity_limit * config.posture_retime_reserve_fraction
         ),
-        base_translation_speed_limit_mps=(
-            config.maximum_base_translation_speed_mps
-        ),
+        base_translation_speed_limit_mps=(config.maximum_base_translation_speed_mps),
         base_vertical_speed_limit_mps=approach_vertical_speed_limit,
-        base_rotation_speed_limit_rad_s=(
-            config.maximum_base_rotation_speed_rad_s
-        ),
-        interpolation_peak_rate_scale=(
-            config.trajectory_interpolation_peak_rate_scale
-        ),
+        base_rotation_speed_limit_rad_s=(config.maximum_base_rotation_speed_rad_s),
+        interpolation_peak_rate_scale=(config.trajectory_interpolation_peak_rate_scale),
     )
     end_q = _interpolate_mapping(start_q, target_q, progress)
     end_base_pose = _interpolate_pose(
@@ -884,9 +1030,7 @@ def _decorate_raw_trajectory(
     assignment_states = _phase_assignment_states(
         phase,
         knot_count=config.rolling_sparse_knot_count,
-        target_reached=(
-            terminal_phase_target and progress >= 1.0 - 1.0e-9
-        ),
+        target_reached=(terminal_phase_target and progress >= 1.0 - 1.0e-9),
     )
     state_templates = _assignment_templates(baseline)
     knots: list[InteractionKnot] = []
@@ -989,18 +1133,14 @@ def _decorate_raw_trajectory(
         )
         knots.append(
             InteractionKnot(
-                t_rel_s=(
-                    config.rolling_horizon_s * float(index) / denominator
-                ),
+                t_rel_s=(config.rolling_horizon_s * float(index) / denominator),
                 contact_assignments=assignments,
                 centroidal_target=CentroidalTarget(
                     com_pos_world=centroidal_pose[:3],
                     com_vel_world=(0.0, 0.0, 0.0),
                     body_orientation_world=centroidal_pose[3:7],
                     centroidal_wrench_preference=(
-                        None
-                        if existing_wrench is None
-                        else list(existing_wrench)
+                        None if existing_wrench is None else list(existing_wrench)
                     ),
                 ),
                 posture_target=PostureTarget(
@@ -1011,9 +1151,7 @@ def _decorate_raw_trajectory(
                     **dict(template.priority_weights),
                     "phase_local_rolling_teacher": 1.0,
                     "configuration_space_teacher": (
-                        1.0
-                        if configuration_space_plan is not None
-                        else 0.0
+                        1.0 if configuration_space_plan is not None else 0.0
                     ),
                 },
                 guard_conditions=[
@@ -1022,19 +1160,14 @@ def _decorate_raw_trajectory(
                         "phase": phase,
                         "phase_target_reached": (
                             "true"
-                            if (
-                                terminal_phase_target
-                                and progress >= 1.0 - 1.0e-9
-                            )
+                            if (terminal_phase_target and progress >= 1.0 - 1.0e-9)
                             else "false"
                         ),
                     },
                     *(
                         [
                             {
-                                "type": (
-                                    "order9_configuration_space_teacher"
-                                ),
+                                "type": ("order9_configuration_space_teacher"),
                                 "planner_version": (
                                     configuration_space_plan.planner_version
                                 ),
@@ -1043,8 +1176,7 @@ def _decorate_raw_trajectory(
                                     len(configuration_space_plan.states)
                                 ),
                                 "collision_check_count": str(
-                                    configuration_space_plan
-                                    .collision_check_count
+                                    configuration_space_plan.collision_check_count
                                 ),
                             }
                         ]
@@ -1079,11 +1211,7 @@ def _decorate_raw_trajectory(
 
 def _task_phase(context: HighLevelPolicyContext) -> str:
     observation = context.runtime_observation
-    raw = (
-        None
-        if observation is None
-        else observation.task_progress.phase_label
-    )
+    raw = None if observation is None else observation.task_progress.phase_label
     phase = "approach" if raw is None else str(raw)
     aliases = {
         "establish_contact": "contact_acquisition",
@@ -1168,8 +1296,7 @@ def _baseline_object_goal(
         target.pose_target_world
         for knot in baseline.knots
         for target in knot.object_targets
-        if target.object_id == object_id
-        and target.pose_target_world is not None
+        if target.object_id == object_id and target.pose_target_world is not None
     ]
     return None if not values else tuple(values[-1])
 
@@ -1291,9 +1418,7 @@ def _pregrasp_candidate_mapping(
         if assignment.schedule_state in {"attach", "maintain", "slide"}
     }
     candidates = {
-        int(candidate.candidate_id): ContactCandidate.from_dict(
-            candidate.to_dict()
-        )
+        int(candidate.candidate_id): ContactCandidate.from_dict(candidate.to_dict())
         for candidate in candidate_set.candidates
         if int(candidate.candidate_id) in active_candidate_ids
     }
@@ -1341,8 +1466,7 @@ def _pregrasp_base_pose(
         norm = 1.0
     return (
         *(
-            float(contact_base_pose[index])
-            + float(clearance_m) * radial[index] / norm
+            float(contact_base_pose[index]) + float(clearance_m) * radial[index] / norm
             for index in range(3)
         ),
         *contact_base_pose[3:],
@@ -1369,9 +1493,7 @@ def _configuration_space_phase_target(
     collision_resolver: Order9PostureTrajectoryResolver,
     route_cache: _ConfigurationRouteCache | None,
     config: Order9ArticulatedTeacherConfig,
-    preferred_goal_joint_seed_positions_rad: (
-        Mapping[str, float] | None
-    ) = None,
+    preferred_goal_joint_seed_positions_rad: Mapping[str, float] | None = None,
 ) -> tuple[
     dict[str, float],
     Pose7D,
@@ -1450,19 +1572,12 @@ def _configuration_space_phase_target(
             }
         ),
     )
-    contact_ceiling_z = (
-        max(
-            float(start_base_pose[2]),
-            float(desired_base_pose[2]),
-        )
-        + float(config.contact_acquisition_ceiling_margin_m)
-    )
-    contact_corridor_start = tuple(
-        float(value) for value in start_base_pose[:3]
-    )
-    contact_corridor_goal = tuple(
-        float(value) for value in desired_base_pose[:3]
-    )
+    contact_ceiling_z = max(
+        float(start_base_pose[2]),
+        float(desired_base_pose[2]),
+    ) + float(config.contact_acquisition_ceiling_margin_m)
+    contact_corridor_start = tuple(float(value) for value in start_base_pose[:3])
+    contact_corridor_goal = tuple(float(value) for value in desired_base_pose[:3])
 
     def collision_free(
         state: Order9ConfigurationState,
@@ -1472,8 +1587,7 @@ def _configuration_space_phase_target(
     ) -> bool:
         if (
             phase == "contact_acquisition"
-            and float(state.base_pose_world[2])
-            > contact_ceiling_z
+            and float(state.base_pose_world[2]) > contact_ceiling_z
         ):
             if diagnostics is not None:
                 diagnostics.append(
@@ -1488,9 +1602,7 @@ def _configuration_space_phase_target(
                 contact_corridor_start,
                 contact_corridor_goal,
             )
-            if corridor_distance > float(
-                config.contact_acquisition_corridor_margin_m
-            ):
+            if corridor_distance > float(config.contact_acquisition_corridor_margin_m):
                 if diagnostics is not None:
                     diagnostics.append(
                         "contact_local_corridor:distance="
@@ -1530,9 +1642,7 @@ def _configuration_space_phase_target(
                 centroidal_pose_world=centroidal_pose,
                 joint_positions_rad=state.joint_positions_rad,
                 exact=False,
-                margin_m=float(
-                    collision_solver.collision_config.collision_margin_m
-                ),
+                margin_m=float(collision_solver.collision_config.collision_margin_m),
                 ground_plane_z_m=collision_object.ground_plane_z_m,
             )
             if result.get("accepted") is not True:
@@ -1553,21 +1663,15 @@ def _configuration_space_phase_target(
         )
         for reference in references
     }
-    desired_seed = {
-        joint_id: float(value) for joint_id, value in desired_q.items()
-    }
-    start_seed = {
-        joint_id: float(value) for joint_id, value in start_q.items()
-    }
+    desired_seed = {joint_id: float(value) for joint_id, value in desired_q.items()}
+    start_seed = {joint_id: float(value) for joint_id, value in start_q.items()}
     zero_seed = {joint_id: 0.0 for joint_id in desired_seed}
     joint_seeds = [desired_seed]
     preferred_seed = (
         None
         if preferred_goal_joint_seed_positions_rad is None
         else {
-            joint_id: float(
-                preferred_goal_joint_seed_positions_rad[joint_id]
-            )
+            joint_id: float(preferred_goal_joint_seed_positions_rad[joint_id])
             for joint_id in desired_seed
         }
     )
@@ -1576,8 +1680,7 @@ def _configuration_space_phase_target(
             continue
         if all(
             any(
-                abs(float(seed[joint_id]) - float(existing[joint_id]))
-                > 1.0e-12
+                abs(float(seed[joint_id]) - float(existing[joint_id])) > 1.0e-12
                 for joint_id in seed
             )
             for existing in joint_seeds
@@ -1602,19 +1705,13 @@ def _configuration_space_phase_target(
     ):
         goal = cached_goal
     else:
-        contact_corridor_goal = tuple(
-            float(value) for value in desired_base_pose[:3]
-        )
-        for offset_index, offset in enumerate(
-            _CONFIGURATION_GOAL_CENTROIDAL_OFFSETS_M
-        ):
+        contact_corridor_goal = tuple(float(value) for value in desired_base_pose[:3])
+        for offset_index, offset in enumerate(_CONFIGURATION_GOAL_CENTROIDAL_OFFSETS_M):
             centroidal_target = (
                 float(desired_centroidal_pose[0]) + float(offset[0]),
                 float(desired_centroidal_pose[1]) + float(offset[1]),
                 float(desired_centroidal_pose[2]) + float(offset[2]),
-                *tuple(
-                    float(value) for value in desired_centroidal_pose[3:7]
-                ),
+                *tuple(float(value) for value in desired_centroidal_pose[3:7]),
             )
             for seed_index, seed in enumerate(joint_seeds):
                 for (
@@ -1665,8 +1762,7 @@ def _configuration_space_phase_target(
                     ):
                         goal_failures.append(
                             f"offset={offset_index}:seed={seed_index}:"
-                            f"scene={scene_id}:"
-                            + ",".join(collision_diagnostics)
+                            f"scene={scene_id}:" + ",".join(collision_diagnostics)
                         )
                         continue
                     goal = candidate_goal
@@ -1680,9 +1776,7 @@ def _configuration_space_phase_target(
             "configuration-space teacher has no multi-obstacle "
             "collision-free goal (" + "; ".join(goal_failures[:8]) + ")"
         )
-    contact_corridor_goal = tuple(
-        float(value) for value in goal.base_pose_world[:3]
-    )
+    contact_corridor_goal = tuple(float(value) for value in goal.base_pose_world[:3])
 
     ordered_ids = tuple(sorted(start_q))
     plan = _resume_configuration_route(
@@ -1706,9 +1800,7 @@ def _configuration_space_phase_target(
                 goal=goal,
                 joint_limits_rad=joint_limits,
                 is_collision_free=collision_free,
-                corridor_radius_m=(
-                    config.contact_acquisition_corridor_margin_m
-                ),
+                corridor_radius_m=(config.contact_acquisition_corridor_margin_m),
             )
         else:
             plan = planner.plan(
@@ -1767,12 +1859,8 @@ def _resume_configuration_route(
         start,
         remaining[0],
         ordered_ids=ordered_ids,
-        translation_tolerance_m=(
-            planner.config.waypoint_translation_tolerance_m
-        ),
-        attitude_tolerance_rad=(
-            planner.config.waypoint_attitude_tolerance_rad
-        ),
+        translation_tolerance_m=(planner.config.waypoint_translation_tolerance_m),
+        attitude_tolerance_rad=(planner.config.waypoint_attitude_tolerance_rad),
         joint_tolerance_rad=planner.config.waypoint_joint_tolerance_rad,
     ):
         remaining.pop(0)
@@ -1826,9 +1914,7 @@ def _configuration_states_close(
             )
         )
         <= translation_tolerance_m
-        and _quaternion_distance(
-            left.base_pose_world[3:], right.base_pose_world[3:]
-        )
+        and _quaternion_distance(left.base_pose_world[3:], right.base_pose_world[3:])
         <= attitude_tolerance_rad
         and max(
             (
@@ -1880,29 +1966,20 @@ def _approach_staging_target(
     staging_base_pose = (
         float(staging_base_pose[0]),
         float(staging_base_pose[1]),
-        float(contact_base_pose[2])
-        + config.approach_articulation_vertical_clearance_m,
+        float(contact_base_pose[2]) + config.approach_articulation_vertical_clearance_m,
         *staging_base_pose[3:],
     )
     contact_distance_sq = sum(
-        (
-            float(contact_q[joint_id]) - float(start_q[joint_id])
-        )
-        ** 2
+        (float(contact_q[joint_id]) - float(start_q[joint_id])) ** 2
         for joint_id in start_q
     )
-    neutral_distance_sq = sum(
-        float(start_q[joint_id]) ** 2 for joint_id in start_q
-    )
+    neutral_distance_sq = sum(float(start_q[joint_id]) ** 2 for joint_id in start_q)
     articulation_committed = bool(
-        neutral_distance_sq > 1.0e-12
-        and contact_distance_sq <= neutral_distance_sq
+        neutral_distance_sq > 1.0e-12 and contact_distance_sq <= neutral_distance_sq
     )
     posture_established = bool(
-        maximum_joint_error
-        <= config.approach_staging_joint_tolerance_rad
-        and attitude_error
-        <= config.approach_staging_attitude_tolerance_rad
+        maximum_joint_error <= config.approach_staging_joint_tolerance_rad
+        and attitude_error <= config.approach_staging_attitude_tolerance_rad
     )
     if posture_established:
         # Descend at the collision-clear lateral staging position before the
@@ -1924,9 +2001,7 @@ def _approach_staging_target(
         # the independently opened pregrasp anchor targets.  Never re-enter
         # the neutral transit stages because of bounded tracking residual.
         return None
-    if (
-        articulation_committed
-    ):
+    if articulation_committed:
         # The articulated posture is established, or the measured posture has
         # crossed the contact/neutral midpoint.  Keep moving toward contact
         # while the slower assembled-body attitude converges; a receding-
@@ -1939,13 +2014,8 @@ def _approach_staging_target(
             dict(contact_q),
             tuple(values),  # type: ignore[arg-type]
         )
-    vertical_error = (
-        float(staging_base_pose[2]) - float(start_base_pose[2])
-    )
-    if (
-        abs(vertical_error)
-        > config.approach_staging_position_tolerance_m
-    ):
+    vertical_error = float(staging_base_pose[2]) - float(start_base_pose[2])
+    if abs(vertical_error) > config.approach_staging_position_tolerance_m:
         return (
             {joint_id: 0.0 for joint_id in start_q},
             (
@@ -1960,18 +2030,11 @@ def _approach_staging_target(
         )
     lateral_error = math.sqrt(
         sum(
-            (
-                float(staging_base_pose[index])
-                - float(start_base_pose[index])
-            )
-            ** 2
+            (float(staging_base_pose[index]) - float(start_base_pose[index])) ** 2
             for index in (0, 1)
         )
     )
-    if (
-        lateral_error
-        > config.approach_staging_position_tolerance_m
-    ):
+    if lateral_error > config.approach_staging_position_tolerance_m:
         values = list(start_base_pose)
         values[0:2] = list(staging_base_pose[0:2])
         # Do not re-anchor the nominal posture/height to each measured
@@ -2012,17 +2075,12 @@ def _point_to_segment_distance(
         1.0,
         max(
             0.0,
-            sum(offset[i] * segment[i] for i in range(3))
-            / length_squared,
+            sum(offset[i] * segment[i] for i in range(3)) / length_squared,
         ),
     )
     return math.sqrt(
         sum(
-            (
-                float(point[i])
-                - (float(start[i]) + fraction * segment[i])
-            )
-            ** 2
+            (float(point[i]) - (float(start[i]) + fraction * segment[i])) ** 2
             for i in range(3)
         )
     )
@@ -2054,11 +2112,7 @@ def _rolling_progress_fraction(
         peak_scale
         * math.sqrt(
             sum(
-                (
-                    float(target_base_pose[index])
-                    - float(start_base_pose[index])
-                )
-                ** 2
+                (float(target_base_pose[index]) - float(start_base_pose[index])) ** 2
                 for index in range(3)
             )
         )
@@ -2103,9 +2157,8 @@ def _approach_vertical_speed_limit_mps(
     if target_base_z >= start_base_z - 1.0e-9:
         return cruise
     peak = float(config.trajectory_interpolation_peak_rate_scale)
-    zone_top_z = (
-        float(terminal_base_z)
-        + float(config.terminal_approach_slowdown_height_m)
+    zone_top_z = float(terminal_base_z) + float(
+        config.terminal_approach_slowdown_height_m
     )
     distance_above_zone = max(0.0, float(start_base_z) - zone_top_z)
     cruise_endpoint_delta = cruise * float(horizon_s) / peak
@@ -2209,9 +2262,7 @@ def _centroidal_pose_from_fk(
                 pose_world=module_root_poses_world[module_id],
                 twist_world=[0.0] * 6,
                 joint_positions=local_q[module_id],
-                joint_velocities={
-                    local_id: 0.0 for local_id in local_q[module_id]
-                },
+                joint_velocities={local_id: 0.0 for local_id in local_q[module_id]},
             )
             for module_id in sorted(module_root_poses_world)
         ],
@@ -2238,8 +2289,7 @@ def _interpolate_mapping(
     ratio: float,
 ) -> dict[str, float]:
     return {
-        key: float(start[key])
-        + (float(target[key]) - float(start[key])) * float(ratio)
+        key: float(start[key]) + (float(target[key]) - float(start[key])) * float(ratio)
         for key in start
     }
 
@@ -2252,8 +2302,7 @@ def _interpolate_pose(
     value = min(max(float(ratio), 0.0), 1.0)
     return (
         *(
-            float(start[index])
-            + (float(target[index]) - float(start[index])) * value
+            float(start[index]) + (float(target[index]) - float(start[index])) * value
             for index in range(3)
         ),
         *_quaternion_slerp(start[3:], target[3:], value),
@@ -2275,8 +2324,7 @@ def _quaternion_slerp(
     if dot > 0.9995:
         return _normalized_quaternion(
             tuple(
-                left[index]
-                + (right[index] - left[index]) * float(ratio)
+                left[index] + (right[index] - left[index]) * float(ratio)
                 for index in range(4)
             )
         )
@@ -2298,9 +2346,7 @@ def _normalized_quaternion(
     resolved = tuple(float(value) for value in values)
     norm = math.sqrt(sum(value * value for value in resolved))
     if len(resolved) != 4 or norm <= 1.0e-12:
-        raise SchemaValidationError(
-            "articulated teacher quaternion is invalid"
-        )
+        raise SchemaValidationError("articulated teacher quaternion is invalid")
     return tuple(value / norm for value in resolved)  # type: ignore[return-value]
 
 
@@ -2310,9 +2356,7 @@ def _quaternion_distance(
 ) -> float:
     first = _normalized_quaternion(left)
     second = _normalized_quaternion(right)
-    dot = abs(
-        sum(a * b for a, b in zip(first, second, strict=True))
-    )
+    dot = abs(sum(a * b for a, b in zip(first, second, strict=True)))
     return 2.0 * math.acos(min(max(dot, -1.0), 1.0))
 
 
@@ -2343,9 +2387,7 @@ def _retime_for_pregrasp(
     if shift <= 0.0:
         return
     for index in range(first_active, len(trajectory.knots)):
-        trajectory.knots[index].t_rel_s = (
-            float(trajectory.knots[index].t_rel_s) + shift
-        )
+        trajectory.knots[index].t_rel_s = float(trajectory.knots[index].t_rel_s) + shift
     trajectory.horizon_s = float(trajectory.horizon_s) + shift
 
 
@@ -2357,9 +2399,7 @@ def _resolve_teacher_posture_trajectory(
     raw_trajectory: ContactWrenchTrajectory,
     initial_joint_positions_rad: Mapping[str, float],
     collision_object: Order9PostureCollisionObject | None,
-    nominal_joint_seed_positions_by_raw_knot: Sequence[
-        Mapping[str, float]
-    ],
+    nominal_joint_seed_positions_by_raw_knot: Sequence[Mapping[str, float]],
 ) -> Order9ResolvedPostureTrajectory:
     """Author sufficient teacher timing, then export one immutable raw plan."""
 
@@ -2369,10 +2409,11 @@ def _resolve_teacher_posture_trajectory(
             output_rate_hz=config.posture_output_rate_hz,
             joint_velocity_fraction=config.joint_velocity_fraction,
             enforce_joint_rate=False,
-            anchor_position_tolerance_m=(
-                config.posture_anchor_position_tolerance_m
-            ),
+            anchor_position_tolerance_m=(config.posture_anchor_position_tolerance_m),
             collision_margin_m=config.collision_margin_m,
+            minimum_normalized_joint_limit_reserve=(
+                config.minimum_normalized_joint_limit_reserve
+            ),
         ),
         collision_object=collision_object,
     )
@@ -2407,9 +2448,8 @@ def _resolve_teacher_posture_trajectory(
             raw_trajectory,
             dense_segment_midpoint_s,
         )
-        current_duration = (
-            float(raw_trajectory.knots[segment_index].t_rel_s)
-            - float(raw_trajectory.knots[segment_index - 1].t_rel_s)
+        current_duration = float(raw_trajectory.knots[segment_index].t_rel_s) - float(
+            raw_trajectory.knots[segment_index - 1].t_rel_s
         )
         required_duration = current_duration * (
             evidence.maximum_joint_rate_rad_s
@@ -2435,9 +2475,7 @@ def _raw_segment_for_time(
     """Map one dense IK segment midpoint back to its owning raw pi_H segment."""
 
     if not math.isfinite(float(time_s)):
-        raise SchemaValidationError(
-            "articulated teacher dense retime time is invalid"
-        )
+        raise SchemaValidationError("articulated teacher dense retime time is invalid")
     for index in range(1, len(trajectory.knots)):
         if float(time_s) <= float(trajectory.knots[index].t_rel_s) + 1.0e-12:
             return index
@@ -2454,19 +2492,14 @@ def _retime_segment(
         raise SchemaValidationError(
             "articulated teacher retime segment index is invalid"
         )
-    current_duration = (
-        float(trajectory.knots[segment_index].t_rel_s)
-        - float(trajectory.knots[segment_index - 1].t_rel_s)
+    current_duration = float(trajectory.knots[segment_index].t_rel_s) - float(
+        trajectory.knots[segment_index - 1].t_rel_s
     )
     shift = max(0.0, float(minimum_duration_s) - current_duration)
     if shift <= 0.0:
-        raise SchemaValidationError(
-            "articulated teacher rate retime made no progress"
-        )
+        raise SchemaValidationError("articulated teacher rate retime made no progress")
     for index in range(segment_index, len(trajectory.knots)):
-        trajectory.knots[index].t_rel_s = (
-            float(trajectory.knots[index].t_rel_s) + shift
-        )
+        trajectory.knots[index].t_rel_s = float(trajectory.knots[index].t_rel_s) + shift
     trajectory.horizon_s = float(trajectory.horizon_s) + shift
 
 
@@ -2581,10 +2614,7 @@ def _initial_joint_positions(
             "articulated teacher runtime observation lacks initial Dock "
             f"joint state for {missing}"
         )
-    return {
-        joint_id: float(runtime[joint_id])
-        for joint_id in ordered_ids
-    }
+    return {joint_id: float(runtime[joint_id]) for joint_id in ordered_ids}
 
 
 def _nominal_start_joint_positions(
@@ -2598,10 +2628,7 @@ def _nominal_start_joint_positions(
             "articulated teacher nominal start Dock identities differ from "
             "the measured state"
         )
-    values = {
-        joint_id: float(requested[joint_id])
-        for joint_id in measured
-    }
+    values = {joint_id: float(requested[joint_id]) for joint_id in measured}
     if any(not math.isfinite(value) for value in values.values()):
         raise SchemaValidationError(
             "articulated teacher nominal start Dock state must be finite"
@@ -2615,9 +2642,7 @@ def _runtime_object_poses(
     observation = context.runtime_observation
     if observation is None:
         return {}
-    return {
-        state.object_id: state.pose_world for state in observation.object_states
-    }
+    return {state.object_id: state.pose_world for state in observation.object_states}
 
 
 def _dock_velocity_limit(physical_model: PhysicalModel) -> float:
@@ -2635,11 +2660,7 @@ def _dock_velocity_limit(physical_model: PhysicalModel) -> float:
     specs = physical_model.metadata.get("joint_actuator_specs")
     dock = specs.get("dock") if isinstance(specs, dict) else None
     drive = dock.get("simulation_drive") if isinstance(dock, dict) else None
-    safe = (
-        drive.get("safe_velocity_limit_rad_s")
-        if isinstance(drive, dict)
-        else None
-    )
+    safe = drive.get("safe_velocity_limit_rad_s") if isinstance(drive, dict) else None
     if isinstance(safe, (int, float)) and not isinstance(safe, bool):
         values.append(float(safe))
     if not values or min(values) <= 0.0:

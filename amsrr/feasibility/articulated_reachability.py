@@ -51,14 +51,11 @@ from amsrr.schemas.runtime import (
     TaskProgressState,
 )
 
-
 ARTICULATED_REACHABILITY_VERSION = "articulated_reachability_v1"
 ARTICULATED_IK_TEACHER_VERSION = (
     "articulated_contact_ik_teacher_v3_feasibility_bootstrap"
 )
-CENTROIDAL_POSTURE_IK_VERSION = (
-    "centroidal_posture_ik_v2_feasibility_bootstrap"
-)
+CENTROIDAL_POSTURE_IK_VERSION = "centroidal_posture_ik_v2_feasibility_bootstrap"
 
 REACHABILITY_POSTURE_MISSING_CODE = "E_REACHABILITY_POSTURE_MISSING"
 REACHABILITY_JOINT_SET_CODE = "E_REACHABILITY_JOINT_SET"
@@ -110,6 +107,7 @@ class ArticulatedIKConfig:
     maximum_base_rotation_step_rad: float = 0.20
     contact_position_tolerance_m: float = 0.005
     contact_normal_tolerance_rad: float = 0.10
+    minimum_normalized_joint_limit_reserve: float = 0.0
 
     def __post_init__(self) -> None:
         if self.maximum_iterations < 1:
@@ -131,8 +129,13 @@ class ArticulatedIKConfig:
         pitch_weight = float(self.pitch_joint_regularization_weight)
         if not math.isfinite(pitch_weight) or pitch_weight < 0.0:
             raise ValueError(
-                "pitch_joint_regularization_weight must be finite and "
-                "non-negative"
+                "pitch_joint_regularization_weight must be finite and " "non-negative"
+            )
+        reserve = float(self.minimum_normalized_joint_limit_reserve)
+        if not math.isfinite(reserve) or not 0.0 <= reserve < 0.5:
+            raise ValueError(
+                "minimum_normalized_joint_limit_reserve must be finite and "
+                "in [0, 0.5)"
             )
 
 
@@ -169,18 +172,15 @@ class CentroidalPostureIKConfig:
     anchor_attitude_tolerance_rad: float = 0.10
     maximum_cache_entries: int = 256
     use_relaxed_seed: bool = True
+    minimum_normalized_joint_limit_reserve: float = 0.0
 
     def __post_init__(self) -> None:
         if self.maximum_iterations < 1:
             raise ValueError("maximum_iterations must be positive")
         if self.relaxed_seed_maximum_iterations < 1:
-            raise ValueError(
-                "relaxed_seed_maximum_iterations must be positive"
-            )
+            raise ValueError("relaxed_seed_maximum_iterations must be positive")
         if self.feasible_refinement_iterations < 0:
-            raise ValueError(
-                "feasible_refinement_iterations must be non-negative"
-            )
+            raise ValueError("feasible_refinement_iterations must be non-negative")
         if self.maximum_cache_entries < 1:
             raise ValueError("maximum_cache_entries must be positive")
         if not isinstance(self.use_relaxed_seed, bool):
@@ -203,8 +203,13 @@ class CentroidalPostureIKConfig:
         pitch_weight = float(self.pitch_joint_regularization_weight)
         if not math.isfinite(pitch_weight) or pitch_weight < 0.0:
             raise ValueError(
-                "pitch_joint_regularization_weight must be finite and "
-                "non-negative"
+                "pitch_joint_regularization_weight must be finite and " "non-negative"
+            )
+        reserve = float(self.minimum_normalized_joint_limit_reserve)
+        if not math.isfinite(reserve) or not 0.0 <= reserve < 0.5:
+            raise ValueError(
+                "minimum_normalized_joint_limit_reserve must be finite and "
+                "in [0, 0.5)"
             )
 
 
@@ -233,9 +238,7 @@ def resolve_mesh_backed_anchor_references(
     anchors = {anchor.anchor_id: anchor for anchor in morphology.robot_anchors}
     surfaces = {
         surface.port_global_id: surface
-        for surface in resolve_unoccupied_gripper_surfaces(
-            morphology, physical_model
-        )
+        for surface in resolve_unoccupied_gripper_surfaces(morphology, physical_model)
     }
     references: list[MeshBackedAnchorReference] = []
     for anchor_id in requested:
@@ -250,9 +253,7 @@ def resolve_mesh_backed_anchor_references(
             raise SchemaValidationError(
                 f"RobotAnchor {anchor_id} does not resolve to a free mesh-backed surface"
             )
-        references.append(
-            MeshBackedAnchorReference(anchor=anchor, surface=surface)
-        )
+        references.append(MeshBackedAnchorReference(anchor=anchor, surface=surface))
     return tuple(references)
 
 
@@ -314,16 +315,15 @@ class ArticulatedContactIKSolver:
         reference_by_id = {
             reference.anchor.anchor_id: reference for reference in references
         }
-        ordered_ids = ordered_global_dock_joint_ids(
-            morphology, self.physical_model
-        )
+        ordered_ids = ordered_global_dock_joint_ids(morphology, self.physical_model)
         joint_regularization_weights = _joint_regularization_weights(
             ordered_ids,
             self.physical_model,
             self.config,
         )
-        limits = _global_joint_limits(
-            morphology, self.physical_model, ordered_ids
+        limits = _joint_limits_with_normalized_reserve(
+            _global_joint_limits(morphology, self.physical_model, ordered_ids),
+            self.config.minimum_normalized_joint_limit_reserve,
         )
         q = {
             joint_id: float(
@@ -359,30 +359,23 @@ class ArticulatedContactIKSolver:
             position_errors: list[float] = []
             normal_errors: list[float] = []
             joint_count = len(ordered_ids)
-            for assignment, candidate in zip(
-                active, selected_candidates, strict=True
-            ):
+            for assignment, candidate in zip(active, selected_candidates, strict=True):
                 reference = reference_by_id[assignment.anchor_id]
                 actual = result.anchor_poses_world[assignment.anchor_id]
                 target_position = tuple(
                     float(value) for value in candidate.contact_pose_world[:3]
                 )
                 position_error = tuple(
-                    target_position[index] - float(actual[index])
-                    for index in range(3)
+                    target_position[index] - float(actual[index]) for index in range(3)
                 )
                 actual_outward = _pose_x_axis(actual)
                 desired_outward = _unit(
                     tuple(-float(value) for value in candidate.normal_world)
                 )
-                normal_error = _axis_alignment_rotation(
-                    actual_outward, desired_outward
-                )
+                normal_error = _axis_alignment_rotation(actual_outward, desired_outward)
                 position_errors.append(_norm(position_error))
                 normal_errors.append(_norm(normal_error))
-                joint_jacobian = result.anchor_jacobians[
-                    reference.anchor.anchor_id
-                ]
+                joint_jacobian = result.anchor_jacobians[reference.anchor.anchor_id]
                 base_position_jacobian = _base_position_jacobian(
                     actual[:3], base_pose[:3]
                 )
@@ -395,8 +388,7 @@ class ArticulatedContactIKSolver:
                                 for column in range(joint_count)
                             ),
                             *(
-                                self.config.position_weight
-                                * float(value)
+                                self.config.position_weight * float(value)
                                 for value in base_position_jacobian[axis]
                             ),
                             *(
@@ -406,9 +398,7 @@ class ArticulatedContactIKSolver:
                             ),
                         ]
                     )
-                    residuals.append(
-                        self.config.position_weight * position_error[axis]
-                    )
+                    residuals.append(self.config.position_weight * position_error[axis])
                 for axis in range(3):
                     rows.append(
                         [
@@ -427,24 +417,16 @@ class ArticulatedContactIKSolver:
                             0.0,
                         ]
                     )
-                    residuals.append(
-                        self.config.normal_weight * normal_error[axis]
-                    )
+                    residuals.append(self.config.normal_weight * normal_error[axis])
             maximum_position_error = max(position_errors, default=0.0)
             maximum_normal_error = max(normal_errors, default=0.0)
-            regularized_objective = sum(
-                value * value for value in residuals
-            ) + sum(
-                joint_regularization_weights[joint_id]
-                * q[joint_id]
-                * q[joint_id]
+            regularized_objective = sum(value * value for value in residuals) + sum(
+                joint_regularization_weights[joint_id] * q[joint_id] * q[joint_id]
                 for joint_id in ordered_ids
             )
             if (
-                maximum_position_error
-                <= self.config.contact_position_tolerance_m
-                and maximum_normal_error
-                <= self.config.contact_normal_tolerance_rad
+                maximum_position_error <= self.config.contact_position_tolerance_m
+                and maximum_normal_error <= self.config.contact_normal_tolerance_rad
                 and regularized_objective < best_feasible_objective
             ):
                 centroidal = _centroidal_pose(
@@ -536,9 +518,7 @@ class ArticulatedContactIKSolver:
                     morphology=morphology,
                     assignments=assignments,
                     candidates=candidates,
-                    initial_joint_positions_rad=(
-                        bootstrap.joint_positions_rad
-                    ),
+                    initial_joint_positions_rad=(bootstrap.joint_positions_rad),
                     initial_base_pose_world=bootstrap.base_pose_world,
                 )
 
@@ -590,9 +570,9 @@ class CentroidalPostureIKSolver:
         self.config = config or CentroidalPostureIKConfig()
         self.kinematics = kinematics or WholeStructureKinematics()
         self._rigid_body_builder = RigidBodyControlModelBuilder()
-        self._solution_cache: dict[
-            tuple[object, ...], tuple[dict[str, float], int]
-        ] = {}
+        self._solution_cache: dict[tuple[object, ...], tuple[dict[str, float], int]] = (
+            {}
+        )
 
     def solve(
         self,
@@ -604,11 +584,11 @@ class CentroidalPostureIKSolver:
     ) -> CentroidalPostureIKSolution:
         np = _numpy()
         _validate_pose7d(centroidal_pose_world, "centroidal_pose_world")
-        ordered_ids = ordered_global_dock_joint_ids(
-            morphology, self.physical_model
-        )
-        limits = _global_joint_limits(
-            morphology, self.physical_model, ordered_ids
+        ordered_ids = ordered_global_dock_joint_ids(morphology, self.physical_model)
+        limits = _global_joint_limits(morphology, self.physical_model, ordered_ids)
+        seed_limits = _joint_limits_with_normalized_reserve(
+            limits,
+            self.config.minimum_normalized_joint_limit_reserve,
         )
         reference_q = {
             joint_id: float(
@@ -618,13 +598,12 @@ class CentroidalPostureIKSolver:
             )
             for joint_id in ordered_ids
         }
-        reference_q = _clip_joint_map(reference_q, limits)
+        reference_q = _clip_joint_map(reference_q, seed_limits)
         q = dict(reference_q)
         target_ids = tuple(sorted(int(value) for value in anchor_pose_targets_world))
         targets = {
             anchor_id: tuple(
-                float(value)
-                for value in anchor_pose_targets_world[anchor_id]
+                float(value) for value in anchor_pose_targets_world[anchor_id]
             )
             for anchor_id in target_ids
         }
@@ -635,9 +614,7 @@ class CentroidalPostureIKSolver:
             self.physical_model,
             target_ids,
         )
-        pitch_ids = _global_pitch_joint_ids(
-            ordered_ids, self.physical_model
-        )
+        pitch_ids = _global_pitch_joint_ids(ordered_ids, self.physical_model)
         cache_key = self._cache_key(
             morphology=morphology,
             centroidal_pose_world=centroidal_pose_world,
@@ -747,27 +724,20 @@ class CentroidalPostureIKSolver:
                 actual = result.anchor_poses_world[anchor_id]
                 target = targets[anchor_id]
                 position_error = tuple(
-                    float(target[axis]) - float(actual[axis])
-                    for axis in range(3)
+                    float(target[axis]) - float(actual[axis]) for axis in range(3)
                 )
-                attitude_error = _pose_rotation_error_vector(
-                    target, actual
-                )
+                attitude_error = _pose_rotation_error_vector(target, actual)
                 position_errors.append(_norm(position_error))
                 attitude_errors.append(_norm(attitude_error))
                 jacobian = jacobians[anchor_id]
                 for axis in range(3):
                     rows.append(
                         [
-                            self.config.position_weight
-                            * float(jacobian[axis][column])
+                            self.config.position_weight * float(jacobian[axis][column])
                             for column in range(len(ordered_ids))
                         ]
                     )
-                    residuals.append(
-                        self.config.position_weight
-                        * position_error[axis]
-                    )
+                    residuals.append(self.config.position_weight * position_error[axis])
                 for axis in range(3):
                     rows.append(
                         [
@@ -776,10 +746,7 @@ class CentroidalPostureIKSolver:
                             for column in range(len(ordered_ids))
                         ]
                     )
-                    residuals.append(
-                        self.config.attitude_weight
-                        * attitude_error[axis]
-                    )
+                    residuals.append(self.config.attitude_weight * attitude_error[axis])
             maximum_position_error = max(position_errors, default=0.0)
             maximum_attitude_error = max(attitude_errors, default=0.0)
             objective = sum(value * value for value in residuals)
@@ -789,15 +756,12 @@ class CentroidalPostureIKSolver:
                 for joint_id in ordered_ids
             )
             objective += sum(
-                self.config.pitch_joint_regularization_weight
-                * q[joint_id] ** 2
+                self.config.pitch_joint_regularization_weight * q[joint_id] ** 2
                 for joint_id in pitch_ids
             )
             if (
-                maximum_position_error
-                <= self.config.anchor_position_tolerance_m
-                and maximum_attitude_error
-                <= self.config.anchor_attitude_tolerance_rad
+                maximum_position_error <= self.config.anchor_position_tolerance_m
+                and maximum_attitude_error <= self.config.anchor_attitude_tolerance_rad
             ):
                 if first_feasible_iteration is None:
                     first_feasible_iteration = iteration
@@ -835,20 +799,16 @@ class CentroidalPostureIKSolver:
             normal += (self.config.damping**2) * np.eye(len(ordered_ids))
             right = matrix.T @ residual
             for index, joint_id in enumerate(ordered_ids):
-                normal[index, index] += (
-                    self.config.continuity_regularization_weight
-                )
-                right[index] -= (
-                    self.config.continuity_regularization_weight
-                    * (q[joint_id] - reference_q[joint_id])
+                normal[index, index] += self.config.continuity_regularization_weight
+                right[index] -= self.config.continuity_regularization_weight * (
+                    q[joint_id] - reference_q[joint_id]
                 )
                 if joint_id in pitch_ids:
-                    normal[index, index] += (
-                        self.config.pitch_joint_regularization_weight
-                    )
+                    normal[
+                        index, index
+                    ] += self.config.pitch_joint_regularization_weight
                     right[index] -= (
-                        self.config.pitch_joint_regularization_weight
-                        * q[joint_id]
+                        self.config.pitch_joint_regularization_weight * q[joint_id]
                     )
             try:
                 delta = np.linalg.solve(normal, right)
@@ -899,9 +859,7 @@ class CentroidalPostureIKSolver:
                     morphology=morphology,
                     centroidal_pose_world=centroidal_pose_world,
                     anchor_pose_targets_world=anchor_pose_targets_world,
-                    initial_joint_positions_rad=(
-                        bootstrap.joint_positions_rad
-                    ),
+                    initial_joint_positions_rad=(bootstrap.joint_positions_rad),
                 )
         return CentroidalPostureIKSolution(
             feasible=False,
@@ -911,9 +869,7 @@ class CentroidalPostureIKSolver:
             anchor_poses_world=last_anchor_poses,
             maximum_position_error_m=maximum_position_error,
             maximum_attitude_error_rad=maximum_attitude_error,
-            iterations=(
-                relaxed_iterations + self.config.maximum_iterations
-            ),
+            iterations=(relaxed_iterations + self.config.maximum_iterations),
         )
 
     def _evaluate_fixed_q(
@@ -953,11 +909,7 @@ class CentroidalPostureIKSolver:
             _norm(
                 tuple(
                     float(targets[reference.anchor.anchor_id][axis])
-                    - float(
-                        result.anchor_poses_world[
-                            reference.anchor.anchor_id
-                        ][axis]
-                    )
+                    - float(result.anchor_poses_world[reference.anchor.anchor_id][axis])
                     for axis in range(3)
                 )
             )
@@ -967,9 +919,7 @@ class CentroidalPostureIKSolver:
             _norm(
                 _pose_rotation_error_vector(
                     targets[reference.anchor.anchor_id],
-                    result.anchor_poses_world[
-                        reference.anchor.anchor_id
-                    ],
+                    result.anchor_poses_world[reference.anchor.anchor_id],
                 )
             )
             for reference in references
@@ -978,10 +928,8 @@ class CentroidalPostureIKSolver:
         maximum_attitude = max(attitude_errors, default=0.0)
         return CentroidalPostureIKSolution(
             feasible=(
-                maximum_position
-                <= self.config.anchor_position_tolerance_m
-                and maximum_attitude
-                <= self.config.anchor_attitude_tolerance_rad
+                maximum_position <= self.config.anchor_position_tolerance_m
+                and maximum_attitude <= self.config.anchor_attitude_tolerance_rad
             ),
             joint_positions_rad={
                 joint_id: float(value) for joint_id, value in q.items()
@@ -1016,10 +964,7 @@ class CentroidalPostureIKSolver:
             relative_targets.append(
                 (
                     int(anchor_id),
-                    *(
-                        round(float(value), 10)
-                        for value in relative[:3]
-                    ),
+                    *(round(float(value), 10) for value in relative[:3]),
                     *(round(value, 10) for value in quaternion),
                 )
             )
@@ -1045,10 +990,7 @@ class CentroidalPostureIKSolver:
             oldest = next(iter(self._solution_cache))
             self._solution_cache.pop(oldest)
         self._solution_cache[key] = (
-            {
-                joint_id: float(value)
-                for joint_id, value in q.items()
-            },
+            {joint_id: float(value) for joint_id, value in q.items()},
             int(iterations),
         )
 
@@ -1080,9 +1022,7 @@ class CentroidalPostureIKSolver:
         )
         best_q = dict(current_q)
         best_objective = math.inf
-        for iteration in range(
-            1, self.config.relaxed_seed_maximum_iterations + 1
-        ):
+        for iteration in range(1, self.config.relaxed_seed_maximum_iterations + 1):
             result = self.kinematics.compute(
                 morphology,
                 self.physical_model,
@@ -1100,12 +1040,9 @@ class CentroidalPostureIKSolver:
                 actual = result.anchor_poses_world[anchor_id]
                 target = targets[anchor_id]
                 position_error = tuple(
-                    float(target[axis]) - float(actual[axis])
-                    for axis in range(3)
+                    float(target[axis]) - float(actual[axis]) for axis in range(3)
                 )
-                attitude_error = _pose_rotation_error_vector(
-                    target, actual
-                )
+                attitude_error = _pose_rotation_error_vector(target, actual)
                 position_errors.append(_norm(position_error))
                 attitude_errors.append(_norm(attitude_error))
                 jacobian = result.anchor_jacobians[anchor_id]
@@ -1131,10 +1068,7 @@ class CentroidalPostureIKSolver:
                             ),
                         ]
                     )
-                    residuals.append(
-                        self.config.position_weight
-                        * position_error[axis]
-                    )
+                    residuals.append(self.config.position_weight * position_error[axis])
                 for axis in range(3):
                     rows.append(
                         [
@@ -1153,10 +1087,7 @@ class CentroidalPostureIKSolver:
                             0.0,
                         ]
                     )
-                    residuals.append(
-                        self.config.attitude_weight
-                        * attitude_error[axis]
-                    )
+                    residuals.append(self.config.attitude_weight * attitude_error[axis])
             objective = sum(value * value for value in residuals)
             if objective < best_objective:
                 best_objective = objective
@@ -1171,22 +1102,17 @@ class CentroidalPostureIKSolver:
             matrix = np.asarray(rows, dtype=float)
             residual = np.asarray(residuals, dtype=float)
             normal = matrix.T @ matrix
-            normal += (self.config.damping**2) * np.eye(
-                matrix.shape[1]
-            )
+            normal += (self.config.damping**2) * np.eye(matrix.shape[1])
             right = matrix.T @ residual
             for index, joint_id in enumerate(current_q):
-                normal[index, index] += (
-                    self.config.continuity_regularization_weight
-                )
-                right[index] -= (
-                    self.config.continuity_regularization_weight
-                    * (current_q[joint_id] - reference_q[joint_id])
+                normal[index, index] += self.config.continuity_regularization_weight
+                right[index] -= self.config.continuity_regularization_weight * (
+                    current_q[joint_id] - reference_q[joint_id]
                 )
                 if joint_id in pitch_ids:
-                    normal[index, index] += (
-                        self.config.pitch_joint_regularization_weight
-                    )
+                    normal[
+                        index, index
+                    ] += self.config.pitch_joint_regularization_weight
                     right[index] -= (
                         self.config.pitch_joint_regularization_weight
                         * current_q[joint_id]
@@ -1210,8 +1136,7 @@ class CentroidalPostureIKSolver:
             )
             current_q = _clip_joint_map(
                 {
-                    joint_id: current_q[joint_id]
-                    + float(joint_delta[index])
+                    joint_id: current_q[joint_id] + float(joint_delta[index])
                     for index, joint_id in enumerate(current_q)
                 },
                 limits,
@@ -1293,10 +1218,7 @@ class CentroidalPostureIKSolver:
                 for axis, value in enumerate(derivative):
                     rows[anchor_id][axis].append(float(value))
         return {
-            anchor_id: tuple(
-                tuple(float(value) for value in row)
-                for row in values
-            )
+            anchor_id: tuple(tuple(float(value) for value in row) for row in values)
             for anchor_id, values in rows.items()
         }
 
@@ -1324,12 +1246,8 @@ class ArticulatedTrajectoryReachabilityEvaluator:
         trajectory: ContactWrenchTrajectory,
     ) -> tuple[KnotReachabilityEvaluation, ...]:
         morphology = context.morphology_graph
-        ordered_ids = ordered_global_dock_joint_ids(
-            morphology, self.physical_model
-        )
-        limits = _global_joint_limits(
-            morphology, self.physical_model, ordered_ids
-        )
+        ordered_ids = ordered_global_dock_joint_ids(morphology, self.physical_model)
+        limits = _global_joint_limits(morphology, self.physical_model, ordered_ids)
         velocity_limit = _dock_velocity_limit(self.physical_model)
         candidate_by_id = {
             candidate.candidate_id: candidate
@@ -1370,23 +1288,14 @@ class ArticulatedTrajectoryReachabilityEvaluator:
                     velocity_margin = velocity_limit - max(
                         abs(value) for value in parsed_qdot.values()
                     )
-                    margins["commanded_joint_rate_margin_radps"] = (
-                        velocity_margin
-                    )
-                    if (
-                        velocity_margin
-                        < -self.config.joint_rate_tolerance_radps
-                    ):
+                    margins["commanded_joint_rate_margin_radps"] = velocity_margin
+                    if velocity_margin < -self.config.joint_rate_tolerance_radps:
                         _append_code(codes, REACHABILITY_JOINT_RATE_CODE)
                     if previous_q is not None and previous_time is not None:
                         elapsed = float(knot.t_rel_s) - previous_time
                         if elapsed > 1.0e-12:
                             required_rate = max(
-                                abs(
-                                    parsed_q[joint_id]
-                                    - previous_q[joint_id]
-                                )
-                                / elapsed
+                                abs(parsed_q[joint_id] - previous_q[joint_id]) / elapsed
                                 for joint_id in ordered_ids
                             )
                             margins["transition_joint_rate_margin_radps"] = (
@@ -1397,9 +1306,7 @@ class ArticulatedTrajectoryReachabilityEvaluator:
                                 > velocity_limit
                                 + self.config.joint_rate_tolerance_radps
                             ):
-                                _append_code(
-                                    codes, REACHABILITY_JOINT_RATE_CODE
-                                )
+                                _append_code(codes, REACHABILITY_JOINT_RATE_CODE)
                     self._evaluate_geometry(
                         context=context,
                         knot=knot,
@@ -1451,19 +1358,14 @@ class ArticulatedTrajectoryReachabilityEvaluator:
                 self.physical_model,
                 q,
                 tuple(float(value) for value in centroidal.com_pos_world),
-                tuple(
-                    float(value)
-                    for value in centroidal.body_orientation_world
-                ),
+                tuple(float(value) for value in centroidal.body_orientation_world),
                 kinematics=self.kinematics,
             )
             references = resolve_mesh_backed_anchor_references(
                 context.morphology_graph,
                 self.physical_model,
                 sorted(
-                    {
-                        value.anchor_id for value in active
-                    }
+                    {value.anchor_id for value in active}
                     | set(
                         (
                             {}
@@ -1490,13 +1392,10 @@ class ArticulatedTrajectoryReachabilityEvaluator:
             else posture.free_anchor_pose_targets
         )
         active_anchor_ids = {value.anchor_id for value in active}
-        assigned_anchor_ids = {
-            value.anchor_id for value in assignments
-        }
-        if (
-            not active_anchor_ids.issubset(target_poses)
-            or not set(target_poses).issubset(assigned_anchor_ids)
-        ):
+        assigned_anchor_ids = {value.anchor_id for value in assignments}
+        if not active_anchor_ids.issubset(target_poses) or not set(
+            target_poses
+        ).issubset(assigned_anchor_ids):
             _append_code(codes, REACHABILITY_ANCHOR_TARGET_CODE)
         minimum_position_margin = math.inf
         minimum_normal_margin = math.inf
@@ -1515,17 +1414,12 @@ class ArticulatedTrajectoryReachabilityEvaluator:
             )
             position_error = _norm(
                 tuple(
-                    float(expected_pose[index])
-                    - float(actual[index])
+                    float(expected_pose[index]) - float(actual[index])
                     for index in range(3)
                 )
             )
-            desired_outward = _unit(
-                tuple(-float(value) for value in expected_normal)
-            )
-            normal_error = _angle(
-                _pose_x_axis(actual), desired_outward
-            )
+            desired_outward = _unit(tuple(-float(value) for value in expected_normal))
+            normal_error = _angle(_pose_x_axis(actual), desired_outward)
             minimum_position_margin = min(
                 minimum_position_margin,
                 self.config.contact_position_tolerance_m - position_error,
@@ -1549,8 +1443,7 @@ class ArticulatedTrajectoryReachabilityEvaluator:
             target_attitude_error = _pose_attitude_error(target, actual)
             minimum_anchor_position_margin = min(
                 minimum_anchor_position_margin,
-                self.config.anchor_target_position_tolerance_m
-                - target_position_error,
+                self.config.anchor_target_position_tolerance_m - target_position_error,
             )
             minimum_anchor_attitude_margin = min(
                 minimum_anchor_attitude_margin,
@@ -1558,8 +1451,7 @@ class ArticulatedTrajectoryReachabilityEvaluator:
                 - target_attitude_error,
             )
             if (
-                target_position_error
-                > self.config.anchor_target_position_tolerance_m
+                target_position_error > self.config.anchor_target_position_tolerance_m
                 or target_attitude_error
                 > self.config.anchor_target_attitude_tolerance_rad
             ):
@@ -1657,6 +1549,88 @@ def _global_joint_limits(
     return values
 
 
+def _joint_limits_with_normalized_reserve(
+    limits: Mapping[str, tuple[float, float]],
+    minimum_normalized_reserve: float,
+) -> dict[str, tuple[float, float]]:
+    """Inset finite joint bounds without changing the PhysicalModel.
+
+    A tiny numerical headroom keeps a value clamped to the inset bound from
+    rounding just below an equal post-solve reserve gate.  A zero requested
+    reserve is an exact pass-through so existing C3 trajectories retain their
+    previous numerical contract and performance.
+    """
+
+    reserve = float(minimum_normalized_reserve)
+    if not math.isfinite(reserve) or not 0.0 <= reserve < 0.5:
+        raise ValueError("minimum_normalized_reserve must be finite and in [0, 0.5)")
+    if reserve == 0.0:
+        return dict(limits)
+    effective_reserve = reserve + 1.0e-9
+    values: dict[str, tuple[float, float]] = {}
+    for joint_id, (lower_raw, upper_raw) in limits.items():
+        lower = float(lower_raw)
+        upper = float(upper_raw)
+        if not math.isfinite(lower) or not math.isfinite(upper) or lower >= upper:
+            raise SchemaValidationError(
+                f"Dock joint {joint_id!r} has invalid finite limits"
+            )
+        span = upper - lower
+        inset_lower = lower + effective_reserve * span
+        inset_upper = upper - effective_reserve * span
+        if inset_lower >= inset_upper:
+            raise SchemaValidationError(
+                f"Dock joint {joint_id!r} has no range after reserve inset"
+            )
+        values[joint_id] = (inset_lower, inset_upper)
+    return values
+
+
+def _minimum_normalized_joint_limit_reserve(
+    joint_positions: Mapping[str, float],
+    limits: Mapping[str, tuple[float, float]],
+) -> float:
+    """Return the smallest physical-range reserve over an exact joint set."""
+
+    if set(joint_positions) != set(limits):
+        raise SchemaValidationError(
+            "joint positions and joint limits must contain the same ids"
+        )
+    reserves = []
+    for joint_id, (lower_raw, upper_raw) in limits.items():
+        lower = float(lower_raw)
+        upper = float(upper_raw)
+        value = float(joint_positions[joint_id])
+        if (
+            not math.isfinite(lower)
+            or not math.isfinite(upper)
+            or not math.isfinite(value)
+            or lower >= upper
+        ):
+            raise SchemaValidationError(
+                f"Dock joint {joint_id!r} has invalid reserve inputs"
+            )
+        reserves.append(min(value - lower, upper - value) / (upper - lower))
+    return min(reserves, default=0.5)
+
+
+def _joint_limit_branch_seeds(
+    limits: Mapping[str, tuple[float, float]],
+) -> tuple[dict[str, float], dict[str, float]]:
+    """Build two deterministic, center-safe seeds for conditional recovery."""
+
+    ordered = tuple(limits)
+    seeds: list[dict[str, float]] = []
+    for phase in (0, 1):
+        seed: dict[str, float] = {}
+        for index, joint_id in enumerate(ordered):
+            lower, upper = limits[joint_id]
+            fraction = 0.25 if (index + phase) % 2 == 0 else 0.75
+            seed[joint_id] = float(lower) + fraction * (float(upper) - float(lower))
+        seeds.append(seed)
+    return seeds[0], seeds[1]
+
+
 def _global_pitch_joint_ids(
     ordered_ids: Sequence[str],
     physical_model: PhysicalModel,
@@ -1667,9 +1641,7 @@ def _global_pitch_joint_ids(
         str(mechanism_joint_id)
         for port in physical_model.dock_ports
         if port.port_type == "pitch_dock"
-        for mechanism_joint_id in (
-            port.mechanical_limits.get("mechanism_joint_id"),
-        )
+        for mechanism_joint_id in (port.mechanical_limits.get("mechanism_joint_id"),)
         if isinstance(mechanism_joint_id, str) and mechanism_joint_id
     }
     return frozenset(
@@ -1684,9 +1656,7 @@ def _joint_regularization_weights(
     physical_model: PhysicalModel,
     config: ArticulatedIKConfig,
 ) -> dict[str, float]:
-    pitch_joint_ids = _global_pitch_joint_ids(
-        ordered_ids, physical_model
-    )
+    pitch_joint_ids = _global_pitch_joint_ids(ordered_ids, physical_model)
     return {
         joint_id: (
             config.joint_regularization_weight
@@ -1727,9 +1697,7 @@ def _dock_velocity_limit(physical_model: PhysicalModel) -> float:
         dock = specs.get("dock")
         drive = dock.get("simulation_drive") if isinstance(dock, dict) else None
         value = (
-            drive.get("safe_velocity_limit_rad_s")
-            if isinstance(drive, dict)
-            else None
+            drive.get("safe_velocity_limit_rad_s") if isinstance(drive, dict) else None
         )
         if (
             isinstance(value, (int, float))
@@ -1831,8 +1799,7 @@ def _centroidal_pose(
                 twist_world=[0.0] * 6,
                 joint_positions=local_positions[module_id],
                 joint_velocities={
-                    local_id: 0.0
-                    for local_id in local_positions[module_id]
+                    local_id: 0.0 for local_id in local_positions[module_id]
                 },
             )
             for module_id in sorted(module_root_poses)
@@ -1894,9 +1861,7 @@ def _axis_alignment_rotation(
         if cosine >= 0.0:
             return (0.0, 0.0, 0.0)
         orthogonal = _unit(
-            (0.0, -left[2], left[1])
-            if abs(left[0]) > 0.5
-            else (-left[1], left[0], 0.0)
+            (0.0, -left[2], left[1]) if abs(left[0]) > 0.5 else (-left[1], left[0], 0.0)
         )
         return tuple(math.pi * value for value in orthogonal)
     angle = math.atan2(sine, cosine)
@@ -1969,8 +1934,7 @@ def _pose_finite_difference(
     denominator: float,
 ) -> tuple[float, float, float, float, float, float]:
     translation = tuple(
-        (float(after[index]) - float(before[index])) / denominator
-        for index in range(3)
+        (float(after[index]) - float(before[index])) / denominator for index in range(3)
     )
     before_rotation = transform_from_pose(before).rotation
     after_rotation = transform_from_pose(after).rotation
@@ -1989,9 +1953,7 @@ def _pose_finite_difference(
 
 
 def _validate_pose7d(value: Sequence[float], name: str) -> None:
-    if len(value) != 7 or any(
-        not math.isfinite(float(item)) for item in value
-    ):
+    if len(value) != 7 or any(not math.isfinite(float(item)) for item in value):
         raise SchemaValidationError(f"{name} must be a finite Pose7D")
     _normalized_quaternion(value[3:7])
 

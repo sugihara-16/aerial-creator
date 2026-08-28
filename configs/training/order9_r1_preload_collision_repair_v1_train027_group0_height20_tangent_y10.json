@@ -1,0 +1,54 @@
+{
+  "config_version": "order9_r1_preload_collision_repair_v1",
+  "reason": "Use a smaller tangential contact displacement after the 20 mm displacement was rejected by the deterministic teacher and IK screen.",
+  "candidates": {
+    "r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_05": {
+      "selected_surface_port_ids": [19, 22],
+      "selected_candidate_group_id": "slot_0:grasp_pair:0",
+      "pregrasp_clearance_m": 0.15,
+      "collision_margin_m": 0.01,
+      "grasp_contact_height_offset_m": 0.02,
+      "grasp_contact_tangent_offset_world_m": [0.0, 0.01, 0.0],
+      "fallback_contact_options": [{
+        "selected_surface_port_ids": [19, 22],
+        "selected_candidate_group_id": "slot_0:grasp_pair:0",
+        "pregrasp_clearance_m": 0.15,
+        "collision_margin_m": 0.01,
+        "grasp_contact_height_offset_m": 0.02,
+        "grasp_contact_tangent_offset_world_m": [0.0, -0.01, 0.0]
+      }]
+    },
+    "r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_19": {
+      "selected_surface_port_ids": [19, 22],
+      "selected_candidate_group_id": "slot_0:grasp_pair:0",
+      "pregrasp_clearance_m": 0.15,
+      "collision_margin_m": 0.01,
+      "grasp_contact_height_offset_m": 0.02,
+      "grasp_contact_tangent_offset_world_m": [0.0, 0.01, 0.0],
+      "fallback_contact_options": [{
+        "selected_surface_port_ids": [19, 22],
+        "selected_candidate_group_id": "slot_0:grasp_pair:0",
+        "pregrasp_clearance_m": 0.15,
+        "collision_margin_m": 0.01,
+        "grasp_contact_height_offset_m": 0.02,
+        "grasp_contact_tangent_offset_world_m": [0.0, -0.01, 0.0]
+      }]
+    },
+    "r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_23": {
+      "selected_surface_port_ids": [19, 22],
+      "selected_candidate_group_id": "slot_0:grasp_pair:0",
+      "pregrasp_clearance_m": 0.15,
+      "collision_margin_m": 0.01,
+      "grasp_contact_height_offset_m": 0.02,
+      "grasp_contact_tangent_offset_world_m": [0.0, 0.01, 0.0],
+      "fallback_contact_options": [{
+        "selected_surface_port_ids": [19, 22],
+        "selected_candidate_group_id": "slot_0:grasp_pair:0",
+        "pregrasp_clearance_m": 0.15,
+        "collision_margin_m": 0.01,
+        "grasp_contact_height_offset_m": 0.02,
+        "grasp_contact_tangent_offset_world_m": [0.0, -0.01, 0.0]
+      }]
+    }
+  }
+}

@@ -47,7 +47,6 @@ from amsrr.training.order9_design_teacher_dataset import (
 )
 from amsrr.utils.hashing import stable_hash
 
-
 ORDER9_C3_ARTICULATED_TEACHER_VERSION = (
     "order9_c3_articulated_teacher_v8_mesh_clear_pregrasp"
 )
@@ -66,18 +65,21 @@ class Order9C3TeacherConfig:
     require_full_trajectory_recheck: bool = True
     collision_margin_m: float = 0.005
     grasp_contact_height_offset_m: float = 0.0
+    grasp_contact_tangent_offset_world_m: tuple[float, float, float] = (
+        0.0,
+        0.0,
+        0.0,
+    )
     pregrasp_clearance_m: float = 0.08
+    minimum_normalized_joint_limit_reserve: float = 0.0
+    maximum_contact_solution_body_tilt_rad: float | None = None
 
     def __post_init__(self) -> None:
         if self.maximum_surface_pair_attempts < 1:
             raise ValueError("maximum_surface_pair_attempts must be positive")
         if self.preferred_surface_port_ids is not None:
             values = tuple(int(value) for value in self.preferred_surface_port_ids)
-            if (
-                len(values) != 2
-                or len(set(values)) != 2
-                or min(values) < 0
-            ):
+            if len(values) != 2 or len(set(values)) != 2 or min(values) < 0:
                 raise ValueError(
                     "preferred_surface_port_ids must contain two distinct "
                     "non-negative port ids"
@@ -92,24 +94,16 @@ class Order9C3TeacherConfig:
         excluded_pairs: list[frozenset[int]] = []
         for pair in self.excluded_surface_port_id_pairs:
             values = tuple(int(value) for value in pair)
-            if (
-                len(values) != 2
-                or len(set(values)) != 2
-                or min(values) < 0
-            ):
+            if len(values) != 2 or len(set(values)) != 2 or min(values) < 0:
                 raise ValueError(
                     "excluded_surface_port_id_pairs must contain pairs of "
                     "two distinct non-negative port ids"
                 )
             excluded_pairs.append(frozenset(values))
         if len(excluded_pairs) != len(set(excluded_pairs)):
-            raise ValueError(
-                "excluded_surface_port_id_pairs must not repeat a pair"
-            )
+            raise ValueError("excluded_surface_port_id_pairs must not repeat a pair")
         if not isinstance(self.require_full_trajectory_recheck, bool):
-            raise ValueError(
-                "require_full_trajectory_recheck must be boolean"
-            )
+            raise ValueError("require_full_trajectory_recheck must be boolean")
         if (
             not math.isfinite(float(self.collision_margin_m))
             or self.collision_margin_m <= 0.0
@@ -120,15 +114,38 @@ class Order9C3TeacherConfig:
             or not 0.0 <= self.grasp_contact_height_offset_m <= 0.10
         ):
             raise ValueError(
-                "grasp_contact_height_offset_m must be finite and in "
-                "[0, 0.10]"
+                "grasp_contact_height_offset_m must be finite and in " "[0, 0.10]"
+            )
+        tangent = tuple(
+            float(value) for value in self.grasp_contact_tangent_offset_world_m
+        )
+        if (
+            len(tangent) != 3
+            or any(not math.isfinite(value) for value in tangent)
+            or math.sqrt(sum(value * value for value in tangent)) > 0.030 + 1.0e-12
+        ):
+            raise ValueError(
+                "grasp_contact_tangent_offset_world_m must be a finite 3-vector "
+                "with norm no greater than 0.030 m"
             )
         if (
             not math.isfinite(float(self.pregrasp_clearance_m))
             or not 0.05 <= self.pregrasp_clearance_m <= 0.30
         ):
+            raise ValueError("pregrasp_clearance_m must be finite and in [0.05, 0.30]")
+        reserve = float(self.minimum_normalized_joint_limit_reserve)
+        if not math.isfinite(reserve) or not 0.0 <= reserve < 0.5:
             raise ValueError(
-                "pregrasp_clearance_m must be finite and in [0.05, 0.30]"
+                "minimum_normalized_joint_limit_reserve must be finite and "
+                "in [0, 0.5)"
+            )
+        tilt = self.maximum_contact_solution_body_tilt_rad
+        if tilt is not None and (
+            not math.isfinite(float(tilt)) or not 0.0 < float(tilt) < math.pi
+        ):
+            raise ValueError(
+                "maximum_contact_solution_body_tilt_rad must be None or "
+                "finite and in (0, pi)"
             )
 
 
@@ -179,28 +196,22 @@ def order9_c3_teacher_evidence(
         ),
         "resolved_posture_knot_count": len(bundle.trajectory.knots),
         "posture_maximum_joint_rate_rad_s": (
-            bundle.trajectory_plan.posture_resolution.evidence
-            .maximum_joint_rate_rad_s
+            bundle.trajectory_plan.posture_resolution.evidence.maximum_joint_rate_rad_s
         ),
         "posture_minimum_joint_rate_margin_rad_s": (
-            bundle.trajectory_plan.posture_resolution.evidence
-            .minimum_joint_rate_margin_rad_s
+            bundle.trajectory_plan.posture_resolution.evidence.minimum_joint_rate_margin_rad_s
         ),
         "posture_collision_gate_status": (
-            bundle.trajectory_plan.posture_resolution.evidence
-            .collision_gate_status
+            bundle.trajectory_plan.posture_resolution.evidence.collision_gate_status
         ),
         "posture_collision_gate_version": (
-            bundle.trajectory_plan.posture_resolution.evidence
-            .collision_gate_version
+            bundle.trajectory_plan.posture_resolution.evidence.collision_gate_version
         ),
         "posture_minimum_collision_clearance_m": (
-            bundle.trajectory_plan.posture_resolution.evidence
-            .minimum_collision_clearance_m
+            bundle.trajectory_plan.posture_resolution.evidence.minimum_collision_clearance_m
         ),
         "posture_maximum_collision_violating_pair_count": (
-            bundle.trajectory_plan.posture_resolution.evidence
-            .maximum_collision_violating_pair_count
+            bundle.trajectory_plan.posture_resolution.evidence.maximum_collision_violating_pair_count
         ),
         "candidate_group_id": bundle.trajectory_plan.candidate_group_id,
         "ik_iterations": bundle.trajectory_plan.ik_solution.iterations,
@@ -211,9 +222,7 @@ def order9_c3_teacher_evidence(
             bundle.trajectory_plan.ik_solution.maximum_normal_error_rad
         ),
         "configuration_planner_version": (
-            None
-            if configuration_plan is None
-            else configuration_plan.planner_version
+            None if configuration_plan is None else configuration_plan.planner_version
         ),
         "configuration_plan_method": (
             None if configuration_plan is None else configuration_plan.method
@@ -227,9 +236,7 @@ def order9_c3_teacher_evidence(
             else configuration_plan.collision_check_count
         ),
         "configuration_plan_sampled_state_count": (
-            0
-            if configuration_plan is None
-            else configuration_plan.sampled_state_count
+            0 if configuration_plan is None else configuration_plan.sampled_state_count
         ),
         "reachability_margins_hash": stable_hash(bundle.reachability_margins),
         "minimum_reachability_margin": min(
@@ -247,9 +254,7 @@ def build_order9_c3_articulated_teacher(
     config: Order9C3TeacherConfig | None = None,
     runtime_observation: RuntimeObservation | None = None,
     collision_object: Order9PostureCollisionObject | None = None,
-    contact_goal_joint_seed_positions_rad: (
-        Mapping[str, float] | None
-    ) = None,
+    contact_goal_joint_seed_positions_rad: Mapping[str, float] | None = None,
 ) -> Order9C3TeacherBundle:
     """Search mesh-backed surface pairs, then emit one complete checked plan."""
 
@@ -275,9 +280,7 @@ def build_order9_c3_articulated_teacher(
         pairs = [
             pair
             for pair in pairs
-            if frozenset(
-                (pair[0].port_global_id, pair[1].port_global_id)
-            )
+            if frozenset((pair[0].port_global_id, pair[1].port_global_id))
             not in excluded_pairs
         ]
     if not pairs:
@@ -290,10 +293,7 @@ def build_order9_c3_articulated_teacher(
         pairs = [
             pair
             for pair in pairs
-            if frozenset(
-                (pair[0].port_global_id, pair[1].port_global_id)
-            )
-            == requested
+            if frozenset((pair[0].port_global_id, pair[1].port_global_id)) == requested
         ]
         if not pairs:
             raise SchemaValidationError(
@@ -321,6 +321,9 @@ def build_order9_c3_articulated_teacher(
             candidates = _offset_horizontal_grasp_candidates(
                 candidates,
                 height_offset_m=cfg.grasp_contact_height_offset_m,
+                tangent_offset_world_m=(
+                    cfg.grasp_contact_tangent_offset_world_m
+                ),
             )
             teacher_observation = (
                 build_order9_c3_neutral_runtime_observation(
@@ -336,9 +339,7 @@ def build_order9_c3_articulated_teacher(
                     phase_label="approach",
                 )
                 if runtime_observation is None
-                else RuntimeObservation.from_dict(
-                    runtime_observation.to_dict()
-                )
+                else RuntimeObservation.from_dict(runtime_observation.to_dict())
             )
             high_level_context = HighLevelPolicyContext(
                 built.irg,
@@ -350,18 +351,21 @@ def build_order9_c3_articulated_teacher(
             plan = Order9ArticulatedTrajectoryTeacher(
                 physical_model,
                 config=Order9ArticulatedTeacherConfig(
-                    preferred_candidate_group_id=(
-                        cfg.preferred_candidate_group_id
-                    ),
+                    preferred_candidate_group_id=(cfg.preferred_candidate_group_id),
                     collision_margin_m=cfg.collision_margin_m,
                     pregrasp_clearance_m=cfg.pregrasp_clearance_m,
+                    minimum_normalized_joint_limit_reserve=(
+                        cfg.minimum_normalized_joint_limit_reserve
+                    ),
+                    maximum_contact_solution_body_tilt_rad=(
+                        cfg.maximum_contact_solution_body_tilt_rad
+                    ),
                 ),
                 collision_object=collision_object,
             ).plan(
                 high_level_context,
                 initial_object_poses_world={
-                    obj.object_id: obj.pose_world
-                    for obj in task_spec.scene.objects
+                    obj.object_id: obj.pose_world for obj in task_spec.scene.objects
                 },
                 contact_goal_joint_seed_positions_rad=(
                     contact_goal_joint_seed_positions_rad
@@ -376,13 +380,11 @@ def build_order9_c3_articulated_teacher(
             )
             evaluations = ()
             if cfg.require_full_trajectory_recheck:
-                evaluations = (
-                    ArticulatedTrajectoryReachabilityEvaluator(
-                        physical_model
-                    ).evaluate_trajectory(
-                        context=checked_context,
-                        trajectory=plan.trajectory,
-                    )
+                evaluations = ArticulatedTrajectoryReachabilityEvaluator(
+                    physical_model
+                ).evaluate_trajectory(
+                    context=checked_context,
+                    trajectory=plan.trajectory,
                 )
                 codes = sorted(
                     {
@@ -409,9 +411,7 @@ def build_order9_c3_articulated_teacher(
                 },
             )
         except (SchemaValidationError, ValueError, KeyError) as error:
-            failures.append(
-                f"{first.port_global_id}:{second.port_global_id}:{error}"
-            )
+            failures.append(f"{first.port_global_id}:{second.port_global_id}:{error}")
     raise SchemaValidationError(
         "C3 articulated teacher exhausted surface-pair search; "
         + "; ".join(failures[:8])
@@ -422,6 +422,7 @@ def _offset_horizontal_grasp_candidates(
     candidate_set: ContactCandidateSet,
     *,
     height_offset_m: float,
+    tangent_offset_world_m: tuple[float, float, float] = (0.0, 0.0, 0.0),
 ) -> ContactCandidateSet:
     """Move supported-box side contacts upward without changing identity.
 
@@ -431,7 +432,8 @@ def _offset_horizontal_grasp_candidates(
     to a vertical face, so it changes neither its normal nor its wrench model.
     """
 
-    if height_offset_m == 0.0:
+    requested_tangent = tuple(float(value) for value in tangent_offset_world_m)
+    if height_offset_m == 0.0 and all(value == 0.0 for value in requested_tangent):
         return candidate_set
     result = ContactCandidateSet.from_dict(candidate_set.to_dict())
     shifted = 0
@@ -441,15 +443,39 @@ def _offset_horizontal_grasp_candidates(
             or abs(float(candidate.normal_world[2])) > 0.25
         ):
             continue
+        normal = tuple(float(value) for value in candidate.normal_world)
+        normal_projection = sum(
+            requested_tangent[index] * normal[index] for index in range(3)
+        )
+        tangent = tuple(
+            requested_tangent[index] - normal_projection * normal[index]
+            for index in range(3)
+        )
         pose = list(candidate.contact_pose_world)
         frame = list(candidate.contact_frame_world)
-        pose[2] += float(height_offset_m)
-        frame[2] += float(height_offset_m)
+        for index in range(3):
+            displacement = tangent[index] + (
+                float(height_offset_m) if index == 2 else 0.0
+            )
+            pose[index] += displacement
+            frame[index] += displacement
         candidate.contact_pose_world = tuple(pose)  # type: ignore[assignment]
         candidate.contact_frame_world = tuple(frame)  # type: ignore[assignment]
         candidate.candidate_scores = {
             **candidate.candidate_scores,
             "c3_grasp_contact_height_offset_m": float(height_offset_m),
+            **{
+                f"c3_grasp_contact_requested_tangent_offset_world_{axis}_m": (
+                    float(requested_tangent[index])
+                )
+                for index, axis in enumerate(("x", "y", "z"))
+            },
+            **{
+                f"c3_grasp_contact_applied_tangent_offset_world_{axis}_m": (
+                    float(tangent[index])
+                )
+                for index, axis in enumerate(("x", "y", "z"))
+            },
         }
         candidate.validate()
         shifted += 1
@@ -459,7 +485,9 @@ def _offset_horizontal_grasp_candidates(
         )
     result.sampler_version = (
         f"{result.sampler_version}+c3_side_height_"
-        f"{1.0e3 * float(height_offset_m):.3f}mm"
+        f"{1.0e3 * float(height_offset_m):.3f}mm_tangent_"
+        + "_".join(f"{1.0e3 * value:.3f}" for value in requested_tangent)
+        + "mm"
     )
     result.validate()
     return result
@@ -528,30 +556,23 @@ def build_order9_c3_posture_collision_object(
         )
     object_spec = movable[0]
     geometries = {
-        value.geometry_id: value
-        for value in task_spec.scene.geometry_library
+        value.geometry_id: value for value in task_spec.scene.geometry_library
     }
     geometry = geometries.get(object_spec.geometry_id)
     if geometry is None:
-        raise SchemaValidationError(
-            "C3 movable object references an unknown geometry"
-        )
+        raise SchemaValidationError("C3 movable object references an unknown geometry")
     if geometry.geometry_type.value != "box":
         raise SchemaValidationError(
             "C3 posture collision checking currently requires a box object"
         )
     parameters = geometry.primitive_params or {}
     raw_size = parameters.get("size_m")
-    if (
-        not isinstance(raw_size, (list, tuple))
-        or len(raw_size) != 3
-    ):
+    if not isinstance(raw_size, (list, tuple)) or len(raw_size) != 3:
         raise SchemaValidationError(
             "C3 box collision geometry lacks a three-value size_m"
         )
     size_m = tuple(
-        float(raw_size[index]) * float(geometry.scale[index])
-        for index in range(3)
+        float(raw_size[index]) * float(geometry.scale[index]) for index in range(3)
     )
     support = _bucket_object_support_collision_box(
         task_spec=task_spec,
@@ -584,9 +605,7 @@ def _bucket_object_support_collision_box(
         and goal.target_pose_world is not None
     ]
     if len(targets) != 1:
-        raise SchemaValidationError(
-            "C3 bucket support requires one object-pose goal"
-        )
+        raise SchemaValidationError("C3 bucket support requires one object-pose goal")
     target = targets[0]
     start = object_spec.pose_world
     support_top_z = _support_top_z(task_spec, geometries)
@@ -649,19 +668,14 @@ def build_order9_c3_neutral_runtime_observation(
         )
     object_spec = movable[0]
     geometries = {
-        value.geometry_id: value
-        for value in task_spec.scene.geometry_library
+        value.geometry_id: value for value in task_spec.scene.geometry_library
     }
     geometry = geometries.get(object_spec.geometry_id)
     if geometry is None or geometry.geometry_type.value != "box":
-        raise SchemaValidationError(
-            "C3 overhead initialization requires a box object"
-        )
+        raise SchemaValidationError("C3 overhead initialization requires a box object")
     raw_size = (geometry.primitive_params or {}).get("size_m")
     if not isinstance(raw_size, (list, tuple)) or len(raw_size) != 3:
-        raise SchemaValidationError(
-            "C3 overhead initialization lacks object size_m"
-        )
+        raise SchemaValidationError("C3 overhead initialization lacks object size_m")
     object_top_z = float(object_spec.pose_world[2]) + 0.5 * (
         float(raw_size[2]) * float(geometry.scale[2])
     )
@@ -678,8 +692,7 @@ def build_order9_c3_neutral_runtime_observation(
                 pose_world=(
                     float(module.pose_in_design_frame[0]),
                     float(module.pose_in_design_frame[1]),
-                    float(module.pose_in_design_frame[2])
-                    + overhead_root_z,
+                    float(module.pose_in_design_frame[2]) + overhead_root_z,
                     *module.pose_in_design_frame[3:],
                 ),
                 twist_world=[0.0] * 6,

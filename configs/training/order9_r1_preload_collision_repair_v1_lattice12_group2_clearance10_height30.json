@@ -1,0 +1,13 @@
+{
+  "config_version": "order9_r1_preload_collision_repair_v1",
+  "reason": "Use the highest lattice12 support-clearance margin below the proven infeasible 12 mm request.",
+  "candidates": {
+    "r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_12": {
+      "selected_surface_port_ids": [21, 29],
+      "selected_candidate_group_id": "slot_0:grasp_pair:2",
+      "pregrasp_clearance_m": 0.15,
+      "collision_margin_m": 0.01,
+      "grasp_contact_height_offset_m": 0.03
+    }
+  }
+}
