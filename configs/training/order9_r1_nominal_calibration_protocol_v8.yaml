@@ -1,0 +1,89 @@
+# APPROVED 2026-08-28 by the repository user. This protocol preserves the
+# 673 unchanged v7 paths and replaces exactly nine +5 degree paths in one
+# source morphology with lightweight-admitted, Isaac-validated yaw branches.
+protocol_version: order9_r1_nominal_calibration_protocol_v8
+calibration_gate_id: r1-minimum-level-yaw-branch-overlay-gate-v8
+status: approved
+approval_record: for_codex/R1_NOMINAL_CALIBRATION_PROTOCOL_V8_APPROVAL.json
+
+base_v7_protocol:
+  artifact_kind: approved_parent_protocol
+  path: configs/training/order9_r1_nominal_calibration_protocol_v7.yaml
+  sha256: 91c2b327d62f1a66e58067f7d7b02947fb44b2731b209375db0a3ffa8c54ff05
+base_v7_approval:
+  artifact_kind: parent_protocol_approval
+  path: for_codex/R1_NOMINAL_CALIBRATION_PROTOCOL_V7_APPROVAL.json
+  sha256: 045325f5d196105be30b674256f773ca7552730fa204726b53c5004480200022
+protected_c3_checkpoint:
+  artifact_kind: c3_promoted_pi_l_checkpoint_retained_not_applied
+  path: artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt
+  sha256: 6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b
+protected_c3_rollout:
+  artifact_kind: c3_protected_rollout_implementation
+  path: scripts/order9_vectorized_isaac_rollout.py
+  sha256: e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2
+protected_c3_release_ledger:
+  artifact_kind: c3_promoted_release_ledger
+  path: for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json
+  sha256: 7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729
+
+batched_wrapper_implementation:
+  artifact_kind: same_morphology_environment_batch_wrapper
+  path: scripts/order9_r1_batched_nominal_compression_rollout.py
+  sha256: f6ddc4f4c61be1146e65a392039d4081b93b0e9f4e3c8d06e22b19186a409518
+batched_runtime_implementation:
+  artifact_kind: environment_wise_nominal_runtime
+  path: amsrr/training/order9_r1_batched_nominal_runtime.py
+  sha256: 422172ac78410f4f897b389ca337dd1ae46aebdcf5ebd4fca546bf8e33e49eae
+subset_runner_implementation:
+  artifact_kind: v7_unchanged_subset_executor
+  path: scripts/order9_run_r1_batched_nominal_calibration_v7.py
+  sha256: 196b29f2196d7ab437f5e38d07c2127b81c88d38b1b4305cdfa453ac2b33b8e1
+yaw_repair_implementation:
+  artifact_kind: bounded_yaw_teacher_branch_repair
+  path: amsrr/training/order9_r1_yaw_branch_repair.py
+  sha256: 6f7c5c2c202ab482bd41fab04b4964b569ca2713d6e3a6af63fcb996afbbebe3
+yaw_repair_derivation_script:
+  artifact_kind: yaw_teacher_branch_repair_cli
+  path: scripts/order9_derive_r1_yaw_branch_repair.py
+  sha256: a0ed7e2ec610f682dee059048b391e1e563054920f4a93ed359dfa07c45e2d68
+repaired_candidate_exclusion:
+  artifact_kind: exact_replaced_candidate_set
+  path: configs/training/order9_r1_nominal_v8_repaired_candidates.json
+  sha256: 22bce94ce0ed7f001efb047553d4950f98c3f2ccb3878f647f3402fdc319a266
+repair_evidence_ledger:
+  artifact_kind: hash_bound_repair_evidence_ledger
+  path: for_codex/R1_NOMINAL_CALIBRATION_V8_REPAIR_EVIDENCE_LEDGER.json
+  sha256: d227101edba8b016bdc852aed4278682589848793a8adbfdf3c402f8df220364
+v8_calibration_implementation:
+  artifact_kind: v8_overlay_contract_and_validator
+  path: amsrr/training/order9_r1_nominal_calibration_v8.py
+  sha256: 23566d30242d092b2348ddbe3bdfba533a5fcf5c3c6c00ad851cd2061ce76742
+
+base_level_id: r1_l1_10mm_5deg
+base_split: train
+source_bucket_count: 22
+candidate_count: 682
+replay_count_per_candidate: 2
+v7_unchanged_candidate_count: 673
+yaw_repaired_candidate_count: 9
+
+lightweight_screen_before_isaac: true
+lightweight_screen_uses_isaac: false
+lightweight_screen_uses_controller: false
+lightweight_screen_uses_ik: false
+lightweight_screen_uses_trajectory_optimization: false
+minimum_collision_clearance_m: 0.0118
+minimum_normalized_joint_limit_reserve: 0.01
+grasp_point_position_tolerance_m: 0.03
+
+pi_l_system_retained: true
+pi_l_actor_command_applied: false
+nominal_preload_applied: true
+qpid_qp_applied: true
+local_servo_applied: true
+deterministic_safety_applied: true
+isaac_required: true
+minimum_level_result_authorizes_collection: false
+calibration_evidence_training_eligible: false
+formal_teacher_collection_authorized_by_protocol_alone: false

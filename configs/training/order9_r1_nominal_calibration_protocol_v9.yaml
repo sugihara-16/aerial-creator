@@ -1,0 +1,105 @@
+# APPROVED 2026-08-28 by the repository user. This protocol replaces the
+# numerically unstable large-scene check with at most four candidates per
+# Isaac scene, keeps pi_L commands at zero, and preserves the protected C3.
+protocol_version: order9_r1_nominal_calibration_protocol_v9
+calibration_gate_id: r1-minimum-level-bounded-four-gate-v9
+status: approved
+approval_record: for_codex/R1_NOMINAL_CALIBRATION_PROTOCOL_V9_APPROVAL.json
+
+protected_c3_checkpoint:
+  artifact_kind: c3_promoted_pi_l_checkpoint_retained_not_applied
+  path: artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt
+  sha256: 6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b
+protected_c3_rollout:
+  artifact_kind: c3_protected_rollout_implementation
+  path: scripts/order9_vectorized_isaac_rollout.py
+  sha256: e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2
+protected_c3_curriculum:
+  artifact_kind: c3_protected_learning_curriculum
+  path: configs/training/order9_learning_curriculum.yaml
+  sha256: 965b1abc180d3dab80369c150c55a774c4ceee186befda68f3093c22f7d6f9d4
+protected_c3_release_ledger:
+  artifact_kind: c3_promoted_release_ledger
+  path: for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json
+  sha256: 7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729
+
+batched_wrapper_implementation:
+  artifact_kind: bounded_four_same_morphology_isaac_wrapper
+  path: scripts/order9_r1_batched_nominal_compression_rollout.py
+  sha256: 131212be0dc96be69c3fd5d6fc7f3b7ed2c5497f09bbdda378c197ba3a2f17a2
+batched_runtime_implementation:
+  artifact_kind: environment_wise_nominal_runtime
+  path: amsrr/training/order9_r1_batched_nominal_runtime.py
+  sha256: 422172ac78410f4f897b389ca337dd1ae46aebdcf5ebd4fca546bf8e33e49eae
+bounded_four_runner_implementation:
+  artifact_kind: bounded_four_restartable_minimum_level_runner
+  path: scripts/order9_run_r1_origin_packed_validation_v9.py
+  sha256: b6b880190064c63b223e88e61458ba6fa86845ca402e770dde6d5b71771a0c5c
+release_clearance_repair_implementation:
+  artifact_kind: train003_relative_grasp_preserving_release_height_repair
+  path: amsrr/training/order9_r1_release_clearance_repair.py
+  sha256: a2a50703441e9e5668d12365e991f205b4870e6225537d8b70f4bb5701718f54
+train003_repair_manifest:
+  artifact_kind: train003_compression5mm_release30mm_job_set
+  path: artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v8_train000003_original_grasp_compression5_release30_full_v1/all_jobs.json
+  sha256: 2a8d1cd1ad0fdcf58d02013c5729943ee202fecd756da125e3adf8d953e89aa7
+repaired_candidate_exclusion:
+  artifact_kind: nine_yaw_candidates_validated_separately
+  path: configs/training/order9_r1_nominal_v8_repaired_candidates.json
+  sha256: 22bce94ce0ed7f001efb047553d4950f98c3f2ccb3878f647f3402fdc319a266
+yaw_repair_evidence_ledger:
+  artifact_kind: historical_nine_yaw_repair_path_and_admission_evidence
+  path: for_codex/R1_NOMINAL_CALIBRATION_V8_REPAIR_EVIDENCE_LEDGER.json
+  sha256: d227101edba8b016bdc852aed4278682589848793a8adbfdf3c402f8df220364
+yaw_repair_evidence_validator_implementation:
+  artifact_kind: current_v8_yaw_repair_evidence_validator
+  path: amsrr/training/order9_r1_nominal_calibration_v8.py
+  sha256: 7bb425009effd89058c05807f090455dba574e61789a525cf28f2a34f5d49d02
+yaw_bounded_revalidation_runner_implementation:
+  artifact_kind: bounded_four_yaw_repair_revalidation_runner
+  path: scripts/order9_run_r1_yaw_repair_bounded_validation_v9.py
+  sha256: afe80ce17052f652a13aa92f2127a00167bce4fa8766a51bcc8957c2bb25d357
+yaw_bounded_revalidation_result_ledger:
+  artifact_kind: bounded_four_nine_yaw_repair_isaac_evidence
+  path: artifacts/p4_full/order9/r1_teacher/validation_v10_bounded_four/r1_l1_10mm_5deg/yaw_repaired_bounded_v1/result_ledger.json
+  sha256: a27f29435b5c69e131e1cd21a730529dfce9e230d3938062f174d7e232ca4c86
+finalizer_implementation:
+  artifact_kind: v9_hash_bound_result_finalizer
+  path: scripts/order9_finalize_r1_nominal_calibration_v9.py
+  sha256: ddb799c57bca1447f724a3c3047a8e6e5e60d2367af4b9b9a5ba19144326d1f1
+
+level_id: r1_l1_10mm_5deg
+split: train
+source_bucket_count: 22
+candidate_count: 682
+replay_count_per_candidate: 2
+bounded_four_main_candidate_count: 673
+yaw_repaired_candidate_count: 9
+yaw_repaired_candidate_bounded_revalidation_count: 9
+expected_legacy_v7_evidence_reuse_count: 254
+
+maximum_candidates_per_isaac_scene: 4
+isaac_environment_spacing_m: 3.0
+single_candidate_confirmation_on_bounded_failure: true
+candidate_set_digest_required_in_restart_manifest_name: true
+restart_reuses_validated_retry_evidence_before_isaac: true
+invalid_large_scene_evidence_accepted: false
+
+train003_grasp_compression_m: 0.005
+train003_release_height_offset_m: 0.03
+train003_relative_grasp_geometry_preserved: true
+
+pi_l_system_retained: true
+pi_l_actor_command_applied: false
+nominal_preload_applied: true
+qpid_qp_applied: true
+local_servo_applied: true
+deterministic_safety_applied: true
+isaac_required: true
+
+success_required_per_candidate: 2
+safety_failure_allowed: 0
+fallback_allowed: 0
+minimum_level_result_authorizes_collection: false
+calibration_evidence_training_eligible: false
+formal_teacher_collection_authorized_by_protocol_alone: false

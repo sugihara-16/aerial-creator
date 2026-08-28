@@ -1,0 +1,16 @@
+{
+  "candidate_ids": [
+    "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_02",
+    "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_05",
+    "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_08",
+    "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_11",
+    "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_14",
+    "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_17",
+    "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_20",
+    "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_23",
+    "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_26"
+  ],
+  "manifest_version": "order9_r1_nominal_v8_repaired_candidate_exclusion_v1",
+  "reason": "validated_yaw_branch_teacher_path_repair",
+  "replacement_evidence_required": true
+}

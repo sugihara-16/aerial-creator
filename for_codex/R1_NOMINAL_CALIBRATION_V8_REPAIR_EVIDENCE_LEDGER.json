@@ -1,0 +1,185 @@
+{
+  "entries": [
+    {
+      "candidate_id": "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_02",
+      "case_manifest": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_02/case_manifest.json",
+        "sha256": "a700ed604995d0e72176446a7c729e99d0ff17e525c5fea8bd00b728b72eae21"
+      },
+      "episodes": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_02/isaac/evaluation_episodes.jsonl",
+        "sha256": "4ac4b6fb9efb5b19c6eabb826c18b9f25f276da5836f6dd6ec41445b76dacf8e"
+      },
+      "lightweight_admission": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_02/yaw_branch_repair_admission.json",
+        "sha256": "123085d1aae57fbce2b8a2fa5ef042db310746872a788394b94f44953d7bdad0"
+      },
+      "raw_rollout": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_02/isaac/evaluation_rollout.pt",
+        "sha256": "35bbd0f8b79c579cd987b16a33eaa04c38bead7a8becf5c26074b0b54baf5c7f"
+      },
+      "selected_execution": "initial_nine_candidate_batch"
+    },
+    {
+      "candidate_id": "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_05",
+      "case_manifest": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_05/case_manifest.json",
+        "sha256": "066becf64b15cd4441d07177bde09531fa566cd924a77449c74c2ba9213b91cf"
+      },
+      "episodes": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/retries/individual_lattice_05/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_05/isaac/evaluation_episodes.jsonl",
+        "sha256": "41c608537f67c72df7c64ced335d47a5703f5eeebb242fbb8b34f39d69ee1e00"
+      },
+      "lightweight_admission": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_05/yaw_branch_repair_admission.json",
+        "sha256": "77256ddb641a00b90415932ee812795776c7c4452eb4fd68955e583f87a07df2"
+      },
+      "raw_rollout": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/retries/individual_lattice_05/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_05/isaac/evaluation_rollout.pt",
+        "sha256": "681bf8ab8cc130dd3c5acfe5e296a8e5eecc8db6b12b17f0ca46f1fdce4aa7ba"
+      },
+      "selected_execution": "single_candidate_retry"
+    },
+    {
+      "candidate_id": "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_08",
+      "case_manifest": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_08/case_manifest.json",
+        "sha256": "7976f5de9206ddba45e7779b8d87225ab6ca52bbf88809f6c80b401f8ef9f4e7"
+      },
+      "episodes": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_08/isaac/evaluation_episodes.jsonl",
+        "sha256": "7ef84f5f9cab4629799b910e47467be73d87631941496cd542350be36654ea27"
+      },
+      "lightweight_admission": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_08/yaw_branch_repair_admission.json",
+        "sha256": "915d5b78887c67def5c757782c5aee962844ad3d223bba9686cd10187a67dd8e"
+      },
+      "raw_rollout": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_08/isaac/evaluation_rollout.pt",
+        "sha256": "c4b3b89c9489f41112a9ef23cb747d94b05ecd0ca8d6674eaf1924b1dbabba31"
+      },
+      "selected_execution": "initial_nine_candidate_batch"
+    },
+    {
+      "candidate_id": "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_11",
+      "case_manifest": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_11/case_manifest.json",
+        "sha256": "7a57d1968ffb904663e1a2114b4a55a53162cb602cf3b2cfb50133ec7ce466f0"
+      },
+      "episodes": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_11/isaac/evaluation_episodes.jsonl",
+        "sha256": "bf5485c1322a90f24dff2d73637c217ce2acf12953d038fbe28b9b8d0f1a973f"
+      },
+      "lightweight_admission": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_11/yaw_branch_repair_admission.json",
+        "sha256": "cb47affe8072cabfdc26597fbb952085ff396c259880511fd7cfa3024dcc4baf"
+      },
+      "raw_rollout": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_11/isaac/evaluation_rollout.pt",
+        "sha256": "7bcbb0a204f8e2080676594977907ad3435d72b77b186345e496ecfa8c98fff4"
+      },
+      "selected_execution": "initial_nine_candidate_batch"
+    },
+    {
+      "candidate_id": "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_14",
+      "case_manifest": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_14/case_manifest.json",
+        "sha256": "db0e1861bd6f1efeb59f901dec878c94dcbbe5b89eed0ce1c9cf0d879c00ce75"
+      },
+      "episodes": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_14/isaac/evaluation_episodes.jsonl",
+        "sha256": "283ec00542a654f21e10b1eae47eda92d36da5fa790d88d52cdbbdbd215459b3"
+      },
+      "lightweight_admission": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_14/yaw_branch_repair_admission.json",
+        "sha256": "e746c95596c1762e3e39d6158b116b0b80d7e36233b6503d0e878293e1817347"
+      },
+      "raw_rollout": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_14/isaac/evaluation_rollout.pt",
+        "sha256": "c4828288c84a3ef20ebef4399a24eb3c002a7e5e0b51dd99bc4f2454e9af35c1"
+      },
+      "selected_execution": "initial_nine_candidate_batch"
+    },
+    {
+      "candidate_id": "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_17",
+      "case_manifest": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_17/case_manifest.json",
+        "sha256": "cd76d751f9fd368e8559542f1455c954183564a6879ad2b32c677b99977b2b77"
+      },
+      "episodes": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_17/isaac/evaluation_episodes.jsonl",
+        "sha256": "0f6abbb69822f6349bb800aa1641389603ca88abe3a5688a67e1849f0244810f"
+      },
+      "lightweight_admission": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_17/yaw_branch_repair_admission.json",
+        "sha256": "7bf1c33407f0dec4dc632369cce143453c8e26f6e9ee6e95130ba21b2eba833e"
+      },
+      "raw_rollout": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_17/isaac/evaluation_rollout.pt",
+        "sha256": "9d04fc5383df8334e6aad309073530906b526297880ca899c833b040886d064f"
+      },
+      "selected_execution": "initial_nine_candidate_batch"
+    },
+    {
+      "candidate_id": "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_20",
+      "case_manifest": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_20/case_manifest.json",
+        "sha256": "4734d77217b60d320f074d2fbfb70b0b63b1aed25047987ca4ceeeb96c112cd7"
+      },
+      "episodes": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_20/isaac/evaluation_episodes.jsonl",
+        "sha256": "9c6e14da87b30ed1943d0e7f2f0c9a43d20005f8240c3c0cafa2f67a09e97031"
+      },
+      "lightweight_admission": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_20/yaw_branch_repair_admission.json",
+        "sha256": "b3a148788d09d2572a3df05c6a4a8dac8aa63a9d682c2558718ed9609ecac6d5"
+      },
+      "raw_rollout": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_20/isaac/evaluation_rollout.pt",
+        "sha256": "ff060473b372dcda2e60e7d4300d3f75be9bd4a22b521af0e97ceb264d140a6e"
+      },
+      "selected_execution": "initial_nine_candidate_batch"
+    },
+    {
+      "candidate_id": "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_23",
+      "case_manifest": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_23/case_manifest.json",
+        "sha256": "7cf5376a434b717822dba79e302414ff657f3817638e29933d9a634cf8a7a5ae"
+      },
+      "episodes": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_23/isaac/evaluation_episodes.jsonl",
+        "sha256": "c4969d5866d870075f5ea3fe3a1edc984094204112ef119e4ea4db75cf8009e7"
+      },
+      "lightweight_admission": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_23/yaw_branch_repair_admission.json",
+        "sha256": "73d0ecd634b1868179d360b327b431075d908baea7b06fd49c13e2c7fc8b6296"
+      },
+      "raw_rollout": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_23/isaac/evaluation_rollout.pt",
+        "sha256": "e7af6c47eb6c710a9072dcbe5f7f7fb6e3d132edc27d93552ba08e377b8f279a"
+      },
+      "selected_execution": "initial_nine_candidate_batch"
+    },
+    {
+      "candidate_id": "r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_26",
+      "case_manifest": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_26/case_manifest.json",
+        "sha256": "7dbdbc4922c3de08fffd55110232109fbbde68395398ab0b6d02f046005254ba"
+      },
+      "episodes": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_26/isaac/evaluation_episodes.jsonl",
+        "sha256": "7bb09b35e4cad077e07813398b4c6d705cb6973c98ace59c00d483807df203e2"
+      },
+      "lightweight_admission": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_26/yaw_branch_repair_admission.json",
+        "sha256": "8a9fdd7110afb5ec75a09b36b10e16f779ae73def7eeac1f0025e8279e8741b8"
+      },
+      "raw_rollout": {
+        "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/r1_v7_train000002_yaw_branch_repair_v3/r1_l1_10mm_5deg__train__train-000002-0e86a4ff3e71__lattice_26/isaac/evaluation_rollout.pt",
+        "sha256": "682d30f95a6efa581cd15b3c409cabb26f739c77a49242545e0c50576efb0b0e"
+      },
+      "selected_execution": "initial_nine_candidate_batch"
+    }
+  ],
+  "ledger_version": "order9_r1_nominal_v8_yaw_repair_evidence_ledger_v1"
+}
