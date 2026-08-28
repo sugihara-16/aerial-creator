@@ -84,7 +84,7 @@ artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1
 | C3 phase/success | exact wrench-box membership を hard gate または actor reward にせず、task outcome と deterministic safety で判定する |
 | C3 curriculum | 同一 v9 action/runtime contract で 2--8 modules を topology-stratified に段階拡張する |
 | C3 status | update 18 が 14 held-out buckets、448/448、safety failure 0、fallback 0 で promoted |
-| next curriculum | C3後は R1--R4 の object-condition rings、post-R4 `pi_D`、joint PPO、held-out evaluation へ進む |
+| next curriculum | C3後は名目制御で R1--R4 の object-condition rings、`pi_H`、post-R4 `pi_D` を先に進め、`pi_L` は他要素完成後に必要性を再判定する |
 
 本版では、実装証跡の数値を再現性に必要な範囲だけ残す。個々の failed trial の全結果は
 source-of-truth ではなく、上記 chronological audit log に保存する。
@@ -222,8 +222,9 @@ Order 9:
   C1 fixed-morphology pi_L BC
   C2 conservative fixed-morphology pi_L PPO
   C3 arbitrary 2--8-module pi_L PPO
-  R1--R4 progressive object-condition learning
+  R1--R4 progressive object-condition and pi_H learning under nominal control
   post-R4 pi_D learning
+  optional pi_L application/readaptation only after measured need
   joint object-task PPO
   held-out full-system evaluation
 ```
@@ -231,8 +232,12 @@ Order 9:
 本版時点で C3 は promoted 済みである。R1 以降は C3 の common policy/controller
 contract を初期値として利用するが、C3 の morphology-only 成果を object diversity、
 learned `pi_H`、learned `pi_D`、または別 task family の達成と解釈してはならない。
-canonical stage list、stage index、budget、および gate は
-`configs/training/order9_learning_curriculum.yaml` を正本とする。
+C3までのcanonical stage list、stage index、budget、およびgateは、保護済み
+`configs/training/order9_learning_curriculum.yaml`を正本とする。2026-08-25に承認された
+π_L適用延期後のR1以降については、同ファイルを変更せず、版付き追加契約
+`configs/training/order9_r1_nominal_calibration_protocol_v2.yaml`を先に適用する。
+旧設定中のR1--R4 π_L BC/PPO/再調整stageは宣言を保存するが、再適用条件が別途
+承認されるまで実行対象ではない。
 
 ### 2.3 Version 1 inclusions
 
@@ -4054,23 +4059,146 @@ R3: box / sphere / cylinder training primitives
 R4: morphology x object-condition full training cross-product
 ```
 
-各ringは原則として次の7-stage patternを使う。
+2026-08-25の承認済み変更により、各ringでπ_Lを先行または交互に再学習する旧7段階
+patternは延期する。R1以降の当面の標準低レベル経路は次とする。
 
 ```text
 teacher trajectory collection
-pi_L BC on teacher trajectory
-pi_L PPO on teacher trajectory
 pi_H assignment BC
 pi_H full-trajectory BC
-pi_H PPO with pi_L frozen
-pi_L readaptation with pi_H frozen
+pi_H PPO through deterministic IK + nominal preload + QPID/QP + local servo
 ```
 
-後段policyを更新するときは他方をfreezeし、ring追加前までのcumulative distributionで
-forgettingを検査する。Learned π_Hはassignmentだけでなくcomplete contact-wrench
+この期間もπ_Lのschema、実装、C3 promoted checkpoint、回帰検査は削除しないが、
+π_L actor commandを標準経路へ適用しない。名目制御とは、決定論的IK、形態・接触・
+荷重に応じたnominal preload、QPID/QP、local servo、およびdeterministic safetyを含む。
+π_Lを使わないことを、preloadやcontrollerを使わないことと解釈してはならない。
+
+Learned π_Hはassignmentだけでなくcomplete contact-wrench
 trajectoryを出し、deterministic `C_H`を通る。R1以降のphase/timing decisionはdeployable
 observationに基づくlearned π_Hへ移し、C3 privileged phase supervisorをruntime authority
 として残してはならない。
+
+π_LはR1--R4の物体条件、π_H、post-R4 π_D、および対象タスク要素が完成した後に、
+名目経路の測定済み不足がある場合だけ再適用候補とする。再適用には、同条件での改善、
+累積分布での安全性非劣化、危険な関節・接触補正を縮小または0へ戻す決定論的境界、
+新しい学習系統とhash-bound検査が必要である。これらを満たす承認がない限り、既存設定の
+`r*_pi_l_bc_*`、`r*_pi_l_ppo_*`、`r*_pi_l_readaptation_*`を起動してはならない。
+
+2026-08-25にR1名目較正v2を実行した結果、最小の10 mm/5度段階は不合格となった。
+学習側22機体の最外側格子点を一次判定し、5モジュール機と7モジュール機の2件が、
+衝突ではなく関節限界からの必須余裕1%を満たさなかった。格子点100%条件を達成
+できないため、正式Isaac試験、第2--第4段階、未使用14機体での最終確認は実行せず、
+採用範囲なしで停止した。教師軌道の正式収集と学習は未承認である。規範結果目録は
+`for_codex/R1_NOMINAL_CALIBRATION_V2_RESULT_LEDGER.json`、SHA-256
+`09fa797d7be267a59266c1df0258127a6723042855eb54b9a85a3b1ef8f07a4a`とする。
+次は不合格2件の決定論的IKと把持姿勢における関節限界張り付きの原因確認である。
+関節余裕条件の緩和、10 mm/5度未満への範囲縮小、教師軌道または把持姿勢の変更は、
+別の設計判断と承認なしに行ってはならない。
+
+2026-08-25の後続診断では、物理関節限界をIKの許容範囲として使う一方、一次判定が
+その1%内側を別条件として要求していたため、物理限界上の可行解が後段で不合格に
+なる境界不一致を確認した。R1専用の修正は、昇格済みC3の通常生成経路と既定値を
+変更せず、完成済み軌道が1%余裕を欠く場合だけ、同じ1%内側の実効上下限で全対象
+時刻をまとめて解き直す。通常解で把持点精度を回復できない場合に限り、複数の
+決定論的初期姿勢を試し、関節余裕が最大で時間方向に最も滑らかな解を選ぶ。補正した
+時刻は把持点位置・姿勢、物体・支持台・自己衝突、関節速度を再検査し、どれか一つでも
+満たさなければ不合格とする。1%条件や把持点許容値を緩和してはならない。
+
+読み取り検証では、通常合格の2モジュール例は追加判定`0.00194 s`で同一軌道を返した。
+旧不合格の7モジュール例は既存生成`409.28 s`に対して追加`3.54 s`で、正規化最小
+関節余裕`0.010000001`となり、Isaac前の一次判定を通過した。旧不合格の5モジュール例は
+既存生成`96.22 s`に対して追加`3.38 s`だったが、複数初期姿勢後も把持点位置誤差
+`0.0194142 m`が許容`0.011 m`を超え、安全側に不合格となった。したがってR1名目較正
+v2の規範的不合格結果、採用範囲なし、正式収集・学習未承認は変更しない。次は5モジュール
+例の教師軌道または接触姿勢を変更するか否かを別の設計判断として扱い、承認なしに
+再較正へ進んではならない。
+
+その後ユーザーは、R1補正後の把持点位置について、各軸独立の±30 mmではなく、
+目標把持点からの三次元距離30 mm以内を許容値として承認した。この30 mmはR1専用で、
+C3教師・C3昇格契約の`0.011 m`や、姿勢`0.10 rad`、衝突、関節速度、1%関節余裕を
+変更しない。承認値で5モジュール例を再検査した結果、補正後の最大把持点距離
+`0.0211487 m`は30 mm以内であり、最小正規化関節余裕`0.010000001`、衝突違反0、
+最小衝突余裕`0.00480859 m`、関節速度余裕非負でIsaac前一次判定を通過した。
+7モジュール例も同じ30 mm契約で、最小正規化関節余裕`0.010000001`、衝突違反0、
+最小衝突余裕`0.00480358 m`、関節速度余裕非負となり、一次判定合格を維持した。
+これはR1名目較正v2の正式再実行ではないため、既存結果目録を上書きせず、正式収集・
+学習を承認しない。正式再較正には、30 mm三次元距離を明記して新しいhash-bound
+追加契約と承認記録へ固定しなければならない。
+
+2026-08-25に、三次元距離30 mmと1%関節余裕を固定したR1名目較正v3を正式実行した。
+規範入力は`configs/training/order9_r1_nominal_calibration_protocol_v3.yaml`と
+`for_codex/R1_NOMINAL_CALIBRATION_PROTOCOL_V3_APPROVAL.json`である。最小の
+10 mm/5度段階は、学習側22機体について61件をIsaacなしで一次判定し、60件合格、
+1件不合格となった。不合格は4モジュール機`train-000016-a9b26f370bba`の
+`lattice_01`で、機体の最大傾き`1.5990674556 rad`が上限`1.0471975512 rad`
+（60度）を超えた。把持姿勢には到達し、正規化最小関節余裕は
+`0.010000000999999994`、衝突違反0、最小衝突余裕`0.00480956 m`、最大関節速度
+`0.274444 rad/s`であった。したがって不合格理由は把持点距離、関節限界、衝突、
+関節速度ではなく、一次判定が禁止する極端な機体姿勢である。
+
+格子点100%条件が達成不能になったため、承認された実行順序に従って正式Isaac試験を
+起動せず、第2--第4段階と未使用14機体での最終確認も実行しなかった。採用範囲はなく、
+正式教師軌道収集と学習は引き続き未承認である。規範結果目録は
+`for_codex/R1_NOMINAL_CALIBRATION_V3_RESULT_LEDGER.json`、SHA-256
+`a967b68f06ac58265fc526e41b6d255edd82ae2bb9a53d3c91843bb6a2917264`とする。
+v2結果は履歴として保持するが、30 mm/1%補正後の現在のR1較正判断にはv3結果を使う。
+次はこの4モジュール機について、約91.6度の傾きを生む軌道区間と機体部位を診断する。
+60度上限の緩和、教師軌道またはIK姿勢選択の変更は、別の設計判断と承認なしに行っては
+ならない。
+
+2026-08-26の後続処理では、個別の教師軌道作成失敗を学習手法の失敗として扱わず、
+R1専用の決定論的な接触面候補と早期傾斜経路で一次判定682/682を通過させた。名目
+較正v4はIsaac確認10回中8回成功で不合格となり、その結果を履歴として固定した。
+さらに、10時間以内の完了条件に対し、一次判定済み軌道の幾何学的な形、終端関節姿勢、
+接触点割当を変えず、時間配分だけを変更するv5追加契約を承認した。接近と接触獲得は
+元の0.5倍、以後の各区間は0.1倍とし、変更後の関節速度を再検査する。同じ形である
+ことを確認できない軌道へ既存の衝突判定を引き継いではならない。
+
+R1名目較正v5の正式実行では、最小の10 mm/5度段階について学習側22機体の一次判定
+682/682が合格した。続く格子点6件各2回、合計12回のIsaac確認は6回成功、安全違反6、
+代替制御0だった。格子点100%かつ安全違反0の条件が回復不能になったため、第1段階の
+残り、第2--第4段階、未使用14機体による最終確認を実行せず、不合格とした。全処理は
+843.054秒で、36000秒上限以内だった。π_Lの仕組みとC3保護成果物は保持したが、
+π_L由来の動作量は適用していない。名目押し込み、QPID/QP、局所サーボ、安全制限は
+有効である。採用範囲はなく、正式教師軌道収集と学習は未承認である。現在の規範結果は
+`for_codex/R1_NOMINAL_CALIBRATION_V5_RESULT_LEDGER.json`、SHA-256
+`1fbb9b071d7c1ad5966a3a071c74e0ec0ec6d26030ec26a8b8be17d320131991`とする。
+
+2026-08-26に、退避軌道、形態別時間配分、および完全軌道のIsaac前意味検査を固定した
+R1名目較正v6を正式実行した。最小の10 mm/5度段階は、学習側22機体の一次判定
+682/682が合格した。続くIsaac確認は25候補を各2回、合計50回実行し、48回成功した。
+6モジュール機`train-000004-190f3a425b3e`の`lattice_02`は2回とも搬送段階で時間切れと
+なった。安全違反と代替制御への切替は0であるが、格子点100%条件を満たさないため、
+第1段階の残り、第2--第4段階、未使用14機体による最終確認を実行せず不合格とした。
+全処理は12348.750秒で、36000秒上限以内だった。採用範囲はなく、正式教師軌道収集と
+学習は未承認である。現在の規範結果は
+`for_codex/R1_NOMINAL_CALIBRATION_V6_RESULT_LEDGER.json`、SHA-256
+`1da48a4d10224773aeb86461ece665be40cc2cbc044bdbde2b751ceff04a4da9`とする。
+v1--v5結果は履歴として保持するが、R1の現在判断にはv6結果を使う。
+
+2026-08-28に、第1段階10 mm/5度を対象とするR1名目較正v9を正式実行した。学習側
+22機体の各31軌道、合計682軌道を各2回Isaacで再生し、1364/1364成功、安全違反0、
+代替制御0となった。π_Lの実装とC3昇格済みcheckpointは保持したが、π_L actor commandは
+全実行で0とした。形態対応の名目押し込み、QPID/QP、local servo、および決定論的安全
+制限は有効である。Isaac前には、生成途中の値ではなく、保存して実行器が読み込む軌道
+そのものについて、全8段階、関節限界、物体・自己・支持台干渉、極端姿勢、押し込み後
+衝突を再検査しなければならない。再開時は既存の単独または最大4候補の合格証拠を、
+新規Isaac実行より先に検査・再利用する。
+
+現在の第1段階の規範結果は`for_codex/R1_NOMINAL_CALIBRATION_V9_RESULT_LEDGER.json`、
+SHA-256 `f162ca51cb6a996aba93877dd12d5e9b0c0c2b71a4ed46ede10d47c311e04556`
+とする。v1--v8は履歴として保持する。この合格は第2--第4段階または未使用14機体の
+最終確認を代替せず、正式教師軌道収集と学習を許可しない。次は同じ契約で第2段階
+20 mm/10度を実行し、40 mm/20度までの段階選定後に未使用14機体で一度だけ最終確認
+する。その合格後にのみ`r1_teacher_trajectory_collection`へ進む。
+
+完了監査では、姿勢修正9候補の旧Isaac証拠のうち8候補が9候補同時配置であり、
+v9の最大4候補条件を満たさないことを検出した。この旧証拠は正式合否に使用せず、
+同じ修正済み軌道を現行実行器、3 m間隔、4・4・1候補の3場面で各2回再実行した。
+18/18成功、安全違反0、代替制御0、π_L動作量0、QPID/QP・局所サーボ有効を確認し、
+上記規範結果へ結合した。以後、最大4候補条件に適合する再確認台帳がない場合、v9の
+最終集計は失敗しなければならない。
 
 R4後に `post_r4_pi_d_structured_bc`、`post_r4_pi_d_masked_ppo`、
 `joint_object_task_ppo`、`held_out_full_system_evaluation` を実行する。π_Dはjoint angleや
@@ -4977,6 +5105,7 @@ actor-free nominal success used as promotion evidence
 | C3 failed/diagnostic action and reward trials | historical evidence only |
 | actuator-aware nominal preload + v9 categorical contact action | normative。Sections 20.9、24.5.8へ統合 |
 | promoted common C3 update 18 | normative and hash-bound。Appendix Fを正本入口とする |
+| approved deferred-π_L post-C3 rule | normative。Section 24.5.9とR1名目較正v2追加契約へ統合 |
 | future recommendations in chronological log | non-normative until curriculum/config and acceptance are approved |
 
 実装者はchronological logの後に書かれた項目を単に「新しいから採用」と判断してはならない。
@@ -4998,6 +5127,9 @@ P4.0 simplified acceptance が pass しても P4 full completion と見なして
 
 既存repositoryから作業を継続する場合は、完了済みstageを再実装せず、protected releaseと
 current curriculumを検証してから次stageへ進む。本v0.5時点ではOrder-9 C3がpromoted済み
-であり、次のlearning stageは `r1_teacher_trajectory_collection` である。R1開始前にC3
-checkpoint/manifest SHA、v9 contract、accepted nominal dependencies、R1 distribution
-adapter、およびstorage headroomをfail-closedにpreflightする。
+である。π_Lを適用しないR1名目較正v9は第1段階10 mm/5度で、682軌道・1364回の
+Isaac確認に全件合格した。次の入口は教師軌道収集ではなく、第2段階20 mm/10度の
+範囲選定である。第4段階までの選定と未使用14機体の一度だけの最終確認に合格した
+後でのみ、`r1_teacher_trajectory_collection`へ進む。
+π_Lのv9実装と保護成果物は保持するが、再適用条件の承認前にR1以降のactor command
+として使ってはならない。

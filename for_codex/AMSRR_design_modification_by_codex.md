@@ -5,6 +5,219 @@ originally accumulated against `A-MSRR_codex_ready_spec_v0_4_ja.md`. Current
 normative state is consolidated in `A-MSRR_codex_ready_spec_v0_5_ja.md`; this
 file remains the chronological decision/evidence log.
 
+## 2026-08-24
+
+### R1 support-collision diagnosis and rejected clearance revisions
+
+- The v1 `hard_collision` is now identified as a support collision, not a
+  movable-object collision. In both replays, during contact acquisition at
+  rollout index 2790 and phase elapsed about 1.78 s, robot body
+  `module_1__battery1` had about 2.42 N environment force and zero object
+  force. In this scene the only external environment collider is the support.
+- A controlled diagnostic held teacher trajectory, deterministic IK, reset,
+  physical conditions, QPID/QP, local servo, and real Isaac fixed and bypassed
+  only the promoted C3 `pi_L` command. Both episodes completed all eight phases
+  with task success, zero safety failure, and zero fallback. Teacher references
+  were identical through the learned failure index. A conservative oriented-
+  box reconstruction attributes about 6.82 mm of lost support clearance and
+  about 15.4 mm lateral battery displacement to the learned-command case. This
+  establishes the promoted correction as decisive for the observed failure,
+  while remaining diagnostic-only and promotion/collection/training
+  ineligible.
+- A user-requested second diagnostic retained only direct joint position/
+  velocity action and contact-normal compression action. Centroidal pose/twist,
+  residual wrench, contact-tangential translation, and contact-rotation action
+  were zero. Persisted command values verified zero global/body/wrench and
+  non-normal contact corrections. Both environments nevertheless reproduced
+  the battery/support collision during contact acquisition at rollout index
+  2791, one step later than the full-policy run, with about 2.48 N environment
+  force and zero object force. The remaining causal set is therefore direct
+  joint correction, normal-compression correction, or their combination. This
+  result is diagnostic-only and authorizes no promotion, calibration,
+  collection, or learning.
+- R1 randomization moves object start and goal but not the physical support.
+  The generic C3 nominal helper had reconstructed its support proxy from the
+  moved object poses. An additive optional collision-object override now lets
+  R1 generation combine the randomized object with the frozen source support.
+  The first implementation touched the ledger-bound C3 nominal-generator
+  source, so its resulting intermediate evidence was invalidated. That source
+  was restored byte-for-byte to ledger SHA-256 `252c30fd...7887`; the override
+  is now process-scoped in R1-only preparation and the default C3 path is
+  unchanged. A post-restoration audit passed all 180 protected files and 159
+  critical implementation files.
+- An R1-only 12 mm frozen-support proposal passed the cheap exact-tracking
+  screen with about 11.803 mm proxy clearance, 589 knots, and zero collision
+  violations. A newly materialized two-environment full-layer replay through
+  the protected update-18 `pi_L` nevertheless reproduced the same battery/
+  support collision twice. The proposal is rejected.
+- An execution-error-aware proposal sums about 8.47 mm measured nominal
+  tracking consumption, about 6.83 mm learned-command consumption, and a 5 mm
+  retained reserve, requiring at least 20.30 mm and requesting 22 mm. Under the
+  existing contact targets and IK conditions, every available contact/posture
+  alternative failed before screening or Isaac. The proposal is rejected.
+- These results rule out clearance-only teacher-trajectory repair for this
+  candidate under the current contact/IK contract. They do not modify the v0.5
+  normative contract, the promoted checkpoint, or the formal v1 rejection.
+  The recommended pending design choice is a derived low-level robustness
+  branch from the immutable promoted checkpoint that preserves current tensor,
+  action, and controller interfaces; a support-aware residual safety
+  projection is the alternative. Either is a new contract/stage decision and
+  requires explicit approval before implementation, learning, or R1
+  recalibration.
+- Only post-restoration result roots `diagnostic_selection_final_v3` (12 mm)
+  and `preparation_result_final_v2` (22 mm) are current. Earlier similarly
+  named roots are retained as superseded diagnostics and have no promotion,
+  calibration, collection, or learning authority.
+
+### R1 reachable-pose calibration v1 rejection
+
+- The approved v1 calibration was executed through the real-Isaac boundary.
+  Its first L1 lattice case used the train-owned two-module source bucket at
+  residual x/y/yaw `-10 mm/-10 mm/-5 degrees`. Deterministic teacher plus IK
+  completed, and the Isaac-free exact-tracking screen accepted all 589 resolved
+  knots with no violation before any controller or simulator was invoked.
+- The admitted trajectory was then run twice through deterministic teacher,
+  deterministic IK, the protected update-18 C3 `pi_L`, QPID/QP, local servo,
+  and real Isaac. Both episodes terminated in contact acquisition after 2791
+  environment steps with `hard_collision`, task success false, safety failure
+  true, and zero fallback.
+- L1 requires every lattice case and both associated replays to pass and
+  requires zero safety failures. This first monotonic failure makes the L1
+  gates mathematically impossible regardless of later outcomes. The approved
+  stop-on-first-failed-level rule therefore ended the remaining 681 L1 cases,
+  L2--L4, and the 14-bucket confirmation. V1 is `rejected`; no envelope,
+  distribution, collection authority, or learning authority exists.
+- The protected C3 rollout implementation was restored to and executed at
+  ledger SHA-256 `e813f950...b764c2`; the protected checkpoint remains
+  `6ea412cc...57b`. Selection-source `train` ownership is recorded separately
+  from the `validation` execution alias required by the unmodified C3 formal
+  phase-zero runner. The alias is not counted as 14-bucket confirmation.
+- The formal rejection manifest is
+  `artifacts/p4_full/order9/r1_teacher/calibration_v1/formal_decision_final_v1/calibration_decision.json`
+  at SHA-256 `d31e3fe4...af440b`. It also binds the five R1 implementation
+  files used for enumeration, randomization, screening, and execution.
+  Earlier smoke/intermediate records are retained but superseded. The complete
+  result summary is `for_codex/R1_CALIBRATION_V1_RESULT.md`.
+
+### R1 mandatory exact-tracking screening before full-layer testing
+
+- User direction adds a strict two-stage admission order for every newly
+  generated R1 calibration or collection candidate. First, the deterministic
+  high-level teacher plus already-resolved IK trajectory is evaluated under
+  ideal exact tracking only through the end of contact acquisition. Only a
+  passing path may proceed to the protected C3 `pi_L`, QPID/QP, local-servo,
+  and real-Isaac test.
+- `order9_r1_exact_tracking_fast_screen_v1` is intentionally a linear scan of
+  existing dense trajectory values and hash-bound resolver/planner evidence.
+  It does not rerun IK, invoke trajectory search/optimization, step any
+  controller, or start Isaac. It checks window/trajectory identity and
+  continuity, finite and complete joint targets, joint-rate margin, collision
+  acceptance recorded at the resolved knots, and arrival at a maintained
+  two-anchor grasp pose.
+- The collision evidence covers robot self-collision, unintended movable-
+  object collision, support/ground, and authored environment boxes; only the
+  selected grasp anchor/object contacts are permitted at acquisition. The
+  screen does not claim physical force closure, frictional retention, or
+  closed-loop tracking. Those claims remain exclusively with the later
+  full-layer Isaac replay.
+- An extreme-posture guard requires at least 1% of each authored joint range
+  between every resolved target and its nearest hard limit and limits
+  assembled-body tilt from world-up to 60 degrees. Read-only inspection of the
+  promoted C3 nominal set found one train trajectory reaching about 91.6
+  degrees, demonstrating that the tilt check is not redundant. The normalized
+  reserve/tilt thresholds, screen identity, prohibited operations,
+  attempt/pass counts, and selection/confirmation results are explicit
+  proposal/manifest fields rather than implicit runner behavior. These values
+  are part of the still-proposed v1 approval package and are not an executed
+  calibration result.
+- Isaac replay counts are now derived from fast-screen passes, not merely from
+  teacher-generation successes. The accepted-distribution schema requires a
+  separate `fast_kinematic_screen` artifact and proves that every screen
+  attempt corresponds to a teacher-feasible path and every Isaac attempt to a
+  screen-admitted path. The same ordering applies to formal collection.
+
+## 2026-08-23
+
+### Order-9 R1 Teacher-Collection Preparation and Calibration Gate
+
+- v0.5 Section 24.5.9 and the current curriculum define R1 as
+  `reachable_pose_expansion`, but intentionally do not define approved x/y/yaw
+  bounds. The prior expanded-object sampler's `+/-0.015 m` position setting is
+  not promoted into R1. No R1 teacher collection or learning may begin from an
+  uncalibrated range.
+- The additive R1 adapter uses world-frame offsets centered on the input
+  task's `object.pose_world`, with versioned independent-uniform sampling. It
+  applies the same planar translation and yaw rotation to the object-pose goal,
+  preserving the relative transport task, box geometry, mass, CoM, inertia,
+  friction, support height, and every non-pose condition. This makes R1 a
+  placement/yaw ring rather than an accidental R2 property expansion.
+- An acceptance-eligible adapter requires a hash-bound distribution manifest.
+  The manifest records its envelope, seed/sampling semantics, complete 2--8
+  module and topology coverage, center/axis/corner outcomes, deterministic
+  teacher-feasibility yield, real-Isaac success and wall time, zero safety
+  failures, and exact artifact bindings for the calibration config, complete
+  teacher trajectory, production `C_H` checks, Isaac replay, and topology
+  coverage. Calibration thresholds are not guessed in source: the manifest
+  must bind a separately approved gate artifact and demonstrate its recorded
+  thresholds.
+- The preflight has two fail-closed modes. `calibration` verifies the immutable
+  C3 base, current schedule/lineage, v9 checkpoint/action/observation contract,
+  current physical model, both source and protected 43-entry nominal dependency
+  sets, CUDA, and storage. `collection` additionally requires the accepted R1
+  distribution manifest and re-hashes all evidence before it may publish the
+  normal stage `PREPARED` manifest. Neither mode starts teacher collection or
+  learning.
+- The local operational storage floor is 128 GiB and may be raised but not
+  weakened by the CLI. The first audit had 683.8 GiB free, verified all 180
+  release-ledger files and 159 promotion-critical implementation files, and
+  passed calibration readiness. Collection readiness correctly remains false
+  because no x/y/yaw envelope or calibration gate has yet been approved.
+- R1 orchestration must reuse the generic teacher episode/dataset writer,
+  articulated trajectory teacher, deterministic posture resolver, and
+  production checker. The C0-fixed collector, C3 conservative wrapper, and C3
+  accepted nominal replay are not valid R1 entry points without a new
+  versioned orchestration layer.
+
+### Order-9 R1 Calibration Protocol v1 Proposal (Not Approved)
+
+- A reviewable, schema-validated proposal now defines four symmetric
+  world-frame x/y/yaw ladders beyond the C3 conservative envelope: +/-10 mm and
+  +/-5 degrees, +/-20 mm and +/-10 degrees, +/-30 mm and +/-15 degrees, and
+  +/-40 mm and +/-20 degrees. These are proposed calibration probes, not
+  accepted R1 bounds.
+- Ladder selection uses only the 22 C3 train-owned buckets. The selected
+  largest consecutive pass is confirmed once on the untouched 14
+  validation-owned buckets; both splits independently cover module counts
+  2--8. Confirmation failure rejects the complete v1 result and may not be
+  converted into a smaller accepted range by tuning against validation.
+- Each bucket/level evaluates the complete 27-point lower/center/upper lattice
+  (center, six face centers, twelve edge centers, eight corners), four seeded
+  interior points, and two real-Isaac replays per teacher-feasible case. The
+  lattice pass rate is 100%; aggregate and independently computed interior
+  deterministic-teacher/Isaac rates are at least 95%; safety/fallback counts
+  are zero. A first failed selection level stops the ladder, L1 failure accepts
+  no envelope, and L4 success does not authorize extrapolation.
+- Every sampled start/goal is audited against the frozen source-bucket support.
+  Projected CoM must remain within that support and both projected-CoM and
+  full-footprint margins are recorded. A negative full-footprint margin is not
+  rejected by itself because promoted C3 intentionally uses lateral support
+  inset; the unchanged support and real-Isaac gates remain mandatory.
+- The distribution-manifest contract now separately binds the approved
+  protocol and approval record, plus selection and confirmation counts/rates.
+  Collection preflight re-hashes both. This prevents selection-only evidence
+  or an unapproved proposal from publishing an accepted R1 envelope.
+- The proposed post-acceptance collection contains 140 episodes, allocated
+  98/21/21 across train/validation/held-out and 14/3/3 per module count. Its
+  seeds are disjoint from calibration. Task ids, seeds, and pose hashes must be
+  globally unique, validation/held-out poses disjoint, and the 95% success plus
+  zero-safety/fallback gates apply to every split-by-module cell. Calibration
+  records remain permanently ineligible for imitation learning.
+- The complete proposal is
+  `for_codex/R1_CALIBRATION_PROTOCOL_V1_PROPOSAL.md` and the executable
+  proposal is
+  `configs/training/order9_r1_calibration_protocol_v1_proposal.yaml`. Their
+  current `proposed` state authorizes neither calibration nor collection.
+
 ## 2026-08-22
 
 ### v0.5 Standalone Specification Consolidation
@@ -3002,3 +3215,356 @@ file remains the chronological decision/evidence log.
 - The authoritative training/data inventory is
   `for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json`; the human-readable
   release description is `for_codex/C3_PROMOTED_UPDATE18_RELEASE.md`.
+
+### R1 Reachable-Pose Calibration v1 Approval and Execution Order
+
+- On 2026-08-24 the repository user approved the complete R1 v1 calibration
+  package. The normative executable input is
+  `configs/training/order9_r1_calibration_protocol_v1.yaml`; its authorization
+  is `for_codex/R1_CALIBRATION_PROTOCOL_V1_APPROVAL.json`. The proposal remains
+  historical review evidence. The approval record binds both protocol byte
+  hashes and the protected C3 update-18 checkpoint identity.
+- Selection expands residual object x/y/yaw in four ascending levels:
+  10 mm/5 degrees, 20 mm/10 degrees, 30 mm/15 degrees, and
+  40 mm/20 degrees. Each level uses all 22 train-owned source buckets, with
+  27 boundary/center lattice cases and four deterministic interior cases per
+  bucket. Evaluation stops at the first failed level.
+- Only the largest consecutively passing selection level is evaluated once on
+  the untouched 14 validation-owned buckets. Confirmation failure rejects the
+  complete v1 result. It must not select a smaller level or tune v1 against
+  validation evidence.
+- Every candidate follows one enforced sequence: deterministic teacher plus
+  deterministic IK, then the Isaac-free exact-tracking screen, then—only on a
+  screen pass—two complete replays through protected C3 pi_L, QPID/QP, local
+  servo, and Isaac. A screen pass asserts kinematic arrival at the maintained
+  two-contact grasp pose only; it does not assert physical grasp success.
+- This approval does not constitute a calibration result. No range is accepted
+  until selection and the single confirmation pass and their evidence is
+  published in a hash-bound distribution manifest. Formal R1 teacher data,
+  imitation learning, or C3 release mutation is not authorized by approval
+  alone.
+
+### R1 Isolated pi_L Action-Path Diagnosis
+
+- This is a diagnostic finding, not a modification of the promoted C3 action
+  contract or the v0.5 R1 learning contract. The promoted checkpoint and
+  protected rollout remain byte-identical and authoritative.
+- On the first rejected 10 mm/5 degree R1 candidate, controlled two-environment
+  replays retained either direct joint position/velocity correction alone or
+  contact-normal compression correction alone. All other pi_L action paths
+  were zero, and the teacher, deterministic IK, initial state, physics,
+  QPID/QP, local servo, and Isaac path were held fixed.
+- Both isolated modes failed 0/2 by the same module-1 battery/support collision
+  during contact acquisition, with zero object force and zero fallback.
+  Therefore each path is independently sufficient for this observed failure;
+  their combination is not necessary.
+- No general ranking of the two paths follows from one candidate. A future
+  derived-policy or safety-contract proposal must address both paths; merely
+  disabling either one is contradicted by the controlled evidence. Such a
+  proposal still requires explicit approval before implementation, learning,
+  or R1 recalibration.
+- The hash-bound combined diagnostic is
+  `artifacts/p4_full/order9/r1_teacher/calibration_v2_support_clearance/diagnostics/isolated_action_comparison_final_v1/r1_l1_10mm_5deg__train__train-000000-5fecfad4f44f__lattice_00/diagnostic_result.json`,
+  SHA-256 `2ca12b869ce9c18c5fc2e11a22071e6c7337ec460f6c8f23ccf50547aadd6f34`.
+
+### 承認済み方針: π_Lの適用を他要素の完成後まで延期する
+
+#### 2026-08-25
+
+- 決定: π_Lの仕組み、入出力契約、実装、検査、C3 promoted update 18、および
+  保護済み成果物は削除せず維持する。ただし、R1以降の物体条件拡張、π_H、π_D、
+  物体形状・把持点・別タスク対応を進める間、現行π_Lを標準実行経路の必須要素と
+  しない。π_Lの再適用は、他要素の完成後、測定上必要な場合に限って別途判断する。
+- 当面の標準低レベル経路は、π_Hまたは決定論的教師が出す軌道を決定論的IKへ
+  渡し、形態・接触・荷重に応じた名目押し込み、QPID/QP、局所サーボ、安全制限を
+  経て実行する構成とする。π_Lを使わないことは、名目押し込み、QPID/QP、局所
+  サーボ、または安全層を無効にすることを意味しない。
+- C3の448/448成功は、promoted update 18とC3評価分布に対して引き続き有効である。
+  ただし、そのπ_LをR1以降の物体位置、物体形状、接触点数、または別タスクへ
+  自動的に外挿する根拠にはしない。C3保護成果物は回帰比較と将来の派生作業の親と
+  して保持する。
+- 現行R1 v1の不合格判定は変更しない。名目経路による1候補2実行の成功だけで、
+  R1分布、教師収集、または模倣学習を承認してはならない。新しい標準経路を実装
+  した後、一次判定を通過した候補について、名目経路で較正を最初から実行する。
+- π_Lを将来再適用するには、少なくとも次を満たさなければならない。
+  1. 同一条件の名目経路に、π_Lで対処すべき測定済みの不足がある。
+  2. π_Lを加えた同条件比較で、その不足が改善する。
+  3. それまでに獲得した機体構成・物体条件・接触点数・タスク全体で、安全性を
+     悪化させない。
+  4. 危険な関節補正と接触補正を縮小または0へ戻せる決定論的安全境界を持つ。
+  5. 再適用の範囲、学習系統、検査条件、派生成果物を新しいハッシュで固定する。
+- この方針は、v0.5 Section 24.5.9にある各R1--R4段階でのπ_L BC、π_L PPO、
+  π_L再調整を必須順序とする工程、および既存R1実行器がpromoted C3 π_Lを必須と
+  する契約を変更する。v0.5の優先規則上、このログだけでは実行契約を切り替えない。
+  実装または学習を再開する前に、v0.5の後継仕様、学習工程設定、R1較正実行器、
+  事前検査、結果形式を同じ方針へ更新し、相互の食い違いを解消しなければならない。
+- 本項の追加時点では、仕様本文、学習工程設定、実行コード、チェックポイント、
+  教師データ、成果物を変更していない。学習、教師軌道収集、R1再較正も開始して
+  いない。
+
+### R1名目制御較正v2の実装と不合格確定
+
+#### 2026-08-25
+
+- 前項の承認済み方針をv0.5本文へ統合し、保護済みのC3学習工程設定を変更せず、
+  R1専用の追加契約、承認記録、実行部、結果形式を実装した。
+- R1の標準実行経路は、決定論的教師軌道、決定論的IK、形態・接触・荷重に応じた
+  名目押し込み、QPID/QP、局所サーボ、Isaacとした。π_Lの仕組みとC3昇格済み
+  チェックポイントは保持したが、π_L由来の動作量は適用しなかった。
+- 接続確認では、2モジュール機の1候補を2回Isaacで再生し、2/2成功、安全停止0、
+  代替制御0だった。記録されたπ_L由来の6種類の動作量は全時刻で厳密に0だった。
+  この確認は実行経路の確認専用で、較正合格や学習の根拠ではない。
+- 正式選定では、最小の10 mm/5度段階について、学習側22機体の最外側格子点を
+  Isaacなしで先に一次判定した。20機体は合格したが、5モジュール機1件と
+  7モジュール機1件が関節限界からの必須余裕1%を満たさなかった。両件とも
+  衝突違反0で把持姿勢には到達していた。
+- 格子点100%条件が達成不能になったため、第1段階の正式Isaac試験、第2--第4段階、
+  未使用14機体での最終確認を行わず、採用範囲なしで不合格とした。教師軌道の
+  正式収集と学習は許可しない。
+- 規範結果目録は
+  `for_codex/R1_NOMINAL_CALIBRATION_V2_RESULT_LEDGER.json`、SHA-256
+  `09fa797d7be267a59266c1df0258127a6723042855eb54b9a85a3b1ef8f07a4a`である。
+- 次は不合格2件の決定論的IKと把持姿勢における関節限界張り付きの原因確認とする。
+  関節余裕条件の緩和、10 mm/5度未満への範囲縮小、教師軌道または把持姿勢の変更は、
+  今回の不合格から自動的に導入せず、別の設計判断と承認を必要とする。
+
+### R1関節限界余裕の高速・安全側補正
+
+#### 2026-08-25
+
+- 原因: 既存IKは物理関節限界を最適化制約に含めていたが、R1一次判定が要求する
+  物理範囲の1%内側を実効制約に含めていなかった。このため、物理的には可行な
+  限界上の解が、後段の1%余裕検査だけで不合格になった。検査値を緩める問題ではない。
+- 決定: 昇格済みC3と通常のR1教師生成は従来どおり一度だけ実行する。1%余裕を
+  既に満たす軌道はその同一物を直ちに返す。満たさない軌道だけを生成後に処理し、
+  1%内側の実効上下限へ射影した後、補正対象の全時刻を配列として同時に有界IKで
+  解く。これにより、補正結果を逐次的な区間再計画へ戻して計算時間を増幅させない。
+- 複数初期姿勢: 通常枝で把持点精度を回復できない姿勢群だけに、限界へ張り付いた
+  関節を中央または反対側四分点へ移した初期姿勢、および2種類の決定論的全関節
+  初期姿勢を試す。可行解から正規化関節余裕が最大のものを選び、同値なら時刻間の
+  最大関節変化が小さいものを選ぶ。通常枝が通る時は追加枝を実行しない。
+- 安全条件: 補正された全時刻について、把持点の位置`0.011 m`・姿勢`0.10 rad`、
+  物体・支持台・自己衝突、関節速度、および1%余裕を再検査する。一つでも失敗すれば
+  補正結果を採用せず不合格とする。C3保護成果物、π_L契約、R1数値条件は変更しない。
+- 速度: 通常合格2モジュール例では追加判定は`0.001943943 s`で、元の軌道物を
+  そのまま返した。旧不合格5モジュール例では既存生成`96.224423 s`、追加処理
+  `3.376077 s`、旧不合格7モジュール例では既存生成`409.283287 s`、追加処理
+  `3.538568 s`だった。各時刻を逐次的に再最適化する旧試作の約40--90秒増加はない。
+- 実例結果: 7モジュール `train-000026-a8ced2acf24c` は正規化最小余裕
+  `0.010000000999999994`でIsaac前一次判定を通過した。5モジュール
+  `train-000003-3b95da871f01` は複数初期姿勢後も一時刻の把持点位置誤差
+  `0.0194142 m`が許容`0.011 m`を超えたため不合格のままである。
+- 非主張: これは正式較正の再実行ではなく、Isaac、教師軌道収集、学習、削除、
+  commitを含まない。R1名目較正v2の不合格目録を上書きせず、正式収集を承認しない。
+  5モジュール例を通すには教師軌道または接触姿勢の変更が必要となる可能性があり、
+  それは本数値修正とは別の設計判断である。
+
+### R1補正後把持点の三次元距離30 mm許容
+
+#### 2026-08-25
+
+- ユーザー承認: R1の補正後把持点について、目標把持点からの三次元ユークリッド
+  距離を`0.030 m`以内とする。これはx/y/z各軸を独立に±30 mm許容する契約ではなく、
+  斜め方向を含む距離半径30 mmである。
+- 適用範囲: R1専用の生成後関節余裕補正とその再検査にだけ適用する。C3教師の
+  `0.011 m`、C3 promoted update 18、把持点姿勢`0.10 rad`、1%関節余裕、衝突、
+  関節速度、QPID/QP、局所サーボの条件は変更しない。
+- 実例結果: 旧不合格5モジュール `train-000003-3b95da871f01` は、補正後の
+  最大把持点距離`0.0211487 m`、最小正規化関節余裕`0.010000001`、衝突違反0、
+  最小衝突余裕`0.00480859 m`、最大関節速度`0.274444 rad/s`となり、Isaac前一次
+  判定を通過した。実行時間は生成と補正を含め`99.2888 s`だった。
+- 7モジュール回帰: `train-000026-a8ced2acf24c` も最小正規化関節余裕
+  `0.010000001`、衝突違反0、最小衝突余裕`0.00480358 m`、最大関節速度
+  `0.274444 rad/s`で一次判定合格を維持した。生成と補正を含む時間は`411.3660 s`。
+- 非主張: これは閾値実装と個別の読み取り検証であり、R1名目較正v2の正式再実行、
+  Isaac成功、採用範囲確定、教師収集、学習を意味しない。正式再較正前に30 mmの
+  三次元距離定義を新しいhash-bound追加契約と承認記録へ固定する必要がある。
+
+### R1名目制御較正v3の正式不合格
+
+#### 2026-08-25
+
+- 承認済み追加契約: 三次元距離30 mm、物理関節範囲の端から1%内側、補正後の
+  把持点姿勢・衝突・関節速度再検査を
+  `configs/training/order9_r1_nominal_calibration_protocol_v3.yaml`へ固定した。
+  30 mmは各軸独立の±30 mmではない。π_Lの仕組みは保持するが動作量は適用せず、
+  名目押し込み、QPID/QP、局所サーボ、Isaacを一次判定合格後の正式経路とした。
+- 正式結果: 最小の10 mm/5度段階で61件を一次判定し、60件合格、1件不合格。
+  不合格は4モジュール機`train-000016-a9b26f370bba`の格子点で、最大機体傾き
+  `1.5990674556 rad`（約91.6度）が上限`1.0471975512 rad`（60度）を超えた。
+- 原因の分離: 不合格軌道は把持姿勢到達、最終接触数2、最小正規化関節余裕
+  `0.010000000999999994`、衝突違反0、最小衝突余裕`0.00480956 m`、最大関節速度
+  `0.274444 rad/s`である。したがって30 mm許容や1%補正の失敗ではなく、
+  ユーザー指定の極端姿勢排除が決定的だった。
+- 停止判断: 格子点100%条件が達成不能になった時点で新規一次判定を停止した。
+  一次判定を通過した段階だけをIsaacへ渡す契約に従い、正式Isaac、第2--第4段階、
+  未使用14機体での最終確認を実行しなかった。採用範囲なし、正式収集・学習未承認。
+- 規範証拠: `for_codex/R1_NOMINAL_CALIBRATION_V3_RESULT_LEDGER.json`、SHA-256
+  `a967b68f06ac58265fc526e41b6d255edd82ae2bb9a53d3c91843bb6a2917264`。
+  v2結果は履歴として保持し、30 mm/1%補正後の現行判断はv3目録を優先する。
+- 次の設計入口: 不合格4モジュール機で傾きが最大となる軌道区間と機体部位を
+  読み取り診断する。60度条件の緩和、教師軌道またはIK姿勢選択の変更は、今回の
+  結果だけから自動的に行わず、別途承認を必要とする。
+
+### R1教師軌道の修正、同一路径の時間短縮、および名目制御較正v5
+
+#### 2026-08-26
+
+- 教師軌道は学習手法そのものではないため、一次判定に合わない個別軌道をそのまま
+  作業停止理由とせず、決定論的な接触面候補と早期傾斜経路から適切な候補を選ぶ
+  R1専用処理を追加した。v4では一次判定682/682に合格したが、Isaac確認10回中
+  8回成功に留まり不合格となった。v4の結果と教師上書きv1は履歴証拠として固定し、
+  後続処理で上書きしない。
+- 速度条件を満たしつつ10時間以内で完了させるため、一次判定済みの軌道について、
+  幾何学的な経路、終端関節姿勢、接触点割当を変えず、時間配分だけを変更する
+  R1専用処理を追加した。接近と接触獲得は元の0.5倍、以後の各区間は0.1倍とし、
+  変更後の関節速度を再検査する。同じ形であることを確認できない軌道には、既存の
+  衝突判定を引き継がない。
+- 正式実行前に代表1件をIsaacで2回確認し、2/2成功、安全違反0、代替制御0を得た。
+  この結果は時間短縮経路を正式試験へ入れるための確認であり、22機体全体の較正
+  合格を意味しない。
+- v5正式結果では、最小の10 mm/5度段階の一次判定682/682が合格した。その後、
+  最初の格子点6件を各2回Isaacで実行し、合計12回中6回成功、安全違反6、代替
+  制御0だった。格子点100%かつ安全違反0の条件が回復不能になったため、残りの
+  第1段階、第2--第4段階、および未使用14機体での最終確認を実行せず不合格とした。
+- 全処理は843.054秒で完了し、承認された36000秒上限を満たした。採用範囲はなく、
+  教師軌道の正式収集と学習は許可しない。個別の教師軌道不適合を学習手法の失敗とは
+  扱わないが、制御層を含む正式試験の安全違反は較正条件を直接不合格にする。
+- π_Lの仕組みとC3 promoted update 18は保持したが、v5でもπ_L由来の動作量は
+  適用しなかった。名目押し込み、QPID/QP、局所サーボ、決定論的安全制限は有効で
+  あり、C3保護成果物は変更していない。
+- 現行の規範結果目録は`for_codex/R1_NOMINAL_CALIBRATION_V5_RESULT_LEDGER.json`
+  とする。v1--v4は時系列証拠として保持する。次に進むには、名目制御の安全違反を
+  制御・接触・軌道の集計結果から切り分け、新しい承認済み較正契約で再評価する必要が
+  ある。現時点で教師収集またはπ_H模倣学習を開始してはならない。
+
+### R1退避軌道の原因修正と形態別実行時間（v6）
+
+#### 2026-08-26
+
+- 原因1: 完全タスク軌道生成は`retreat_offset_m`を受け取り、正値か検査した後、
+  `amsrr/training/order9_c3_nominal_trajectory.py:817`で値を破棄していた。さらに
+  同ファイル902--912行で、退避を10 cmの離隔ではなく接近軌道全体の逆再生として
+  作っていた。これは実行時の基準
+  `amsrr/simulation/order9_object_task_runtime.py:456-460`が定める
+  `root_start - retreat_offset_m`と一致しない。8モジュール機では元の時間配分でも
+  退避中に2/2回、QP計算不能となったため、時間短縮だけが原因ではない。
+- 原因2: v5は接近・接触獲得を0.5倍、以後を0.1倍にする同一の時間配分を全形態へ
+  適用した。関節速度検査と衝突の幾何検査を通っても、閉ループでは3モジュール機の
+  支持台衝突、4・6モジュール機のQP計算不能が生じた。したがって、幾何と関節速度
+  だけでは時間短縮の許可条件として不十分である。
+- 解決: C3共通生成器を変更せず、R1材料化の間だけ退避・静止区間を置き換える。
+  解放終了姿勢から世界x負方向へ正確に0.10 mだけ滑らかに動き、開いた関節姿勢と
+  静止物体を保ち、移動に対応する速度目標を持つ。接近から把持、接触点割当、解放
+  までの軌道は変えない。置換後に解放端との連続性、10 cm離隔、他6姿勢成分不変、
+  速度目標、退避後静止を自動検査する。
+- 時間配分: 2・5モジュールは接近/接触獲得0.5倍、3・4・6・7・8モジュールは
+  0.75倍とし、把持後は全形態0.1倍とする。2--8以外は安全側に拒否する。計算側は
+  既存の一括処理を維持し、Isaac同時実行上限を4とする。π_Lは保持するが動作量を
+  適用せず、名目押し込み、QPID/QP、局所サーボ、安全制限は有効とする。
+- 代表検証: 2--8モジュールから各1候補を選び、一次判定合格後に各2回Isaacで
+  実行した。14/14成功、安全違反0、代替制御0、物体落下0、QP計算不能0だった。
+  とくに修正前に2/2回QP計算不能だった8モジュール機は、修正後2/2回成功した。
+  この結果は退避修正と形態別時間配分の導入根拠であり、22機体×31候補の正式選定
+  または14機体での最終確認を代替しない。
+- 契約: `configs/training/order9_r1_nominal_calibration_protocol_v6.yaml`と
+  `for_codex/R1_NOMINAL_CALIBRATION_PROTOCOL_V6_APPROVAL.json`で実装・C3保護物・
+  14件のIsaac証拠をハッシュ固定した。正式教師収集と学習は、v6の4段階正式選定と
+  未使用14機体での一度の最終確認が合格するまで許可しない。
+
+### R1完全軌道の意味検査と重要入力反映検査
+
+#### 2026-08-26
+
+- 再発原因: 完全軌道生成器は`retreat_offset_m`を正値として受理・検査しながら
+  実際の計算では破棄していた。既存試験は生成された退避軌道の形を固定していたが、
+  「指定値を変えれば終点が同量だけ変わる」という外部契約を検査していなかった。
+  また、Isaac前の軽量判定は把持獲得までで終わり、解放、退避、静止を含む全8段階を
+  対象にしていなかった。この2つが同時に存在したため、未使用入力が正常な成果物と
+  して材料化され、重いIsaac実行まで到達した。
+- 決定: C3の履歴にハッシュ固定された共通生成器は変更しない。新しいR1 v6候補だけを
+  対象に、R1用生成器を関数と識別子で明示選択する専用層を置く。その層が全8段階を
+  永続化し、検査記録を候補台帳へハッシュ結合できた場合にだけIsaac入力とする。
+- 全8段階検査: 段階順序と境界連続、物体の開始・持上げ・運搬・配置・目標姿勢、
+  接触状態、把持中の機体・物体相対姿勢、解放後の正確な退避量と余分な移動の不存在、
+  退避速度、最終静止を検査する。不一致は安全側に拒否し、Isaac、制御器、IK再計算、
+  軌道最適化を起動しない。
+- 重要入力反映検査: 同じ把持軌道を用いて退避量を`0.05 m`と`0.10 m`で二度生成し、
+  退避前の6段階が不変で、退避終点だけが`0.05 m`変わることを確認する。これにより、
+  入力が単に受理・検査されるだけで出力に使われない実装を、値が偶然合う単一例にも
+  依存せず拒否する。
+- 簡易確認: 旧C3方式は`E_R1_COMPLETE_TASK_RETREAT_OFFSET`でIsaac前に不合格。
+  接続済みR1 v6経路の代表1候補は全8段階合格、指定退避`0.10 m`に対する実測経路長
+  `0.10000000000000009 m`、`0.05/0.10 m`入力間の終点差
+  `0.050000000000000044 m`だった。検査中のIsaac・制御器・IK再計算・軌道最適化は
+  すべて未起動である。証拠は
+  `artifacts/p4_full/order9/r1_teacher/diagnostics/r1_complete_task_semantic_gate_smoke_v3/mechanism_smoke_result.json`。
+- 境界: これは再発防止機構の実装と軽量確認であり、v6正式4段階較正、14機体での
+  最終確認、教師正式収集、π_H模倣学習を完了または承認するものではない。
+
+### R1名目制御較正v6の正式不合格
+
+#### 2026-08-26
+
+- 正式結果: 最小の10 mm/5度段階について、学習側22機体の全31候補、合計682件を
+  Isaacなしで一次判定し、682/682件が合格した。完全軌道8段階と重要入力反映検査を
+  含み、一次判定に不合格を見落としてIsaacへ渡した事例はない。
+- Isaac結果: 25候補を各2回、合計50回実行し、48回成功した。6モジュール機
+  `train-000004-190f3a425b3e`の`lattice_02`は2回とも搬送段階で時間切れとなった。
+  安全違反、物体落下、QP計算不能、代替制御は0だった。
+- 停止判断: 格子点100%条件が回復不能になったため、第1段階の残り、第2--第4段階、
+  未使用14機体による最終確認を実行しなかった。採用範囲はなく、正式教師軌道収集と
+  学習は許可しない。これは処理の未完了ではなく、承認済み停止条件による正式な
+  不合格完了である。
+- 実行時間: 最初の正式開始時刻から12348.750秒で判定を完了し、36000秒上限を
+  満たした。再開で上限を延長しない実行時間記録、期限時に子処理群も止める処理、
+  格子角優先順、既存の決定的不合格を再利用して新規Isaacを起動しない処理を追加した。
+  候補集合、合否条件、各候補2回の再現回数は変更していない。
+- 制御境界: π_Lの仕組みとC3保護成果物は保持したが、π_L由来の動作量は適用して
+  いない。名目押し込み、QPID/QP、局所サーボ、安全制限は有効である。
+- 規範証拠: `for_codex/R1_NOMINAL_CALIBRATION_V6_RESULT_LEDGER.json`、SHA-256
+  `1da48a4d10224773aeb86461ece665be40cc2cbc044bdbde2b751ceff04a4da9`。
+  v1--v5結果は履歴として保持し、現在のR1較正判断にはv6結果を使う。
+- 検証: R1全体とC3実行束75/75、関連する到達可能性・教師・C3設定54/54の
+  合計129/129単体試験、Python構文、Black、JSON構文、結果目録の参照ハッシュ、
+  差分空白検査が合格した。終了時にIsaacまたはR1較正処理は残っていない。
+- 次の設計入口: 教師収集ではない。不合格6モジュール機について、搬送段階の
+  時間切れを制御追従、接触力、および形態別時間配分から診断する。合否条件の緩和、
+  時間配分変更、教師軌道変更は新しい設計判断と承認を必要とする。
+
+### R1最小条件の全件合格と再開時の証拠再利用（v9）
+
+#### 2026-08-28
+
+- 対象範囲: 学習側22機体について、第1段階の物体位置10 mm・向き5度を各31軌道
+  （格子27、内部4）で確認した。第2--第4段階と未使用14機体の最終確認は含まない。
+- 正式結果: 682軌道を各2回、合計1364回Isaacで再生し、1364/1364成功、
+  安全違反0、代替制御0となった。π_Lの実装とC3昇格済みcheckpointは保持したが、
+  π_L由来の動作量は全実行で0とした。形態対応の名目押し込み、QPID/QP、局所
+  サーボ、決定論的安全制限は有効である。
+- 最終修正: 8モジュール機`train-000027-7fe33c662d36`の`lattice_12`は、到達可能な
+  把持面[21, 29]を維持し、接触点を高さ25 mm、世界x負方向15 mmへ面内移動した。
+  合成移動量は約29.15 mmで30 mm以内である。保存後の軌道で最小幾何余裕
+  `0.006803574496524689 m`、最小正規化関節余裕`0.19960983199852517`を再確認して
+  からIsaacへ渡し、2/2成功、安全違反0、代替制御0を得た。
+- 再発防止: 軌道生成前の中間値ではなく、保存して実行器が読み込む軌道そのものを
+  押し込み後まで再検査する。再開時は、単独確認または最大4候補確認の既存合格証拠を
+  新規Isaac実行より先に検査・再利用する。これにより、不良な保存済み軌道がIsaacへ
+  進む問題と、合格済み候補を再計算する問題を別々に防ぐ。
+- 完了監査で、別管理していた姿勢修正9候補の旧証拠のうち8候補が、v9の最大4候補
+  条件ではなく9候補同時配置で取得されていたことを検出した。この旧Isaac証拠を正式
+  合否から除外し、同じ保存済み修正軌道を現行実行器、3 m間隔、4・4・1候補の3場面で
+  各2回再生した。18/18成功、安全違反0、代替制御0、π_L動作量0、QPID/QP・局所
+  サーボ指令ありを成果物から再確認した。最終集計器はこの新しい再確認台帳を必須とし、
+  旧9候補同時配置証拠だけでは合格台帳を生成できない。
+- 規範証拠: `for_codex/R1_NOMINAL_CALIBRATION_V9_RESULT_LEDGER.json`、SHA-256
+  `f162ca51cb6a996aba93877dd12d5e9b0c0c2b71a4ed46ede10d47c311e04556`。
+  v1--v8は履歴として保持し、第1段階の現在判断にはv9を使う。
+- 履歴読込規則: v4--v8の承認済み契約に記録された実装ハッシュは履歴として不変に
+  保つ。一方、同じ実ファイル位置にv9の後継実装が置かれた項目だけは、履歴読込時の
+  現在バイト一致を要求しない。保存済み証拠、承認記録、C3保護物のハッシュ検査は
+  緩めない。現在のv9は、旧姿勢修正証拠の検査器を含む現行実装もハッシュ固定する。
+- 境界: v9は第1段階の合格だけを確定し、教師軌道の正式収集または学習を許可しない。
+  次の入口は、同じ一次判定・制御・安全・証拠契約を維持した第2段階20 mm/10度の
+  契約確認と実行である。第4段階まで選定した後に、未使用14機体で一度だけ最終確認
+  し、その合格後にのみ正式教師軌道収集へ進む。
