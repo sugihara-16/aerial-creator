@@ -1,0 +1,15 @@
+{
+  "record_version": "order9_r1_range_selection_approval_record_v13",
+  "decision": "approved",
+  "approved_by": "repository_user",
+  "approval_date": "2026-08-30",
+  "approval_basis": "User required 20 mm/10 degree success, allowed ad hoc teacher construction, required fast pre-Isaac screening, and required systemic guards against invalid evidence reuse. The current-run contract hash-binds and enforces C3 human posture rejections, separates the 19.5 mm acceptance threshold from the 30 mm generation target, and preserves every contact, clearance, joint-reserve, safety, QPID/QP, and local-servo gate. A hash-bound successful posture from the same morphology may initialize configuration-space search only; it does not seed the contact goal or change contact IK. A finite teacher option may be fixed only after a hash-bound complete CPU screen reports trajectory completion and eligibility for the full control test without changing any gate. Reselecting a teacher option after an Isaac collision still requires both a bounded failure and an independent single-candidate replay, with pi_L actor commands disabled. A repeated fixed-support collision may raise the grasp contact height only after both replays identify the same non-grasp body and the raised option passes the unchanged complete CPU screen.",
+  "approved_protocol": {
+    "path": "configs/training/order9_r1_range_selection_protocol_v13.json",
+    "sha256": "e59a341bc8b6ff534df258830e516aa4902e306a9250b5c17fc7b7e5b3b3bbfb"
+  },
+  "learning_authorized": false,
+  "teacher_collection_authorized": false,
+  "file_deletion_authorized": false,
+  "commit_authorized": false
+}

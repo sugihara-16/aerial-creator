@@ -370,6 +370,7 @@ struct CollisionFrameCache {
 
 struct CollisionMetrics {
   std::vector<double> clearances;
+  std::vector<bool> colliding;
   double minimum = std::numeric_limits<double>::infinity();
   int active_count = 0;
   int colliding_count = 0;
@@ -1257,6 +1258,39 @@ class Kernel {
     }
     py::dict output;
     output["minimum_clearance_m"] = metrics.minimum;
+    double minimum_robot_clearance_m =
+        std::numeric_limits<double>::infinity();
+    double minimum_object_clearance_m =
+        std::numeric_limits<double>::infinity();
+    int robot_colliding_pair_count = 0;
+    int object_colliding_pair_count = 0;
+    for (int pair_index = 0;
+         pair_index < static_cast<int>(metrics.clearances.size());
+         ++pair_index) {
+      const CollisionPair& pair =
+          active_collision_scene_.pairs[pair_index];
+      const bool object_pair =
+          pair.second_kind == CollisionTargetKind::kObject;
+      double& minimum = object_pair
+          ? minimum_object_clearance_m
+          : minimum_robot_clearance_m;
+      minimum = std::min(minimum, metrics.clearances[pair_index]);
+      if (metrics.colliding[pair_index]) {
+        if (object_pair) {
+          ++object_colliding_pair_count;
+        } else {
+          ++robot_colliding_pair_count;
+        }
+      }
+    }
+    output["minimum_robot_clearance_m"] =
+        minimum_robot_clearance_m;
+    output["minimum_object_clearance_m"] =
+        minimum_object_clearance_m;
+    output["robot_colliding_pair_count"] =
+        robot_colliding_pair_count;
+    output["object_colliding_pair_count"] =
+        object_colliding_pair_count;
     output["violating_pair_count"] = metrics.active_count;
     output["colliding_pair_count"] = metrics.colliding_count;
     output["checked_pair_count"] =
@@ -1310,13 +1344,7 @@ class Kernel {
     for (int pair_index : ordered) {
       const CollisionPair& pair =
           active_collision_scene_.pairs[pair_index];
-      const bool colliding =
-          exact && metrics.clearances[pair_index] <= 0.0 &&
-          pair_collides(
-              evaluation,
-              active_collision_scene_,
-              pair,
-              true);
+      const bool colliding = metrics.colliding[pair_index];
       if (py::len(worst_pairs) >= 32) {
         break;
       }
@@ -1790,12 +1818,14 @@ class Kernel {
       double activation_distance) const {
     CollisionMetrics output;
     output.clearances.reserve(scene.pairs.size());
+    output.colliding.reserve(scene.pairs.size());
     const CollisionFrameCache frames =
         collision_frame_cache(evaluation, scene, exact);
     for (const CollisionPair& pair : scene.pairs) {
       if (!exact && !pair.proxy_enabled) {
         output.clearances.push_back(
             std::numeric_limits<double>::infinity());
+        output.colliding.push_back(false);
         continue;
       }
       ++output.evaluated_count;
@@ -1816,12 +1846,15 @@ class Kernel {
         ++output.narrow_phase_count;
       }
       output.clearances.push_back(clearance);
+      const bool colliding =
+          exact && clearance <= 0.0 &&
+          pair_collides(evaluation, scene, pair, true);
+      output.colliding.push_back(colliding);
       output.minimum = std::min(output.minimum, clearance);
       if (clearance < activation_distance) {
         ++output.active_count;
       }
-      if (exact && clearance <= 0.0 &&
-          pair_collides(evaluation, scene, pair, true)) {
+      if (colliding) {
         ++output.colliding_count;
       }
     }

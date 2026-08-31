@@ -73,6 +73,13 @@ class Order9R1EarlyTiltTeacherScreenPipeline(
             case.candidate_id,
             (),
         )
+        excluded_surface_port_id_pairs = tuple(
+            getattr(
+                self,
+                "excluded_surface_port_id_pairs_by_source",
+                {},
+            ).get(case.source_bucket.bucket_id, ())
+        )
         try:
             nominal = _generate_with_safe_surface_fallback(
                 task_spec=case.task_spec,
@@ -83,6 +90,9 @@ class Order9R1EarlyTiltTeacherScreenPipeline(
                 maximum_body_tilt_rad=self.screen_config.maximum_body_tilt_rad,
                 strict_preferred_candidate_options=(
                     self.strict_preferred_candidate_options
+                ),
+                excluded_surface_port_id_pairs=(
+                    excluded_surface_port_id_pairs
                 ),
             )
             if self.enforce_joint_limit_reserve_during_ik:
@@ -136,12 +146,14 @@ def _generate_with_safe_surface_fallback(
     ] = (),
     maximum_body_tilt_rad: float,
     strict_preferred_candidate_options: bool = False,
+    excluded_surface_port_id_pairs: tuple[tuple[int, int], ...] = (),
 ):
     arguments = {
         "task_spec": task_spec,
         "structural_target": structural_target,
         "physical_model": physical_model,
         "maximum_contact_solution_body_tilt_rad": maximum_body_tilt_rad,
+        "excluded_surface_port_id_pairs": excluded_surface_port_id_pairs,
     }
     candidate_failures: list[str] = []
     for option in preferred_candidate_options:

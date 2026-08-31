@@ -1,0 +1,174 @@
+{
+  "protocol_version": "order9_r1_range_selection_protocol_v13",
+  "status": "approved",
+  "approval_record": "for_codex/R1_RANGE_SELECTION_PROTOCOL_V13_APPROVAL.json",
+  "selection_level_ids": [
+    "r1_l2_20mm_10deg",
+    "r1_l3_30mm_15deg",
+    "r1_l4_40mm_20deg"
+  ],
+  "inherited_minimum_level_id": "r1_l1_10mm_5deg",
+  "selection_split": "train",
+  "selection_bucket_count": 22,
+  "confirmation_split": "validation",
+  "confirmation_bucket_count": 14,
+  "candidate_count_per_selection_level": 682,
+  "candidate_count_per_confirmation_level": 434,
+  "lattice_point_count_per_bucket": 27,
+  "interior_point_count_per_bucket": 4,
+  "replay_count_per_candidate": 2,
+  "acceptance_clearance_m": 0.0195,
+  "planning_clearance_m": 0.03,
+  "minimum_planning_buffer_m": 0.0105,
+  "all_eight_phases_generated_under_constraint": true,
+  "uncertified_rigid_pose_copy_rejected": true,
+  "exact_margin_tolerance_compensated": true,
+  "native_exact_aabb_uses_requested_clearance": true,
+  "reuse_pre_clearance_v11_teacher_rejection": false,
+  "parent_teacher_rejection_reuse_forbidden": true,
+  "selection_requires_current_runner_result": true,
+  "automatic_rotation_contact_retry": true,
+  "automatic_lightweight_contact_retry": true,
+  "automatic_source_configuration_seed_reuse": true,
+  "stale_isaac_evidence_quarantine_required": true,
+  "human_posture_rejections_enforced": true,
+  "linear_algebra_thread_count_per_worker": 1,
+  "preparation_worker_start_method": "spawn",
+  "torchinductor_compile_threads_per_isaac_process": 8,
+  "immutable_v12_preparation_reuse_allowed": true,
+  "pre_isaac_rejection_stops_lattice_level": true,
+  "stop_on_first_failed_level": true,
+  "accept_largest_consecutive_passing_level": true,
+  "confirmation_failure_stepback_forbidden": true,
+  "maximum_preparation_process_count": 24,
+  "recommended_preparation_process_count": 24,
+  "maximum_parallel_isaac_batches": 4,
+  "maximum_candidates_per_isaac_scene": 4,
+  "maximum_wall_time_s": 36000.0,
+  "pi_l_system_retained": true,
+  "pi_l_actor_command_applied": false,
+  "qpid_qp_enabled_when_isaac_invoked": true,
+  "local_servo_enabled_when_isaac_invoked": true,
+  "calibration_evidence_training_eligible": false,
+  "formal_teacher_collection_authorized": false,
+  "base_numeric_protocol": {
+    "path": "configs/training/order9_r1_calibration_protocol_v1.yaml",
+    "sha256": "dfd947b877636a31b0a7d6cd632e42e4f054e3ae1a8a8746bc6d9db7b78418c9"
+  },
+  "parent_minimum_level_result": {
+    "path": "for_codex/R1_NOMINAL_CALIBRATION_V9_RESULT_LEDGER.json",
+    "sha256": "f162ca51cb6a996aba93877dd12d5e9b0c0c2b71a4ed46ede10d47c311e04556"
+  },
+  "parent_v11_rejection": {
+    "path": "for_codex/R1_RANGE_SELECTION_V11_RESULT_LEDGER.json",
+    "sha256": "5ca0d7cc1d2cc7fd3b6980cdf75e813b19adcafd177dbd0718983593b9f56393"
+  },
+  "parent_v12_result": {
+    "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v12/range_selection_and_confirmation_result.json",
+    "sha256": "c33ef4996778b927d140d248947e0e3fb92bc6b0be9f44fc7bb8e3e2257840fa"
+  },
+  "source_bucket_manifest": {
+    "path": "artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/runtime/rollout_buckets_current_lineage_v5/manifest_c3_release_smooth_clear300_current_config_min2_preload_screened_v2.json",
+    "sha256": "ee0001c7c7bc9f5d71ad08219ae73907b5ef4022f82fd90505e3c4642ba291a6"
+  },
+  "geometry_config": {
+    "path": "configs/training/order9_r1_nominal_geometry_v11.json",
+    "sha256": "963407b2881533e6ffe967d49a15a72e2930ca49d48861c056cf6719ca9b0041"
+  },
+  "geometry_implementation": {
+    "path": "amsrr/training/order9_r1_nominal_geometry_v11.py",
+    "sha256": "9e34607a1c3dfa2af179f5d6ddefaf5d690a0a3334d222b47c0111f4f03eff08"
+  },
+  "complete_task_geometry_audit": {
+    "path": "amsrr/training/order9_r1_complete_task_geometry_v13.py",
+    "sha256": "6a93859881f8fc61321a2efa7bd9010732f6b83a73fb55935ed7a9368a475752"
+  },
+  "support_clearance_config": {
+    "path": "configs/training/order9_r1_support_clearance_teacher_v12.json",
+    "sha256": "5b1d753805fc6fd1d1fda89c54faa58aa8abeb39424b3e9847619eabf8c83e6a"
+  },
+  "support_clearance_teacher": {
+    "path": "amsrr/training/order9_r1_support_clearance_teacher_v12.py",
+    "sha256": "d36aaed39e4ac63d2364ba82fc063ebb4df62503bd2e2bb0580385c01e635f45"
+  },
+  "teacher_pipeline": {
+    "path": "amsrr/training/order9_r1_range_selection_v13.py",
+    "sha256": "785effebd40a95a0865014334cd11e1adf2355e9d5fc36e4b484e8952209f808"
+  },
+  "early_tilt_pipeline": {
+    "path": "amsrr/training/order9_r1_early_tilt_pipeline.py",
+    "sha256": "29c3578159d7a646d9c6bd797968a04cab1fd871c8445223c8fa9f36424744ae"
+  },
+  "teacher_hints": {
+    "path": "configs/training/order9_r1_range_teacher_hints_v10.json",
+    "sha256": "7826fae862f857a9e5539593968dcfcc4bdedebedf6a271f4920f79550c667b5"
+  },
+  "teacher_repair_config": {
+    "path": "configs/training/order9_r1_range_teacher_repairs_v13.json",
+    "sha256": "37e04e8cfa96771ce797e0c2a891417b49bbd082055679cbf5b6910241c1e335"
+  },
+  "human_posture_rejections": {
+    "path": "configs/training/order9_c3_human_posture_rejections_v2.json",
+    "sha256": "8cd35608ae0b966380a6154c2fdb3dd572714f332b5e2eff754d1e4b7a9e2303"
+  },
+  "materializer": {
+    "path": "amsrr/training/order9_r1_complete_task_materialization_v14.py",
+    "sha256": "9a333c28b1b97a57e41995f9d564d7629ee1e8c9a47d96e454835726245b0d71"
+  },
+  "native_collision_base_implementation": {
+    "path": "amsrr/feasibility/native/order9_posture_native.cpp",
+    "sha256": "401c54f11cccac451f892d161f2843c24364edd8730acb4ee6bc8986482d9868"
+  },
+  "native_v13_build_script": {
+    "path": "scripts/build_order9_posture_native_v13.sh",
+    "sha256": "b7e791475574c0c070aefbc233a6419c86241c32c2e16092629e574e3aa76513"
+  },
+  "isaac_python_native_extension": {
+    "path": "build/order9_posture_native_v13_py312/_order9_posture_native.cpython-312-x86_64-linux-gnu.so",
+    "sha256": "5e2baa9b75077a865da29e1a46c819be03537a316acc247803897699789917bb"
+  },
+  "native_v13_loader": {
+    "path": "amsrr/feasibility/order9_native_loader_v13.py",
+    "sha256": "43e68b1734a845f4946b7905ad94ccab40cdd213e4253524afc74d0989744752"
+  },
+  "python_collision_wrapper": {
+    "path": "amsrr/feasibility/order9_posture_collision.py",
+    "sha256": "3f6d2acac3f8cf00f0346727da9a3243e9bf75ac2d6c6e96412cef6491a7e486"
+  },
+  "runner_implementation": {
+    "path": "scripts/order9_run_r1_range_selection_v13.py",
+    "sha256": "9cab2347de3f53b268f36b755ae02668b39574c5fff38facc9a3dd4f060ce841"
+  },
+  "base_runner_implementation": {
+    "path": "scripts/order9_run_r1_range_selection_v10.py",
+    "sha256": "9467631299cacea75fc8630b3fc4dc9f40f3366b4e767123fc59d52f6b4800cc"
+  },
+  "streaming_runner_implementation": {
+    "path": "scripts/order9_stream_r1_isaac_v13.py",
+    "sha256": "a55e3214991796275f219e33834d98e1547100bf754970a3ab709d534634f83e"
+  },
+  "batched_wrapper_implementation": {
+    "path": "scripts/order9_r1_batched_nominal_compression_rollout.py",
+    "sha256": "131212be0dc96be69c3fd5d6fc7f3b7ed2c5497f09bbdda378c197ba3a2f17a2"
+  },
+  "batched_runtime_implementation": {
+    "path": "amsrr/training/order9_r1_batched_nominal_runtime.py",
+    "sha256": "422172ac78410f4f897b389ca337dd1ae46aebdcf5ebd4fca546bf8e33e49eae"
+  },
+  "protected_c3_checkpoint": {
+    "path": "artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt",
+    "sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b"
+  },
+  "protected_c3_rollout": {
+    "path": "scripts/order9_vectorized_isaac_rollout.py",
+    "sha256": "e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2"
+  },
+  "protected_c3_curriculum": {
+    "path": "configs/training/order9_learning_curriculum.yaml",
+    "sha256": "965b1abc180d3dab80369c150c55a774c4ceee186befda68f3093c22f7d6f9d4"
+  },
+  "protected_c3_release_ledger": {
+    "path": "for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json",
+    "sha256": "7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729"
+  }
+}

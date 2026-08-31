@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from amsrr.schemas.policies import (
@@ -13,10 +15,14 @@ from amsrr.schemas.policies import (
 from amsrr.training.order9_r1_phase_duration_repair import (
     _move_approach_tail_to_contact_acquisition,
     _extend_phase_endpoint_hold,
+    _replace_portable_root,
+    load_order9_r1_phase_duration_repairs,
     _validated_endpoint_holds,
     _validated_handoff_fraction,
     _validated_multipliers,
 )
+
+ROOT = Path(__file__).resolve().parents[3]
 
 
 def _values(multiplier: float = 2.0) -> dict[str, float]:
@@ -48,6 +54,39 @@ def test_phase_duration_repair_rejects_speedup_and_noop() -> None:
     with pytest.raises(ValueError):
         _validated_multipliers(_values(1.0))
 
+
+def test_phase_duration_repair_relocation_rebinds_nested_paths_only() -> None:
+    payload = {
+        "path": "artifacts/source/case/manifest.json",
+        "nested": [{"path": "artifacts/source/audit.json"}],
+        "number": 3,
+    }
+    assert _replace_portable_root(
+        payload,
+        source_relative="artifacts/source",
+        destination_relative="artifacts/destination",
+    ) == {
+        "path": "artifacts/destination/case/manifest.json",
+        "nested": [{"path": "artifacts/destination/audit.json"}],
+        "number": 3,
+    }
+
+
+def test_phase_duration_repair_registry_binds_failure_and_success() -> None:
+    repairs = load_order9_r1_phase_duration_repairs(repository_root=ROOT)
+
+    assert set(repairs) == {
+        "r1_l2_20mm_10deg__validation__validation-000034-3ccb6e92bc38__lattice_01",
+        "r1_l2_20mm_10deg__validation__validation-000034-3ccb6e92bc38__lattice_06",
+        "r1_l2_20mm_10deg__validation__validation-000034-3ccb6e92bc38__lattice_24",
+    }
+    assert all(
+        value["phase_duration_multipliers"]["place"] == 2.0
+        and value["spatial_path_changed"] is False
+        and value["joint_path_changed"] is False
+        and value["acceptance_or_safety_gate_changed"] is False
+        for value in repairs.values()
+    )
 
 def _trajectory(*, attach: bool) -> ContactWrenchTrajectory:
     knots = []

@@ -1,0 +1,57 @@
+{
+  "repair_version": "order9_r1_range_teacher_repairs_v11",
+  "maximum_contact_height_offset_m": 0.03,
+  "candidate_contact_height_repairs": {},
+  "exhausted_candidate_repairs": {
+    "r1_l1_10mm_5deg__validation__validation-000038-e6065f5b3c3e__lattice_00": {
+      "source_decisive_checkpoint_path": "artifacts/p4_full/order9/r1_teacher/range_selection_v11/preparation/validation__r1_l1_10mm_5deg__decisive_in_progress.json",
+      "source_decisive_checkpoint_sha256": "e74d4dbe97490293835b200d0d98367d76f3d1c74274db36f5b86490b8d9f05a",
+      "failure_phase": "place",
+      "failure_knot_index": 24,
+      "observed_robot_support_clearance_m": 0.018085631664698426,
+      "required_robot_support_clearance_m": 0.0195,
+      "rejected_higher_trial_contact_height_offset_m": 0.025,
+      "rejected_higher_trial_observed_clearance_m": 0.01410785346941304,
+      "rejected_lower_trial_contact_height_offset_m": 0.015,
+      "rejected_lower_trial_observed_clearance_m": 0.013085631239442924,
+      "rejected_50mm_object_height_trial_observed_clearance_m": 0.014107853885156979,
+      "fixed_seed_parallel_contact_height_probe": [
+        {
+          "contact_height_offset_m": 0.001,
+          "outcome": "joint_rate_limit_rejected"
+        },
+        {
+          "contact_height_offset_m": 0.005,
+          "outcome": "support_collision"
+        },
+        {
+          "contact_height_offset_m": 0.01,
+          "outcome": "positive_but_below_1mm",
+          "observed_clearance_m": 0.0008048493045661187
+        },
+        {
+          "contact_height_offset_m": 0.015,
+          "outcome": "support_collision"
+        },
+        {
+          "contact_height_offset_m": 0.02,
+          "outcome": "support_collision"
+        },
+        {
+          "contact_height_offset_m": 0.025,
+          "outcome": "positive_but_below_1mm",
+          "observed_clearance_m": 0.00028563124719085953
+        },
+        {
+          "contact_height_offset_m": 0.03,
+          "outcome": "positive_but_below_1mm",
+          "observed_clearance_m": 0.0007078534541176962
+        }
+      ],
+      "isaac_invoked": false,
+      "controller_layers_invoked": false,
+      "decision": "no_active_repair_and_reject_confirmation",
+      "reason": "no finite teacher contact-height or 50 mm object-height repair reproduced the required fixed-support clearance without collision"
+    }
+  }
+}

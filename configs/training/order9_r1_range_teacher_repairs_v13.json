@@ -1,0 +1,529 @@
+{
+  "repair_version": "order9_r1_range_teacher_repairs_v13",
+  "bounded_local_contact_maximum_iterations": 160,
+  "automatic_configuration_goal_seed_overrides": {
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_14": {
+      "source_candidate_id": "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_13",
+      "configuration_goal_seed_scope": "configuration_space_goal_initialization_only",
+      "configuration_goal_seed_trajectory": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_13/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_13/windows/024/resolved_nominal_trajectory.json",
+        "sha256": "74bb48ded1f41e3b159261ec79658d7612f7091314c1f8ea9ce7f75d13ad0203"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_23": {
+      "source_candidate_id": "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_22",
+      "configuration_goal_seed_scope": "configuration_space_goal_initialization_only",
+      "configuration_goal_seed_trajectory": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_22/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_22/windows/013/resolved_nominal_trajectory.json",
+        "sha256": "7ba1d3ffdbf970180decde233ce6aec7db50f20961f204120f6700c9b0188ba9"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__interior_02": {
+      "source_candidate_id": "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_08",
+      "configuration_goal_seed_scope": "configuration_space_goal_initialization_only",
+      "configuration_goal_seed_trajectory": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_08/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_08/windows/023/resolved_nominal_trajectory.json",
+        "sha256": "fd1543658640ad1e5c3582e8d2e212bcc77e062cab06f61bc2fe948f23ae7baf"
+      }
+    }
+  },
+  "candidate_repairs": {
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_09": {
+      "repair_kind": "confirmed_isaac_collision_teacher_option_reselection",
+      "reason": "A bounded Isaac batch and an independent single-candidate replay both found the same fixed-support collision at module_3__yaw_dock_mech2 shortly after lift began. Keep the [21,29] group 3 grasp, raise its contact height by 10 mm, and seed only configuration-space goal initialization from the hash-bound nearby group 3 trajectory; do not change contact IK or any acceptance, clearance, joint-reserve, safety, or Isaac gate.",
+      "teacher_candidate_override": {
+        "selected_surface_port_ids": [
+          21,
+          29
+        ],
+        "candidate_group_id": "slot_0:grasp_pair:3",
+        "pregrasp_clearance_m": 0.12,
+        "collision_margin_m": 0.007,
+        "grasp_contact_height_offset_m": 0.03,
+        "tangent_offset_world_m": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "configuration_goal_seed_scope": "configuration_space_goal_initialization_only",
+      "configuration_goal_seed_trajectory": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_08/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_08/windows/023/resolved_nominal_trajectory.json",
+        "sha256": "fd1543658640ad1e5c3582e8d2e212bcc77e062cab06f61bc2fe948f23ae7baf"
+      },
+      "source_confirmed_isaac_failure": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train027_lattice_09_confirmed_isaac_support_collision_v1.json",
+        "sha256": "38bbebd8c2af2676250db7f57a6c9d33213d1bf1975fbce25c11f5f3d35f94f4"
+      },
+      "isaac_invoked_during_probe": true,
+      "controller_layers_invoked_during_probe": true,
+      "contact_goal_seed_applied": false,
+      "contact_ik_constraints_changed": false,
+      "acceptance_or_safety_gate_changed": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_10": {
+      "repair_kind": "confirmed_cpu_teacher_option_selection",
+      "reason": "The complete CPU screen confirmed the finite [21,29] group 3 teacher option with the interpolated adjacent-pose configuration seed. Fix that option so later preparation does not repeat the full contact-option search; do not change contact IK or any acceptance, clearance, joint-reserve, safety, or Isaac gate.",
+      "teacher_candidate_override": {
+        "selected_surface_port_ids": [
+          21,
+          29
+        ],
+        "candidate_group_id": "slot_0:grasp_pair:3",
+        "pregrasp_clearance_m": 0.12,
+        "collision_margin_m": 0.007,
+        "grasp_contact_height_offset_m": 0.02,
+        "tangent_offset_world_m": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "configuration_goal_seed_scope": "configuration_space_goal_initialization_only",
+      "configuration_goal_seed_trajectory": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train027_lattice10_interpolated_configuration_seed_v1.json",
+        "sha256": "33dbc75957720cdeb97dc1949fc6e09a93263793af83981e1a62c7b77482ec19"
+      },
+      "source_confirmed_cpu_success": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train027_lattice10_confirmed_cpu_teacher_option_v1.json",
+        "sha256": "9405879aa676adc9585f277404bcde9155c9c3ff8d8b04d1200e0332f8c060c6"
+      },
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "contact_goal_seed_applied": false,
+      "contact_ik_constraints_changed": false,
+      "acceptance_or_safety_gate_changed": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_11": {
+      "repair_kind": "confirmed_cpu_teacher_option_selection",
+      "reason": "The original group 2 posture timed out twice at the transport endpoint under the unchanged full controller, while the complete CPU screen accepted the finite [21,29] group 3 posture branch. Fix only that posture branch and its configuration-space initialization seed; do not change contact IK or any acceptance, clearance, joint-reserve, safety, timeout, or Isaac gate.",
+      "teacher_candidate_override": {
+        "selected_surface_port_ids": [
+          21,
+          29
+        ],
+        "candidate_group_id": "slot_0:grasp_pair:3",
+        "pregrasp_clearance_m": 0.12,
+        "collision_margin_m": 0.007,
+        "grasp_contact_height_offset_m": 0.02,
+        "tangent_offset_world_m": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "configuration_goal_seed_scope": "configuration_space_goal_initialization_only",
+      "configuration_goal_seed_trajectory": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_10/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_10/windows/023/resolved_nominal_trajectory.json",
+        "sha256": "0c08cb26d5fbb130aed1b7cf6f571a982b01a261a0f2e9a9301bf094f2e6029f"
+      },
+      "source_confirmed_cpu_success": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train027_lattice11_confirmed_cpu_teacher_option_v1.json",
+        "sha256": "b0ddae99d4455309bbf6451d8f4ba4a43d29233eb553a6d23a9815ef4a598366"
+      },
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "contact_goal_seed_applied": false,
+      "contact_ik_constraints_changed": false,
+      "acceptance_or_safety_gate_changed": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_15": {
+      "repair_kind": "confirmed_cpu_teacher_option_selection",
+      "reason": "The complete CPU screen confirmed the finite [21,29] group 3 posture branch after the previously selected group 2 branch failed the immutable virtual-preload collision admission. Fix only the posture branch and configuration-space initialization seed; do not change contact IK or any acceptance, clearance, joint-reserve, safety, preload-collision, or Isaac gate.",
+      "teacher_candidate_override": {
+        "selected_surface_port_ids": [
+          21,
+          29
+        ],
+        "candidate_group_id": "slot_0:grasp_pair:3",
+        "pregrasp_clearance_m": 0.12,
+        "collision_margin_m": 0.007,
+        "grasp_contact_height_offset_m": 0.02,
+        "tangent_offset_world_m": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "configuration_goal_seed_scope": "configuration_space_goal_initialization_only",
+      "configuration_goal_seed_trajectory": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_16/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_16/windows/023/resolved_nominal_trajectory.json",
+        "sha256": "cd5aebb9354aa3e6a3119ea74c2f85747b99becb39e109fce8467eaf5a25fd3f"
+      },
+      "source_confirmed_cpu_success": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train027_lattice15_confirmed_cpu_teacher_option_v1.json",
+        "sha256": "1f85933e48a8a6a270366065f86bb2a15f764fa6181d0273b396ec12af222f25"
+      },
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "contact_goal_seed_applied": false,
+      "contact_ik_constraints_changed": false,
+      "acceptance_or_safety_gate_changed": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_17": {
+      "repair_kind": "confirmed_isaac_collision_teacher_option_reselection",
+      "reason": "A bounded Isaac batch and an independent single-candidate replay both found the same fixed-support collision at module_3__yaw_dock_mech2 shortly after lift began. Keep the [21,29] group 3 grasp, raise its contact height by 10 mm, and seed only configuration-space goal initialization from the hash-bound nearby group 3 trajectory; do not change contact IK or any acceptance, clearance, joint-reserve, safety, or Isaac gate.",
+      "teacher_candidate_override": {
+        "selected_surface_port_ids": [
+          21,
+          29
+        ],
+        "candidate_group_id": "slot_0:grasp_pair:3",
+        "pregrasp_clearance_m": 0.12,
+        "collision_margin_m": 0.007,
+        "grasp_contact_height_offset_m": 0.03,
+        "tangent_offset_world_m": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "configuration_goal_seed_scope": "configuration_space_goal_initialization_only",
+      "configuration_goal_seed_trajectory": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_18/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_18/windows/023/resolved_nominal_trajectory.json",
+        "sha256": "9ba208133926fcfdfa7072e738858ceb6565cf46ddad47f77110047605a27bb9"
+      },
+      "source_confirmed_isaac_failure": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train027_lattice_17_confirmed_isaac_support_collision_v1.json",
+        "sha256": "77f451fdadcf41b765f9cd74f64cdb4e593a74fd056b09956d3eda8887a4bbfd"
+      },
+      "isaac_invoked_during_probe": true,
+      "controller_layers_invoked_during_probe": true,
+      "contact_goal_seed_applied": false,
+      "contact_ik_constraints_changed": false,
+      "acceptance_or_safety_gate_changed": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_18": {
+      "repair_kind": "confirmed_isaac_collision_teacher_option_reselection",
+      "reason": "A bounded Isaac batch and an independent single-candidate replay both found the same fixed-support collision at module_3__yaw_dock_mech2 shortly after lift began. Keep the [21,29] group 3 grasp, raise its contact height by 10 mm, and seed only configuration-space goal initialization from the hash-bound nearby group 3 trajectory; do not change contact IK or any acceptance, clearance, joint-reserve, safety, or Isaac gate.",
+      "teacher_candidate_override": {
+        "selected_surface_port_ids": [
+          21,
+          29
+        ],
+        "candidate_group_id": "slot_0:grasp_pair:3",
+        "pregrasp_clearance_m": 0.12,
+        "collision_margin_m": 0.007,
+        "grasp_contact_height_offset_m": 0.03,
+        "tangent_offset_world_m": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "configuration_goal_seed_scope": "configuration_space_goal_initialization_only",
+      "configuration_goal_seed_trajectory": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_20/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_20/windows/024/resolved_nominal_trajectory.json",
+        "sha256": "be44d09bcf75f4e1b5aa2616d42961b003161024a0e60494ef83c44d504b7986"
+      },
+      "source_confirmed_isaac_failure": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train027_lattice18_confirmed_isaac_support_collision_v1.json",
+        "sha256": "12b30836caab7fbee7c2687a84d78bfb7f88f2ee5d15d862befabdf11cdaab39"
+      },
+      "isaac_invoked_during_probe": true,
+      "controller_layers_invoked_during_probe": true,
+      "contact_goal_seed_applied": false,
+      "contact_ik_constraints_changed": false,
+      "acceptance_or_safety_gate_changed": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__interior_00": {
+      "repair_kind": "confirmed_isaac_collision_teacher_option_reselection",
+      "reason": "A bounded Isaac batch and an independent single-candidate replay both found the same fixed-support collision at module_3__yaw_dock_mech2 shortly after lift began. Keep the [21,29] group 3 grasp, raise its contact height by 10 mm, and seed only configuration-space goal initialization from the hash-bound repaired lattice trajectory; do not change contact IK or any acceptance, clearance, joint-reserve, safety, or Isaac gate.",
+      "teacher_candidate_override": {
+        "selected_surface_port_ids": [
+          21,
+          29
+        ],
+        "candidate_group_id": "slot_0:grasp_pair:3",
+        "pregrasp_clearance_m": 0.12,
+        "collision_margin_m": 0.007,
+        "grasp_contact_height_offset_m": 0.03,
+        "tangent_offset_world_m": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "configuration_goal_seed_scope": "configuration_space_goal_initialization_only",
+      "configuration_goal_seed_trajectory": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_18/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_18/windows/023/resolved_nominal_trajectory.json",
+        "sha256": "9ba208133926fcfdfa7072e738858ceb6565cf46ddad47f77110047605a27bb9"
+      },
+      "source_confirmed_isaac_failure": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train027_interior00_confirmed_isaac_support_collision_v1.json",
+        "sha256": "3069529bb1d1daa4ef4b396904ffab1cf23fcbc792d086f10f65a06faa79e9bd"
+      },
+      "isaac_invoked_during_probe": true,
+      "controller_layers_invoked_during_probe": true,
+      "contact_goal_seed_applied": false,
+      "contact_ik_constraints_changed": false,
+      "acceptance_or_safety_gate_changed": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000002-0e86a4ff3e71__interior_02": {
+      "repair_kind": "confirmed_isaac_collision_teacher_option_reselection",
+      "reason": "A bounded Isaac batch and an independent single-candidate replay both found a hard object collision from an unnecessarily tilted finite grasp assignment. Select the hash-bound nearby successful group 3 assignment on the same [0,12] surfaces and seed only configuration-space goal initialization from it; do not change contact IK or any acceptance, clearance, joint-reserve, safety, or Isaac gate.",
+      "teacher_candidate_override": {
+        "selected_surface_port_ids": [
+          0,
+          12
+        ],
+        "candidate_group_id": "slot_0:grasp_pair:3",
+        "pregrasp_clearance_m": 0.12,
+        "collision_margin_m": 0.007,
+        "grasp_contact_height_offset_m": 0.02,
+        "tangent_offset_world_m": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "configuration_goal_seed_scope": "configuration_space_goal_initialization_only",
+      "configuration_goal_seed_trajectory": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000002-0e86a4ff3e71__interior_03/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000002-0e86a4ff3e71__interior_03/windows/020/resolved_nominal_trajectory.json",
+        "sha256": "714f0c9aa7dde6c8be59900ac42add024abe1cdfd24e69542c837445abd5ac58"
+      },
+      "source_confirmed_isaac_failure": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train002_interior02_confirmed_isaac_collision_v1.json",
+        "sha256": "e3641f270b07cb8d1161ab0a4e83bee9b2413afa12b7282bd1d3d6b48ebd1307"
+      },
+      "isaac_invoked_during_probe": true,
+      "controller_layers_invoked_during_probe": true,
+      "contact_goal_seed_applied": false,
+      "contact_ik_constraints_changed": false,
+      "acceptance_or_safety_gate_changed": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_00": {
+      "repair_kind": "bounded_deterministic_local_contact_search",
+      "reason": "The hash-bound [14,18] adjacent-pose grasp needs the finite local contact bridge that lightweight admission disables. Run that bounded bridge without changing any gate.",
+      "source_decisive_checkpoint": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train004_lattice00_lightweight_local_v1.json",
+        "sha256": "9197a9bbe583c742f05ef08325e5f6936290a7712780bcb5c5f6cdde22f006f3"
+      },
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_02": {
+      "repair_kind": "bounded_deterministic_local_contact_search",
+      "reason": "The hash-bound [14,18] adjacent-yaw grasp is not joint-reachable under lightweight admission. Run the finite local contact bridge without changing any gate.",
+      "source_decisive_checkpoint": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train004_lattice02_lightweight_local_v1.json",
+        "sha256": "5787973f713c5e22c053fb0a2f2972207dc92f509dc76d7f5a8d264eaab06824"
+      },
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_06": {
+      "repair_kind": "bounded_deterministic_local_contact_search",
+      "reason": "The hash-bound [14,18] adjacent-position grasp requires the finite local contact bridge disabled in lightweight admission. Run that bridge without changing any gate.",
+      "source_decisive_checkpoint": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train004_lattice06_lightweight_local_v1.json",
+        "sha256": "4e05ae3b406987a041004d003fde02eefac985bf5b8860c34749e164eedee9c5"
+      },
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_18": {
+      "repair_kind": "bounded_deterministic_local_contact_search",
+      "reason": "Run the finite local contact bridge disabled in lightweight admission without changing any gate.",
+      "source_decisive_checkpoint": {"path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train004_lattice18_lightweight_local_v1.json", "sha256": "0da2010b4d9746ed96be619c9a0724f6b14623efaf3e76258a99765f046456db"},
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_20": {
+      "repair_kind": "bounded_deterministic_local_contact_search",
+      "reason": "Run the finite local contact bridge disabled in lightweight admission without changing any gate.",
+      "source_decisive_checkpoint": {"path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train004_lattice20_lightweight_local_v1.json", "sha256": "fca2e94ed0d61b283dd42270015b20590860529a341d72c8535ee6f8126fa1b7"},
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_24": {
+      "repair_kind": "bounded_deterministic_local_contact_search",
+      "reason": "Run the finite local contact bridge disabled in lightweight admission without changing any gate.",
+      "source_decisive_checkpoint": {"path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train004_lattice24_lightweight_local_v1.json", "sha256": "4d7b9ef47f32cecfc8a6f2d0077657fd4277092f252df0c280d7b3e561cf6390"},
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_26": {
+      "repair_kind": "bounded_deterministic_local_contact_search",
+      "reason": "Run the finite local contact bridge disabled in lightweight admission without changing any gate.",
+      "source_decisive_checkpoint": {"path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train004_lattice26_lightweight_local_v1.json", "sha256": "05049d695806ade6c9f218b0cb0e0ef69723e3ccbde26e28c5cb034837c63757"},
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_00": {
+      "repair_kind": "bounded_deterministic_local_contact_search",
+      "reason": "The first reachable teacher path lost joint reserve when the exact object collision was rechecked at knot 23. Search the finite alternate contact paths without changing any clearance, joint-reserve, safety, or Isaac gate.",
+      "source_decisive_checkpoint": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train027_lattice00_joint_reserve_collision_v1.json",
+        "sha256": "f758bbf58000e21ae45c7eb1d62308b1249989df2d9c1d3bdd96f0233367a026"
+      },
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_01": {
+      "repair_kind": "bounded_deterministic_local_contact_search",
+      "reason": "The preferred group is rejected only because lightweight admission disables its finite sampled local contact bridge. Run that bounded bridge without changing any contact, clearance, joint-reserve, safety, or Isaac gate.",
+      "source_decisive_checkpoint": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train027_lattice01_lightweight_local_v1.json",
+        "sha256": "718110a9ed4769299e315366df5ecea9d1fca59ec9e15dff07a05da646a366e6"
+      },
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_02": {
+      "repair_kind": "bounded_deterministic_local_contact_search",
+      "reason": "The permitted [21,29] grasp is reachable, but the default configuration-goal initial posture enters the wrong collision-free branch. Seed only that branch search from the hash-bound adjacent permitted-pair trajectory without changing contact IK, clearance, joint-reserve, safety, or Isaac gates.",
+      "configuration_goal_seed_scope": "configuration_space_goal_initialization_only",
+      "configuration_goal_seed_trajectory": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v10/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06/windows/024/resolved_nominal_trajectory.json",
+        "sha256": "c19150d385151885c3f5c877083c4528526a8a9518d48191287bc4363ea66bd6"
+      },
+      "source_decisive_checkpoint": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train027_lattice02_joint_reserve_collision_v1.json",
+        "sha256": "fb2ecfe6cebfa8b06939c11a9a39cba3b287b060d819c4834778f4aff4a4946e"
+      },
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06": {
+      "repair_kind": "bounded_deterministic_local_contact_search",
+      "reason": "The permitted [21,29] grasp requires the finite local contact bridge disabled during lightweight admission. Seed only the collision-free configuration-goal branch from the hash-bound permitted-pair trajectory; do not change contact IK, clearance, joint-reserve, safety, or Isaac gates.",
+      "configuration_goal_seed_scope": "configuration_space_goal_initialization_only",
+      "configuration_goal_seed_trajectory": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v10/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06/windows/024/resolved_nominal_trajectory.json",
+        "sha256": "c19150d385151885c3f5c877083c4528526a8a9518d48191287bc4363ea66bd6"
+      },
+      "source_decisive_checkpoint": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train027_lattice06_lightweight_local_v2.json",
+        "sha256": "5dab48edd4456af9a9d5fd5d7473a18b63c1c68458eb8a9668f7954866e83013"
+      },
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_07": {
+      "repair_kind": "bounded_deterministic_local_contact_search",
+      "reason": "The finite grasp group is rejected only because lightweight admission disables its sampled local contact bridge. Run that bounded bridge without changing any clearance, joint-reserve, safety, or Isaac gate.",
+      "source_decisive_checkpoint": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train027_lattice07_lightweight_local_v1.json",
+        "sha256": "2e0be0d7490eefc6990ee9cb49b1117956f514a74d2d7ad117e870d229bba704"
+      },
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_08": {
+      "repair_kind": "bounded_deterministic_local_contact_search",
+      "reason": "The human-rejected [19,22] pair remains forbidden. The permitted [21,29] grasp is reachable, but the default configuration-goal initial posture enters the wrong collision-free branch. Seed only that branch search from the hash-bound permitted-pair trajectory without changing contact IK, clearance, joint-reserve, safety, or Isaac gates.",
+      "configuration_goal_seed_scope": "configuration_space_goal_initialization_only",
+      "configuration_goal_seed_trajectory": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v10/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06/windows/024/resolved_nominal_trajectory.json",
+        "sha256": "c19150d385151885c3f5c877083c4528526a8a9518d48191287bc4363ea66bd6"
+      },
+      "source_decisive_checkpoint": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train027_lattice08_lightweight_overhead_v1.json",
+        "sha256": "7a45d1802de2809ad72dbc7c20e6000f38baa981d29d96304e88e2c86b792b2c"
+      },
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_24": {
+      "repair_kind": "bounded_deterministic_local_contact_search",
+      "reason": "The permitted [21,29] grasp is reachable, but the default configuration-goal initial posture enters the wrong collision-free branch. Seed only that branch search from the hash-bound adjacent permitted-pair trajectory without changing contact IK, clearance, joint-reserve, safety, or Isaac gates.",
+      "configuration_goal_seed_scope": "configuration_space_goal_initialization_only",
+      "configuration_goal_seed_trajectory": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v10/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06/windows/024/resolved_nominal_trajectory.json",
+        "sha256": "c19150d385151885c3f5c877083c4528526a8a9518d48191287bc4363ea66bd6"
+      },
+      "source_decisive_checkpoint": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train027_lattice24_lightweight_local_v1.json",
+        "sha256": "584da6ffba658335457f3c155fea3a326d01b81826687cb1efaa5fe337c91da3"
+      },
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_26": {
+      "repair_kind": "bounded_deterministic_local_contact_search",
+      "reason": "The human-rejected [19,22] pair remains forbidden. The permitted [21,29] grasp is reachable, but the default configuration-goal initial posture enters the wrong collision-free branch. Seed only that branch search from the hash-bound permitted-pair trajectory without changing contact IK, clearance, joint-reserve, safety, or Isaac gates.",
+      "configuration_goal_seed_scope": "configuration_space_goal_initialization_only",
+      "configuration_goal_seed_trajectory": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v10/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06/windows/024/resolved_nominal_trajectory.json",
+        "sha256": "c19150d385151885c3f5c877083c4528526a8a9518d48191287bc4363ea66bd6"
+      },
+      "source_decisive_checkpoint": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/train027_lattice26_configuration_goal_v1.json",
+        "sha256": "cd55741f3e289848ebec2ccf22c0756544e816c2d5819b475fb8856999d4e882"
+      },
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_08": {
+      "repair_kind": "bounded_deterministic_local_contact_search",
+      "reason": "The earlier lightweight path selected a reachable but rotation-ineffective grasp and did not run the bounded search for the known 149.8 mm moment-arm grasp. The current repair goes directly to that finite search without changing any gate.",
+      "source_decisive_checkpoint": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v11/preparation/train__r1_l2_20mm_10deg__decisive_in_progress.json",
+        "sha256": "5f87d3fd04f68699e425b98454186660e4bba09008ac219ff2d4562a4fe2850f"
+      },
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    },
+    "r1_l1_10mm_5deg__validation__validation-000040-783dd4e143cb__lattice_09": {
+      "repair_kind": "bounded_deterministic_local_contact_search",
+      "reason": "The lightweight coordinate bridge exhausted all finite grasp groups; the existing bounded local contact planner produced a complete path without changing any acceptance threshold.",
+      "source_decisive_checkpoint": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/preparation/validation__r1_l1_10mm_5deg__decisive_in_progress.json",
+        "sha256": "6c810a319782c9d113fad396951b394b1cf59fd5964b34f2326be0197591b589"
+      },
+      "isaac_invoked_during_probe": false,
+      "controller_layers_invoked_during_probe": false,
+      "acceptance_clearance_m": 0.0195,
+      "planning_clearance_m": 0.03
+    }
+  }
+}

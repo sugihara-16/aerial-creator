@@ -1,0 +1,25 @@
+{
+  "contract_version": "order9_r1_support_clearance_teacher_v12",
+  "acceptance_clearance_m": 0.0195,
+  "planning_clearance_m": 0.03,
+  "minimum_planning_buffer_m": 0.0105,
+  "solver_discretization_reserve_m": 0.0005,
+  "maximum_vertical_contact_frame_shift_m": 0.03,
+  "vertical_shift_quantization_m": 0.005,
+  "required_phases": [
+    "approach",
+    "contact_acquisition",
+    "lift",
+    "transport",
+    "place",
+    "release",
+    "retreat",
+    "settle"
+  ],
+  "maximum_alternate_contact_group_count": 8,
+  "require_generation_time_clearance_constraint": true,
+  "reject_uncertified_rigid_pose_copy": true,
+  "isaac_allowed_during_generation": false,
+  "controller_layers_allowed_during_generation": false,
+  "formal_teacher_collection_authorized": false
+}

@@ -1,0 +1,15 @@
+{
+  "record_version": "order9_r1_range_selection_approval_record_v12",
+  "decision": "approved",
+  "approved_by": "repository_user",
+  "approval_date": "2026-08-29",
+  "approval_basis": "User approved binding the R1 v12 19.5/30 mm generation-proof mechanism to the formal 22-morphology range selection and subsequent one-time 14-morphology confirmation.",
+  "approved_protocol": {
+    "path": "configs/training/order9_r1_range_selection_protocol_v12.json",
+    "sha256": "3f5373d8223642ac03d8b915231a779a8510c85adbf82ef662f6b6b053c3890f"
+  },
+  "learning_authorized": false,
+  "teacher_collection_authorized": false,
+  "file_deletion_authorized": false,
+  "commit_authorized": false
+}

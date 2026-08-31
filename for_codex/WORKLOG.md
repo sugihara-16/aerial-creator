@@ -2,6 +2,64 @@
 
 ## Global Worklog
 
+### 2026-08-31 (R1 v13作業の中断・保護)
+
+- Spec version: v0.5、およびR1範囲選定v13追加契約。
+- Work package / Agent label: Codex / R1教師軌道収集前の範囲選定。
+- Summary: ユーザーの確認作業に備えてR1/Isaac処理をすべて停止し、未完了のコード、
+  設定、試験、文書と生成物の停止時点を保護した。従来の`validation` 14機体は候補
+  修正にも使用したため診断専用とし、正式最終確認へ流用しない。
+- Files changed: 今回の未commit差分一式と
+  `for_codex/R1_RANGE_SELECTION_V13_PAUSE_HANDOFF_20260831.md`。約70 GBの生成物本体は
+  Gitへ追加せず、既存場所で保持した。
+- Schema/interface changes: 共有schema、C3 policy/action/controller契約の変更なし。
+  R1専用の実装・証拠形式は未完了の作業状態として保存する。
+- Upstream dependencies used: v0.5、R1 v9--v13履歴、C3 promoted update 18保護物、
+  `morphology_pool.json`。
+- Downstream impact: R1 v13の正式採用範囲は未確定。正式教師収集とπ_H模倣学習の入口は
+  開いていない。
+- Tests added or run: 中断保護時には追加検証を行わず、実行処理が残っていないこと、
+  C3保護ハッシュ、Git差分空白、生成物の件数・容量・一覧指紋だけを確認した。
+- Commands run: `ps`、`sha256sum`、`du`、`find`、`git status`、`git diff --check`、
+  安全用分岐作成、保存commit。
+- Assumptions: 大容量生成物は移動・削除・上書きせず、Git外の既存場所と一覧指紋で
+  保護する。中断時の診断結果を正式合格へ読み替えない。
+- Blockers / open questions: 22機体側で第2--第4段階を順に確定してから、候補修正に
+  未使用の14機体で一度だけ最終確認する必要がある。
+- Next steps: ユーザーの再開指示まで停止する。再開時は中断記録の順序と保護値を先に
+  確認する。
+
+### 2026-08-29 (R1学習側範囲選定v10完了)
+
+- Spec version: v0.5、R1最小条件v9、およびユーザー承認済みR1範囲選定v10追加契約。
+- Work package / Agent label: Codex / R1教師軌道収集前の学習側範囲選定。
+- Summary: 合格済み10 mm/5度を再計算せず、20 mm/10度から段階選定を開始した。
+  第2段階の最外側176格子点はIsaacなし一次判定176/176合格。最大4候補Isaacで
+  生じた格子点不合格を単独2回で再確認し、0/2成功、安全不合格2、代替制御0と
+  確定した。最初の不合格段階で停止し、採用範囲を10 mm/5度に決定した。
+- Files changed: R1範囲選定の補助処理・実行器・隅点実行器・有限候補診断器・集計器、
+  軽量経路計画、v10契約・承認・教師候補設定、単体試験、結果文書・結果目録、v0.5、
+  設計変更記録、本作業記録。生成証拠は`artifacts/.../range_selection_v10`へ追加した。
+- Schema/interface changes: 共有schema、C3 policy/action/controller契約の変更なし。
+  R1専用の範囲選定、接触点補正、停止・再開証拠形式だけを追加した。
+- Upstream dependencies used: v0.5、R1 v9正式結果、R1完全軌道一次判定、C3 promoted
+  update 18保護物、ユーザー承認済みの三次元距離30 mm条件。
+- Downstream impact: 学習側の採用範囲は10 mm/5度に確定。第3・第4段階は停止規則で
+  未実行。未使用14機体の最終確認、正式教師収集、π_H模倣学習は未開始。
+- Tests added or run: 範囲候補対応、格子角優先、最大4件分割、有限教師候補、平面内
+  補正読込、軽量時の標本探索禁止、有効な単独不合格による即停止を追加・更新。
+  重点単体試験21/21、R1関連一式とC3実行束127/127、Black、Python/JSON構文、
+  契約読込、Isaac前176/176、単独Isaac 0/2成功・安全不合格2・代替制御0を確認した。
+- Commands run: `order9_run_r1_range_corner_probe_v10.py`、
+  `order9_probe_r1_range_teacher_option_v10.py`、
+  `order9_finalize_r1_range_selection_v10.py`、`pytest`、`py_compile`、`sha256sum`。
+- Assumptions: 格子点100%と安全不合格0が必須なので、単独格子点1件の確定不合格は
+  第2段階全体を数学的に不合格にし、残り候補と上位段階を実行する必要がない。
+- Blockers / open questions: 学習側範囲選定にはなし。未使用14機体での一度だけの
+  最終確認は別作業として未実行。
+- Next steps: 採用範囲10 mm/5度を未使用14機体で一度だけ最終確認する。合格後にのみ
+  正式教師軌道収集へ進む。
+
 ### 2026-08-29 (R1第1段階の変更を依存順にcommit)
 
 - Spec version: v0.5、および承認済みR1名目較正v1--v9追加契約。
@@ -10206,6 +10264,22 @@
 
 ## Global Worklog
 
+### 2026-08-29 — R1支持台間隔の生成余裕契約v12
+
+- Spec version: `A-MSRR_codex_ready_spec_v0_5_ja.md`。
+- Work package / Agent label: R1支持台間隔の合否値・生成目標分離と生成証明。
+- Summary: 合否19.5 mm、生成目標30.0 mm、最低余裕10.5 mmを別項目に固定し、
+  不足する設定と生成証明のない旧配置軌道をIsaac前に拒否するR1専用層を実装した。
+- Files changed: v12設定、支持台余裕教師、範囲候補選択、v13材料化、単体試験、v0.5、
+  設計変更記録、本作業記録。
+- Schema/interface changes: 共有schema、C3、π_L/QPID/QP/local servo境界の変更なし。
+  R1専用の設定と生成証明形式のみを追加した。
+- Verification: 重点・周辺回帰16/16合格。v11不合格の未使用5モジュール機格子点0は、
+  元候補と上方移動候補を不採用にし、別接触組が全8段階、2528時点、4444形状判定、
+  最小支持台間隔30.0 mmで合格した。Isaac・制御層は未起動、所要456.447秒。
+- Boundary / next: 機構確認のみ。正式範囲、14機体確認、教師収集、π_H学習は未承認。
+  次はv12をhash-boundな正式実行契約に結合し、22機体側の範囲選定を行う。
+
 ### 2026-08-16 — Saved C3 validation artifact real-time mesh playback
 
 - Spec version: `A-MSRR_codex_ready_spec_v0_4_ja.md`, with the active
@@ -11751,3 +11825,141 @@
 - Blockers/open questions: 第1段階にはなし。第2段階20 mm/10度以降は未実行である。
 - Next: 同じ一次判定、最大4候補、π_L動作量0、QPID/QP・局所サーボ有効、ハッシュ
   固定契約で第2段階を別作業として開始する。
+
+### Codex: R1学習側範囲選定v10
+
+#### 2026-08-29
+
+- Scope: 第2段階20 mm/10度から第4段階40 mm/20度までを順に確認し、最初の
+  不合格段階で停止して、連続合格した最大範囲を固定する。
+- Files changed: `amsrr/training/order9_r1_range_selection_v10.py`、
+  `amsrr/training/order9_configuration_space_planner.py`、範囲選定・隅点・有限候補診断・
+  最終集計の各実行器、v10契約・承認・教師候補設定、単体試験、結果・設計文書。
+- Upstream dependencies: R1 v9の10 mm/5度全件合格目録、R1専用30 mm三次元距離条件、
+  全8段階一次判定、C3 promoted update 18保護成果物。
+- Implemented: 格子角優先、Isaac前の標本探索なし完全追従判定、最大4候補・3 m間隔、
+  同時配置不合格の単独再確認、ハッシュ一致証拠再利用、単独格子不合格時の即停止、
+  8モジュール特異軌道の有限接触点修正、三次元合成距離30 mm検査、Pythonハッシュ
+  乱数0固定、hash-bound結果集計。
+- Not implemented: 未使用14機体の最終確認、正式教師軌道収集、π_H模倣学習、
+  π_L再学習、C3変更、削除、commit。
+- Schema/interface changes: 共有schemaなし。R1 v10専用契約と証拠形式のみ。
+- Downstream impact: 採用範囲は10 mm/5度。次は未使用14機体の最終確認であり、
+  教師軌道収集ではない。
+- Tests added: 有限候補の優先・非拡張、平面内補正、格子角集合、停止判定、軽量時の
+  大域・局所・上方標本探索禁止。
+- Tests passed: 重点単体試験21/21、R1関連一式とC3実行束127/127、Black、Python/JSON
+  構文、契約ハッシュ読込、一次判定176/176。確定Isaac証拠は対象格子点を単独2回
+  実行して成功0、安全不合格2、代替制御0。
+- Handoff notes: 正式目録は`for_codex/R1_RANGE_SELECTION_V10_RESULT_LEDGER.json`
+  （SHA-256 `820f6ae76e7f021e82831b28f6ec3a580b25fdb510fd4a148ab6c150304bb253`）。
+  第3・第4段階は未完了ではなく、承認済み停止規則により未実行。
+- Open questions: 未使用14機体の最終確認結果。
+
+### Codex: R1名目物体・固定支持台・STL事前検査v11
+
+#### 2026-08-29
+
+- Scope: v10の支持台衝突原因を解消するため、名目物体高さ、把持点高さ、支持台入力、
+  保存済み全8段階の実形状検査をR1専用の追加契約として実装し、旧不合格候補で
+  Isaac前排除と補正後Isaac成功を確認した。
+- Files changed: v11名目物体設定・補正器・教師生成層・8段階STL検査・材料化層・
+  代表実行器・単体試験・結果文書・結果目録・v0.5・設計変更記録・本作業記録。
+- Upstream dependencies: v0.5、R1 v9/v10、Order-8 canonical reset報告、C3 promoted
+  update 18 checkpoint・保護実行器・release ledger。
+- Implemented: 物体高さ+40 mm、中心+20 mm、下面・質量維持、密度・慣性再計算、
+  側面把持点+20 mm以上、小物体の難条件隔離、TaskSpec支持台のOrder-8値への統一、
+  全8段階458時点のSTL三角形判定、支持台19.5 mm条件、失敗時のIsaac前停止。
+- Representative result: 元の小物体軌道は設置段階で電池/支持台距離2.971268 mmのため
+  Isaac前不合格。補正後は8段階、844形状判定に合格し、Isaac 2/2成功、安全不合格0、
+  代替処理0、落下0、時間切れ0、QP計算不能0。π_L動作量0、名目押し込み・QPID/QP・
+  局所制御は有効。
+- Schema/interface changes: 共有schema、C3、π_L/QPID/QP/local servoの既存境界に
+  変更なし。R1 v11専用追加契約と結果形式のみ。
+- Tests: 新規4/4、R1関連一式とC3実行束121/121。Python構文、Black、JSON構文、
+  差分空白、目録参照ハッシュ16/16を確認した。C3保護ハッシュはcheckpoint
+  `6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b`、保護実行器
+  `e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2`、release ledger
+  `7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729`のまま。
+- Evidence: `for_codex/R1_NOMINAL_GEOMETRY_V11_SMOKE_RESULT_LEDGER.json`、SHA-256
+  `57862dad9993af5e833850560dd5a91d56c6b7df76def4053eed7e3f9d98512f`。
+- Not implemented: 正式第2--第4段階、未使用14機体最終確認、正式教師収集、π_H模倣
+  学習、π_L再学習、C3変更、commit。
+- Current point/next: 小物体v10結果は履歴。補正後物体の正式採用範囲は未確定であり、
+  次はv11契約で学習側第2段階20 mm/10度から範囲選定をやり直す。
+
+### Codex: R1 v11正式範囲選定・未使用14機体確認
+
+#### 2026-08-29
+
+- Scope: 補正後名目物体で22機体の第2--第4段階を順に選定し、残った範囲を未使用
+  14機体で一度だけ確認する。最初の格子点不合格で停止し、一次判定合格後だけIsaacを
+  実行する。
+- Implemented: v11正式実行器、承認済みhash-bound契約、全8段階の凸包による保守的
+  分離証明とSTL三角形への必要時切替、決定的不合格の保存・再利用、有限教師修正記録、
+  結果台帳と回帰試験を追加した。一次判定では標本探索、Isaac、制御層を起動しない。
+- Selection result: 第2段階20 mm/10度は、6モジュール機
+  `train-000004-190f3a425b3e/lattice_08`の回転余裕付き把持教師軌道を構成できず不合格。
+  第3・第4段階は承認済み停止規則により未実行。親結果v9の第1段階10 mm/5度を
+  未使用側確認対象とした。
+- Confirmation result: 未使用5モジュール機
+  `validation-000038-e6065f5b3c3e/lattice_00`は、配置段階の時点24で固定支持台間隔
+  18.085631664698426 mmとなり、要求19.5 mmを満たさず不合格。最初の格子点不合格で
+  停止したため、Isaac実行0、制御層実行0、安全違反0、代替制御0である。
+- Finite repair audit: 接触高さ15/25 mm、物体高さ増分50 mm、接触高さ1/5/10/15/
+  20/25/30 mmを比較したが、要求間隔を再現性よく回復する案はなく、一部は支持台と
+  実衝突した。修正は不採用とし、診断記録を削除せず保持した。
+- Decision: 補正後名目物体の採用範囲なし。正式教師軌道収集、π_H模倣学習、π_L
+  再学習は未実行・未承認。次は支持台間隔を教師生成の目的または制約へ直接含める
+  新方式の設計と承認であり、判定値だけを緩めない。
+- Evidence: `for_codex/R1_RANGE_SELECTION_V11_RESULT_LEDGER.json`、SHA-256
+  `5ca0d7cc1d2cc7fd3b6980cdf75e813b19adcafd177dbd0718983593b9f56393`。
+- Verification: v11契約・結果試験6/6、R1一式・構成空間計画・C3実行束139/139、
+  native読込2/2、結果目録の参照16/16、Black、JSON構文、Python構文、差分空白検査に
+  合格した。終了時にR1またはIsaac処理は残っていない。
+- Protected state: C3 checkpoint
+  `6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b`、保護実行器
+  `e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2`、release ledger
+  `7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729`、curriculum
+  `965b1abc180d3dab80369c150c55a774c4ceee186befda68f3093c22f7d6f9d4`を変更していない。
+- Files changed: v10/v11範囲選定・名目幾何・全8段階検査・native衝突計測・実行器・
+  契約・承認・単体試験・結果文書・v0.5・設計変更記録・本記録。C3保護物は変更なし。
+- Commit: 未実行。正式教師収集、学習、ファイル削除は未実行。
+
+### Codex: R1支持台間隔の生成余裕契約v12
+
+#### 2026-08-29
+
+- Scope: v11で同じ値を生成後検査に使った設計ミスを、記憶ではなく設定不変条件と
+  生成証明によって再発防止する。
+- Implemented: 合否19.5 mm、生成30.0 mm、最低余裕10.5 mmの分離、設定の事前拒否、
+  全8段階30.0 mm候補選択、5 mm刻み最大30 mmの有限上方候補、有限別接触組、証明書
+  必須化、保存後の再検査・再結合。Isaacと制御層は生成中に禁止した。
+- Not implemented: 22機体の正式範囲選定、未使用14機体確認、正式教師軌道収集、
+  π_H模倣学習、π_L再学習、C3変更、commit。
+- Tests added: 余裕不足設定の拒否、量子化候補、決定的候補選択、全8段階証明結合、
+  証明のない旧配置軌道の材料化前拒否。
+- Tests passed: 新規・周辺16/16、Python構文、Black。既知不合格1件の実軌道生成では
+  別接触組が全8段階の30.0 mm検査に合格した（2528時点、4444形状判定、456.447秒）。
+- Protected state: C3 checkpoint、保護実行器、release ledger、curriculumは変更しない。
+- Next: v12正式実行契約・承認・結果台帳を別作業で作り、22機体側から選定を再実行する。
+
+### Codex: R1 v13中断時点の保護
+
+#### 2026-08-31
+
+- Scope: ユーザーの確認作業のため、R1範囲選定を未完了のまま安全に停止する。
+- Files changed: 今回の未commit差分一式、中断・保護記録、本作業記録。
+- Upstream dependencies: v0.5、R1 v9--v13、C3 promoted update 18保護物。
+- Implemented: 実行処理の停止確認、安全用分岐、C3ハッシュ再確認、約70 GBの生成物の
+  件数・容量・一覧指紋記録、未完了差分の保存commit。
+- Not implemented: 22機体側の第2--第4段階確定、未使用14機体の正式最終確認、正式
+  教師軌道収集、π_H模倣学習。
+- Schema/interface changes: 共有schemaおよびC3契約の変更なし。R1専用差分は未完了状態。
+- Downstream impact: 従来の`validation` 14機体証拠は診断専用。v13の採用範囲や正式
+  合格を主張できない。
+- Tests added: 中断保護のため追加なし。
+- Tests passed: `git diff --check`、C3保護対象4ハッシュ、実行処理なしを確認。
+- Handoff notes: `for_codex/R1_RANGE_SELECTION_V13_PAUSE_HANDOFF_20260831.md`を先に読む。
+- Open questions: 正しい順序で22機体側の範囲を確定後、候補修正に未使用の14機体を
+  一度だけ正式確認する必要がある。

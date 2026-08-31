@@ -1,0 +1,41 @@
+{
+  "record_version": "order9_r1_phase_duration_repair_approval_v1",
+  "decision": "approved",
+  "approved_by": "repository_user",
+  "approval_date": "2026-08-31",
+  "approval_basis": "The user required completion of the 20 mm/10 degree level, permitted ad hoc teacher construction, and approved slowing the applicable motion without relaxing the task. Three validation candidates independently repeated a one-of-two object drop on entry to release. Keeping every spatial and joint sample unchanged while lengthening only place from 3 s to 6 s passed two diagnostic Isaac replays per candidate with zero safety failure and zero fallback. The base v13 protocol remains immutable; this supplemental approval binds only those three phase-duration repairs and does not authorize learning or teacher collection.",
+  "base_range_protocol": {
+    "path": "configs/training/order9_r1_range_selection_protocol_v13.json",
+    "sha256": "e59a341bc8b6ff534df258830e516aa4902e306a9250b5c17fc7b7e5b3b3bbfb"
+  },
+  "base_range_approval": {
+    "path": "for_codex/R1_RANGE_SELECTION_PROTOCOL_V13_APPROVAL.json",
+    "sha256": "b08792576c23f64012ed93058df37837fcb306661eaca5c6778b1447a7ce15bf"
+  },
+  "repair_config": {
+    "path": "configs/training/order9_r1_phase_duration_repairs_v1.json",
+    "sha256": "1fc459deaa02f1cf5b40916f5df78e0a5cff5e9e02177ea60b09a9b7b003df87"
+  },
+  "repair_implementation": {
+    "path": "amsrr/training/order9_r1_phase_duration_repair.py",
+    "sha256": "72f8e027b1a5169efe2ce297d50660c5ea83b91845d14f232bb236561b9e15a6"
+  },
+  "failure_preservation_implementation": {
+    "path": "scripts/order9_preserve_r1_object_drop_v13.py",
+    "sha256": "dfbc40881d4f7b2481c21bc78403094411e224e858d89bdc0e534383cf2ca67f"
+  },
+  "validator_implementation": {
+    "path": "scripts/order9_validate_r1_phase_duration_repairs_v1.py",
+    "sha256": "acb1bd85d11b839782252c78e149f44668fc31b6d620818d17f51355b1b60ed5"
+  },
+  "candidate_count": 3,
+  "place_source_duration_s": 3.0,
+  "place_repaired_duration_s": 6.0,
+  "spatial_path_changed": false,
+  "joint_path_changed": false,
+  "acceptance_or_safety_gate_changed": false,
+  "learning_authorized": false,
+  "teacher_collection_authorized": false,
+  "file_deletion_authorized": false,
+  "commit_authorized": false
+}

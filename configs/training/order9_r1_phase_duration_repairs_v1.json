@@ -1,0 +1,96 @@
+{
+  "repair_version": "order9_r1_phase_duration_repairs_v1",
+  "acceptance_or_safety_gate_changed": false,
+  "repairs": {
+    "r1_l2_20mm_10deg__validation__validation-000034-3ccb6e92bc38__lattice_01": {
+      "repair_kind": "confirmed_release_entry_object_drop_place_slowdown",
+      "phase_duration_multipliers": {
+        "approach": 1.0,
+        "contact_acquisition": 1.0,
+        "lift": 1.0,
+        "transport": 1.0,
+        "place": 2.0,
+        "release": 1.0,
+        "retreat": 1.0,
+        "settle": 1.0
+      },
+      "source_confirmed_isaac_failure": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/validation034_lattice_01_confirmed_isaac_object_drop_v1.json",
+        "sha256": "2a4623b7b01cae0d82c4091c80210cca496222c22c04017bef4923e1763aa495"
+      },
+      "diagnostic_isaac_success": {
+        "episodes": {
+          "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/diagnostics/validation034_lattice01_place_x2_isaac_v1/r1_l2_20mm_10deg__validation__validation-000034-3ccb6e92bc38__lattice_01/isaac/evaluation_episodes.jsonl",
+          "sha256": "c119d4679de09b8f8c7bf2893f227296ff5ac9d30d846c7e39d2553df04149df"
+        },
+        "raw_rollout": {
+          "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/diagnostics/validation034_lattice01_place_x2_isaac_v1/r1_l2_20mm_10deg__validation__validation-000034-3ccb6e92bc38__lattice_01/isaac/evaluation_rollout.pt",
+          "sha256": "c9d334c9586917fa96cf5429c064bc0bbafc6f5800b76d09522cd1b7b38d9eb7"
+        }
+      },
+      "spatial_path_changed": false,
+      "joint_path_changed": false,
+      "acceptance_or_safety_gate_changed": false
+    },
+    "r1_l2_20mm_10deg__validation__validation-000034-3ccb6e92bc38__lattice_06": {
+      "repair_kind": "confirmed_release_entry_object_drop_place_slowdown",
+      "phase_duration_multipliers": {
+        "approach": 1.0,
+        "contact_acquisition": 1.0,
+        "lift": 1.0,
+        "transport": 1.0,
+        "place": 2.0,
+        "release": 1.0,
+        "retreat": 1.0,
+        "settle": 1.0
+      },
+      "source_confirmed_isaac_failure": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/validation034_lattice_06_confirmed_isaac_object_drop_v1.json",
+        "sha256": "418c96f6fb446a618661edd0a2f6638747ba65f9cf2b8f882cc207ffb8b8c514"
+      },
+      "diagnostic_isaac_success": {
+        "episodes": {
+          "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/diagnostics/validation034_place_slowdown_isaac_v1/r1_l2_20mm_10deg__validation__validation-000034-3ccb6e92bc38__lattice_06/isaac/evaluation_episodes.jsonl",
+          "sha256": "2591bfcd5e9f66093ece98f001b6dbe78a3b624522fb0273cc95f7fdb7ac49db"
+        },
+        "raw_rollout": {
+          "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/diagnostics/validation034_place_slowdown_isaac_v1/r1_l2_20mm_10deg__validation__validation-000034-3ccb6e92bc38__lattice_06/isaac/evaluation_rollout.pt",
+          "sha256": "4497e6bb65f61acfb1eabce021807417224a118166dd34ae1a410e93b17177bb"
+        }
+      },
+      "spatial_path_changed": false,
+      "joint_path_changed": false,
+      "acceptance_or_safety_gate_changed": false
+    },
+    "r1_l2_20mm_10deg__validation__validation-000034-3ccb6e92bc38__lattice_24": {
+      "repair_kind": "confirmed_release_entry_object_drop_place_slowdown",
+      "phase_duration_multipliers": {
+        "approach": 1.0,
+        "contact_acquisition": 1.0,
+        "lift": 1.0,
+        "transport": 1.0,
+        "place": 2.0,
+        "release": 1.0,
+        "retreat": 1.0,
+        "settle": 1.0
+      },
+      "source_confirmed_isaac_failure": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/repair_sources/validation034_lattice_24_confirmed_isaac_object_drop_v1.json",
+        "sha256": "7570b9029ff5dc61d72d54e9042578db6f06b822f1ee30ff11a7e3cb387b6393"
+      },
+      "diagnostic_isaac_success": {
+        "episodes": {
+          "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/diagnostics/validation034_place_slowdown_isaac_v1/r1_l2_20mm_10deg__validation__validation-000034-3ccb6e92bc38__lattice_24/isaac/evaluation_episodes.jsonl",
+          "sha256": "31de51838ee5b15362d8916607f30d2afa343735b7bae633b66e5ac265775078"
+        },
+        "raw_rollout": {
+          "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/diagnostics/validation034_place_slowdown_isaac_v1/r1_l2_20mm_10deg__validation__validation-000034-3ccb6e92bc38__lattice_24/isaac/evaluation_rollout.pt",
+          "sha256": "534e55730aad565e113f1706d86fef56784f65feb097bedc2c8e03e407114a52"
+        }
+      },
+      "spatial_path_changed": false,
+      "joint_path_changed": false,
+      "acceptance_or_safety_gate_changed": false
+    }
+  }
+}

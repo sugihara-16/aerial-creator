@@ -38,7 +38,82 @@ from amsrr.utils.hashing import hash_file, stable_hash
 ORDER9_R1_PHASE_DURATION_REPAIR_VERSION = "order9_r1_phase_duration_repair_v1"
 ORDER9_R1_CONTACT_HANDOFF_REPAIR_VERSION = "order9_r1_contact_handoff_repair_v1"
 ORDER9_R1_ENDPOINT_HOLD_REPAIR_VERSION = "order9_r1_endpoint_hold_repair_v1"
+ORDER9_R1_PHASE_DURATION_REPAIRS_RELATIVE = Path(
+    "configs/training/order9_r1_phase_duration_repairs_v1.json"
+)
 _PHASES = tuple(value.value for value in ORDER9_OBJECT_TASK_PHASES)
+
+
+def load_order9_r1_phase_duration_repairs(
+    path: str | Path = ORDER9_R1_PHASE_DURATION_REPAIRS_RELATIVE,
+    *,
+    repository_root: str | Path,
+) -> dict[str, dict[str, Any]]:
+    """Load hash-bound repairs proven by failure and successful Isaac replays."""
+
+    repository = Path(repository_root).resolve()
+    source = Path(path)
+    source = source.resolve() if source.is_absolute() else (repository / source).resolve()
+    payload = json.loads(source.read_text(encoding="utf-8"))
+    repairs = payload.get("repairs")
+    if (
+        payload.get("repair_version") != "order9_r1_phase_duration_repairs_v1"
+        or payload.get("acceptance_or_safety_gate_changed") is not False
+        or not isinstance(repairs, dict)
+        or not repairs
+    ):
+        raise ValueError("R1 phase-duration repair registry differs")
+    expected_multipliers = {phase: 1.0 for phase in _PHASES}
+    expected_multipliers["place"] = 2.0
+    result = {}
+    for candidate_id, repair in repairs.items():
+        if not isinstance(repair, dict):
+            raise ValueError("R1 phase-duration repair entry differs")
+        failure_binding = repair.get("source_confirmed_isaac_failure") or {}
+        diagnostic = repair.get("diagnostic_isaac_success") or {}
+        episodes_binding = diagnostic.get("episodes") or {}
+        raw_binding = diagnostic.get("raw_rollout") or {}
+        bound_paths = []
+        for binding in (failure_binding, episodes_binding, raw_binding):
+            bound = (repository / str(binding.get("path", ""))).resolve()
+            if (
+                repository not in bound.parents
+                or not bound.is_file()
+                or binding.get("sha256") != hash_file(bound)
+            ):
+                raise ValueError("R1 phase-duration repair binding differs")
+            bound_paths.append(bound)
+        failure = json.loads(bound_paths[0].read_text(encoding="utf-8"))
+        episodes = [
+            json.loads(line)
+            for line in bound_paths[1].read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        if (
+            repair.get("repair_kind")
+            != "confirmed_release_entry_object_drop_place_slowdown"
+            or repair.get("phase_duration_multipliers") != expected_multipliers
+            or repair.get("spatial_path_changed") is not False
+            or repair.get("joint_path_changed") is not False
+            or repair.get("acceptance_or_safety_gate_changed") is not False
+            or failure.get("candidate_id") != candidate_id
+            or failure.get("failure_kind")
+            != "independently_repeated_release_entry_object_drop"
+            or failure.get("terminal_phase") != "release"
+            or failure.get("acceptance_or_safety_gate_changed") is not False
+            or len(episodes) != 2
+            or any(
+                episode.get("task_success") is not True
+                or episode.get("safety_failure") is not False
+                or int(episode.get("fallback_decision_count", -1)) != 0
+                or float((episode.get("metrics") or {}).get("terminal_phase_index", -1.0))
+                != 8.0
+                for episode in episodes
+            )
+        ):
+            raise ValueError("R1 phase-duration repair evidence differs")
+        result[candidate_id] = dict(repair)
+    return result
 
 
 def derive_order9_r1_phase_duration_repair_case(
@@ -433,6 +508,225 @@ def derive_order9_r1_phase_duration_repair_case(
         raise
 
 
+def relocate_order9_r1_phase_duration_repair_case(
+    *,
+    source_case_root: str | Path,
+    destination_case_root: str | Path,
+    repository_root: str | Path,
+) -> dict[str, Any]:
+    """Relocate a verified repair while rebinding every path-dependent hash."""
+
+    repository = Path(repository_root).resolve()
+    source_root = Path(source_case_root).resolve()
+    destination = Path(destination_case_root).resolve()
+    if source_root == destination or destination.exists():
+        raise FileExistsError(destination)
+    source_case_payload = json.loads(
+        (source_root / "case_manifest.json").read_text(encoding="utf-8")
+    )
+    source_candidate_id = source_case_payload.get("candidate_id")
+    if not isinstance(source_candidate_id, str) or not source_candidate_id:
+        raise ValueError("R1 relocated phase-duration candidate is invalid")
+    source_set_path = source_root / "nominal_set/manifest.json"
+    source_set = Order9C3NominalTrajectorySetManifest.from_json(
+        source_set_path.read_text(encoding="utf-8")
+    )
+    source_set.validate()
+    if (
+        len(source_set.entries) != 1
+        or source_case_payload.get("nominal_set", {}).get("sha256")
+        != hash_file(source_set_path)
+    ):
+        raise ValueError("R1 relocated phase-duration source set differs")
+    source_artifact_path = source_set_path.parent / source_set.entries[0].artifact_path
+    validate_order9_c3_nominal_trajectory_artifact_bytes(source_artifact_path)
+    if (
+        source_case_payload.get("nominal_artifact", {}).get("sha256")
+        != hash_file(source_artifact_path)
+    ):
+        raise ValueError("R1 relocated phase-duration source artifact differs")
+    source_reset_path = source_root / "reset_bank.pt"
+    if source_reset_path.is_file():
+        import torch
+
+        source_reset = torch.load(
+            source_reset_path,
+            map_location="cpu",
+            weights_only=False,
+        )
+        source_reference = (
+            (source_reset.get("contract") or {}).get("c3_nominal_reference")
+            if isinstance(source_reset, dict)
+            else None
+        )
+        source_timeline_path = source_artifact_path.parent / "nominal_timeline.json"
+        if (
+            not isinstance(source_reference, dict)
+            or source_reference.get("set_manifest_path")
+            != source_case_payload["nominal_set"]["path"]
+            or source_reference.get("set_manifest_sha256")
+            != source_case_payload["nominal_set"]["sha256"]
+            or source_reference.get("artifact_path")
+            != source_case_payload["nominal_artifact"]["path"]
+            or source_reference.get("artifact_sha256")
+            != source_case_payload["nominal_artifact"]["sha256"]
+            or source_reference.get("timeline_sha256")
+            != hash_file(source_timeline_path)
+        ):
+            raise ValueError("R1 relocated source reset-bank binding differs")
+    source_relative = _portable(source_root, repository)
+    destination_relative = _portable(destination, repository)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = Path(
+        tempfile.mkdtemp(prefix=f".{destination.name}.tmp-", dir=destination.parent)
+    )
+    try:
+        shutil.rmtree(temporary)
+        shutil.copytree(source_root, temporary, ignore=shutil.ignore_patterns("isaac"))
+
+        set_path = temporary / "nominal_set/manifest.json"
+        nominal_set = Order9C3NominalTrajectorySetManifest.from_json(
+            set_path.read_text(encoding="utf-8")
+        )
+        nominal_set.validate()
+        if len(nominal_set.entries) != 1:
+            raise ValueError("R1 relocated phase-duration set is not singular")
+        artifact_path = set_path.parent / nominal_set.entries[0].artifact_path
+        artifact_payload = _replace_portable_root(
+            json.loads(artifact_path.read_text(encoding="utf-8")),
+            source_relative=source_relative,
+            destination_relative=destination_relative,
+        )
+        _write_json_text(artifact_path, artifact_payload)
+        validate_order9_c3_nominal_trajectory_artifact_bytes(artifact_path)
+
+        collision_path = set_path.parent / "collision_validation.json"
+        collision_payload = _replace_portable_root(
+            json.loads(collision_path.read_text(encoding="utf-8")),
+            source_relative=source_relative,
+            destination_relative=destination_relative,
+        )
+        _write_json_text(collision_path, collision_payload)
+
+        nominal_set.entries[0].artifact_sha256 = hash_file(artifact_path)
+        _write_json_text(set_path, nominal_set.to_dict())
+        nominal_set_sha256 = hash_file(set_path)
+
+        case_path = temporary / "case_manifest.json"
+        case_payload = _replace_portable_root(
+            json.loads(case_path.read_text(encoding="utf-8")),
+            source_relative=source_relative,
+            destination_relative=destination_relative,
+        )
+        case_payload["nominal_set"]["sha256"] = nominal_set_sha256
+        case_payload["nominal_artifact"]["sha256"] = hash_file(artifact_path)
+        _write_json_text(case_path, case_payload)
+
+        reset_path = temporary / "reset_bank.pt"
+        if reset_path.is_file():
+            import torch
+
+            reset_payload = torch.load(
+                reset_path,
+                map_location="cpu",
+                weights_only=False,
+            )
+            contract = (
+                reset_payload.get("contract")
+                if isinstance(reset_payload, dict)
+                else None
+            )
+            reference = (
+                contract.get("c3_nominal_reference")
+                if isinstance(contract, dict)
+                else None
+            )
+            if not isinstance(reference, dict):
+                raise ValueError("R1 relocated reset-bank reference is absent")
+            reference.update(
+                {
+                    "set_manifest_path": _portable(
+                        destination / "nominal_set/manifest.json", repository
+                    ),
+                    "set_manifest_sha256": nominal_set_sha256,
+                    "artifact_path": _portable(
+                        destination
+                        / "nominal_set"
+                        / nominal_set.entries[0].artifact_path,
+                        repository,
+                    ),
+                    "artifact_sha256": hash_file(artifact_path),
+                    "timeline_sha256": hash_file(
+                        artifact_path.parent / "nominal_timeline.json"
+                    ),
+                }
+            )
+            torch.save(reset_payload, reset_path)
+
+        admission_path = temporary / "phase_duration_repair_admission.json"
+        admission = _replace_portable_root(
+            json.loads(admission_path.read_text(encoding="utf-8")),
+            source_relative=source_relative,
+            destination_relative=destination_relative,
+        )
+        admission.update(
+            {
+                "case_manifest_sha256": hash_file(case_path),
+                "nominal_set_sha256": nominal_set_sha256,
+                "nominal_artifact_sha256": hash_file(artifact_path),
+                "reset_bank_status": (
+                    "relocated_hash_reference_rebound"
+                    if reset_path.is_file()
+                    else "pending_runtime_generation"
+                ),
+                "relocated_from": {
+                    "path": source_relative + "/case_manifest.json",
+                    "sha256": hash_file(source_root / "case_manifest.json"),
+                },
+            }
+        )
+        _write_json_text(admission_path, admission)
+        os.rename(temporary, destination)
+        relocated = load_order9_r1_isaac_case(
+            destination / "case_manifest.json", repository
+        )
+        if relocated.manifest.candidate_id != source_candidate_id:
+            raise ValueError("R1 relocated phase-duration candidate differs")
+        return admission
+    except BaseException:
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise
+
+
+def _replace_portable_root(
+    value: Any,
+    *,
+    source_relative: str,
+    destination_relative: str,
+) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _replace_portable_root(
+                item,
+                source_relative=source_relative,
+                destination_relative=destination_relative,
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _replace_portable_root(
+                item,
+                source_relative=source_relative,
+                destination_relative=destination_relative,
+            )
+            for item in value
+        ]
+    if isinstance(value, str):
+        return value.replace(source_relative, destination_relative)
+    return value
+
+
 def _validated_multipliers(
     values: Mapping[str, float], *, allow_noop: bool = False
 ) -> dict[str, float]:
@@ -592,6 +886,9 @@ def _candidate_id(root: Path) -> str:
 __all__ = [
     "ORDER9_R1_CONTACT_HANDOFF_REPAIR_VERSION",
     "ORDER9_R1_ENDPOINT_HOLD_REPAIR_VERSION",
+    "ORDER9_R1_PHASE_DURATION_REPAIRS_RELATIVE",
     "ORDER9_R1_PHASE_DURATION_REPAIR_VERSION",
     "derive_order9_r1_phase_duration_repair_case",
+    "load_order9_r1_phase_duration_repairs",
+    "relocate_order9_r1_phase_duration_repair_case",
 ]

@@ -1,0 +1,106 @@
+{
+  "ledger_version": "order9_r1_range_selection_release_ledger_v11",
+  "decision": "rejected_before_teacher_collection",
+  "date": "2026-08-29",
+  "accepted_range": null,
+  "selection": {
+    "split": "train",
+    "bucket_count": 22,
+    "first_attempted_level_id": "r1_l2_20mm_10deg",
+    "passed": false,
+    "decisive_candidate_id": "r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_08",
+    "decisive_reason": "R1 grasp rotation admission rejected: E_R1_GRASP_ROTATION_FORCE_MOMENT_ARM",
+    "isaac_invoked": false,
+    "controller_layers_invoked": false,
+    "higher_levels_skipped_by_approved_stop_rule": true
+  },
+  "confirmation": {
+    "split": "validation",
+    "bucket_count": 14,
+    "level_id": "r1_l1_10mm_5deg",
+    "passed": false,
+    "decisive_candidate_id": "r1_l1_10mm_5deg__validation__validation-000038-e6065f5b3c3e__lattice_00",
+    "decisive_phase": "place",
+    "decisive_knot_index": 24,
+    "observed_robot_support_clearance_m": 0.018085631664698426,
+    "required_robot_support_clearance_m": 0.0195,
+    "isaac_invoked": false,
+    "controller_layers_invoked": false,
+    "confirmation_failure_stepback_forbidden": true
+  },
+  "finite_teacher_repair_search_exhausted": true,
+  "formal_teacher_collection_authorized": false,
+  "pi_h_imitation_learning_authorized": false,
+  "training_eligible": false,
+  "pi_l_system_retained": true,
+  "pi_l_actor_command_applied": false,
+  "qpid_qp_applied": false,
+  "local_servo_applied": false,
+  "protected_c3_unchanged": true,
+  "bindings": {
+    "result_report": {
+      "path": "for_codex/R1_RANGE_SELECTION_V11_RESULT.md",
+      "sha256": "59753d53695dc16281d25a371fbf36bc1aa5fce635553c232bbbcc6e4b6b9a06"
+    },
+    "formal_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v11/range_selection_and_confirmation_result.json",
+      "sha256": "ea612b531a0bec02d1a71e3df8674417993efe2493e2debefd99264c51dbb2c2"
+    },
+    "selection_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v11/results/train__r1_l2_20mm_10deg.json",
+      "sha256": "316cd3c66c07d19f485cfb96ae089f847ca2354a6cdb9ac8d284ccdfe903ebad"
+    },
+    "confirmation_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v11/results/validation__r1_l1_10mm_5deg.json",
+      "sha256": "47d237e591c81dcb002456f33472722973690870d6de906a9beb4b57c385e5b1"
+    },
+    "selection_preparation": {
+      "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v11/preparation/train__r1_l2_20mm_10deg.json",
+      "sha256": "b40831b4b3179a0a8fc7b3898757dbedb3f6f48bc5107d9051968e20d32906dc"
+    },
+    "confirmation_preparation": {
+      "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v11/preparation/validation__r1_l1_10mm_5deg.json",
+      "sha256": "96837b20090c9c2abe53abe4188e1e30978dbd865e00715c49131d6122ccc151"
+    },
+    "selection_decisive_checkpoint": {
+      "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v11/preparation/train__r1_l2_20mm_10deg__decisive_in_progress.json",
+      "sha256": "5f87d3fd04f68699e425b98454186660e4bba09008ac219ff2d4562a4fe2850f"
+    },
+    "confirmation_decisive_checkpoint": {
+      "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v11/preparation/validation__r1_l1_10mm_5deg__decisive_in_progress.json",
+      "sha256": "e74d4dbe97490293835b200d0d98367d76f3d1c74274db36f5b86490b8d9f05a"
+    },
+    "teacher_repair_record": {
+      "path": "configs/training/order9_r1_range_teacher_repairs_v11.json",
+      "sha256": "62a4d3cfcaba8e413ef384a0354cb4771bbb3a95efcb671841b1cb540acccdf5"
+    },
+    "protocol": {
+      "path": "configs/training/order9_r1_range_selection_protocol_v11.json",
+      "sha256": "fd1bf6c72e5dd981626db0e842ccbe8351fc33aa1d26c3be1b366bd6e560917b"
+    },
+    "approval": {
+      "path": "for_codex/R1_RANGE_SELECTION_PROTOCOL_V11_APPROVAL.json",
+      "sha256": "92daeba5aa536df271f299ee95d58e8e6f2eb7469ad996ee796088c9e779f53f"
+    },
+    "runner": {
+      "path": "scripts/order9_run_r1_range_selection_v11.py",
+      "sha256": "3599001b8f8f83166801733d9cdd609ad5601d34dd251670a8df252582e9a9ef"
+    },
+    "parent_minimum_level_result": {
+      "path": "for_codex/R1_NOMINAL_CALIBRATION_V9_RESULT_LEDGER.json",
+      "sha256": "f162ca51cb6a996aba93877dd12d5e9b0c0c2b71a4ed46ede10d47c311e04556"
+    },
+    "protected_c3_checkpoint": {
+      "path": "artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt",
+      "sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b"
+    },
+    "protected_c3_rollout": {
+      "path": "scripts/order9_vectorized_isaac_rollout.py",
+      "sha256": "e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2"
+    },
+    "protected_c3_release_ledger": {
+      "path": "for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json",
+      "sha256": "7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729"
+    }
+  }
+}

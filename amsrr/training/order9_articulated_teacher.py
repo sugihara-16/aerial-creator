@@ -382,11 +382,19 @@ class Order9ArticulatedTrajectoryTeacher:
         nominal_start_joint_positions_rad: Mapping[str, float] | None = None,
         release_joint_positions_rad: Mapping[str, float] | None = None,
         contact_goal_joint_seed_positions_rad: Mapping[str, float] | None = None,
+        configuration_goal_joint_seed_positions_rad: (
+            Mapping[str, float] | None
+        ) = None,
     ) -> Order9ArticulatedTeacherPlan:
         contact_goal_joint_seed = _validated_contact_goal_joint_seed(
             context,
             self.physical_model,
             contact_goal_joint_seed_positions_rad,
+        )
+        configuration_goal_joint_seed = _validated_contact_goal_joint_seed(
+            context,
+            self.physical_model,
+            configuration_goal_joint_seed_positions_rad,
         )
         candidate_groups = _candidate_group_attempts(
             context.contact_candidate_set,
@@ -558,7 +566,11 @@ class Order9ArticulatedTrajectoryTeacher:
                         nominal_start_joint_positions_rad
                     ),
                     release_joint_positions_rad=release_joint_positions_rad,
-                    contact_goal_joint_seed_positions_rad=(contact_goal_joint_seed),
+                    contact_goal_joint_seed_positions_rad=(
+                        configuration_goal_joint_seed
+                        if configuration_goal_joint_seed is not None
+                        else contact_goal_joint_seed
+                    ),
                     collision_object=self.collision_object,
                     configuration_space_planner=(self.configuration_space_planner),
                     configuration_route_cache=(self._configuration_route_cache),

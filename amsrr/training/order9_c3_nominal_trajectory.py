@@ -425,6 +425,9 @@ def generate_order9_c3_nominal_grasp_trajectory(
     preferred_candidate_group_id: str | None = None,
     excluded_surface_port_id_pairs: tuple[tuple[int, int], ...] = (),
     contact_goal_joint_seed_positions_rad: Mapping[str, float] | None = None,
+    configuration_goal_joint_seed_positions_rad: (
+        Mapping[str, float] | None
+    ) = None,
     progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> Order9C3NominalTrajectory:
     """Search contact groups until the complete local grasp path succeeds."""
@@ -455,6 +458,9 @@ def generate_order9_c3_nominal_grasp_trajectory(
             excluded_surface_port_id_pairs=excluded_surface_port_id_pairs,
             contact_goal_joint_seed_positions_rad=(
                 contact_goal_joint_seed_positions_rad
+            ),
+            configuration_goal_joint_seed_positions_rad=(
+                configuration_goal_joint_seed_positions_rad
             ),
             progress_callback=progress_callback,
         )
@@ -488,6 +494,9 @@ def generate_order9_c3_nominal_grasp_trajectory(
             collision_object if enforce_proxy_collision_during_generation else None
         ),
         contact_goal_joint_seed_positions_rad=(contact_goal_joint_seed_positions_rad),
+        configuration_goal_joint_seed_positions_rad=(
+            configuration_goal_joint_seed_positions_rad
+        ),
     )
     first_group_id = probe.trajectory_plan.candidate_group_id
     group_ids = tuple(
@@ -524,6 +533,9 @@ def generate_order9_c3_nominal_grasp_trajectory(
                 contact_goal_joint_seed_positions_rad=(
                     contact_goal_joint_seed_positions_rad
                 ),
+                configuration_goal_joint_seed_positions_rad=(
+                    configuration_goal_joint_seed_positions_rad
+                ),
                 progress_callback=progress_callback,
             )
         except SchemaValidationError as error:
@@ -555,6 +567,9 @@ def _generate_order9_c3_nominal_grasp_trajectory_once(
     preferred_candidate_group_id: str | None = None,
     excluded_surface_port_id_pairs: tuple[tuple[int, int], ...] = (),
     contact_goal_joint_seed_positions_rad: Mapping[str, float] | None = None,
+    configuration_goal_joint_seed_positions_rad: (
+        Mapping[str, float] | None
+    ) = None,
     progress_callback: Callable[[Mapping[str, Any]], None] | None = None,
 ) -> Order9C3NominalTrajectory:
     """Chain ideal resolved endpoints from approach through grasp contact."""
@@ -592,6 +607,9 @@ def _generate_order9_c3_nominal_grasp_trajectory_once(
             collision_object if enforce_proxy_collision_during_generation else None
         ),
         contact_goal_joint_seed_positions_rad=(contact_goal_joint_seed_positions_rad),
+        configuration_goal_joint_seed_positions_rad=(
+            configuration_goal_joint_seed_positions_rad
+        ),
     )
     built = IRGBuilder().build_with_scene_graph(task_spec)
     envelope = InteractionEnvelopeExtractor().extract(built.irg)
@@ -646,6 +664,9 @@ def _generate_order9_c3_nominal_grasp_trajectory_once(
                 nominal_start_joint_positions_rad=initial_q,
                 contact_goal_joint_seed_positions_rad=(
                     contact_goal_joint_seed_positions_rad
+                ),
+                configuration_goal_joint_seed_positions_rad=(
+                    configuration_goal_joint_seed_positions_rad
                 ),
             )
             if plan.task_phase != phase:

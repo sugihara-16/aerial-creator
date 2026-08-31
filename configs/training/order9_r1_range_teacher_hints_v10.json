@@ -1,0 +1,271 @@
+{
+  "config_version": "order9_r1_range_teacher_hints_v10",
+  "candidate_fast_paths": {
+    "r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_00": {
+      "additional_contact_options": [],
+      "candidate_group_id": "slot_0:grasp_pair:0",
+      "collision_margin_m": 0.007,
+      "pregrasp_clearance_m": 0.12,
+      "prefer_additional_options_first": false,
+      "selected_surface_port_ids": [
+        14,
+        18
+      ],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_08/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_08/manifest.json",
+        "sha256": "01badc4e57ecae9c6e80e49b816a44c16f6731173a4a72bd4d27a2264c478215"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_02": {
+      "additional_contact_options": [],
+      "candidate_group_id": "slot_0:grasp_pair:0",
+      "collision_margin_m": 0.007,
+      "pregrasp_clearance_m": 0.12,
+      "prefer_additional_options_first": false,
+      "selected_surface_port_ids": [
+        14,
+        18
+      ],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_08/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_08/manifest.json",
+        "sha256": "01badc4e57ecae9c6e80e49b816a44c16f6731173a4a72bd4d27a2264c478215"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_06": {
+      "additional_contact_options": [],
+      "candidate_group_id": "slot_0:grasp_pair:0",
+      "collision_margin_m": 0.007,
+      "pregrasp_clearance_m": 0.12,
+      "prefer_additional_options_first": false,
+      "selected_surface_port_ids": [
+        14,
+        18
+      ],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_08/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_08/manifest.json",
+        "sha256": "01badc4e57ecae9c6e80e49b816a44c16f6731173a4a72bd4d27a2264c478215"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_18": {
+      "additional_contact_options": [],
+      "candidate_group_id": "slot_0:grasp_pair:0",
+      "collision_margin_m": 0.007,
+      "pregrasp_clearance_m": 0.12,
+      "prefer_additional_options_first": false,
+      "selected_surface_port_ids": [14, 18],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v10/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_18/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_18/manifest.json",
+        "sha256": "c8e0ad10769b77713af4481851492e6488b9f9f08117e4ab284da60a261b3d52"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_20": {
+      "additional_contact_options": [],
+      "candidate_group_id": "slot_0:grasp_pair:0",
+      "collision_margin_m": 0.007,
+      "pregrasp_clearance_m": 0.12,
+      "prefer_additional_options_first": false,
+      "selected_surface_port_ids": [14, 18],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v10/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_20/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_20/manifest.json",
+        "sha256": "0c1dfe588feb3133a679b9a81efc4e49e5b8d78a653c03b13d695b97752ad27a"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_24": {
+      "additional_contact_options": [],
+      "candidate_group_id": "slot_0:grasp_pair:0",
+      "collision_margin_m": 0.007,
+      "pregrasp_clearance_m": 0.12,
+      "prefer_additional_options_first": false,
+      "selected_surface_port_ids": [14, 18],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v10/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_24/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_24/manifest.json",
+        "sha256": "1b92fa3a81924c63a8965f20bb8af79d91df5a7a0134cfcb917e061d7c5c4ce5"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_26": {
+      "additional_contact_options": [],
+      "candidate_group_id": "slot_0:grasp_pair:0",
+      "collision_margin_m": 0.007,
+      "pregrasp_clearance_m": 0.12,
+      "prefer_additional_options_first": false,
+      "selected_surface_port_ids": [14, 18],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v10/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_26/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_26/manifest.json",
+        "sha256": "8b9181156adc49182135b724033403c10e1d7d14655618466d6dda40b95ff92a"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_00": {
+      "additional_contact_options": [],
+      "candidate_group_id": "slot_0:grasp_pair:3",
+      "collision_margin_m": 0.007,
+      "grasp_contact_height_offset_m": 0.02,
+      "pregrasp_clearance_m": 0.12,
+      "prefer_additional_options_first": false,
+      "selected_surface_port_ids": [
+        21,
+        29
+      ],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v10/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06/manifest.json",
+        "sha256": "85f654d627be25d6991e64e645d4e68bb0d5a2692d21a8fe61267a6e87dc0f58"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_02": {
+      "additional_contact_options": [],
+      "candidate_group_id": "slot_0:grasp_pair:3",
+      "collision_margin_m": 0.007,
+      "pregrasp_clearance_m": 0.12,
+      "prefer_additional_options_first": false,
+      "grasp_contact_height_offset_m": 0.02,
+      "selected_surface_port_ids": [21, 29],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v10/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06/manifest.json",
+        "sha256": "85f654d627be25d6991e64e645d4e68bb0d5a2692d21a8fe61267a6e87dc0f58"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06": {
+      "additional_contact_options": [],
+      "candidate_group_id": "slot_0:grasp_pair:3",
+      "collision_margin_m": 0.007,
+      "grasp_contact_height_offset_m": 0.02,
+      "pregrasp_clearance_m": 0.12,
+      "prefer_additional_options_first": false,
+      "selected_surface_port_ids": [
+        21,
+        29
+      ],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v10/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_06/manifest.json",
+        "sha256": "85f654d627be25d6991e64e645d4e68bb0d5a2692d21a8fe61267a6e87dc0f58"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_07": {
+      "additional_contact_options": [],
+      "candidate_group_id": "slot_0:grasp_pair:2",
+      "collision_margin_m": 0.007,
+      "grasp_contact_height_offset_m": 0.02,
+      "pregrasp_clearance_m": 0.12,
+      "prefer_additional_options_first": false,
+      "selected_surface_port_ids": [21, 29],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v10/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_24/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_24/manifest.json",
+        "sha256": "695cbe64a3a786dd62d35c43e22eecc570965e1ac3ffffa56823407b7cb81f99"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_24": {
+      "additional_contact_options": [],
+      "candidate_group_id": "slot_0:grasp_pair:2",
+      "collision_margin_m": 0.007,
+      "grasp_contact_height_offset_m": 0.005,
+      "pregrasp_clearance_m": 0.12,
+      "prefer_additional_options_first": false,
+      "selected_surface_port_ids": [21, 29],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v10/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_24/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_24/manifest.json",
+        "sha256": "695cbe64a3a786dd62d35c43e22eecc570965e1ac3ffffa56823407b7cb81f99"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000003-3b95da871f01__lattice_02": {
+      "additional_contact_options": [],
+      "candidate_group_id": "slot_0:grasp_pair:3",
+      "collision_margin_m": 0.007,
+      "pregrasp_clearance_m": 0.12,
+      "prefer_additional_options_first": false,
+      "selected_surface_port_ids": [
+        10,
+        18
+      ],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000003-3b95da871f01__lattice_00/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000003-3b95da871f01__lattice_00/manifest.json",
+        "sha256": "ae0f3a01bc677cf196dc833e8c9b44c2cc7b8758db95e30a0a9888baa53aaf9f"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000003-3b95da871f01__lattice_06": {
+      "additional_contact_options": [],
+      "candidate_group_id": "slot_0:grasp_pair:3",
+      "collision_margin_m": 0.007,
+      "pregrasp_clearance_m": 0.12,
+      "prefer_additional_options_first": false,
+      "selected_surface_port_ids": [
+        10,
+        18
+      ],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000003-3b95da871f01__lattice_00/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000003-3b95da871f01__lattice_00/manifest.json",
+        "sha256": "ae0f3a01bc677cf196dc833e8c9b44c2cc7b8758db95e30a0a9888baa53aaf9f"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000003-3b95da871f01__lattice_08": {
+      "additional_contact_options": [],
+      "candidate_group_id": "slot_0:grasp_pair:3",
+      "collision_margin_m": 0.007,
+      "pregrasp_clearance_m": 0.12,
+      "prefer_additional_options_first": false,
+      "selected_surface_port_ids": [
+        10,
+        18
+      ],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000003-3b95da871f01__lattice_00/nominal_set/buckets/r1_l2_20mm_10deg__train__train-000003-3b95da871f01__lattice_00/manifest.json",
+        "sha256": "ae0f3a01bc677cf196dc833e8c9b44c2cc7b8758db95e30a0a9888baa53aaf9f"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_08": {
+      "additional_contact_options": [],
+      "candidate_group_id": "slot_0:grasp_pair:3",
+      "collision_margin_m": 0.007,
+      "grasp_contact_height_offset_m": 0.02,
+      "pregrasp_clearance_m": 0.12,
+      "prefer_additional_options_first": false,
+      "selected_surface_port_ids": [21, 29],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/calibration_v8_short_retreat_safe_timing/selection/r1_l1_10mm_5deg/r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_08/nominal_set/buckets/r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_08/manifest.json",
+        "sha256": "9edf6b0b369b8c96816c2a7865d25b6c073aad2bdb1b69c0e534009a1538591f"
+      }
+    },
+    "r1_l2_20mm_10deg__train__train-000027-7fe33c662d36__lattice_26": {
+      "candidate_group_id": "slot_0:grasp_pair:3",
+      "collision_margin_m": 0.007,
+      "grasp_contact_height_offset_m": 0.02,
+      "pregrasp_clearance_m": 0.12,
+      "selected_surface_port_ids": [21, 29],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/calibration_v8_short_retreat_safe_timing/selection/r1_l1_10mm_5deg/r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_26/nominal_set/buckets/r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_26/manifest.json",
+        "sha256": "4fd3c6c6ebba96fdef6b267e0ecf7b56d499fe0d672f976219457fbb66b0f9a8"
+      }
+    }
+  },
+  "minimum_level_hints": {
+    "r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_08": {
+      "candidate_group_id": "slot_0:grasp_pair:3",
+      "collision_margin_m": 0.007,
+      "pregrasp_clearance_m": 0.12,
+      "selected_surface_port_ids": [21, 29],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/calibration_v8_short_retreat_safe_timing/selection/r1_l1_10mm_5deg/r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_08/nominal_set/buckets/r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_08/manifest.json",
+        "sha256": "9edf6b0b369b8c96816c2a7865d25b6c073aad2bdb1b69c0e534009a1538591f"
+      }
+    },
+    "r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_20": {
+      "candidate_group_id": "slot_0:grasp_pair:3",
+      "collision_margin_m": 0.007,
+      "pregrasp_clearance_m": 0.12,
+      "selected_surface_port_ids": [21, 29],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/calibration_v8_short_retreat_safe_timing/selection/r1_l1_10mm_5deg/r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_08/nominal_set/buckets/r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_08/manifest.json",
+        "sha256": "9edf6b0b369b8c96816c2a7865d25b6c073aad2bdb1b69c0e534009a1538591f"
+      }
+    },
+    "r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_26": {
+      "candidate_group_id": "slot_0:grasp_pair:3",
+      "collision_margin_m": 0.007,
+      "pregrasp_clearance_m": 0.12,
+      "selected_surface_port_ids": [21, 29],
+      "source_nominal_artifact": {
+        "path": "artifacts/p4_full/order9/r1_teacher/calibration_v8_short_retreat_safe_timing/selection/r1_l1_10mm_5deg/r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_26/nominal_set/buckets/r1_l1_10mm_5deg__train__train-000027-7fe33c662d36__lattice_26/manifest.json",
+        "sha256": "4fd3c6c6ebba96fdef6b267e0ecf7b56d499fe0d672f976219457fbb66b0f9a8"
+      }
+    }
+  },
+  "strict": false
+}

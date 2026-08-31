@@ -7,6 +7,7 @@ from amsrr.training.order9_configuration_space_planner import (
     Order9ConfigurationSpacePlannerConfig,
     Order9ConfigurationSpacePlanningError,
     Order9ConfigurationState,
+    order9_lightweight_configuration_planning,
 )
 
 
@@ -44,6 +45,26 @@ def test_configuration_space_planner_finds_deterministic_detour() -> None:
     assert first.collision_check_count == second.collision_check_count
     assert len(first.states) >= 3
     assert all(collision_free(state) for state in first.states)
+
+
+def test_lightweight_admission_refuses_sampled_configuration_search() -> None:
+    planner = DeterministicOrder9ConfigurationSpacePlanner()
+
+    def collision_free(state: Order9ConfigurationState) -> bool:
+        x, y = state.base_pose_world[:2]
+        return not (0.40 < x < 0.60 and abs(y) < 0.15)
+
+    with order9_lightweight_configuration_planning(), pytest.raises(
+        Order9ConfigurationSpacePlanningError,
+        match="sampled configuration search is disabled",
+    ):
+        planner.plan(
+            start=_state(0.0, 0.0, 0.0),
+            goal=_state(1.0, 0.0, 1.0),
+            joint_limits_rad={"module_0:yaw": (-2.0, 2.0)},
+            is_collision_free=collision_free,
+            sampling_center_world=(0.5, 0.0, 0.0),
+        )
 
 
 def test_local_contact_planner_uses_bounded_coordinate_detour() -> None:
@@ -101,9 +122,7 @@ def test_configuration_space_planner_fails_closed_on_colliding_goal() -> None:
             start=_state(0.0, 0.0, 0.0),
             goal=_state(1.0, 0.0, 1.0),
             joint_limits_rad={"module_0:yaw": (-2.0, 2.0)},
-            is_collision_free=lambda state: (
-                state.base_pose_world[0] < 0.9
-            ),
+            is_collision_free=lambda state: (state.base_pose_world[0] < 0.9),
         )
 
 
@@ -180,9 +199,7 @@ def test_overhead_planner_finds_joint_detour_before_descent() -> None:
         first = float(state.joint_positions_rad["joint_a"])
         second = float(state.joint_positions_rad["joint_b"])
         return not (
-            abs(first) < 0.80
-            and abs(second) < 0.80
-            and abs(first - second) < 0.25
+            abs(first) < 0.80 and abs(second) < 0.80 and abs(first - second) < 0.25
         )
 
     plan = planner.plan(
@@ -202,10 +219,7 @@ def test_overhead_planner_finds_joint_detour_before_descent() -> None:
         "deterministic_overhead_birrt_bridge",
     }
     assert all(collision_free(state) for state in plan.states)
-    assert all(
-        state.base_pose_world[2] >= 0.65 - 1.0e-9
-        for state in plan.states[1:-1]
-    )
+    assert all(state.base_pose_world[2] >= 0.65 - 1.0e-9 for state in plan.states[1:-1])
 
 
 def test_overhead_bridge_snaps_numerically_converged_waypoint() -> None:

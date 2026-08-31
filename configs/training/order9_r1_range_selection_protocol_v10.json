@@ -1,0 +1,94 @@
+{
+  "accept_largest_consecutive_passing_level": true,
+  "approval_record": "for_codex/R1_RANGE_SELECTION_PROTOCOL_V10_APPROVAL.json",
+  "base_numeric_protocol": {
+    "artifact_kind": "approved_r1_numeric_calibration_protocol",
+    "path": "configs/training/order9_r1_calibration_protocol_v1.yaml",
+    "sha256": "dfd947b877636a31b0a7d6cd632e42e4f054e3ae1a8a8746bc6d9db7b78418c9"
+  },
+  "batched_runtime_implementation": {
+    "artifact_kind": "environment_wise_nominal_runtime",
+    "path": "amsrr/training/order9_r1_batched_nominal_runtime.py",
+    "sha256": "422172ac78410f4f897b389ca337dd1ae46aebdcf5ebd4fca546bf8e33e49eae"
+  },
+  "batched_wrapper_implementation": {
+    "artifact_kind": "bounded_four_same_morphology_isaac_wrapper",
+    "path": "scripts/order9_r1_batched_nominal_compression_rollout.py",
+    "sha256": "131212be0dc96be69c3fd5d6fc7f3b7ed2c5497f09bbdda378c197ba3a2f17a2"
+  },
+  "calibration_evidence_training_eligible": false,
+  "calibration_gate_id": "r1-train-range-selection-bounded-four-gate-v10",
+  "candidate_count_per_level": 682,
+  "candidate_set_digest_required_in_restart_manifest_name": true,
+  "diagnostic_preparation_only_allowed": true,
+  "formal_teacher_collection_authorized": false,
+  "held_out_confirmation_in_scope": false,
+  "isaac_environment_spacing_m": 3.0,
+  "local_servo_applied": true,
+  "lightweight_planner_implementation": {
+    "artifact_kind": "context_scoped_no_sampled_search_admission_planner",
+    "path": "amsrr/training/order9_configuration_space_planner.py",
+    "sha256": "bef6ba1094a717beeae7eb2888ab8d6139cba6cc65395356d06c316ccb99efd6"
+  },
+  "maximum_candidates_per_isaac_scene": 4,
+  "maximum_parallel_isaac_batches": 4,
+  "maximum_preparation_process_count": 24,
+  "maximum_wall_time_s": 36000.0,
+  "parent_minimum_level_id": "r1_l1_10mm_5deg",
+  "parent_minimum_level_result": {
+    "artifact_kind": "accepted_r1_minimum_level_result",
+    "path": "for_codex/R1_NOMINAL_CALIBRATION_V9_RESULT_LEDGER.json",
+    "sha256": "f162ca51cb6a996aba93877dd12d5e9b0c0c2b71a4ed46ede10d47c311e04556"
+  },
+  "pi_l_actor_command_applied": false,
+  "preparation_numeric_library_threads_per_worker": 2,
+  "python_hash_seed": 0,
+  "protected_c3_checkpoint": {
+    "artifact_kind": "c3_promoted_pi_l_checkpoint_retained_not_applied",
+    "path": "artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt",
+    "sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b"
+  },
+  "protected_c3_curriculum": {
+    "artifact_kind": "c3_protected_learning_curriculum",
+    "path": "configs/training/order9_learning_curriculum.yaml",
+    "sha256": "965b1abc180d3dab80369c150c55a774c4ceee186befda68f3093c22f7d6f9d4"
+  },
+  "protected_c3_release_ledger": {
+    "artifact_kind": "c3_promoted_release_ledger",
+    "path": "for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json",
+    "sha256": "7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729"
+  },
+  "protected_c3_rollout": {
+    "artifact_kind": "c3_protected_rollout_implementation",
+    "path": "scripts/order9_vectorized_isaac_rollout.py",
+    "sha256": "e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2"
+  },
+  "protocol_version": "order9_r1_range_selection_protocol_v10",
+  "qpid_qp_applied": true,
+  "range_helper_implementation": {
+    "artifact_kind": "r1_range_teacher_screen_and_gate_helper",
+    "path": "amsrr/training/order9_r1_range_selection_v10.py",
+    "sha256": "de80f3c4b47bfcbfe444882ed02259d240643b4df1499d4f4579d4bf56323dab"
+  },
+  "range_teacher_hints": {
+    "artifact_kind": "non_strict_minimum_level_contact_fast_paths",
+    "path": "configs/training/order9_r1_range_teacher_hints_v10.json",
+    "sha256": "4a1620aa954bfe4b0323fea83596fd269de3da18b119adb8c7fdd53658bc979d"
+  },
+  "replay_count_per_candidate": 2,
+  "restart_reuses_validated_evidence": true,
+  "runner_implementation": {
+    "artifact_kind": "restartable_bounded_four_range_selection_runner",
+    "path": "scripts/order9_run_r1_range_selection_v10.py",
+    "sha256": "6063d1411911e2da3824e1f0ca2fc3178f5748cda9634064be788ad181b78517"
+  },
+  "selection_bucket_count": 22,
+  "selection_level_ids": [
+    "r1_l2_20mm_10deg",
+    "r1_l3_30mm_15deg",
+    "r1_l4_40mm_20deg"
+  ],
+  "single_candidate_confirmation_on_bounded_failure": true,
+  "status": "approved",
+  "stop_on_first_failed_level": true
+}

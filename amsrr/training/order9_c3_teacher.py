@@ -255,6 +255,9 @@ def build_order9_c3_articulated_teacher(
     runtime_observation: RuntimeObservation | None = None,
     collision_object: Order9PostureCollisionObject | None = None,
     contact_goal_joint_seed_positions_rad: Mapping[str, float] | None = None,
+    configuration_goal_joint_seed_positions_rad: (
+        Mapping[str, float] | None
+    ) = None,
 ) -> Order9C3TeacherBundle:
     """Search mesh-backed surface pairs, then emit one complete checked plan."""
 
@@ -369,6 +372,9 @@ def build_order9_c3_articulated_teacher(
                 },
                 contact_goal_joint_seed_positions_rad=(
                     contact_goal_joint_seed_positions_rad
+                ),
+                configuration_goal_joint_seed_positions_rad=(
+                    configuration_goal_joint_seed_positions_rad
                 ),
             )
             checked_context = HighLevelPolicyContext(

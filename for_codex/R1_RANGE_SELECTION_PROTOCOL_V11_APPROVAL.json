@@ -1,0 +1,15 @@
+{
+  "record_version": "order9_r1_range_selection_approval_record_v11",
+  "decision": "approved",
+  "approved_by": "repository_user",
+  "approval_date": "2026-08-29",
+  "approval_basis": "User authorized completion through range selection on 22 train-owned morphologies and one final confirmation on 14 untouched validation-owned morphologies.",
+  "approved_protocol": {
+    "path": "configs/training/order9_r1_range_selection_protocol_v11.json",
+    "sha256": "fd1bf6c72e5dd981626db0e842ccbe8351fc33aa1d26c3be1b366bd6e560917b"
+  },
+  "learning_authorized": false,
+  "teacher_collection_authorized": false,
+  "file_deletion_authorized": false,
+  "commit_authorized": false
+}

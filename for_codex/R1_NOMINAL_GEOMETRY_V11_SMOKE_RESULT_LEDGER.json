@@ -1,0 +1,80 @@
+{
+  "ledger_version": "order9_r1_nominal_geometry_v11_smoke_result_ledger",
+  "date": "2026-08-29",
+  "status": "representative_passed",
+  "candidate_id": "r1_l2_20mm_10deg__train__train-000000-5fecfad4f44f__lattice_02",
+  "formal_range_selection_completed": false,
+  "formal_teacher_collection_authorized": false,
+  "pi_l_system_retained": true,
+  "pi_l_actor_command_applied": false,
+  "isaac_episode_count": 2,
+  "isaac_success_count": 2,
+  "safety_failure_count": 0,
+  "fallback_count": 0,
+  "bindings": {
+    "geometry_config": {
+      "path": "configs/training/order9_r1_nominal_geometry_v11.json",
+      "sha256": "963407b2881533e6ffe967d49a15a72e2930ca49d48861c056cf6719ca9b0041"
+    },
+    "geometry_implementation": {
+      "path": "amsrr/training/order9_r1_nominal_geometry_v11.py",
+      "sha256": "9e34607a1c3dfa2af179f5d6ddefaf5d690a0a3334d222b47c0111f4f03eff08"
+    },
+    "teacher_pipeline": {
+      "path": "amsrr/training/order9_r1_range_selection_v11.py",
+      "sha256": "f4030a01b323e349cb71f5ec5aaa9babd99a132608e878f6da2ed87e425cc906"
+    },
+    "complete_task_geometry_audit": {
+      "path": "amsrr/training/order9_r1_complete_task_geometry_v11.py",
+      "sha256": "d23ca9fe42f927e6b6584f8cc39642fdd11171884873c6d5d2654a1fee5b5566"
+    },
+    "materializer": {
+      "path": "amsrr/training/order9_r1_complete_task_materialization_v11.py",
+      "sha256": "b311818db3279db578ee786799dd61c583372a569047f15f6ccc1916b30e238d"
+    },
+    "runner": {
+      "path": "scripts/order9_run_r1_nominal_geometry_v11_smoke.py",
+      "sha256": "dd4d2740f02efbd55b878343e9e15084cfe02c12830521c657424797c3ea7ab3"
+    },
+    "unit_test": {
+      "path": "tests/unit/training/test_order9_r1_nominal_geometry_v11.py",
+      "sha256": "1936ff7044c6e26bd8c1fc79892810a493818d4a1d30185f5b233793fc9fedac"
+    },
+    "result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/nominal_geometry_v11_exact_smoke_v3/result.json",
+      "sha256": "ff3446e3e208ae811cebbba080f9784e0c18e347cff8111fb6acb30fbf597edd"
+    },
+    "small_object_rejection": {
+      "path": "artifacts/p4_full/order9/r1_teacher/nominal_geometry_v11_exact_smoke_v3/small_object_pre_isaac_rejection.json",
+      "sha256": "ff7061397472f8d25ffc3e5b57204931ac10aae9d4caa099471d372c293f74e6"
+    },
+    "corrected_complete_task_audit": {
+      "path": "artifacts/p4_full/order9/r1_teacher/nominal_geometry_v11_exact_smoke_v3/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000000-5fecfad4f44f__lattice_02/complete_task_geometry_audit_v11.json",
+      "sha256": "90902e21f06ef1995d33cb53b930f1993a6e30ccbbd302d204e2224203835d2e"
+    },
+    "nominal_isaac_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/nominal_geometry_v11_exact_smoke_v3/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000000-5fecfad4f44f__lattice_02/nominal_result.json",
+      "sha256": "d6c61c1792f8bd0cb0afb1c72b13e2bc5ce3d3cde11288e8a6ed4498f511a3c2"
+    },
+    "isaac_raw": {
+      "path": "artifacts/p4_full/order9/r1_teacher/nominal_geometry_v11_exact_smoke_v3/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000000-5fecfad4f44f__lattice_02/isaac/evaluation_rollout.pt",
+      "sha256": "245703263f2cc532ffef822c19df4360887d63786fc9c09846521cd1cb637b5e"
+    },
+    "isaac_episodes": {
+      "path": "artifacts/p4_full/order9/r1_teacher/nominal_geometry_v11_exact_smoke_v3/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000000-5fecfad4f44f__lattice_02/isaac/evaluation_episodes.jsonl",
+      "sha256": "b56374afc70656b054e5e7bc13e3abaca610f872095a29af43202776b6df3550"
+    },
+    "protected_c3_checkpoint": {
+      "path": "artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt",
+      "sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b"
+    },
+    "protected_c3_rollout": {
+      "path": "scripts/order9_vectorized_isaac_rollout.py",
+      "sha256": "e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2"
+    },
+    "protected_c3_release_ledger": {
+      "path": "for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json",
+      "sha256": "7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729"
+    }
+  }
+}

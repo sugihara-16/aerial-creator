@@ -2,16 +2,31 @@ from __future__ import annotations
 
 """Deterministic configuration-space planning for the Order 9 pi_H teacher."""
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 import math
 from typing import Callable, Mapping, Sequence
 
 from amsrr.schemas.common import Pose7D, SchemaValidationError
 
-
 ORDER9_CONFIGURATION_SPACE_PLANNER_VERSION = (
     "order9_configuration_space_overhead_birrt_v6_local_contact"
 )
+_LIGHTWEIGHT_PLANNING_ONLY = ContextVar(
+    "order9_lightweight_configuration_planning_only", default=False
+)
+
+
+@contextmanager
+def order9_lightweight_configuration_planning():
+    """Forbid sampled searches inside an explicitly lightweight admission pass."""
+
+    token = _LIGHTWEIGHT_PLANNING_ONLY.set(True)
+    try:
+        yield
+    finally:
+        _LIGHTWEIGHT_PLANNING_ONLY.reset(token)
 
 
 class Order9ConfigurationSpacePlanningError(RuntimeError):
@@ -65,17 +80,13 @@ class Order9ConfigurationSpacePlannerConfig:
         if self.maximum_iterations < 1:
             raise ValueError("maximum_iterations must be positive")
         if self.maximum_connect_extensions < 1:
-            raise ValueError(
-                "maximum_connect_extensions must be positive"
-            )
+            raise ValueError("maximum_connect_extensions must be positive")
         if self.goal_bias_period < 2:
             raise ValueError("goal_bias_period must be at least two")
         if self.deterministic_seed < 0:
             raise ValueError("deterministic_seed must be non-negative")
         if self.local_contact_maximum_iterations < 1:
-            raise ValueError(
-                "local_contact_maximum_iterations must be positive"
-            )
+            raise ValueError("local_contact_maximum_iterations must be positive")
         for name in (
             "base_extension_step_m",
             "attitude_extension_step_rad",
@@ -157,9 +168,7 @@ class DeterministicOrder9ConfigurationSpacePlanner:
 
         ordered_ids = tuple(sorted(start.joint_positions_rad))
         if set(goal.joint_positions_rad) != set(ordered_ids):
-            raise SchemaValidationError(
-                "configuration edge joint identities differ"
-            )
+            raise SchemaValidationError("configuration edge joint identities differ")
         collision_checks = 0
 
         def checked(state: Order9ConfigurationState) -> bool:
@@ -270,15 +279,18 @@ class DeterministicOrder9ConfigurationSpacePlanner:
                 tree_node_count=len(coordinate_path),
             )
 
+        if _LIGHTWEIGHT_PLANNING_ONLY.get():
+            raise Order9ConfigurationSpacePlanningError(
+                "sampled local contact search is disabled in lightweight admission"
+            )
+
         start_tree = _Tree(states=[start], parents=[None])
         goal_tree = _Tree(states=[goal], parents=[None])
         active = start_tree
         other = goal_tree
         active_is_start = True
         sampled = 0
-        for iteration in range(
-            self.config.local_contact_maximum_iterations
-        ):
+        for iteration in range(self.config.local_contact_maximum_iterations):
             target = (
                 other.states[0]
                 if iteration % self.config.goal_bias_period == 0
@@ -352,13 +364,10 @@ class DeterministicOrder9ConfigurationSpacePlanner:
         overhead_required: bool = False,
     ) -> Order9ConfigurationSpacePlan:
         ordered_ids = tuple(sorted(start.joint_positions_rad))
-        if (
-            set(goal.joint_positions_rad) != set(ordered_ids)
-            or set(joint_limits_rad) != set(ordered_ids)
-        ):
-            raise SchemaValidationError(
-                "configuration planner joint identities differ"
-            )
+        if set(goal.joint_positions_rad) != set(ordered_ids) or set(
+            joint_limits_rad
+        ) != set(ordered_ids):
+            raise SchemaValidationError("configuration planner joint identities differ")
         limits = {
             joint_id: (
                 float(joint_limits_rad[joint_id][0]),
@@ -401,14 +410,11 @@ class DeterministicOrder9ConfigurationSpacePlanner:
             raise Order9ConfigurationSpacePlanningError(
                 "configuration-space goal state is in collision"
             )
-        direct_edge_allowed = (
-            not overhead_required
-            or _aligned_for_overhead_descent(
-                start,
-                goal,
-                ordered_ids=ordered_ids,
-                config=self.config,
-            )
+        direct_edge_allowed = not overhead_required or _aligned_for_overhead_descent(
+            start,
+            goal,
+            ordered_ids=ordered_ids,
+            config=self.config,
         )
         if direct_edge_allowed and _edge_is_free(
             start,
@@ -463,6 +469,10 @@ class DeterministicOrder9ConfigurationSpacePlanner:
                     sampled_state_count=0,
                     tree_node_count=len(coordinate_path),
                 )
+            if _LIGHTWEIGHT_PLANNING_ONLY.get():
+                raise Order9ConfigurationSpacePlanningError(
+                    "sampled overhead search is disabled in lightweight admission"
+                )
             overhead_result = _deterministic_overhead_birrt_bridge(
                 start,
                 goal,
@@ -482,10 +492,13 @@ class DeterministicOrder9ConfigurationSpacePlanner:
                     tree_node_count=tree_nodes,
                 )
             raise Order9ConfigurationSpacePlanningError(
-                "deterministic overhead configuration-space search is "
-                "blocked"
+                "deterministic overhead configuration-space search is " "blocked"
             )
 
+        if _LIGHTWEIGHT_PLANNING_ONLY.get():
+            raise Order9ConfigurationSpacePlanningError(
+                "sampled configuration search is disabled in lightweight admission"
+            )
         start_tree = _Tree(states=[start], parents=[None])
         goal_tree = _Tree(states=[goal], parents=[None])
         active = start_tree
@@ -563,13 +576,10 @@ def _validated_joint_domain(
     joint_limits_rad: Mapping[str, tuple[float, float]],
 ) -> tuple[tuple[str, ...], dict[str, tuple[float, float]]]:
     ordered_ids = tuple(sorted(start.joint_positions_rad))
-    if (
-        set(goal.joint_positions_rad) != set(ordered_ids)
-        or set(joint_limits_rad) != set(ordered_ids)
-    ):
-        raise SchemaValidationError(
-            "configuration planner joint identities differ"
-        )
+    if set(goal.joint_positions_rad) != set(ordered_ids) or set(
+        joint_limits_rad
+    ) != set(ordered_ids):
+        raise SchemaValidationError("configuration planner joint identities differ")
     limits = {
         joint_id: (
             float(joint_limits_rad[joint_id][0]),
@@ -666,9 +676,7 @@ def _deterministic_local_coordinate_bridge(
         for order in orders:
             path = [start]
             current_pose = (
-                goal.base_pose_world
-                if move_base_first
-                else start.base_pose_world
+                goal.base_pose_world if move_base_first else start.base_pose_world
             )
             if move_base_first:
                 path.append(
@@ -724,8 +732,7 @@ def _sample_local_contact_state(
     sample_index = (
         iteration
         + 1
-        + config.deterministic_seed
-        * config.local_contact_maximum_iterations
+        + config.deterministic_seed * config.local_contact_maximum_iterations
     )
     blend = _halton(sample_index, _prime(0))
     center = tuple(
@@ -734,22 +741,16 @@ def _sample_local_contact_state(
         for index in range(3)
     )
     raw_direction = tuple(
-        2.0 * _halton(sample_index, _prime(index + 1)) - 1.0
-        for index in range(3)
+        2.0 * _halton(sample_index, _prime(index + 1)) - 1.0 for index in range(3)
     )
-    direction_norm = math.sqrt(
-        sum(value * value for value in raw_direction)
-    )
+    direction_norm = math.sqrt(sum(value * value for value in raw_direction))
     if direction_norm <= 1.0e-12:
         direction = (1.0, 0.0, 0.0)
     else:
         direction = tuple(value / direction_norm for value in raw_direction)
     radial_fraction = _halton(sample_index, _prime(4)) ** (1.0 / 3.0)
     xyz = tuple(
-        center[index]
-        + float(corridor_radius_m)
-        * radial_fraction
-        * direction[index]
+        center[index] + float(corridor_radius_m) * radial_fraction * direction[index]
         for index in range(3)
     )
     orientation = _quaternion_slerp(
@@ -761,15 +762,12 @@ def _sample_local_contact_state(
     joints = {}
     for joint_index, joint_id in enumerate(ordered_ids):
         lower, upper = limits[joint_id]
-        reference = (
-            (1.0 - blend) * float(start.joint_positions_rad[joint_id])
-            + blend * float(goal.joint_positions_rad[joint_id])
-        )
+        reference = (1.0 - blend) * float(
+            start.joint_positions_rad[joint_id]
+        ) + blend * float(goal.joint_positions_rad[joint_id])
         unit = _halton(sample_index, _prime(joint_index + 5))
         value = reference + (
-            (2.0 * unit - 1.0)
-            * jitter_scale
-            * config.local_contact_joint_jitter_rad
+            (2.0 * unit - 1.0) * jitter_scale * config.local_contact_joint_jitter_rad
         )
         joints[joint_id] = min(max(value, lower), upper)
     return Order9ConfigurationState(
@@ -792,17 +790,12 @@ def _point_to_segment_distance(
         1.0,
         max(
             0.0,
-            sum(offset[i] * segment[i] for i in range(3))
-            / length_squared,
+            sum(offset[i] * segment[i] for i in range(3)) / length_squared,
         ),
     )
     return math.sqrt(
         sum(
-            (
-                float(point[i])
-                - (float(start[i]) + fraction * segment[i])
-            )
-            ** 2
+            (float(point[i]) - (float(start[i]) + fraction * segment[i])) ** 2
             for i in range(3)
         )
     )
@@ -867,9 +860,7 @@ def _deterministic_overhead_bridge(
     for index, state in enumerate(candidates[1:], start=1):
         final_goal = index == len(candidates) - 1
         if final_goal:
-            if not _states_close(
-                path[-1], state, ordered_ids=ordered_ids
-            ):
+            if not _states_close(path[-1], state, ordered_ids=ordered_ids):
                 path.append(state)
         elif not _waypoints_equivalent(
             path[-1],
@@ -951,9 +942,7 @@ def _deterministic_overhead_birrt_bridge(
 
     def overhead_checked(state: Order9ConfigurationState) -> bool:
         return bool(
-            float(state.base_pose_world[2])
-            >= overhead_z - 1.0e-9
-            and checked(state)
+            float(state.base_pose_world[2]) >= overhead_z - 1.0e-9 and checked(state)
         )
 
     if _edge_is_free(
@@ -1119,17 +1108,13 @@ def _deterministic_overhead_coordinate_bridge(
                     base_pose_world=current.base_pose_world,
                     joint_positions_rad=dict(q),
                 )
-                if not _states_close(
-                    current, next_state, ordered_ids=ordered_ids
-                ):
+                if not _states_close(current, next_state, ordered_ids=ordered_ids):
                     path.append(next_state)
                     current = next_state
             if not move_before_articulation:
                 path.append(goal_overhead)
             path.append(goal)
-            compact = _join_configuration_paths(
-                path, ordered_ids=ordered_ids
-            )
+            compact = _join_configuration_paths(path, ordered_ids=ordered_ids)
             if all(
                 _edge_is_free(
                     left,
@@ -1167,11 +1152,8 @@ def _join_configuration_paths(
     output: list[Order9ConfigurationState] = []
     for path in paths:
         for state in path:
-            if (
-                not output
-                or not _states_close(
-                    output[-1], state, ordered_ids=ordered_ids
-                )
+            if not output or not _states_close(
+                output[-1], state, ordered_ids=ordered_ids
             ):
                 output.append(state)
     return output
@@ -1192,8 +1174,7 @@ def _aligned_for_overhead_descent(
     )
     return bool(
         float(start.base_pose_world[2])
-        >= float(goal.base_pose_world[2])
-        - config.waypoint_translation_tolerance_m
+        >= float(goal.base_pose_world[2]) - config.waypoint_translation_tolerance_m
         and lateral_distance <= config.waypoint_translation_tolerance_m
         and _quaternion_distance(
             start.base_pose_world[3:],
@@ -1435,9 +1416,7 @@ def _sample_state(
     config: Order9ConfigurationSpacePlannerConfig,
     minimum_base_z: float | None = None,
 ) -> Order9ConfigurationState:
-    sample_index = (
-        iteration + 1 + config.deterministic_seed * config.maximum_iterations
-    )
+    sample_index = iteration + 1 + config.deterministic_seed * config.maximum_iterations
     margin = float(config.sampling_margin_m)
     lower_xyz = tuple(
         min(
@@ -1473,8 +1452,7 @@ def _sample_state(
         )
     xyz = tuple(
         lower_xyz[index]
-        + _halton(sample_index, _prime(index))
-        * (upper_xyz[index] - lower_xyz[index])
+        + _halton(sample_index, _prime(index)) * (upper_xyz[index] - lower_xyz[index])
         for index in range(3)
     )
     blend = _halton(sample_index, _prime(3))
@@ -1492,14 +1470,10 @@ def _sample_state(
         if full_limit_sample:
             value = lower + unit * (upper - lower)
         else:
-            reference = (
-                (1.0 - blend)
-                * float(start.joint_positions_rad[joint_id])
-                + blend * float(goal.joint_positions_rad[joint_id])
-            )
-            value = reference + (2.0 * unit - 1.0) * jitter_scale * (
-                upper - lower
-            )
+            reference = (1.0 - blend) * float(
+                start.joint_positions_rad[joint_id]
+            ) + blend * float(goal.joint_positions_rad[joint_id])
+            value = reference + (2.0 * unit - 1.0) * jitter_scale * (upper - lower)
         joints[joint_id] = min(max(value, lower), upper)
     return Order9ConfigurationState(
         base_pose_world=(*xyz, *orientation),
@@ -1516,15 +1490,11 @@ def _sampling_center(
     if sampling_center_world is None:
         return tuple(
             0.5
-            * (
-                float(start.base_pose_world[index])
-                + float(goal.base_pose_world[index])
-            )
+            * (float(start.base_pose_world[index]) + float(goal.base_pose_world[index]))
             for index in range(3)
         )
     if len(sampling_center_world) < 3 or any(
-        not math.isfinite(float(value))
-        for value in sampling_center_world[:3]
+        not math.isfinite(float(value)) for value in sampling_center_world[:3]
     ):
         raise SchemaValidationError(
             "configuration-space sampling center must contain finite xyz"
@@ -1544,10 +1514,7 @@ def _interpolate_state(
         *(
             float(start.base_pose_world[index])
             + value
-            * (
-                float(goal.base_pose_world[index])
-                - float(start.base_pose_world[index])
-            )
+            * (float(goal.base_pose_world[index]) - float(start.base_pose_world[index]))
             for index in range(3)
         ),
         *_quaternion_slerp(
@@ -1579,10 +1546,7 @@ def _translation_distance(
 ) -> float:
     return math.sqrt(
         sum(
-            (
-                float(right.base_pose_world[index])
-                - float(left.base_pose_world[index])
-            )
+            (float(right.base_pose_world[index]) - float(left.base_pose_world[index]))
             ** 2
             for index in range(3)
         )
@@ -1626,8 +1590,7 @@ def _waypoints_equivalent(
     """Bound receding-horizon completion without weakening edge checks."""
 
     return bool(
-        _translation_distance(left, right)
-        <= config.waypoint_translation_tolerance_m
+        _translation_distance(left, right) <= config.waypoint_translation_tolerance_m
         and _quaternion_distance(
             left.base_pose_world[3:],
             right.base_pose_world[3:],
@@ -1661,10 +1624,7 @@ def _quaternion_slerp(
     dot = min(max(dot, -1.0), 1.0)
     if dot > 0.9995:
         return _normalized_quaternion(
-            tuple(
-                q0[index] + ratio * (q1[index] - q0[index])
-                for index in range(4)
-            )
+            tuple(q0[index] + ratio * (q1[index] - q0[index]) for index in range(4))
         )
     theta = math.acos(dot)
     sin_theta = math.sin(theta)
@@ -1694,14 +1654,10 @@ def _normalized_quaternion(
     values: Sequence[float],
 ) -> tuple[float, float, float, float]:
     if len(values) != 4:
-        raise SchemaValidationError(
-            "configuration quaternion must contain four values"
-        )
+        raise SchemaValidationError("configuration quaternion must contain four values")
     norm = math.sqrt(sum(float(value) ** 2 for value in values))
     if norm <= 1.0e-12:
-        raise SchemaValidationError(
-            "configuration quaternion norm must be positive"
-        )
+        raise SchemaValidationError("configuration quaternion norm must be positive")
     normalized = tuple(float(value) / norm for value in values)
     if normalized[3] < 0.0:
         normalized = tuple(-value for value in normalized)
@@ -1709,12 +1665,8 @@ def _normalized_quaternion(
 
 
 def _validate_pose(pose: Pose7D) -> None:
-    if len(pose) != 7 or any(
-        not math.isfinite(float(value)) for value in pose
-    ):
-        raise SchemaValidationError(
-            "configuration base pose must be a finite Pose7D"
-        )
+    if len(pose) != 7 or any(not math.isfinite(float(value)) for value in pose):
+        raise SchemaValidationError("configuration base pose must be a finite Pose7D")
     _normalized_quaternion(pose[3:])
 
 
@@ -1786,4 +1738,5 @@ __all__ = [
     "Order9ConfigurationSpacePlannerConfig",
     "Order9ConfigurationSpacePlanningError",
     "Order9ConfigurationState",
+    "order9_lightweight_configuration_planning",
 ]

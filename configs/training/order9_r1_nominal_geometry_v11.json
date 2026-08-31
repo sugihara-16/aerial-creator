@@ -1,0 +1,16 @@
+{
+  "config_version": "order9_r1_nominal_geometry_v11",
+  "canonical_order8_report": {
+    "path": "artifacts/p4_full/order8_natural_contact/order8_mu4p5_dt20ms_full_v406.json",
+    "sha256": "d0f75cca2ae540c79971766ab722d4530dd4fb44842276256bac40aafdb8cc49"
+  },
+  "nominal_object_height_increment_m": 0.04,
+  "nominal_grasp_contact_height_offset_m": 0.02,
+  "required_robot_support_clearance_m": 0.0195,
+  "other_collision_clearance_m": 0.0,
+  "small_object_variant": {
+    "role": "difficult_condition_only",
+    "formal_range_selection_eligible": false,
+    "formal_teacher_collection_eligible": false
+  }
+}
