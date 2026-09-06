@@ -1,0 +1,63 @@
+{
+  "ledger_version": "order9_r1_teacher_collection_preparation_v19",
+  "status": "ready_awaiting_explicit_launch",
+  "collection_started": false,
+  "collection_launch_authorized": false,
+  "training_authorized": false,
+  "episode_count": 140,
+  "bindings": {
+    "report": {
+      "path": "for_codex/R1_TEACHER_COLLECTION_PREPARATION_V19.md",
+      "sha256": "bdfee84d01289b2615dddbb1e1ef422535460c533c4026482ce73b23edc0e07d"
+    },
+    "protocol": {
+      "path": "configs/training/order9_r1_teacher_collection_protocol_v19.json",
+      "sha256": "5bd4e905ea0fcf2c0df08ff189713c2eb8a8a943ea927d976c45119c5bd64b4b"
+    },
+    "preparation_implementation": {
+      "path": "amsrr/training/order9_r1_teacher_collection_preparation.py",
+      "sha256": "a4635830b8e59d4c831abd979e3e6ade64543f3fc61fdfa2daf80c8aa69d1c7c"
+    },
+    "preparation_runner": {
+      "path": "scripts/order9_prepare_r1_teacher_collection_v19.py",
+      "sha256": "171fa15710d3fc691d1442295ebcfd16423788001407a2781930706b94cdf0a2"
+    },
+    "collection_runner": {
+      "path": "scripts/order9_run_r1_teacher_collection_v19.py",
+      "sha256": "3ee5f8a83cec217c45aa9179287e23d38dfd8d28972da2b5460b45a4b0b7dab0"
+    },
+    "isaac_wrapper": {
+      "path": "scripts/order9_r1_batched_nominal_compression_rollout.py",
+      "sha256": "92ee90ddc2aea445915f234d792242a14c395857c611c379081b86bfcf202631"
+    },
+    "collection_plan": {
+      "path": "artifacts/p4_full/order9/r1_teacher/formal_collection_v19/collection_plan.json",
+      "sha256": "4513eb01f3de08e404d36b6b0a3df0f2f522c628924431b0af0a098e00fca57c"
+    },
+    "preflight": {
+      "path": "artifacts/p4_full/order9/r1_teacher/formal_collection_v19/preflight.json",
+      "sha256": "a10a06fe0fe7fe0de8d78d42c86bcb5854c5cb075ea038845435e23fd39bc5cd"
+    },
+    "launch_authorization_template": {
+      "path": "artifacts/p4_full/order9/r1_teacher/formal_collection_v19/launch_authorization_template.json",
+      "sha256": "dde587d5b176dd423fc27b87499338c537c43b0ef710b986b5008ab38204b500"
+    },
+    "materialization_smoke_case": {
+      "path": "artifacts/p4_full/order9/r1_teacher/formal_collection_v19/preflight_smoke_v2/cases/r1-teacher-000000/case_manifest.json",
+      "sha256": "4588b3313af93ff5a11f6f54b1e64543a1c25771ff7a059aa419cdd46e8eb76c"
+    },
+    "materialization_smoke_screen": {
+      "path": "artifacts/p4_full/order9/r1_teacher/formal_collection_v19/preflight_smoke_v2/cases/r1-teacher-000000/fast_screen.json",
+      "sha256": "668115a1dcc71909165b1418704c699abbe01085abf0c2d1ce4a5f6617129a8e"
+    },
+    "materialization_smoke_clearance": {
+      "path": "artifacts/p4_full/order9/r1_teacher/formal_collection_v19/preflight_smoke_v2/cases/r1-teacher-000000/complete_task_planning_clearance_audit_v14.json",
+      "sha256": "38473c24623fb3a3ccf163153885c755073403f9a7f74ab7283b8da36d0308cd"
+    }
+  },
+  "protected_c3": {
+    "checkpoint_sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b",
+    "rollout_sha256": "e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2",
+    "release_ledger_sha256": "7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729"
+  }
+}

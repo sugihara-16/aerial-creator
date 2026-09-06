@@ -1,0 +1,61 @@
+{
+  "protocol_version": "order9_r1_teacher_collection_protocol_v19",
+  "status": "preparation_approved",
+  "stage_id": "r1_teacher_trajectory_collection",
+  "collection_launch_authorized": false,
+  "training_authorized": false,
+  "total_episode_count": 140,
+  "seed_start": 29009,
+  "module_counts": [2, 3, 4, 5, 6, 7, 8],
+  "episodes_per_module_count": 20,
+  "split_counts_per_module_count": {
+    "train": 14,
+    "validation": 3,
+    "held_out": 3
+  },
+  "position_half_span_m": 0.04,
+  "yaw_half_span_rad": 0.3490658503988659,
+  "whole_scene_planar_transfer": true,
+  "support_transformed_with_scene": true,
+  "all_eight_task_phases_required": true,
+  "fast_exact_tracking_screen_required": true,
+  "real_isaac_success_required": true,
+  "pi_l_actor_command_applied": false,
+  "qpid_qp_applied": true,
+  "local_servo_applied": true,
+  "minimum_free_storage_gib": 128,
+  "global_success_rate_minimum": 0.95,
+  "split_module_success_rate_minimum": 0.95,
+  "safety_failure_count_maximum": 0,
+  "fallback_count_maximum": 0,
+  "source_bindings": {
+    "range_selection_v15": {
+      "path": "artifacts/p4_full/order9/r1_teacher/range_selection_scene_transfer_v15/range_selection_result.json",
+      "sha256": "ce20fe7ade3321459586a66c5780b55f6f05b4f33d8202d2719e646d56b7f497"
+    },
+    "held_out_confirmation_v16": {
+      "path": "artifacts/p4_full/order9/r1_teacher/held_out_scene_confirmation_v16/held_out_confirmation_result.json",
+      "sha256": "979867b839f332bb7d4fd985e2e59278f4a3303501b353c3944ad6c6953252df"
+    },
+    "collision_repair_v17": {
+      "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/held_out_collision_avoidance_v17/result.json",
+      "sha256": "e8a6271daa9eef56e9758609023ed345a7327fbbf320c866f0ad6404520f22f3"
+    },
+    "object_drop_repair_v18": {
+      "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/held_out_object_drop_repair_v18_formatted_acceptance/result.json",
+      "sha256": "cf306f1b7d9bc9f9cb449ada6af5252ab9e6029eada89332931916094398f5a3"
+    },
+    "protected_c3_checkpoint": {
+      "path": "artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt",
+      "sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b"
+    },
+    "protected_c3_rollout": {
+      "path": "scripts/order9_vectorized_isaac_rollout.py",
+      "sha256": "e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2"
+    },
+    "protected_c3_release_ledger": {
+      "path": "for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json",
+      "sha256": "7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729"
+    }
+  }
+}

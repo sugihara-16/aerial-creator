@@ -6950,7 +6950,65 @@
 
 ---
 
+## Global Worklog
+
+### 2026-09-06 (R1正式教師軌道収集v19の完了)
+
+- Spec version: A-MSRR v0.5。
+- Work package / Agent label: R1教師軌道収集。
+- Summary: 中断点119件から収集を再開し、最終的に140/140件を正式受理した。
+  2--8モジュール各20件、各モジュールで学習14・調整3・最終確認3を満たす。
+  正式受理記録では成功140、安全不合格・代替制御・重大衝突・物体落下・QP計算不能・
+  時間切れは全て0である。
+- Files changed: `formal_collection_v19`のcase・実行・判定・修復・集計・監査成果物、
+  `for_codex/R1_TEACHER_COLLECTION_V19_RESULT.md`、同結果台帳、
+  `AMSRR_design_modification_by_codex.md`、本記録。既存の不合格成果物は削除していない。
+- Schema/interface changes: None。共有schema、C3、π_L/QPID/QP/局所サーボ境界、合否基準は
+  不変。R1 v19専用の修復由来情報と結果監査だけを追加した。
+- Upstream dependencies used: v0.5、R1 v19条件表・開始承認、v13成功軌道、v15場面全体
+  移送、v18左右別押し込み診断、C3 promoted update 18。
+- Downstream impact: 140件はπ_H模倣学習の入力候補として固定された。教師収集完了は
+  模倣学習開始の許可を含まず、`training_authorized=false`を維持する。
+- Tests added or run: 140件の計画照合、参照ハッシュ、分割数、一意性、成功、安全、制御境界
+  の全件監査に合格。関連単体試験22/22、Python構文、差分空白検査に合格。
+- Commands run: R1 v19収集実行器の再開、Isaac単独修復1件と2件並列修復、残り正式収集、
+  `pytest`、`py_compile`、`git diff --check`、`sha256sum`、全件監査。
+- Assumptions: 教師生成では同一機体の成功済み別軌道を個別に選んでよいが、目的の物体姿勢、
+  支持台、目標、機体姿勢、接触点を同じ平面剛体変換で移し、合否基準は変更しない。
+- Blockers / open questions: 教師収集にはなし。π_Hへ渡す入力・出力テンソルの最終構築検査と
+  学習開始承認は未実施。
+- Next steps: 140件を読み込むπ_H模倣学習データ構築を読み取り検査し、学習設定と再開点を
+  固定する。利用者の明示指示があるまで学習を開始しない。
+
+---
+
 ## Work Package Logs
+
+### Codex: R1正式教師軌道収集v19
+
+#### 2026-09-06
+
+- Scope: 中断中の正式収集を自律的に診断・修復・再開し、140件の受理と結果固定まで行う。
+- Implemented: `000116`の設置安定化、8モジュールの`000121/000127/000131`を同一機体の
+  Isaac成功済み`lattice_12`軌道から場面全体移送する修復、10度以内の段階別軽量検査、
+  修復由来ハッシュ、140件の最終監査と結果台帳。
+- Not implemented: π_H模倣学習、π_L再学習、C3変更、削除、commit。
+- Execution result: 正式140/140成功。標準実行の不合格4件と追加診断不合格1件は正式集合から
+  除外して保持し、修復後の4件だけを受理した。最終受理集合の安全不合格・代替制御・重大
+  衝突・落下・QP計算不能・時間切れは0。
+- Schema/interface changes: None。
+- Tests passed: 関連単体試験22/22、全140件監査、Python構文、JSON参照ハッシュ、差分空白。
+- Evidence: `for_codex/R1_TEACHER_COLLECTION_V19_RESULT_LEDGER.json`、
+  `artifacts/p4_full/order9/r1_teacher/formal_collection_v19/collection_audit_identity_v2.json`。
+- Protection: C3 checkpoint `6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b`、
+  保護実行器`e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2`、
+  release ledger `7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729`
+  は不変。
+- Handoff notes: π_L学習済み動作量は0、QPID/QPと局所サーボは全件有効。正式140件は
+  `records_identity_v2`と、それらをハッシュで列挙する`collection_summary_identity_v2.json`
+  から読む。不合格診断成果物を学習入力へ含めない。
+- Open questions: π_H模倣学習用の観測量・教師出力への変換を既存仕様のどの実装入口で固定
+  するか。学習開始は別途明示承認を要する。
 
 ### Agent H/I/J/K/L: Order 8 Object Natural-Contact Smoke
 
@@ -12288,6 +12346,68 @@
   `training_eligible=false`、`formal_teacher_collection_authorized=false`を維持する。
 - Open questions: この診断手法を正式R1実行契約へ昇格させるか、新しい未使用集合をどう構成
   するか。
+## Global Worklog
+
+### 2026-09-05 (R1教師軌道収集の直前準備v19)
+
+- Spec version: A-MSRR v0.5。
+- Work package / Agent label: R1正式教師軌道収集の起動直前準備。
+- Summary: 140件の決定論的収集条件を固定し、再開可能な収集実行器、一次判定、Isaac後
+  の成功・安全・生データ検査、明示的開始承認の強制を実装した。収集と学習は未開始。
+- Files changed: R1 v19専用設定、条件生成・検査実装、準備実行器、収集実行器、R1
+  Isaac wrapperの正式収集候補分岐、単体試験、結果文書・目録、設計変更記録、本記録。
+- Schema/interface changes: 共有schemaなし。R1 v19専用の条件表、事前検査、開始承認、
+  収集記録だけを追加した。C3保護実行器とcheckpointは不変。
+- Upstream dependencies used: v0.5、v15範囲選定、v16最終確認、v17衝突修正診断、v18
+  落下修正診断、C3 promoted update 18。
+- Execution result: 140件を2--8モジュール各20件、学習/検証/最終評価=14/3/3へ分割。
+  タスク・乱数・姿勢条件は140/140一意。代表1件をIsaacなしで材料化し、全8区間、
+  支持台余裕30 mm、一次判定合格を確認した。
+- Preflight: 空き359.24 GiB、Isaac用Python、CUDA、入力・保護物ハッシュ、同時収集
+  なしは全て合格。未承認の開始雛形では実行器が材料化前に拒否することを確認した。
+- Tests: 新規および関連単体試験22/22合格、Python構文、Black、JSON構文、差分空白、
+  C3保護ハッシュを確認した。
+- Not executed: 正式140件収集、Isaac正式収集実行、π_H模倣学習、π_L再学習、削除、
+  commit。
+- Next step: 利用者の明示的開始指示後、条件表と事前検査を結合した開始承認記録を作り、
+  `order9_run_r1_teacher_collection_v19.py`を起動する。学習開始は別承認とする。
+- Evidence: `for_codex/R1_TEACHER_COLLECTION_PREPARATION_V19_LEDGER.json`。
+
+---
+
+## Global Worklog
+
+### 2026-09-05 (R1正式教師軌道収集v19の開始)
+
+- Spec version: A-MSRR v0.5。
+- Work package / Agent label: R1教師軌道収集。
+- Summary: 利用者の明示承認を条件表・事前検査へ結合して収集を開始した。初回は
+  TaskSpecに残った収集元識別子を物理実行前の検査が拒否し、採用0件で停止した。
+  識別子を一元化し、同じ不一致を実行命令作成前に拒否する検査と、異常時に未開始分を
+  即時停止する投入方式を実装した。修正版1件をIsaacで正式合格させ、残り139件を開始した。
+- Files changed: `scripts/order9_run_r1_teacher_collection_v19.py`、対応単体試験、
+  `launch_authorization_identity_v2.json`、設計変更記録、本記録。初回不合格成果は保持した。
+- Schema/interface changes: 共有schemaなし。R1 v19専用TaskSpec metadataの既存識別子を
+  派生caseと一致させ、実行リビジョンを分離した。C3契約は不変。
+- Upstream dependencies used: v0.5、R1 v19条件表・事前検査、C3 promoted update 18。
+- Tests run: 対象単体試験5/5合格、Python構文、差分空白、C3 checkpoint・release ledger
+  ハッシュ不変を確認した。
+- Commands run: `pytest`、`py_compile`、`git diff --check`、`sha256sum`、Isaac単独1件、
+  Isaac残り139件の4並列起動。
+- Current execution result: 120件まで実行し119件を正式合格として保存した。
+  `r1-teacher-000116`だけが設置区間で時間切れとなり、即時停止機構が未開始20件の投入を
+  止めた。重大衝突、物体落下、QP不能、安全不合格、代替制御は0。π_L学習済み補正は0、
+  QPID/QPと局所サーボは有効。再開と学習は未許可。
+- Assumptions: 利用者の開始指示は教師軌道収集だけを許可し、π_H模倣学習は許可しない。
+- Blockers / open questions: 7モジュール検証条件`r1-teacher-000116`の設置区間時間切れを
+  診断する必要がある。記録された法線力約2.49 Nは観測値であり、直接原因とは未確定。
+- Next steps: 失敗1件の短区間診断を別作業として行い、修正を採用する場合は当該1件を
+  再確認してから未開始20件を再開する。学習開始は別途明示承認を待つ。
+- Interruption evidence:
+  `artifacts/p4_full/order9/r1_teacher/formal_collection_v19/collection_interruption_identity_v2.json`。
+
+---
+
 ## Global Worklog
 
 ### 2026-09-06 (R1共通実行処理の分割保存)

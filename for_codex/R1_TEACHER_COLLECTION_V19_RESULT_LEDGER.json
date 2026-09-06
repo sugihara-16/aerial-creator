@@ -1,0 +1,70 @@
+{
+  "accepted_episode_count": 140,
+  "bindings": {
+    "audit": {
+      "path": "artifacts/p4_full/order9/r1_teacher/formal_collection_v19/collection_audit_identity_v2.json",
+      "sha256": "66ff0c2c0a37d6543813350c2c66fe339e032775fc1ecd28b081403035fc4153"
+    },
+    "collection_plan": {
+      "path": "artifacts/p4_full/order9/r1_teacher/formal_collection_v19/collection_plan.json",
+      "sha256": "4513eb01f3de08e404d36b6b0a3df0f2f522c628924431b0af0a098e00fca57c"
+    },
+    "collection_runner": {
+      "path": "scripts/order9_run_r1_teacher_collection_v19.py",
+      "sha256": "0eb57de90e617450bc897b46afec8372c2ea6800b240daea4e3777df15332816"
+    },
+    "collection_summary": {
+      "path": "artifacts/p4_full/order9/r1_teacher/formal_collection_v19/collection_summary_identity_v2.json",
+      "sha256": "5fa9c636a378cbe311d4f8523550390e5ddaf66fd8446df631b87d80ab2151c9"
+    },
+    "isaac_wrapper": {
+      "path": "scripts/order9_r1_batched_nominal_compression_rollout.py",
+      "sha256": "92ee90ddc2aea445915f234d792242a14c395857c611c379081b86bfcf202631"
+    },
+    "launch_authorization": {
+      "path": "artifacts/p4_full/order9/r1_teacher/formal_collection_v19/launch_authorization_identity_v2.json",
+      "sha256": "d34a3de576c115263c7256994bf4621cef07e759ccbfcf5d94480ded819c44d6"
+    },
+    "protocol": {
+      "path": "configs/training/order9_r1_teacher_collection_protocol_v19.json",
+      "sha256": "5bd4e905ea0fcf2c0df08ff189713c2eb8a8a943ea927d976c45119c5bd64b4b"
+    },
+    "report": {
+      "path": "for_codex/R1_TEACHER_COLLECTION_V19_RESULT.md",
+      "sha256": "667e2344471c2ecafe7fe36b22010cd9a914fc88e8775e931e6bf3a48ea4d052"
+    }
+  },
+  "control_contract": {
+    "local_servo_applied_episode_count": 140,
+    "pi_l_actor_command_applied_episode_count": 0,
+    "qpid_qp_applied_episode_count": 140
+  },
+  "dataset_split_counts": {
+    "held_out": 21,
+    "train": 98,
+    "validation": 21
+  },
+  "execution_revision": "identity_v2",
+  "ledger_version": "order9_r1_teacher_collection_result_v19",
+  "module_counts": {
+    "2": 20,
+    "3": 20,
+    "4": 20,
+    "5": 20,
+    "6": 20,
+    "7": 20,
+    "8": 20
+  },
+  "pi_h_imitation_training_started": false,
+  "planned_episode_count": 140,
+  "protected_c3": {
+    "checkpoint_sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b",
+    "release_ledger_sha256": "7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729",
+    "rollout_sha256": "e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2"
+  },
+  "repair_episode_count": 4,
+  "safety_failure_count": 0,
+  "status": "complete",
+  "teacher_collection_complete": true,
+  "training_authorized": false
+}
