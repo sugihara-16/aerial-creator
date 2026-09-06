@@ -12410,6 +12410,65 @@
 
 ## Global Worklog
 
+### 2026-09-06 (R1 π_Hデータ変換前検査v20)
+
+- Spec version: A-MSRR v0.5。
+- Work package / Agent label: R1 π_H模倣学習データ準備。
+- Summary: 正式受理済み140軌道からπ_H用`InteractionTrajectoryRecord`を作る変換規則を
+  実装し、実ファイルを書き出さずに15,878件を全件実体化して検査した。2--8モジュール、
+  3分割、全8段階の168代表件で現行π_Hの全模倣損失を更新なしで計算した。
+- Files changed: `amsrr/training/order9_r1_pi_h_dataset_preflight.py`、
+  `scripts/order9_preflight_r1_pi_h_dataset_v20.py`、対応単体試験、v20結果文書・結果台帳、
+  設計変更記録、本記録、変換前検査結果JSON。
+- Schema/interface changes: None。既存`InteractionTrajectoryRecord`とπ_Hインターフェースを
+  使用し、共有schema・共通π_L生ログ変換器は変更していない。
+- Upstream dependencies used: v0.5 §24.5.9、R1正式収集v19結果台帳、正式140件の
+  accepted記録、生のIsaac記録、ハッシュ固定TaskSpec・機体構造・接触候補・名目軌道、
+  C3 promoted update 18保護物。
+- Downstream impact: 15,878件の分割別データ書き出しへ進める。π_H教師出力からIK関節
+  目標を除き、実際にQPIDへ渡された重心・物体目標を使う変換規則を固定した。
+- Tests added or run: v20単体試験3件と、π_H方策・学習・教師・schema・既存学習処理の
+  関連試験を実行し27/27合格。全140軌道・15,878候補のschema/C_H検査、168代表条件の
+  π_H損失計算に合格した。
+- Commands run: `pytest`、`py_compile`、`black`、v20全件検査、`sha256sum`、C3保護
+  ハッシュ確認、差分空白検査。
+- Assumptions: 0.5秒間隔に段階境界と終端を追加すれば、2秒先のπ_H教師窓を過剰な重複
+  なしに保持できる。正式accepted記録だけを学習利用資格の根拠とする。
+- Blockers / open questions: 共通π_L生ログ変換器は正式ログの接触割当雛形数と選択接触
+  配列幅が一致せず直接使えない。次工程はv20専用経路を使用するため阻害しないが、共有
+  変換器を直す場合は別途schema/interface審査が必要。
+- Next steps: 15,878件を分割別`InteractionTrajectoryRecord`として書き出し、件数、
+  内容ハッシュ、元accepted記録との対応を台帳で固定する。π_H模倣学習はまだ開始しない。
+
+---
+
+## Work Package Logs
+
+### Codex: R1 π_H模倣学習データ準備v20
+
+#### 2026-09-06
+
+- Scope: 正式140軌道をπ_Hデータへ変換可能か全件検査し、学習開始直前で止める。
+- Files changed: v20変換前検査実装・実行器・単体試験・結果文書・結果台帳、設計変更記録、
+  本記録、結果JSON。
+- Upstream dependencies: v0.5、R1正式収集v19、既存π_H方策・模倣損失、C_H、C3保護物。
+- Implemented: 0.5秒標本化、段階境界・終端保持、2秒9点の将来窓、Isaac実行目標反映、
+  IK関節目標除去、正式accepted記録による資格検査、全件schema/C_H検査、168代表π_H
+  計算確認。
+- Not implemented: 学習データの永続書き出し、π_Hパラメータ更新、模倣学習、PPO、
+  π_L再学習、C3変更、共通π_L生ログ変換器変更、commit。
+- Schema/interface changes: None。
+- Downstream impact: v20経路で15,878件を書き出せる。実行時高さ倍率を含む実目標を教師に
+  し、決定論的IK境界を維持する。
+- Tests added: `tests/unit/training/test_order9_r1_pi_h_dataset_preflight.py`。
+- Tests passed: 関連27/27、全140軌道・15,878候補、168代表π_H計算、Python構文、
+  Black、差分空白、C3保護ハッシュ。
+- Handoff notes: 結果JSONは`ready_for_pi_h_dataset_conversion`かつ
+  `training_authorized=false`。データ書き出し後も、学習開始には別の明示指示が必要。
+- Open questions: 共通π_L生ログ変換器の接触割当幅不一致を別作業で修正するか。
+
+## Global Worklog
+
 ### 2026-09-06 (R1共通実行処理の分割保存)
 
 - Spec version: A-MSRR v0.5。
@@ -12443,3 +12502,41 @@
 - Open questions: なし。
 
 ## Global Worklog
+
+### 2026-09-06 (R1既存成果の7分割commit)
+
+- Spec version: A-MSRR v0.5。
+- Work package / Agent label: Codex / R1成果のGit履歴整理。
+- Summary: 利用者の依頼により、開始HEAD `6002f58`からの未commit変更48ファイルを、
+  MuJoCo比較、共通実行処理、場面移送と範囲選定v15、14機体確認v16、衝突・落下修復
+  v17/v18、正式教師収集v19、π_H変換前検査v20の7単位へ分割してcommitする。
+- Files changed: 既存差分48ファイル。保存作業で追記したのは本WORKLOGだけである。
+- Schema/interface changes: 保存作業による追加変更はNone。
+- Upstream dependencies used: v0.5、設計変更記録、各工程の結果文書と台帳、実ファイル。
+- Downstream impact: 各機能のコード・試験・設定・結果文書と対応する記録を同じcommitで
+  追跡できる。共通実行処理は依存する実行器より前に保存する。
+- Tests added or run: 対象・関連58/58合格、Python 27ファイル・JSON 12ファイルの構文、
+  正式収集v19および変換前検査v20の台帳参照14件、差分空白、C3保護3ハッシュを確認。
+- Whitespace note: 新規追加のv20結果報告には末尾空行1行が既存の結果台帳ハッシュに
+  含まれているため、そのバイト列を保持した。標準`git diff --cached --check`の指摘は
+  この1行だけであり、`-c core.whitespace=-blank-at-eof`による他の空白検査は合格した。
+- Commands run: `git status`、`git diff`、`pytest`、構文・ハッシュ検査、部分ステージ、
+  `git commit`、commit差分と最終作業ツリーの確認。
+- Assumptions: `.gitignore`の既存方針に従い、大容量の`artifacts/`はGitへ追加しない。
+  結果台帳と実データの既存ハッシュを維持し、実データはローカルに残す。
+- Blockers / open questions: commit作業にはなし。v20の既知制限は前の記録どおり。
+- Next steps: 分割保存の完了を報告する。収集・学習・追加検査実行は開始しない。
+
+## Work Package Logs
+
+### Codex: R1既存成果の7分割commit
+
+#### 2026-09-06
+
+- Scope / implemented: 既存差分の7分割保存と、設計変更記録・WORKLOGの対応箇所の部分
+  ステージ。作業ツリー上の既存ソース・結果台帳の内容は変えない。
+- Files changed / upstream dependencies: 上記Global Worklog参照。
+- Schema/interface changes: None。
+- Tests passed: 関連58/58、構文確認、現行台帳14参照、C3保護ハッシュ。
+- Handoff notes: ローカルcommitのみ。大容量実データは既存の`artifacts/`に保持する。
+- Open questions: なし。

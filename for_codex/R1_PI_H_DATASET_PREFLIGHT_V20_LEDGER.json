@@ -1,0 +1,56 @@
+{
+  "bindings": {
+    "implementation": {
+      "path": "amsrr/training/order9_r1_pi_h_dataset_preflight.py",
+      "sha256": "d571f2617d1d8cc8dca261eba9b56fabef4416d1bcf648b58617e741da308cf9"
+    },
+    "preflight_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/formal_collection_v19/pi_h_dataset_preflight_v20.json",
+      "sha256": "7bf9e4822826ec07ce7c78ea614f650c279ab3be6fa0810f99b211dde54be4e5"
+    },
+    "report": {
+      "path": "for_codex/R1_PI_H_DATASET_PREFLIGHT_V20.md",
+      "sha256": "a4a77d37dccb14a1a5a0d208506e9f1795e3ccf2d2a3cfec25a6dd9d4af157fd"
+    },
+    "runner": {
+      "path": "scripts/order9_preflight_r1_pi_h_dataset_v20.py",
+      "sha256": "011646543d9a575ebb00d0e42fb08058f6dd451e8504f7f94e4bc703f2192cb6"
+    },
+    "source_collection_ledger": {
+      "path": "for_codex/R1_TEACHER_COLLECTION_V19_RESULT_LEDGER.json",
+      "sha256": "612917dc9667873caa1288c7308c8e3415945f5e863c0391b48efc94d1957675"
+    },
+    "test": {
+      "path": "tests/unit/training/test_order9_r1_pi_h_dataset_preflight.py",
+      "sha256": "6b7d65586386764e9d75373e12f0caaf70b02f9556eeaa2a1695aedf898a6ae7"
+    }
+  },
+  "conversion_contract": {
+    "decision_interval_s": 0.5,
+    "deterministic_ik_boundary_preserved": true,
+    "joint_targets_in_pi_h_teacher_output": false,
+    "knot_count": 9,
+    "knot_dt_s": 0.25,
+    "raw_contact_actor_input": false,
+    "trajectory_horizon_s": 2.0,
+    "uses_recorded_qpid_reference": true
+  },
+  "episode_count": 140,
+  "ledger_version": "order9_r1_pi_h_dataset_preflight_result_v20",
+  "module_split_phase_representative_count": 168,
+  "pi_h_parameter_update_performed": false,
+  "planned_interaction_record_count": 15878,
+  "protected_c3": {
+    "checkpoint_sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b",
+    "release_ledger_sha256": "7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729",
+    "rollout_sha256": "e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2"
+  },
+  "record_split_counts": {
+    "held_out": 2251,
+    "train": 11335,
+    "validation": 2292
+  },
+  "representative_active_wrench_count": 1890,
+  "status": "ready_for_pi_h_dataset_conversion",
+  "training_authorized": false
+}
