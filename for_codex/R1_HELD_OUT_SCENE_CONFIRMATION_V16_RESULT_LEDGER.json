@@ -1,0 +1,122 @@
+{
+  "ledger_version": "order9_r1_held_out_scene_confirmation_result_ledger_v16",
+  "date": "2026-09-01",
+  "status": "rejected",
+  "decision": "selected_range_rejected_on_held_out_isaac_confirmation",
+  "parent_selection_level_id": "r1_l4_40mm_20deg",
+  "selected_position_half_span_m": 0.04,
+  "selected_yaw_half_span_rad": 0.3490658503988659,
+  "source_pool_split": "held_out",
+  "held_out_bucket_count": 14,
+  "held_out_count_per_module_count": 2,
+  "lightweight_candidate_count": 434,
+  "lightweight_accepted_count": 434,
+  "representative_isaac_candidate_count": 28,
+  "representative_isaac_episode_count": 28,
+  "representative_isaac_success_count": 22,
+  "representative_isaac_safety_failure_count": 6,
+  "representative_isaac_hard_collision_count": 4,
+  "representative_isaac_object_drop_count": 2,
+  "representative_isaac_timeout_count": 0,
+  "representative_isaac_fallback_count": 0,
+  "r1_range_confirmed": false,
+  "accepted_level_id": null,
+  "formal_teacher_collection_authorized": false,
+  "learning_started": false,
+  "training_eligible": false,
+  "pi_l_actor_command_applied": false,
+  "qpid_qp_applied_for_isaac": true,
+  "local_servo_applied_for_isaac": true,
+  "complete_scene_transform_required": true,
+  "support_transformed_with_scene": true,
+  "legacy_validation_evidence_reused": false,
+  "failure_buckets": [
+    {
+      "bucket_id": "held-out-000045-58a5c015f4db",
+      "structural_hash": "58a5c015f4db032c765412d4827d64629ccb6ae4fb2b3ce5feb0d0e6d7a03ece",
+      "module_count": 6,
+      "failure_kind": "object_dropped_during_transport",
+      "failed_sample_indices": [0, 26]
+    },
+    {
+      "bucket_id": "held-out-000057-ba94152a03e4",
+      "structural_hash": "ba94152a03e418e14f9ee2398c4b4fd0e8b2cfc61869391f73ffb31490dfb999",
+      "module_count": 7,
+      "failure_kind": "hard_collision_during_initial_phase",
+      "failed_sample_indices": [0, 26]
+    },
+    {
+      "bucket_id": "held-out-000069-b6b88f01296d",
+      "structural_hash": "b6b88f01296dc0001bb7341a8b169889f736ab3e05a98996eb06487f1c1786de",
+      "module_count": 8,
+      "failure_kind": "hard_collision_during_contact_acquisition",
+      "failed_sample_indices": [0, 26]
+    }
+  ],
+  "bindings": {
+    "parent_selection_result": {
+      "path": "for_codex/R1_SCENE_INVARIANT_RANGE_SELECTION_V15_RESULT_LEDGER.json",
+      "sha256": "df930a754874f5f56f81b89ed144250e4a482fb13d38facfd507e438abdcbadf"
+    },
+    "protocol": {
+      "path": "configs/training/order9_r1_held_out_scene_confirmation_protocol_v16.json",
+      "sha256": "946b2cc635fb324fb3c6db618c68dac7951d015f71bb8734ef11fb2d878b9367"
+    },
+    "approval": {
+      "path": "for_codex/R1_HELD_OUT_SCENE_CONFIRMATION_PROTOCOL_V16_APPROVAL.json",
+      "sha256": "416c8a655b8e3f776297edd7ed17a0068be116ead6d1c4c09aa5466c48ee4bcc"
+    },
+    "result_document": {
+      "path": "for_codex/R1_HELD_OUT_SCENE_CONFIRMATION_V16_RESULT.md",
+      "sha256": "c748c541ebf4416a4cc26f570a42d3f893055f7289da9b8bd9fd536409f6b814"
+    },
+    "artifact_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/held_out_scene_confirmation_v16/held_out_confirmation_result.json",
+      "sha256": "979867b839f332bb7d4fd985e2e59278f4a3303501b353c3944ad6c6953252df"
+    },
+    "lightweight_scene_proofs": {
+      "path": "artifacts/p4_full/order9/r1_teacher/held_out_scene_confirmation_v16/results/held_out_scene_proofs.json",
+      "sha256": "7379897c007d591d3bc84456c3d35027caf84effe430fd7af1427388626bc441"
+    },
+    "representative_isaac_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/held_out_scene_confirmation_v16/results/held_out_representative_isaac.json",
+      "sha256": "7718cee7eb9cc7c0f4579ec225940eb122c7117419e49bd45709e50d0d6b6384"
+    },
+    "unusedness_audit": {
+      "path": "artifacts/p4_full/order9/r1_teacher/held_out_scene_confirmation_v16/unusedness_audit.json",
+      "sha256": "594e462287a38793ce491f596566309698babbcd39571673296a47f79ffcb6cf"
+    },
+    "confirmation_implementation": {
+      "path": "amsrr/training/order9_r1_held_out_confirmation_v16.py",
+      "sha256": "0762e83a216e7daf888ac68207cd7c45f1e5790b557e52ed1e612d444ad4ef48"
+    },
+    "runner_implementation": {
+      "path": "scripts/order9_run_r1_held_out_scene_confirmation_v16.py",
+      "sha256": "a49db206b7d510fa1afd09b2a60a14626daa3db86cb6a9565baf572022658ed1"
+    },
+    "scene_transfer_implementation": {
+      "path": "amsrr/training/order9_r1_yaw_branch_repair.py",
+      "sha256": "9f19e97cae885597772657417de6dc1091f44fe14bd949f76bdf160b8fc2331d"
+    },
+    "isaac_wrapper_implementation": {
+      "path": "scripts/order9_r1_batched_nominal_compression_rollout.py",
+      "sha256": "3187c9dfdfc568f76ea07acb3f0f8b3e86acfe9593965dd61870fa7d1a71a862"
+    },
+    "protected_c3_checkpoint": {
+      "path": "artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt",
+      "sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b"
+    },
+    "protected_c3_rollout": {
+      "path": "scripts/order9_vectorized_isaac_rollout.py",
+      "sha256": "e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2"
+    },
+    "protected_c3_curriculum": {
+      "path": "configs/training/order9_learning_curriculum.yaml",
+      "sha256": "965b1abc180d3dab80369c150c55a774c4ceee186befda68f3093c22f7d6f9d4"
+    },
+    "protected_c3_release_ledger": {
+      "path": "for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json",
+      "sha256": "7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729"
+    }
+  }
+}

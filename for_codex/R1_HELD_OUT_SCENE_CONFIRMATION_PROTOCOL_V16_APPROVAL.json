@@ -1,0 +1,23 @@
+{
+  "record_version": "order9_r1_held_out_scene_confirmation_approval_v16",
+  "date": "2026-08-31",
+  "decision": "approved",
+  "approved_by": "repository_user",
+  "request": "未使用14機体の最終確認を実行する。",
+  "approved_protocol": {
+    "path": "configs/training/order9_r1_held_out_scene_confirmation_protocol_v16.json",
+    "sha256": "946b2cc635fb324fb3c6db618c68dac7951d015f71bb8734ef11fb2d878b9367"
+  },
+  "scope": {
+    "held_out_bucket_count": 14,
+    "selected_level_id": "r1_l4_40mm_20deg",
+    "complete_scene_transform_required": true,
+    "support_transformed_with_scene": true,
+    "representative_isaac_episode_count": 28,
+    "pi_l_actor_command_applied": false
+  },
+  "learning_authorized": false,
+  "teacher_collection_authorized": false,
+  "artifact_deletion_authorized": false,
+  "commit_authorized": false
+}

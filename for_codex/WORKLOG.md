@@ -12137,6 +12137,66 @@
 
 ## Global Worklog
 
+### 2026-09-01 (R1未使用14機体の最終確認v16・不合格確定)
+
+- Spec version: A-MSRR v0.5。
+- Work package / Agent label: R1教師軌道収集前の未使用形態最終確認。
+- Summary: v15で選定した前後・左右`±40 mm`、yaw `±20度`を、候補修正に使って
+  いない`held_out` 14機体で確認した。中央基準軌道14/14と場面全体移送434/434は
+  一次判定に合格したが、Isaac代表は22/28成功、安全不合格6となり、選定範囲を
+  不合格とした。
+- Files changed: `amsrr/training/order9_r1_held_out_confirmation_v16.py`、
+  `scripts/order9_run_r1_held_out_scene_confirmation_v16.py`、v16契約・承認、単体試験、
+  結果文書・結果目録、`AMSRR_design_modification_by_codex.md`、本記録。
+- Schema/interface changes: 共有schema、C3、π_L/QPID/QP/local servo境界に変更なし。
+  R1 v16専用契約・証拠形式だけを追加した。
+- Upstream dependencies used: v0.5、v15選定目録、形態候補集合、未使用形態資産、
+  v13/v14教師生成・30 mm支持台余裕証明、C3 promoted update 18保護物。
+- Downstream impact: `±40 mm`・`±20度`はR1一般化範囲として未確定。正式教師収集と
+  π_H模倣学習へ進まない。今回の14機体は判定に使用済みとなった。
+- Tests added or run: 現行8区間名、14機体の2--8モジュール各2件、未使用分割保持、
+  未使用資産結合、支持台同伴2分割構築を検査する単体試験。関連試験10/10合格。
+- Commands run: v16実行器の`--prepare-only`、`--proof-only`、正式Isaac 28件、
+  `black --check`、`pytest`、`py_compile`、JSON・目録ハッシュ検査、C3保護ハッシュ検査、
+  `git diff --check`。
+- Assumptions: 同じ物体・支持台・タスクの平面位置とyawだけを変えるため、場面全体の
+  平面剛体移送は完全追従幾何を保存する。一方、その証明を物理接触成功へ読み替えない。
+- Blockers / open questions: 6モジュール1機体は搬送中落下、7モジュール1機体は開始時
+  重大衝突、8モジュール1機体は接触獲得時重大衝突。失敗原因の短区間診断は未実行。
+- Next steps: 3失敗機体で重大衝突と把持力低下を短区間診断する。手法変更後の正式な
+  一般化確認には、今回とは別の未使用機体集合を用意する。
+
+---
+
+## Work Package Logs
+
+### Codex: R1未使用14機体の場面全体移送・最終確認v16
+
+#### 2026-09-01
+
+- Scope: v15選定範囲を真の`held_out` 14機体で一度だけ最終確認する。
+- Files changed: v16確認実装・実行器・契約・承認・試験・結果文書・結果目録、設計変更
+  記録、本作業記録。
+- Upstream dependencies: v15目録、形態候補集合・資産目録、v13/v14の完全8区間生成、
+  C3 promoted update 18。
+- Implemented: 未使用性監査、モジュール数別2機体選択、中央基準軌道生成、全31条件の
+  支持台同伴場面移送、434条件一次判定、対角2条件×14機体の独立Isaac実行、
+  hash-bound不合格目録。
+- Not implemented: 失敗原因修正、範囲再選定、正式教師軌道収集、π_H模倣学習、
+  π_L再学習、C3変更、削除、commit。
+- Schema/interface changes: None。R1専用の新規実装・契約のみ。
+- Downstream impact: R1の次の入口を教師収集から失敗3機体の短区間診断へ戻した。
+- Tests added: `tests/unit/training/test_order9_r1_held_out_confirmation_v16.py`。
+- Tests passed: 関連10/10、Black、Python/JSON構文、目録参照16/16、差分空白検査。
+- Execution result: 中央14/14、一次判定434/434。Isaacは22/28成功、安全不合格6、
+  重大衝突4、落下2、時間切れ0、代替制御0。π_L動作量0、QPID/QP・局所サーボ有効。
+- Handoff notes: 正式目録は
+  `for_codex/R1_HELD_OUT_SCENE_CONFIRMATION_V16_RESULT_LEDGER.json`
+  （SHA-256 `fb3a8083bdbdbbc3891bfc2da6b316ca180e023682b55f74656f83521b3612c8`）。
+  今回の14機体を再び未使用集合として扱わない。
+- Open questions: 7・8モジュールの重大衝突が初期姿勢配置か制御初動か、6モジュールの
+  搬送時法線力低下が把持点・押し込み・機体変形のどれに支配されるか。
+
 ### 2026-09-06 (R1共通実行処理の分割保存)
 
 - Spec version: A-MSRR v0.5。

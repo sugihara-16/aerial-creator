@@ -1,0 +1,89 @@
+{
+  "protocol_version": "order9_r1_held_out_scene_confirmation_protocol_v16",
+  "date": "2026-08-31",
+  "status": "approved",
+  "purpose": "Confirm the already-selected R1 planar scene range on the 14 morphology-pool held-out structures without reusing the contaminated validation set.",
+  "source_pool_split": "held_out",
+  "held_out_bucket_count": 14,
+  "held_out_count_per_module_count": 2,
+  "module_count_minimum": 2,
+  "module_count_maximum": 8,
+  "reference_level_id": "r1_l2_20mm_10deg",
+  "reference_lattice_index": 13,
+  "selected_level_id": "r1_l4_40mm_20deg",
+  "selected_position_half_span_m": 0.04,
+  "selected_yaw_half_span_rad": 0.3490658503988659,
+  "candidate_count_per_bucket": 31,
+  "lattice_candidate_count_per_bucket": 27,
+  "interior_candidate_count_per_bucket": 4,
+  "candidate_count": 434,
+  "complete_scene_transform_required": true,
+  "support_transformed_with_scene": true,
+  "joint_targets_exactly_preserved": true,
+  "contact_assignments_exactly_preserved": true,
+  "all_eight_phases_required": true,
+  "proof_substep_count": 2,
+  "proof_substeps_are_not_temporal_phases": true,
+  "temporal_two_stage_method_used": false,
+  "legacy_validation_evidence_reuse_forbidden": true,
+  "representative_lattice_indices": [
+    0,
+    26
+  ],
+  "representative_isaac_episode_count": 28,
+  "pi_l_system_retained": true,
+  "pi_l_actor_command_applied": false,
+  "qpid_qp_enabled_for_isaac": true,
+  "local_servo_enabled_for_isaac": true,
+  "formal_teacher_collection_authorized": false,
+  "learning_authorized": false,
+  "training_eligible": false,
+  "parent_selection_result": {
+    "path": "for_codex/R1_SCENE_INVARIANT_RANGE_SELECTION_V15_RESULT_LEDGER.json",
+    "sha256": "df930a754874f5f56f81b89ed144250e4a482fb13d38facfd507e438abdcbadf"
+  },
+  "morphology_pool": {
+    "path": "artifacts/p4_full/order9/morphology_pool.json",
+    "sha256": "ba4e6e346fccfd3ac5e4e97a384cd4097c5af07acbaa715758ba67699ee9a682"
+  },
+  "morphology_asset_manifest": {
+    "path": "artifacts/p4_full/order9/c3_preparation/morphology_assets_grasp_frame_mesh_v2/manifest.json",
+    "sha256": "d79a785d3a6e7b4d1685e5677499ee34f5d2260f875c5b6da5cb51a3640d8ab7"
+  },
+  "source_task_manifest": {
+    "path": "artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/runtime/rollout_buckets_current_lineage_v5/manifest_c3_release_smooth_clear300_current_config_min2_preload_screened_v2.json",
+    "sha256": "ee0001c7c7bc9f5d71ad08219ae73907b5ef4022f82fd90505e3c4642ba291a6"
+  },
+  "confirmation_implementation": {
+    "path": "amsrr/training/order9_r1_held_out_confirmation_v16.py",
+    "sha256": "0762e83a216e7daf888ac68207cd7c45f1e5790b557e52ed1e612d444ad4ef48"
+  },
+  "runner_implementation": {
+    "path": "scripts/order9_run_r1_held_out_scene_confirmation_v16.py",
+    "sha256": "a49db206b7d510fa1afd09b2a60a14626daa3db86cb6a9565baf572022658ed1"
+  },
+  "scene_transfer_implementation": {
+    "path": "amsrr/training/order9_r1_yaw_branch_repair.py",
+    "sha256": "9f19e97cae885597772657417de6dc1091f44fe14bd949f76bdf160b8fc2331d"
+  },
+  "isaac_wrapper_implementation": {
+    "path": "scripts/order9_r1_batched_nominal_compression_rollout.py",
+    "sha256": "3187c9dfdfc568f76ea07acb3f0f8b3e86acfe9593965dd61870fa7d1a71a862"
+  },
+  "protected_c3_checkpoint": {
+    "path": "artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt",
+    "sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b"
+  },
+  "protected_c3_rollout": {
+    "path": "scripts/order9_vectorized_isaac_rollout.py",
+    "sha256": "e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2"
+  },
+  "protected_c3_curriculum": {
+    "path": "configs/training/order9_learning_curriculum.yaml",
+    "sha256": "965b1abc180d3dab80369c150c55a774c4ceee186befda68f3093c22f7d6f9d4"
+  },
+  "protected_c3_release_ledger": {
+    "path": "for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json",
+    "sha256": "7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729"
+  }
+}
