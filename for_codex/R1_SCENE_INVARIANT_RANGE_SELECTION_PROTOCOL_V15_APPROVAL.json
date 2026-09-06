@@ -1,0 +1,15 @@
+{
+  "record_version": "order9_r1_scene_invariant_range_selection_approval_v15",
+  "decision": "approved",
+  "approved_by": "repository_user",
+  "approval_date": "2026-08-31",
+  "approval_basis": "The repository user approved moving the support together with the object, robot poses, goals, and trajectory, accepted the successful representative Isaac result, and then explicitly requested range reselection. The user also confirmed that the temporal two-stage method was not required. The selection therefore treats each pose level as one complete-scene planar rigid transform of the same physical condition, proves all saved trajectories and collision distances invariant, and uses bounded real-Isaac replays only as a numerical implementation check. No learning or teacher collection is authorized.",
+  "approved_protocol": {
+    "path": "configs/training/order9_r1_scene_invariant_range_selection_protocol_v15.json",
+    "sha256": "e985cfbaa5511beef97df4e4d023ddf0a86711af0965f596939908003470c6d6"
+  },
+  "learning_authorized": false,
+  "teacher_collection_authorized": false,
+  "file_deletion_authorized": false,
+  "commit_authorized": false
+}

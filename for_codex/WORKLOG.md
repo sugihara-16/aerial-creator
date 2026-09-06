@@ -2,6 +2,71 @@
 
 ## Global Worklog
 
+### 2026-08-31 (R1場面全体移送による範囲再選定v15完了)
+
+- Spec version: v0.5、およびユーザー承認済みR1場面全体移送範囲選定v15追加契約。
+- Work package / Agent label: Codex / R1教師軌道収集前の22機体範囲再選定。
+- Summary: 同じ物理条件の平面位置・yaw変更について、支持台、物体、目標、機体姿勢、
+  自由接触点、重心目標、初期化状態を同じ剛体変換で移した。20 mm・10度の全682候補
+  について既存Isaac成功2回を再検査し、30 mm・15度と40 mm・20度は各682候補の
+  全8段階で関節値、接触割当、物体相対軌道、衝突距離の保存を証明した。最大範囲を
+  モジュール数2--8の各1機体でIsaac確認し、7/7成功した。採用範囲は前後・左右
+  それぞれ±40 mm、yaw ±20度。
+- Files changed: `amsrr/training/order9_r1_yaw_branch_repair.py`、場面移送診断器、
+  R1専用Isaac wrapper、v15選定実行器・契約・承認、対応単体試験、結果文書・結果台帳、
+  設計変更記録、本作業記録。生成証拠は
+  `artifacts/p4_full/order9/r1_teacher/range_selection_scene_transfer_v15`。
+- Schema/interface changes: 共有schema、C3 policy/action/controller契約の変更なし。
+  R1専用の場面移送証明と、単独・非正式Isaac確認でTaskSpecの支持台を使う入口だけを追加。
+- Upstream dependencies used: v0.5、v13の20 mm・10度全682候補の現行Isaac証拠、
+  v14支持台余裕証明、C3 promoted update 18保護物。
+- Downstream impact: 22機体側の選定範囲を40 mm・20度へ更新した。未使用14機体確認、
+  正式教師軌道収集、π_H模倣学習は自動的には許可されない。
+- Tests added or run: 関連単体試験17/17合格。20 mm・10度は1364/1364成功証拠、
+  30 mm・15度と40 mm・20度はそれぞれ682/682証明、最大範囲Isaac 7/7成功。
+  安全不合格、代替制御、硬い衝突、落下、時間切れは0。Black、Python構文、JSON構文、
+  差分空白、C3保護対象4ハッシュに合格。
+- Commands run: `order9_run_r1_scene_invariant_range_selection_v15.py`、
+  `PYTHONPATH=. PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest`、`black --check`、
+  `py_compile`、`json_pp`、`sha256sum`、`git diff --check`。
+- Assumptions: 支持台を含む場面全体の水平移動・yaw回転は重力方向を変えず、同じ機体・
+  物体・支持台・制御条件の距離と物体相対運動を保存する。Isaac代表実行はこの実装上の
+  数値確認であり、全候補の代替証拠ではない。
+- Blockers / open questions: 22機体側の範囲選定にはなし。候補修正に未使用の14機体を
+  一度だけ確認する工程は未実行。
+- Next steps: 別契約で未使用14機体へ選定済み40 mm・20度を一度だけ適用し、合格後に
+  正式教師軌道収集へ進む。学習、収集、削除、commitは今回実行していない。
+
+### 2026-08-31 (R1支持台同伴平面移送の代表Isaac成功)
+
+- Spec version: v0.5、および診断専用R1支持台同伴平面移送v4。
+- Work package / Agent label: Codex / R1 30 mm・15度代表失敗例の場面全体移送診断。
+- Summary: 成功済みの同一機体・同一格子方向の20 mm・10度軌道から、さらに10 mm・5度
+  移した30 mm・15度候補を構成した。支持台を固定せず、物体、目標、支持台、機体姿勢、
+  自由接触点、重心目標、初期化状態を同じ平面剛体変換で移した。一次判定合格後に
+  Isaacを単独1回だけ実行し、成功1/1、安全不合格0、代替制御0を得た。
+- Files changed: `amsrr/training/order9_r1_yaw_branch_repair.py`、
+  `scripts/order9_prepare_r1_planar_nominal_transfer_diagnostic.py`、
+  `scripts/order9_r1_batched_nominal_compression_rollout.py`、対応単体試験、設計変更記録、
+  本作業記録。診断生成物は`artifacts/.../r1_l3_planar_scene_transfer_v4`。
+- Schema/interface changes: 共有schemaとC3契約の変更なし。診断専用入口にTaskSpecの支持台を
+  Isaacへ渡す真偽値を追加し、単独1回・隔離出力・正式注釈禁止の場合だけ許可した。
+- Upstream dependencies used: v0.5、R1 v14支持台余裕証明、同一機体L2格子点8の現行Isaac
+  成功2/2、C3 promoted update 18保護実行器・checkpoint。
+- Downstream impact: 指定代表例では支持台同伴移送により30 mm・15度の実行成功を確認した。
+  第3段階全体の正式合否、範囲選定、教師収集、π_H学習は更新しない。
+- Tests added or run: 対象・周辺単体試験17/17合格。場面全体の支持台・軌道同伴変換、
+  関節値保存、診断制約を確認。
+  一次判定は773時点・1546自由接触姿勢、最小支持台間隔30 mm、最小関節余裕27.306%。
+  実Isaacは3683制御周期で最終段階8、硬い衝突・物体落下・時間切れ0。
+- Commands run: 診断作成器、診断専用Isaac単独実行、`pytest`、`py_compile`、`black`、
+  `sha256sum`、`git diff --check`。
+- Assumptions: 同一物体・同一支持台・同一機体で平面位置とyawだけを変える診断では、
+  場面全体の剛体変換が距離、物体相対軌道、関節軌道を保存する。
+- Blockers / open questions: 代表例にはなし。正式採用には22機体の候補集合を同じ契約で
+  評価した後、未使用14機体を一度だけ確認する必要がある。
+- Next steps: ユーザー承認後にだけ、この同伴移送を22機体側の正式範囲選定へ結合する。
+
 ### 2026-08-31 (R1 v13作業の中断・保護)
 
 - Spec version: v0.5、およびR1範囲選定v13追加契約。
@@ -11987,6 +12052,90 @@
   π_L再学習、C3変更、commit。
 - Next: 接触取得から搬送開始だけを短区間化して両エンジンの接触力・相対姿勢・材料を
   照合し、結果一致後にQPID/QPを一括またはコンパイル済み経路へ移す。
+
+### Codex: R1 30 mm・15度の名目軌道平面移送診断
+
+#### 2026-08-31
+
+- Scope: 生成で詰まった6モジュール機の第3段階格子点8へ、同じ機体の成功済み名目
+  中央軌道を平面剛体移送し、Isaac前一次判定に合格した場合だけIsaacを1回実行する。
+- Implemented: 物体中心まわりの平面回転と世界座標平行移動を全8段階へ適用する処理、
+  関節値・接触割当・物体相対姿勢の不変量監査、診断専用1回Isaac入口、軽量不合格記録を
+  追加した。診断専用1回入口は正式証拠生成を禁止する。
+- Reference: `train-000004-190f3a425b3e/lattice_13`、位置0 mm・向き0度。現行の
+  単独Isaac再確認は2/2成功、安全不合格0、代替制御0。対象は同機体`lattice_08`、
+  x=-30 mm、y=+30 mm、yaw=+15度。
+- Preflight result: 全796時点・自由接触点1592姿勢で関節位置・速度および接触割当が
+  完全一致し、物体相対位置最大誤差`7.216449660063518e-16 m`、姿勢最大誤差
+  `2.9802322387695312e-08 rad`。接近段階の時点374で固定支持台間隔が
+  `0.0117826335 m`となり、19.5 mm合否値と30 mm生成目標の両方を下回った。
+- Outcome: 一次判定で棄却。Isaac、制御層、学習、教師収集、削除、commitは未実行。
+  第3段階の正式合否およびR1進捗は更新しない。
+- Tests: 平面移送と関節値保存の単体試験を追加し、関連5/5合格。Python構文、差分空白、
+  C3保護対象4ハッシュを確認した。
+- Evidence: `artifacts/p4_full/order9/r1_teacher/diagnostics/`
+  `r1_l3_planar_nominal_transfer_v3/`
+  `r1_l3_30mm_15deg__train__train-000004-190f3a425b3e__lattice_08__lightweight_rejection.json`。
+
+### Codex: R1 30 mm・15度の支持台同伴平面移送診断
+
+#### 2026-08-31
+
+- Scope: 直前の固定支持台診断を訂正し、支持台を含む場面全体を、同一機体・同一方向の
+  成功済み20 mm・10度条件から30 mm・15度条件へ移して、一次判定とIsaac単独1回で
+  確認する。
+- Implemented: 支持台、物体、物体目標、機体姿勢、自由接触点、重心目標、初期化状態を
+  同じ固定平面剛体変換で移す処理と不変量監査を追加した。TaskSpecの支持台を使うIsaac
+  分岐は、診断専用、単独1回、隔離出力、正式注釈禁止を同時に満たす場合だけ許可した。
+- Reference: 6モジュール機`train-000004-190f3a425b3e`のL2格子点8。現行の補正後物体
+  条件でIsaac 2/2成功、安全不合格0、代替制御0。ここからx=-10 mm、y=+10 mm、
+  yaw=+5度を加えて同じ機体のL3格子点8を作った。
+- Preflight result: 全8段階773時点・自由接触点1546姿勢で関節値と接触割当を完全保存。
+  物体相対位置最大誤差`9.036560719766055e-16 m`、姿勢最大誤差
+  `2.9802322387695312e-08 rad`、最小支持台間隔30 mm、最小関節余裕27.306%。
+- Isaac result: 1/1成功、3683制御周期、最終段階8。安全不合格、代替制御、硬い衝突、
+  物体落下、時間切れはすべて0。実行記録で`r1_scene_support_from_task=true`を確認した。
+  π_L学習済み動作量は0で、正式昇格・学習用証拠にはできない。
+- Evidence: `artifacts/p4_full/order9/r1_teacher/diagnostics/`
+  `r1_l3_planar_scene_transfer_v4/r1_l3_30mm_15deg__train__`
+  `train-000004-190f3a425b3e__lattice_08/isaac_one_replay/`
+  `r1_l3_30mm_15deg__train__train-000004-190f3a425b3e__lattice_08/isaac/`
+  `evaluation_episodes.jsonl`、SHA-256
+  `239f074905a2e54c85e0fedf8b43d92dd2d94063eb5f6854f7883ad8c23be6da`。
+- Not advanced: 第3段階全体の正式合格、22機体側の範囲選定、未使用14機体確認、正式
+  教師収集、π_H模倣学習、π_L再学習、C3変更、commit。
+
+### Codex: R1場面全体移送による範囲再選定v15
+
+#### 2026-08-31
+
+- Scope: 22機体の20 mm・10度、30 mm・15度、40 mm・20度を、支持台を含む場面
+  全体の平面剛体移送契約で再選定する。
+- Files changed: 場面移送実装・診断器・R1専用Isaac wrapper、v15選定実行器・契約・
+  承認、単体試験、結果文書・台帳、設計変更記録、本作業記録。
+- Upstream dependencies: v0.5、v13の20 mm・10度全件Isaac成功証拠、v14支持台余裕
+  証明、C3 promoted update 18保護物。
+- Implemented: 全8段階の場面変換不変量監査、同一機体内の実物体姿勢による最近傍
+  成功軌道選択、682候補単位の証明、最大範囲のモジュール数別Isaac確認、hash-bound
+  結果台帳。時間方向の二段階手法は使用していない。
+- Selection result: 20 mm・10度は1364/1364成功。30 mm・15度と40 mm・20度は
+  各682/682証明合格。40 mm・20度のIsaac代表7/7成功、安全不合格・代替制御・
+  硬い衝突・落下・時間切れ0。採用範囲は前後・左右±40 mm、yaw ±20度。
+- Not implemented: 未使用14機体の最終確認、正式教師軌道収集、π_H模倣学習、π_L
+  再学習、C3変更、削除、commit。
+- Schema/interface changes: 共有schemaなし。R1 v15専用契約、証明形式および単独の
+  数値確認入口のみ。
+- Downstream impact: 22機体側の範囲選定を完了。次は選定済み範囲の未使用14機体確認。
+- Tests added: 場面全体移送、関節値・接触割当保存、TaskSpec支持台利用条件の回帰試験。
+- Tests passed: 関連17/17、Black、Python/JSON構文、差分空白。全1364証明ファイル、
+  Isaac代表7件、C3保護4ハッシュを再確認した。
+- Handoff notes: 正式目録は
+  `for_codex/R1_SCENE_INVARIANT_RANGE_SELECTION_V15_RESULT_LEDGER.json`
+  （SHA-256 `df930a754874f5f56f81b89ed144250e4a482fb13d38facfd507e438abdcbadf`）。
+  `held_out_confirmation_executed=false`、`training_eligible=false`を維持する。
+- Open questions: 未使用14機体の一度だけの最終確認結果。
+
+## Global Worklog
 
 ### 2026-09-06 (R1共通実行処理の分割保存)
 

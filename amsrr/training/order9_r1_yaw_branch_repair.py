@@ -49,6 +49,10 @@ from amsrr.training.order9_c3_nominal_trajectory import (
     validate_order9_c3_nominal_trajectory_set_bytes,
 )
 from amsrr.training.order9_posture_resolver import _default_posture_ik_solver
+from amsrr.training.order9_posture_resolver import (
+    Order9PostureCollisionBox,
+    Order9PostureCollisionObject,
+)
 from amsrr.training.order9_r1_complete_task_audit import (
     audit_order9_r1_complete_task_semantics,
 )
@@ -63,6 +67,8 @@ from amsrr.training.order9_r1_support_clearance import (
 from amsrr.utils.hashing import hash_file, stable_hash
 
 ORDER9_R1_YAW_BRANCH_REPAIR_VERSION = "order9_r1_yaw_branch_repair_v1"
+ORDER9_R1_PLANAR_NOMINAL_TRANSFER_VERSION = "order9_r1_planar_nominal_transfer_v1"
+ORDER9_R1_PLANAR_SCENE_TRANSFER_VERSION = "order9_r1_planar_scene_transfer_v4"
 ORDER9_R1_YAW_BRANCH_LIGHTWEIGHT_AUDIT_VERSION = (
     "order9_r1_yaw_branch_lightweight_audit_v1"
 )
@@ -83,6 +89,9 @@ def derive_order9_r1_yaw_branch_case(
     destination_case_root: str | Path,
     repository_root: str | Path,
     physical_model_config_path: str | Path = "configs/robot/robot_model.yaml",
+    _allow_planar_translation: bool = False,
+    _preserve_all_phases: bool = False,
+    _scene_rigid_transform: bool = False,
 ) -> dict[str, Any]:
     """Create and admit one private derived case without changing either input."""
 
@@ -104,11 +113,35 @@ def derive_order9_r1_yaw_branch_case(
     target_task = TaskSpec.from_json(
         (target_root / "task_spec.json").read_text(encoding="utf-8")
     )
-    yaw_rotation = _validated_task_yaw_rotation(reference_task, target_task)
+    if _scene_rigid_transform and not _allow_planar_translation:
+        raise ValueError("R1 scene transfer requires planar translation mode")
+    if _scene_rigid_transform:
+        scene_delta = _validated_task_scene_rigid_transform(reference_task, target_task)
+        translation_world = tuple(float(value) for value in scene_delta[:3])
+        yaw_rotation = (0.0, 0.0, 0.0, *scene_delta[3:])
+        repair_version = ORDER9_R1_PLANAR_SCENE_TRANSFER_VERSION
+    elif _allow_planar_translation:
+        scene_delta = None
+        translation_world, yaw_rotation = _validated_task_planar_change(
+            reference_task, target_task
+        )
+        repair_version = ORDER9_R1_PLANAR_NOMINAL_TRANSFER_VERSION
+    else:
+        scene_delta = None
+        translation_world = (0.0, 0.0, 0.0)
+        yaw_rotation = _validated_task_yaw_rotation(reference_task, target_task)
+        repair_version = ORDER9_R1_YAW_BRANCH_REPAIR_VERSION
     reference_object_start, _reference_object_goal = _object_start_and_goal(
         reference_task
     )
-    initial_delta = _centered_yaw_delta(reference_object_start, yaw_rotation)
+    initial_delta = (
+        scene_delta
+        if scene_delta is not None
+        else compose_pose(
+            (*translation_world, 0.0, 0.0, 0.0, 1.0),
+            _centered_yaw_delta(reference_object_start, yaw_rotation),
+        )
+    )
     reference_candidate_id = _candidate_id(reference_root)
     target_candidate_id = _candidate_id(target_root)
 
@@ -155,6 +188,7 @@ def derive_order9_r1_yaw_branch_case(
             target_artifact=target_artifact,
             reference_task=reference_task,
             target_task=target_task,
+            allow_planar_translation=_allow_planar_translation,
         )
 
         target_artifact_root = target_artifact_path.parent
@@ -193,22 +227,44 @@ def derive_order9_r1_yaw_branch_case(
         }
         for entry in reference_artifact.phase_trajectories:
             source = reference_artifact_root / entry.trajectory_path
-            transformed_source_phases[entry.phase] = transform_order9_r1_trajectory(
-                ContactWrenchTrajectory.from_json(source.read_text(encoding="utf-8")),
-                yaw_rotation_world=yaw_rotation,
+            source_trajectory = ContactWrenchTrajectory.from_json(
+                source.read_text(encoding="utf-8")
             )
-        repaired_phases = materialize_order9_r1_complete_task_phases(
-            phase_trajectories={
-                phase: transformed_source_phases[phase] for phase in _PHASES[:2]
-            },
-            task_spec=target_task,
-            lift_clearance_m=0.30,
-            retreat_offset_m=0.10,
-            phase_duration_s={
-                phase: float(transformed_source_phases[phase].horizon_s)
-                for phase in _PHASES
-            },
-            nominal_dt_s=0.1,
+            transformed_source_phases[entry.phase] = (
+                transform_order9_r1_scene_trajectory(
+                    source_trajectory,
+                    delta_pose_world=initial_delta,
+                )
+                if _scene_rigid_transform
+                else (
+                    transform_order9_r1_planar_trajectory(
+                        source_trajectory,
+                        translation_world=translation_world,
+                        yaw_rotation_world=yaw_rotation,
+                    )
+                    if _allow_planar_translation
+                    else transform_order9_r1_trajectory(
+                        source_trajectory,
+                        yaw_rotation_world=yaw_rotation,
+                    )
+                )
+            )
+        repaired_phases = (
+            transformed_source_phases
+            if _preserve_all_phases
+            else materialize_order9_r1_complete_task_phases(
+                phase_trajectories={
+                    phase: transformed_source_phases[phase] for phase in _PHASES[:2]
+                },
+                task_spec=target_task,
+                lift_clearance_m=0.30,
+                retreat_offset_m=0.10,
+                phase_duration_s={
+                    phase: float(transformed_source_phases[phase].horizon_s)
+                    for phase in _PHASES
+                },
+                nominal_dt_s=0.1,
+            )
         )
         repaired_phase_entries: list[Order9C3NominalPhaseArtifact] = []
         for phase in _PHASES:
@@ -225,9 +281,12 @@ def derive_order9_r1_yaw_branch_case(
                     generation_method=(
                         reference_entries[phase].generation_method
                         + "+"
-                        + ORDER9_R1_YAW_BRANCH_REPAIR_VERSION
-                        + "+"
-                        + ORDER9_R1_NOMINAL_RETREAT_VERSION
+                        + repair_version
+                        + (
+                            ""
+                            if _preserve_all_phases
+                            else "+" + ORDER9_R1_NOMINAL_RETREAT_VERSION
+                        )
                     ),
                     collision_validation_status="pending_offline_admission",
                 )
@@ -238,7 +297,7 @@ def derive_order9_r1_yaw_branch_case(
         timeline_path = target_artifact_root / target_artifact.timeline_path
         _write_json_text(timeline_path, _complete_timeline(repaired_phases))
         repair_provenance = {
-            "repair_version": ORDER9_R1_YAW_BRANCH_REPAIR_VERSION,
+            "repair_version": repair_version,
             "reference_candidate_id": reference_candidate_id,
             "target_candidate_id": target_candidate_id,
             "reference_case_manifest_sha256": hash_file(
@@ -252,7 +311,12 @@ def derive_order9_r1_yaw_branch_case(
                 target_root / "nominal_set" / target_set.entries[0].artifact_path
             ),
             "yaw_rotation_world": list(yaw_rotation),
+            "translation_world_m": list(translation_world),
             "initial_centered_delta_pose_world": list(initial_delta),
+            "fixed_scene_delta_pose_world": (
+                None if scene_delta is None else list(scene_delta)
+            ),
+            "support_transformed_with_scene": scene_delta is not None,
             "ik_invoked": False,
             "trajectory_optimization_invoked": False,
             "controller_layers_invoked": False,
@@ -299,28 +363,97 @@ def derive_order9_r1_yaw_branch_case(
         source_task = TaskSpec.from_json(
             source_bucket_task_path.read_text(encoding="utf-8")
         )
+        planar_invariant_audit = (
+            audit_order9_r1_scene_transfer_invariants(
+                source_phases={
+                    phase: ContactWrenchTrajectory.from_json(
+                        (
+                            reference_artifact_root
+                            / reference_entries[phase].trajectory_path
+                        ).read_text(encoding="utf-8")
+                    )
+                    for phase in _PHASES
+                },
+                target_phases=repaired_phases,
+                delta_pose_world=initial_delta,
+            )
+            if _scene_rigid_transform
+            else (
+                audit_order9_r1_planar_transfer_invariants(
+                    source_phases={
+                        phase: ContactWrenchTrajectory.from_json(
+                            (
+                                reference_artifact_root
+                                / reference_entries[phase].trajectory_path
+                            ).read_text(encoding="utf-8")
+                        )
+                        for phase in _PHASES
+                    },
+                    target_phases=repaired_phases,
+                    translation_world=translation_world,
+                    yaw_rotation_world=yaw_rotation,
+                )
+                if _allow_planar_translation
+                else None
+            )
+        )
         physical_path = Path(physical_model_config_path)
         if not physical_path.is_absolute():
             physical_path = repository / physical_path
+        inherited_scene_collision = (
+            _validated_scene_collision_reference(
+                reference_root,
+                source_phases={
+                    phase: ContactWrenchTrajectory.from_json(
+                        (
+                            reference_artifact_root
+                            / reference_entries[phase].trajectory_path
+                        ).read_text(encoding="utf-8")
+                    )
+                    for phase in _PHASES
+                },
+            )
+            if _scene_rigid_transform
+            else None
+        )
         lightweight_audit = audit_order9_r1_yaw_branch_path(
             phases=repaired_phases,
             task_spec=target_task,
-            source_task_spec=source_task,
+            source_task_spec=(
+                reference_task if _allow_planar_translation else source_task
+            ),
             morphology=target_morphology,
             contact_candidate_set=repaired_candidates,
             physical_model_config_path=physical_path,
+            inherit_object_relative_collision=_allow_planar_translation,
+            scene_delta_pose_world=scene_delta,
+            inherited_scene_collision_clearance_m=(
+                None
+                if inherited_scene_collision is None
+                else inherited_scene_collision["minimum_clearance_m"]
+            ),
         )
-        semantic_audit = audit_order9_r1_complete_task_semantics(
-            repaired_phases,
-            task_spec=target_task,
-            lift_clearance_m=0.30,
-            retreat_offset_m=0.10,
-            materializer_id=ORDER9_R1_YAW_BRANCH_REPAIR_VERSION,
+        semantic_audit = (
+            _validated_scene_semantic_reference(
+                reference_root,
+                target_phases=repaired_phases,
+                delta_pose_world=initial_delta,
+            )
+            if _scene_rigid_transform
+            else audit_order9_r1_complete_task_semantics(
+                repaired_phases,
+                task_spec=target_task,
+                lift_clearance_m=0.30,
+                retreat_offset_m=0.10,
+                materializer_id=repair_version,
+            )
         )
         audit_payload = {
             **lightweight_audit,
+            "planar_transfer_invariant_audit": planar_invariant_audit,
             "complete_task_semantic_audit": semantic_audit,
             "repair_provenance": repair_provenance,
+            "inherited_scene_collision_reference": inherited_scene_collision,
         }
         audit_path = temporary / "yaw_branch_repair_lightweight_audit.json"
         _write_json_text(audit_path, audit_payload)
@@ -358,7 +491,7 @@ def derive_order9_r1_yaw_branch_case(
         target_set.metadata.update(
             {
                 "r1_yaw_branch_repair": True,
-                "r1_yaw_branch_repair_version": (ORDER9_R1_YAW_BRANCH_REPAIR_VERSION),
+                "r1_yaw_branch_repair_version": repair_version,
                 "reference_candidate_id": reference_candidate_id,
                 "lightweight_audit_sha256": hash_file(audit_path),
                 "training_eligible": False,
@@ -397,6 +530,8 @@ def derive_order9_r1_yaw_branch_case(
                 source_path=reference_reset_path,
                 destination_path=temporary / "reset_bank.pt",
                 yaw_rotation_world=yaw_rotation,
+                translation_world=translation_world,
+                delta_pose_world=scene_delta,
                 morphology_hash=target_morphology.stable_hash(),
                 task_spec_hash=stable_hash(target_task.to_dict()),
                 nominal_set_path=Path(
@@ -427,18 +562,29 @@ def derive_order9_r1_yaw_branch_case(
             repository,
         )
         case_payload["nominal_artifact"]["sha256"] = hash_file(target_artifact_path)
+        if _allow_planar_translation:
+            case_payload["fast_screen_evidence"] = {
+                "artifact_kind": "fast_kinematic_screen",
+                "path": _portable(destination / audit_path.name, repository),
+                "sha256": hash_file(audit_path),
+            }
         case_payload["reset_bank_path"] = _portable(
             destination / "reset_bank.pt", repository
         )
         _write_json_text(case_path, case_payload)
 
         admission = {
-            "admission_version": ORDER9_R1_YAW_BRANCH_REPAIR_VERSION,
+            "admission_version": repair_version,
             "status": "accepted",
             "candidate_id": target_candidate_id,
             "reference_candidate_id": reference_candidate_id,
             "yaw_rotation_world": list(yaw_rotation),
+            "translation_world_m": list(translation_world),
             "initial_centered_delta_pose_world": list(initial_delta),
+            "fixed_scene_delta_pose_world": (
+                None if scene_delta is None else list(scene_delta)
+            ),
+            "support_transformed_with_scene": scene_delta is not None,
             "case_manifest_path": _portable(
                 destination / "case_manifest.json", repository
             ),
@@ -477,6 +623,207 @@ def derive_order9_r1_yaw_branch_case(
         raise
 
 
+def derive_order9_r1_planar_nominal_transfer_case(
+    *,
+    reference_case_root: str | Path,
+    target_task_spec: TaskSpec,
+    target_candidate_id: str,
+    target_level_id: str,
+    target_seed: int,
+    destination_case_root: str | Path,
+    repository_root: str | Path,
+    physical_model_config_path: str | Path = "configs/robot/robot_model.yaml",
+) -> dict[str, Any]:
+    """Build one diagnostic case by rigidly moving an admitted complete scene."""
+
+    repository = Path(repository_root).resolve()
+    reference = Path(reference_case_root).resolve()
+    destination = Path(destination_case_root).resolve()
+    if destination.exists():
+        raise FileExistsError(destination)
+    if not target_candidate_id or not target_level_id or target_seed < 0:
+        raise ValueError("R1 planar transfer target identity is invalid")
+    target_task_spec.validate()
+    if (
+        target_task_spec.metadata.get("r1_calibration_candidate_id")
+        != target_candidate_id
+    ):
+        raise SchemaValidationError("R1 planar target task candidate identity differs")
+    reference_task = TaskSpec.from_json(
+        (reference / "task_spec.json").read_text(encoding="utf-8")
+    )
+    target_task_spec = transform_order9_r1_planar_task_scene(
+        reference_task,
+        target_identity_task=target_task_spec,
+    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix=f".{destination.name}.target-", dir=destination.parent
+    ) as target_text:
+        target = Path(target_text) / "case"
+        shutil.copytree(reference, target, ignore=shutil.ignore_patterns("isaac"))
+        task_path = target / "task_spec.json"
+        _write_json_text(task_path, target_task_spec.to_dict())
+
+        set_path = target / "nominal_set" / "manifest.json"
+        set_manifest = Order9C3NominalTrajectorySetManifest.from_json(
+            set_path.read_text(encoding="utf-8")
+        )
+        set_manifest.validate()
+        if len(set_manifest.entries) != 1:
+            raise SchemaValidationError("R1 planar source nominal set is not singular")
+        entry = set_manifest.entries[0]
+        old_artifact_path = set_path.parent / entry.artifact_path
+        new_artifact_path = (
+            set_path.parent / "buckets" / target_candidate_id / "manifest.json"
+        )
+        if old_artifact_path.parent != new_artifact_path.parent:
+            new_artifact_path.parent.parent.mkdir(parents=True, exist_ok=True)
+            os.rename(old_artifact_path.parent, new_artifact_path.parent)
+        entry.bucket_id = target_candidate_id
+        entry.artifact_path = str(new_artifact_path.relative_to(set_path.parent))
+        bucket_path = set_path.parent / "bucket_manifest.json"
+        bucket_payload = json.loads(bucket_path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(bucket_payload.get("buckets"), list)
+            or len(bucket_payload["buckets"]) != 1
+        ):
+            raise SchemaValidationError("R1 planar bucket manifest is not singular")
+        bucket_payload["buckets"][0]["bucket_id"] = target_candidate_id
+        bucket_payload["buckets"][0]["task_spec_sha256"] = hash_file(task_path)
+        _write_json_text(bucket_path, bucket_payload)
+        set_manifest.bucket_manifest_path = _portable(
+            destination / "nominal_set" / "bucket_manifest.json", repository
+        )
+        set_manifest.bucket_manifest_sha256 = hash_file(bucket_path)
+        set_manifest.validate()
+        _write_json_text(set_path, set_manifest.to_dict())
+
+        candidates_path = new_artifact_path.parent / "contact_candidate_set.json"
+        candidates_payload = json.loads(candidates_path.read_text(encoding="utf-8"))
+        candidates_payload["task_id"] = target_task_spec.task_id
+        candidates_payload["set_id"] = (
+            f"{target_candidate_id}:planar_nominal_transfer_contacts"
+        )
+        ContactCandidateSet.from_dict(candidates_payload).validate()
+        _write_json_text(candidates_path, candidates_payload)
+
+        artifact_payload = json.loads(new_artifact_path.read_text(encoding="utf-8"))
+        artifact_payload.update(
+            {
+                "bucket_id": target_candidate_id,
+                "task_spec_sha256": hash_file(task_path),
+                "contact_candidate_set_sha256": hash_file(candidates_path),
+                "contact_candidate_set_hash": stable_hash(candidates_payload),
+            }
+        )
+        _write_json_text(new_artifact_path, artifact_payload)
+        entry.artifact_sha256 = hash_file(new_artifact_path)
+        set_manifest.metadata["candidate_id"] = target_candidate_id
+        _write_json_text(set_path, set_manifest.to_dict())
+
+        case_path = target / "case_manifest.json"
+        case_payload = json.loads(case_path.read_text(encoding="utf-8"))
+        case_payload.update(
+            {
+                "candidate_id": target_candidate_id,
+                "level_id": target_level_id,
+                "seed": int(target_seed),
+            }
+        )
+        case_payload["task_spec"].update(
+            {
+                "path": _portable(destination / "task_spec.json", repository),
+                "sha256": hash_file(task_path),
+            }
+        )
+        _write_json_text(case_path, case_payload)
+        return derive_order9_r1_yaw_branch_case(
+            reference_case_root=reference,
+            target_case_root=target,
+            destination_case_root=destination,
+            repository_root=repository,
+            physical_model_config_path=physical_model_config_path,
+            _allow_planar_translation=True,
+            _preserve_all_phases=True,
+            _scene_rigid_transform=True,
+        )
+
+
+def transform_order9_r1_planar_task_scene(
+    reference_task: TaskSpec,
+    *,
+    target_identity_task: TaskSpec,
+) -> TaskSpec:
+    """Move the complete reference scene to the requested target object pose.
+
+    The target task supplies only the candidate identity and desired object-start
+    pose.  Object goals, supports, obstacles, and every other world pose are
+    inherited from the successful reference and moved by one fixed horizontal
+    rigid transform.  This prevents a support from being left behind while the
+    robot/object trajectory is moved.
+    """
+
+    reference_task.validate()
+    target_identity_task.validate()
+    reference_start, _reference_goal = _object_start_and_goal(reference_task)
+    requested_start, requested_goal = _object_start_and_goal(target_identity_task)
+    delta = _bounded_planar_scene_delta(reference_start, requested_start)
+    _require_scene_task_compatibility(reference_task, target_identity_task)
+
+    payload = reference_task.to_dict()
+    payload["task_id"] = target_identity_task.task_id
+    for obj in payload["scene"]["objects"]:
+        obj["pose_world"] = list(compose_pose(delta, tuple(obj["pose_world"])))
+    for surface in payload["scene"]["environment"]["support_surfaces"]:
+        surface["pose_world"] = list(compose_pose(delta, tuple(surface["pose_world"])))
+    for obstacle in payload["scene"]["environment"]["obstacles"]:
+        obstacle["pose_world"] = list(
+            compose_pose(delta, tuple(obstacle["pose_world"]))
+        )
+    for goal in payload["goals"]:
+        if goal.get("target_pose_world") is not None:
+            goal["target_pose_world"] = list(
+                compose_pose(delta, tuple(goal["target_pose_world"]))
+            )
+
+    transformed_goal = next(
+        tuple(goal["target_pose_world"])
+        for goal in payload["goals"]
+        if goal.get("goal_type") == "object_pose"
+        and goal.get("target_entity_id")
+        == target_identity_task.goals[0].target_entity_id
+        and goal.get("target_pose_world") is not None
+    )
+    metadata = deepcopy(target_identity_task.metadata)
+    metadata.update(
+        {
+            "r1_planar_scene_transfer_version": (
+                ORDER9_R1_PLANAR_SCENE_TRANSFER_VERSION
+            ),
+            "r1_planar_scene_delta_pose_world": list(delta),
+            "r1_planar_scene_reference_task_id": reference_task.task_id,
+            "r1_requested_unmoved_support_goal_pose_world": list(requested_goal),
+            "r1_scene_transformed_goal_pose_world": list(transformed_goal),
+            "r1_support_geometry_preserved": True,
+            "r1_support_pose_preserved": False,
+            "r1_support_pose_transformed_with_scene": True,
+            "r1_robot_reset_preserved": False,
+            "r1_robot_reset_transformed_with_scene": True,
+            "r1_formal_range_selection_eligible": False,
+            "r1_formal_teacher_collection_eligible": False,
+        }
+    )
+    payload["metadata"] = metadata
+    value = TaskSpec.from_dict(payload)
+    value.validate()
+    mapped_start, _mapped_goal = _object_start_and_goal(value)
+    if not _pose_close(mapped_start, requested_start, position=1.0e-8, angle=1.0e-8):
+        raise SchemaValidationError("R1 scene transfer missed requested object pose")
+    _validated_task_scene_rigid_transform(reference_task, value)
+    return value
+
+
 def transform_order9_r1_trajectory(
     trajectory: ContactWrenchTrajectory,
     *,
@@ -507,6 +854,485 @@ def transform_order9_r1_trajectory(
         derived_mode_label=(
             f"{source.derived_mode_label or 'unspecified'}:"
             f"{ORDER9_R1_YAW_BRANCH_REPAIR_VERSION}"
+        ),
+        contract_version=source.contract_version,
+    )
+    value.validate()
+    return value
+
+
+def audit_order9_r1_planar_transfer_invariants(
+    *,
+    source_phases: Mapping[str, ContactWrenchTrajectory],
+    target_phases: Mapping[str, ContactWrenchTrajectory],
+    translation_world: Sequence[float],
+    yaw_rotation_world: Pose7D,
+) -> dict[str, Any]:
+    """Prove exact joint inheritance and object-relative pose preservation."""
+
+    if tuple(source_phases) != _PHASES or tuple(target_phases) != _PHASES:
+        raise SchemaValidationError("R1 planar invariant phase order differs")
+    translation_pose: Pose7D = (
+        *tuple(float(value) for value in translation_world),
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    )
+    maximum_relative_position_error = 0.0
+    maximum_relative_attitude_error = 0.0
+    maximum_object_mapping_position_error = 0.0
+    maximum_object_mapping_attitude_error = 0.0
+    checked_knots = 0
+    checked_anchor_poses = 0
+    for phase in _PHASES:
+        source = source_phases[phase]
+        target = target_phases[phase]
+        if len(source.knots) != len(target.knots):
+            raise SchemaValidationError("R1 planar transfer changed knot count")
+        for source_knot, target_knot in zip(source.knots, target.knots):
+            checked_knots += 1
+            if float(source_knot.t_rel_s) != float(target_knot.t_rel_s):
+                raise SchemaValidationError("R1 planar transfer changed knot time")
+            source_posture = source_knot.posture_target
+            target_posture = target_knot.posture_target
+            if (source_posture is None) != (target_posture is None):
+                raise SchemaValidationError(
+                    "R1 planar transfer changed posture presence"
+                )
+            if source_posture is not None and target_posture is not None:
+                if (
+                    source_posture.joint_pos_target != target_posture.joint_pos_target
+                    or source_posture.joint_vel_target
+                    != target_posture.joint_vel_target
+                ):
+                    raise SchemaValidationError(
+                        "R1 planar transfer changed a joint target"
+                    )
+            source_assignments = [
+                (
+                    value.slot_id,
+                    value.anchor_id,
+                    value.candidate_id,
+                    value.schedule_state,
+                )
+                for value in source_knot.contact_assignments
+            ]
+            target_assignments = [
+                (
+                    value.slot_id,
+                    value.anchor_id,
+                    value.candidate_id,
+                    value.schedule_state,
+                )
+                for value in target_knot.contact_assignments
+            ]
+            if source_assignments != target_assignments:
+                raise SchemaValidationError(
+                    "R1 planar transfer changed contact assignment identity"
+                )
+            source_objects = [
+                tuple(value.pose_target_world)
+                for value in source_knot.object_targets
+                if value.pose_target_world is not None
+            ]
+            target_objects = [
+                tuple(value.pose_target_world)
+                for value in target_knot.object_targets
+                if value.pose_target_world is not None
+            ]
+            if len(source_objects) != 1 or len(target_objects) != 1:
+                raise SchemaValidationError("R1 planar invariant object target differs")
+            expected_object = compose_pose(
+                translation_pose,
+                compose_pose(
+                    _centered_yaw_delta(source_objects[0], yaw_rotation_world),
+                    source_objects[0],
+                ),
+            )
+            maximum_object_mapping_position_error = max(
+                maximum_object_mapping_position_error,
+                math.dist(expected_object[:3], target_objects[0][:3]),
+            )
+            maximum_object_mapping_attitude_error = max(
+                maximum_object_mapping_attitude_error,
+                _quaternion_distance_rad(expected_object[3:], target_objects[0][3:]),
+            )
+            pose_pairs = []
+            if (
+                source_knot.centroidal_target is not None
+                and target_knot.centroidal_target is not None
+                and source_knot.centroidal_target.com_pos_world is not None
+                and source_knot.centroidal_target.body_orientation_world is not None
+                and target_knot.centroidal_target.com_pos_world is not None
+                and target_knot.centroidal_target.body_orientation_world is not None
+            ):
+                pose_pairs.append(
+                    (
+                        (
+                            *source_knot.centroidal_target.com_pos_world,
+                            *source_knot.centroidal_target.body_orientation_world,
+                        ),
+                        (
+                            *target_knot.centroidal_target.com_pos_world,
+                            *target_knot.centroidal_target.body_orientation_world,
+                        ),
+                    )
+                )
+            if source_posture is not None and target_posture is not None:
+                source_anchors = source_posture.free_anchor_pose_targets or {}
+                target_anchors = target_posture.free_anchor_pose_targets or {}
+                if set(source_anchors) != set(target_anchors):
+                    raise SchemaValidationError(
+                        "R1 planar transfer changed free-anchor identity"
+                    )
+                for anchor_id in sorted(source_anchors):
+                    pose_pairs.append(
+                        (source_anchors[anchor_id], target_anchors[anchor_id])
+                    )
+                    checked_anchor_poses += 1
+            for source_pose, target_pose in pose_pairs:
+                source_relative = compose_pose(
+                    inverse_pose(source_objects[0]), tuple(source_pose)
+                )
+                target_relative = compose_pose(
+                    inverse_pose(target_objects[0]), tuple(target_pose)
+                )
+                maximum_relative_position_error = max(
+                    maximum_relative_position_error,
+                    math.dist(source_relative[:3], target_relative[:3]),
+                )
+                maximum_relative_attitude_error = max(
+                    maximum_relative_attitude_error,
+                    _quaternion_distance_rad(source_relative[3:], target_relative[3:]),
+                )
+    tolerance = 1.0e-7
+    if (
+        maximum_relative_position_error > tolerance
+        or maximum_relative_attitude_error > tolerance
+        or maximum_object_mapping_position_error > tolerance
+        or maximum_object_mapping_attitude_error > tolerance
+    ):
+        raise SchemaValidationError("R1 planar transfer invariant error is excessive")
+    return {
+        "audit_version": "order9_r1_planar_transfer_invariant_audit_v1",
+        "status": "accepted",
+        "checked_knot_count": checked_knots,
+        "checked_free_anchor_pose_count": checked_anchor_poses,
+        "joint_position_targets_exactly_preserved": True,
+        "joint_velocity_targets_exactly_preserved": True,
+        "contact_assignment_identities_exactly_preserved": True,
+        "maximum_object_relative_position_error_m": maximum_relative_position_error,
+        "maximum_object_relative_attitude_error_rad": maximum_relative_attitude_error,
+        "maximum_object_mapping_position_error_m": (
+            maximum_object_mapping_position_error
+        ),
+        "maximum_object_mapping_attitude_error_rad": (
+            maximum_object_mapping_attitude_error
+        ),
+        "controller_layers_invoked": False,
+        "isaac_invoked": False,
+    }
+
+
+def audit_order9_r1_scene_transfer_invariants(
+    *,
+    source_phases: Mapping[str, ContactWrenchTrajectory],
+    target_phases: Mapping[str, ContactWrenchTrajectory],
+    delta_pose_world: Pose7D,
+) -> dict[str, Any]:
+    """Prove that all phase data uses one fixed scene transform."""
+
+    if tuple(source_phases) != _PHASES or tuple(target_phases) != _PHASES:
+        raise SchemaValidationError("R1 scene invariant phase order differs")
+    checked_knots = 0
+    checked_anchor_poses = 0
+    maximum_relative_position_error = 0.0
+    maximum_relative_attitude_error = 0.0
+    for phase in _PHASES:
+        source = source_phases[phase]
+        target = target_phases[phase]
+        expected = transform_order9_r1_scene_trajectory(
+            source,
+            delta_pose_world=delta_pose_world,
+        )
+        if expected.to_dict() != target.to_dict():
+            raise SchemaValidationError(
+                f"R1 scene transfer differs from its fixed transform at {phase}"
+            )
+        for source_knot, target_knot in zip(source.knots, target.knots):
+            checked_knots += 1
+            source_objects = [
+                tuple(value.pose_target_world)
+                for value in source_knot.object_targets
+                if value.pose_target_world is not None
+            ]
+            target_objects = [
+                tuple(value.pose_target_world)
+                for value in target_knot.object_targets
+                if value.pose_target_world is not None
+            ]
+            if len(source_objects) != 1 or len(target_objects) != 1:
+                raise SchemaValidationError("R1 scene invariant object target differs")
+            source_posture = source_knot.posture_target
+            target_posture = target_knot.posture_target
+            source_anchors = (
+                {}
+                if source_posture is None
+                else source_posture.free_anchor_pose_targets or {}
+            )
+            target_anchors = (
+                {}
+                if target_posture is None
+                else target_posture.free_anchor_pose_targets or {}
+            )
+            if set(source_anchors) != set(target_anchors):
+                raise SchemaValidationError("R1 scene transfer changed anchor identity")
+            pose_pairs: list[tuple[Sequence[float], Sequence[float]]] = [
+                (source_anchors[key], target_anchors[key])
+                for key in sorted(source_anchors)
+            ]
+            checked_anchor_poses += len(pose_pairs)
+            if (
+                source_knot.centroidal_target is not None
+                and target_knot.centroidal_target is not None
+                and source_knot.centroidal_target.com_pos_world is not None
+                and source_knot.centroidal_target.body_orientation_world is not None
+                and target_knot.centroidal_target.com_pos_world is not None
+                and target_knot.centroidal_target.body_orientation_world is not None
+            ):
+                pose_pairs.append(
+                    (
+                        (
+                            *source_knot.centroidal_target.com_pos_world,
+                            *source_knot.centroidal_target.body_orientation_world,
+                        ),
+                        (
+                            *target_knot.centroidal_target.com_pos_world,
+                            *target_knot.centroidal_target.body_orientation_world,
+                        ),
+                    )
+                )
+            for source_pose, target_pose in pose_pairs:
+                source_relative = compose_pose(
+                    inverse_pose(source_objects[0]), tuple(source_pose)
+                )
+                target_relative = compose_pose(
+                    inverse_pose(target_objects[0]), tuple(target_pose)
+                )
+                maximum_relative_position_error = max(
+                    maximum_relative_position_error,
+                    math.dist(source_relative[:3], target_relative[:3]),
+                )
+                maximum_relative_attitude_error = max(
+                    maximum_relative_attitude_error,
+                    _quaternion_distance_rad(source_relative[3:], target_relative[3:]),
+                )
+    if (
+        maximum_relative_position_error > 1.0e-7
+        or maximum_relative_attitude_error > 1.0e-7
+    ):
+        raise SchemaValidationError("R1 scene transfer relative error is excessive")
+    return {
+        "audit_version": "order9_r1_planar_scene_transfer_invariant_audit_v4",
+        "status": "accepted",
+        "fixed_delta_pose_world": list(delta_pose_world),
+        "checked_knot_count": checked_knots,
+        "checked_free_anchor_pose_count": checked_anchor_poses,
+        "joint_position_targets_exactly_preserved": True,
+        "joint_velocity_targets_exactly_preserved": True,
+        "contact_assignment_identities_exactly_preserved": True,
+        "maximum_object_relative_position_error_m": maximum_relative_position_error,
+        "maximum_object_relative_attitude_error_rad": (maximum_relative_attitude_error),
+        "support_transformed_with_same_fixed_delta": True,
+        "controller_layers_invoked": False,
+        "isaac_invoked": False,
+    }
+
+
+def audit_order9_r1_scene_transfer_case(
+    *,
+    reference_case_root: str | Path,
+    target_task_spec: TaskSpec,
+    repository_root: str | Path,
+) -> dict[str, Any]:
+    """Prove one complete saved case is unchanged by a planar scene move.
+
+    This is the read-only, range-selection form of the scene-transfer audit.
+    It authenticates the saved nominal set and its complete collision and task
+    certificates, then checks every trajectory target against one fixed SE(2)
+    transform.  It never runs IK, a controller, or a simulator.
+    """
+
+    repository = Path(repository_root).resolve()
+    reference_root = Path(reference_case_root).resolve()
+    target_task_spec.validate()
+    set_path = reference_root / "nominal_set" / "manifest.json"
+    nominal_set = validate_order9_c3_nominal_trajectory_set_bytes(
+        set_path,
+        repository_root=repository,
+    )
+    if len(nominal_set.entries) != 1:
+        raise SchemaValidationError("R1 scene-transfer source set is not singular")
+    artifact_path = set_path.parent / nominal_set.entries[0].artifact_path
+    artifact = validate_order9_c3_nominal_trajectory_artifact_bytes(artifact_path)
+    reference_task_path = reference_root / "task_spec.json"
+    reference_task = TaskSpec.from_json(reference_task_path.read_text(encoding="utf-8"))
+    transformed_task = transform_order9_r1_planar_task_scene(
+        reference_task,
+        target_identity_task=target_task_spec,
+    )
+    delta = _validated_task_scene_rigid_transform(reference_task, transformed_task)
+    source_phases = {
+        entry.phase: ContactWrenchTrajectory.from_json(
+            (artifact_path.parent / entry.trajectory_path).read_text(encoding="utf-8")
+        )
+        for entry in artifact.phase_trajectories
+    }
+    if tuple(source_phases) != _PHASES:
+        raise SchemaValidationError("R1 scene-transfer source phases differ")
+    target_phases = {
+        phase: transform_order9_r1_scene_trajectory(
+            trajectory,
+            delta_pose_world=delta,
+        )
+        for phase, trajectory in source_phases.items()
+    }
+    invariant = audit_order9_r1_scene_transfer_invariants(
+        source_phases=source_phases,
+        target_phases=target_phases,
+        delta_pose_world=delta,
+    )
+    collision = _validated_scene_collision_reference(
+        reference_root,
+        source_phases=source_phases,
+    )
+    semantic = _validated_scene_semantic_reference(
+        reference_root,
+        target_phases=target_phases,
+        delta_pose_world=delta,
+    )
+    reference_start, reference_goal = _object_start_and_goal(reference_task)
+    target_start, target_goal = _object_start_and_goal(transformed_task)
+    return {
+        "audit_version": "order9_r1_planar_scene_case_audit_v15",
+        "status": "accepted",
+        "reference_case_root": _portable(reference_root, repository),
+        "reference_task_spec_sha256": hash_file(reference_task_path),
+        "reference_nominal_set_sha256": hash_file(set_path),
+        "reference_nominal_artifact_sha256": hash_file(artifact_path),
+        "reference_task_start_pose_world": list(reference_start),
+        "reference_task_goal_pose_world": list(reference_goal),
+        "target_task_start_pose_world": list(target_start),
+        "target_task_goal_pose_world": list(target_goal),
+        "source_support_pose_world": list(
+            reference_task.scene.environment.support_surfaces[0].pose_world
+        ),
+        "target_support_pose_world": list(
+            transformed_task.scene.environment.support_surfaces[0].pose_world
+        ),
+        "fixed_scene_delta_pose_world": list(delta),
+        "invariant_audit": invariant,
+        "collision_certificate": collision,
+        "semantic_certificate": semantic,
+        "controller_layers_invoked": False,
+        "ik_invoked": False,
+        "isaac_invoked": False,
+        "trajectory_optimization_invoked": False,
+        "training_eligible": False,
+    }
+
+
+def transform_order9_r1_scene_trajectory(
+    trajectory: ContactWrenchTrajectory,
+    *,
+    delta_pose_world: Pose7D,
+) -> ContactWrenchTrajectory:
+    """Move every world target with the same fixed planar scene transform."""
+
+    _require_planar_delta(delta_pose_world)
+    source = ContactWrenchTrajectory.from_dict(trajectory.to_dict())
+    source.validate()
+    value = ContactWrenchTrajectory(
+        horizon_s=float(source.horizon_s),
+        dt_s=float(source.dt_s),
+        knots=[
+            _transform_knot(
+                knot,
+                delta_pose_world=delta_pose_world,
+                yaw_rotation_world=None,
+                rotate_contact_wrenches=(
+                    source.contract_version == "implicit_world_v1"
+                ),
+            )
+            for knot in source.knots
+        ],
+        derived_mode_label=(
+            f"{source.derived_mode_label or 'unspecified'}:"
+            f"{ORDER9_R1_PLANAR_SCENE_TRANSFER_VERSION}"
+        ),
+        contract_version=source.contract_version,
+    )
+    value.validate()
+    return value
+
+
+def transform_order9_r1_planar_trajectory(
+    trajectory: ContactWrenchTrajectory,
+    *,
+    translation_world: Sequence[float],
+    yaw_rotation_world: Pose7D,
+) -> ContactWrenchTrajectory:
+    """Move every world target with one object-centred planar pose change.
+
+    R1 changes the start and goal x/y coordinates by the same world-frame
+    translation and changes their yaw about their respective object centres.
+    Applying that operation independently at every knot preserves the robot,
+    grasp anchors, free anchors, and CoM targets relative to the object while
+    leaving all joint coordinates byte-semantically unchanged.
+    """
+
+    if len(translation_world) != 3:
+        raise ValueError("R1 planar translation must contain three values")
+    translation = tuple(float(value) for value in translation_world)
+    if (
+        any(not math.isfinite(value) for value in translation)
+        or abs(translation[2]) > 1.0e-12
+    ):
+        raise ValueError("R1 planar translation must be finite and horizontal")
+    source = ContactWrenchTrajectory.from_dict(trajectory.to_dict())
+    source.validate()
+    translation_pose: Pose7D = (*translation, 0.0, 0.0, 0.0, 1.0)
+    knots = []
+    for knot in source.knots:
+        object_poses = [
+            tuple(value.pose_target_world)
+            for value in knot.object_targets
+            if value.pose_target_world is not None
+        ]
+        if len(object_poses) != 1:
+            raise SchemaValidationError(
+                "R1 planar transform requires one object pose per knot"
+            )
+        centered = _centered_yaw_delta(object_poses[0], yaw_rotation_world)
+        delta = compose_pose(translation_pose, centered)
+        knots.append(
+            _transform_knot(
+                knot,
+                delta_pose_world=delta,
+                yaw_rotation_world=None,
+                rotate_contact_wrenches=(
+                    source.contract_version == "implicit_world_v1"
+                ),
+            )
+        )
+    value = ContactWrenchTrajectory(
+        horizon_s=float(source.horizon_s),
+        dt_s=float(source.dt_s),
+        knots=knots,
+        derived_mode_label=(
+            f"{source.derived_mode_label or 'unspecified'}:"
+            f"{ORDER9_R1_PLANAR_NOMINAL_TRANSFER_VERSION}"
         ),
         contract_version=source.contract_version,
     )
@@ -563,6 +1389,9 @@ def audit_order9_r1_yaw_branch_path(
     anchor_position_tolerance_m: float = _ANCHOR_POSITION_TOLERANCE_M,
     anchor_attitude_tolerance_rad: float = _ANCHOR_ATTITUDE_TOLERANCE_RAD,
     inherited_collision_phase_names: frozenset[str] = frozenset(),
+    inherit_object_relative_collision: bool = False,
+    scene_delta_pose_world: Pose7D | None = None,
+    inherited_scene_collision_clearance_m: float | None = None,
 ) -> dict[str, Any]:
     """Run the Isaac-free, optimization-free admission on every phase knot."""
 
@@ -576,10 +1405,14 @@ def audit_order9_r1_yaw_branch_path(
         raise ValueError("R1 lightweight audit anchor tolerance is invalid")
     if tuple(phases) != _PHASES:
         raise SchemaValidationError("R1 yaw audit phase order differs")
-    if not inherited_collision_phase_names.issubset(_PHASES) or set(
-        inherited_collision_phase_names
-    ) == set(_PHASES):
+    if not inherited_collision_phase_names.issubset(_PHASES):
         raise ValueError("R1 lightweight inherited collision phases are invalid")
+    if inherited_scene_collision_clearance_m is not None and (
+        scene_delta_pose_world is None
+        or not math.isfinite(float(inherited_scene_collision_clearance_m))
+        or float(inherited_scene_collision_clearance_m) < 0.030 - 1.0e-12
+    ):
+        raise ValueError("R1 inherited scene collision certificate is invalid")
     physical_model = build_physical_model_from_config(physical_model_config_path)
     collision_object, support_contract = (
         build_order9_r1_frozen_support_collision_object(
@@ -587,6 +1420,38 @@ def audit_order9_r1_yaw_branch_path(
             randomized_task_spec=task_spec,
         )
     )
+    if scene_delta_pose_world is not None:
+        _require_planar_delta(scene_delta_pose_world)
+        source_support = _task_support_collision_box(source_task_spec)
+        transformed_support = Order9PostureCollisionBox(
+            box_id=source_support.box_id,
+            size_m=source_support.size_m,
+            pose_world=compose_pose(scene_delta_pose_world, source_support.pose_world),
+        )
+        collision_object = Order9PostureCollisionObject(
+            object_id=collision_object.object_id,
+            size_m=collision_object.size_m,
+            initial_pose_world=collision_object.initial_pose_world,
+            environment_boxes=(transformed_support,),
+            ground_plane_z_m=collision_object.ground_plane_z_m,
+        )
+        support_contract = type(support_contract)(
+            version=support_contract.version,
+            support_geometry_hash=stable_hash(
+                [
+                    {
+                        "box_id": box.box_id,
+                        "size_m": list(box.size_m),
+                        "pose_world": list(box.pose_world),
+                    }
+                    for box in collision_object.environment_boxes
+                ]
+            ),
+            requested_clearance_m=support_contract.requested_clearance_m,
+            minimum_admissible_clearance_m=(
+                support_contract.minimum_admissible_clearance_m
+            ),
+        )
     solver = _default_posture_ik_solver(
         physical_model,
         collision_object=collision_object,
@@ -615,7 +1480,10 @@ def audit_order9_r1_yaw_branch_path(
     for phase in _PHASES:
         trajectory = phases[phase]
         trajectory.validate()
-        collision_inherited = phase in inherited_collision_phase_names
+        collision_inherited = (
+            inherited_scene_collision_clearance_m is not None
+            or phase in inherited_collision_phase_names
+        )
         phase_minimum_clearance = math.inf
         for knot_index, knot in enumerate(trajectory.knots):
             checked_knots += 1
@@ -735,11 +1603,17 @@ def audit_order9_r1_yaw_branch_path(
                 []
                 if collision_inherited
                 else [
-                    (
-                        collision_object.object_id,
-                        tuple(object_targets[0].pose_target_world),
-                        collision_object.size_m,
-                        tuple(sorted(allowed_anchors)),
+                    *(
+                        []
+                        if inherit_object_relative_collision
+                        else [
+                            (
+                                collision_object.object_id,
+                                tuple(object_targets[0].pose_target_world),
+                                collision_object.size_m,
+                                tuple(sorted(allowed_anchors)),
+                            )
+                        ]
                     ),
                     *[
                         (box.box_id, box.pose_world, box.size_m, ())
@@ -772,7 +1646,9 @@ def audit_order9_r1_yaw_branch_path(
                 ):
                     raise SchemaValidationError(
                         f"R1 yaw audit collision at {phase}:{knot_index} "
-                        f"against {obstacle_id}"
+                        f"against {obstacle_id} "
+                        f"(clearance_m={clearance:.9g}, "
+                        f"violating_pair_count={int(collision['violating_pair_count'])})"
                     )
         phase_records.append(
             {
@@ -784,6 +1660,8 @@ def audit_order9_r1_yaw_branch_path(
                 "collision_admission_inherited": collision_inherited,
             }
         )
+    if inherited_scene_collision_clearance_m is not None:
+        minimum_clearance = float(inherited_scene_collision_clearance_m)
     return {
         "audit_version": ORDER9_R1_YAW_BRANCH_LIGHTWEIGHT_AUDIT_VERSION,
         "status": "accepted",
@@ -791,6 +1669,10 @@ def audit_order9_r1_yaw_branch_path(
         "checked_knot_count": checked_knots,
         "checked_collision_scene_count": checked_collision_scenes,
         "inherited_collision_phase_names": sorted(inherited_collision_phase_names),
+        "object_relative_collision_inherited": inherit_object_relative_collision,
+        "complete_scene_collision_inherited": (
+            inherited_scene_collision_clearance_m is not None
+        ),
         "phase_records": phase_records,
         "minimum_collision_clearance_m": minimum_clearance,
         "minimum_joint_limit_margin_rad": minimum_limit_margin,
@@ -919,6 +1801,7 @@ def _require_compatible_cases(
     target_artifact: Order9C3NominalTrajectoryArtifact,
     reference_task: TaskSpec,
     target_task: TaskSpec,
+    allow_planar_translation: bool = False,
 ) -> None:
     if (
         reference_artifact.structural_hash != target_artifact.structural_hash
@@ -928,6 +1811,8 @@ def _require_compatible_cases(
         != target_artifact.selected_surface_port_ids
     ):
         raise SchemaValidationError("R1 yaw repair cases differ beyond task yaw")
+    if allow_planar_translation:
+        return
     for key in ("r1_initial_x_offset_m", "r1_initial_y_offset_m"):
         if not math.isclose(
             float(reference_task.metadata[key]),
@@ -954,6 +1839,306 @@ def _object_start_and_goal(task: TaskSpec) -> tuple[Pose7D, Pose7D]:
     ):
         raise SchemaValidationError("R1 yaw repair task object identity differs")
     return tuple(objects[0].pose_world), tuple(goals[0].target_pose_world)
+
+
+def _validated_task_planar_change(
+    reference: TaskSpec,
+    target: TaskSpec,
+) -> tuple[tuple[float, float, float], Pose7D]:
+    reference_start, reference_goal = _object_start_and_goal(reference)
+    target_start, target_goal = _object_start_and_goal(target)
+    start_translation = tuple(
+        float(target_start[index]) - float(reference_start[index]) for index in range(3)
+    )
+    goal_translation = tuple(
+        float(target_goal[index]) - float(reference_goal[index]) for index in range(3)
+    )
+    if (
+        math.dist(start_translation, goal_translation) > 1.0e-8
+        or abs(start_translation[2]) > 1.0e-8
+        or math.hypot(*start_translation[:2]) > math.sqrt(2.0) * 0.040 + 1.0e-8
+    ):
+        raise SchemaValidationError(
+            "R1 planar transfer is not one bounded start/goal translation"
+        )
+    start_delta = compose_pose(target_start, inverse_pose(reference_start))
+    goal_delta = compose_pose(target_goal, inverse_pose(reference_goal))
+    start_rotation = transform_from_pose(start_delta).rotation
+    goal_rotation = transform_from_pose(goal_delta).rotation
+    start_yaw = math.atan2(start_rotation[1][0], start_rotation[0][0])
+    goal_yaw = math.atan2(goal_rotation[1][0], goal_rotation[0][0])
+    start_tilt = math.acos(max(-1.0, min(1.0, start_rotation[2][2])))
+    goal_tilt = math.acos(max(-1.0, min(1.0, goal_rotation[2][2])))
+    if (
+        abs(start_yaw - goal_yaw) > 1.0e-8
+        or abs(start_yaw) > math.radians(20.0) + 1.0e-9
+        or max(start_tilt, goal_tilt) > _MAXIMUM_OTHER_ROTATION_RAD
+    ):
+        raise SchemaValidationError(
+            "R1 planar transfer is not one bounded start/goal yaw change"
+        )
+    yaw_rotation: Pose7D = (0.0, 0.0, 0.0, *start_delta[3:])
+    for source, expected in (
+        (reference_start, target_start),
+        (reference_goal, target_goal),
+    ):
+        mapped = compose_pose(
+            (*start_translation, 0.0, 0.0, 0.0, 1.0),
+            compose_pose(_centered_yaw_delta(source, yaw_rotation), source),
+        )
+        if not _pose_close(mapped, expected, position=1.0e-7, angle=1.0e-7):
+            raise SchemaValidationError("R1 planar transfer does not map its task")
+    return start_translation, yaw_rotation
+
+
+def _bounded_planar_scene_delta(
+    reference_start: Pose7D,
+    target_start: Pose7D,
+) -> Pose7D:
+    if (
+        abs(float(target_start[2]) - float(reference_start[2])) > 1.0e-8
+        or math.dist(reference_start[:2], target_start[:2])
+        > math.sqrt(2.0) * 0.040 + 1.0e-8
+    ):
+        raise SchemaValidationError("R1 scene transfer object displacement is invalid")
+    delta = compose_pose(target_start, inverse_pose(reference_start))
+    _require_planar_delta(delta)
+    rotation = transform_from_pose(delta).rotation
+    yaw = math.atan2(rotation[1][0], rotation[0][0])
+    if abs(yaw) > _MAXIMUM_YAW_DELTA_RAD:
+        raise SchemaValidationError("R1 scene transfer yaw delta is too large")
+    return delta
+
+
+def _require_planar_delta(delta_pose_world: Pose7D) -> None:
+    if len(delta_pose_world) != 7 or any(
+        not math.isfinite(float(value)) for value in delta_pose_world
+    ):
+        raise ValueError("R1 scene transform must be one finite pose")
+    rotation = transform_from_pose(delta_pose_world).rotation
+    tilt = math.acos(max(-1.0, min(1.0, rotation[2][2])))
+    if abs(float(delta_pose_world[2])) > 1.0e-8 or tilt > _MAXIMUM_OTHER_ROTATION_RAD:
+        raise SchemaValidationError(
+            "R1 scene transform must be horizontal and yaw-only"
+        )
+
+
+def _require_scene_task_compatibility(
+    reference: TaskSpec,
+    target: TaskSpec,
+) -> None:
+    if (
+        reference.task_type != target.task_type
+        or reference.robot_constraints.to_dict() != target.robot_constraints.to_dict()
+        or reference.safety.to_dict() != target.safety.to_dict()
+        or [value.to_dict() for value in reference.scene.geometry_library]
+        != [value.to_dict() for value in target.scene.geometry_library]
+        or len(reference.scene.objects) != len(target.scene.objects)
+        or len(reference.goals) != len(target.goals)
+        or len(reference.scene.environment.support_surfaces)
+        != len(target.scene.environment.support_surfaces)
+        or len(reference.scene.environment.obstacles)
+        != len(target.scene.environment.obstacles)
+    ):
+        raise SchemaValidationError("R1 scene transfer task structure differs")
+
+    def without_pose(value: Any, key: str) -> dict[str, Any]:
+        payload = value.to_dict()
+        payload.pop(key, None)
+        return payload
+
+    if [without_pose(value, "pose_world") for value in reference.scene.objects] != [
+        without_pose(value, "pose_world") for value in target.scene.objects
+    ]:
+        raise SchemaValidationError("R1 scene transfer object properties differ")
+    if [without_pose(value, "target_pose_world") for value in reference.goals] != [
+        without_pose(value, "target_pose_world") for value in target.goals
+    ]:
+        raise SchemaValidationError("R1 scene transfer goal contract differs")
+    if [
+        without_pose(value, "pose_world")
+        for value in reference.scene.environment.support_surfaces
+    ] != [
+        without_pose(value, "pose_world")
+        for value in target.scene.environment.support_surfaces
+    ]:
+        raise SchemaValidationError("R1 scene transfer support properties differ")
+    if [
+        without_pose(value, "pose_world")
+        for value in reference.scene.environment.obstacles
+    ] != [
+        without_pose(value, "pose_world")
+        for value in target.scene.environment.obstacles
+    ]:
+        raise SchemaValidationError("R1 scene transfer obstacle properties differ")
+
+
+def _task_support_collision_box(task: TaskSpec) -> Order9PostureCollisionBox:
+    surfaces = task.scene.environment.support_surfaces
+    if len(surfaces) != 1:
+        raise SchemaValidationError("R1 scene transfer requires one TaskSpec support")
+    surface = surfaces[0]
+    geometries = {value.geometry_id: value for value in task.scene.geometry_library}
+    geometry = geometries.get(surface.geometry_id)
+    raw_size = (
+        None if geometry is None else (geometry.primitive_params or {}).get("size_m")
+    )
+    if (
+        geometry is None
+        or geometry.geometry_type.value != "box"
+        or not isinstance(raw_size, list)
+        or len(raw_size) != 3
+    ):
+        raise SchemaValidationError("R1 scene transfer support is not one box")
+    return Order9PostureCollisionBox(
+        box_id=surface.surface_id,
+        size_m=tuple(
+            float(raw_size[index]) * float(geometry.scale[index]) for index in range(3)
+        ),
+        pose_world=tuple(float(value) for value in surface.pose_world),
+    )
+
+
+def _validated_scene_collision_reference(
+    reference_root: Path,
+    *,
+    source_phases: Mapping[str, ContactWrenchTrajectory],
+) -> dict[str, Any]:
+    """Validate the exact eight-phase certificate inherited by a rigid scene move."""
+
+    audit_path = reference_root / "complete_task_planning_clearance_audit_v14.json"
+    certificate_path = (
+        reference_root / "support_clearance_generation_certificate_v14.json"
+    )
+    if not audit_path.is_file() or not certificate_path.is_file():
+        raise SchemaValidationError(
+            "R1 scene reference lacks its exact collision proof"
+        )
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    certificate = json.loads(certificate_path.read_text(encoding="utf-8"))
+    expected_knots = sum(len(source_phases[phase].knots) for phase in _PHASES)
+    clearance = audit.get("minimum_support_or_self_clearance_m")
+    if (
+        audit.get("accepted") is not True
+        or audit.get("status") != "accepted"
+        or audit.get("formal_isaac_admission") is not True
+        or audit.get("checked_phases") != list(_PHASES)
+        or int(audit.get("checked_knot_count", -1)) != expected_knots
+        or int(audit.get("failure_count", -1)) != 0
+        or not isinstance(clearance, (int, float))
+        or float(clearance) < 0.030 - 1.0e-12
+        or certificate.get("persisted_artifact_checked") is not True
+        or certificate.get("complete_phase_candidate_selection") is not True
+        or certificate.get("unsupported_rigid_pose_copy") is not False
+        or certificate.get("planning_audit_sha256") != hash_file(audit_path)
+        or certificate.get("planning_audit_semantic_hash") != stable_hash(audit)
+    ):
+        raise SchemaValidationError("R1 scene reference collision proof is invalid")
+    return {
+        "audit_path": str(audit_path),
+        "audit_sha256": hash_file(audit_path),
+        "audit_semantic_hash": stable_hash(audit),
+        "certificate_path": str(certificate_path),
+        "certificate_sha256": hash_file(certificate_path),
+        "checked_knot_count": expected_knots,
+        "minimum_clearance_m": float(clearance),
+        "rigid_planar_distance_invariance_used": True,
+    }
+
+
+def _validated_scene_semantic_reference(
+    reference_root: Path,
+    *,
+    target_phases: Mapping[str, ContactWrenchTrajectory],
+    delta_pose_world: Pose7D,
+) -> dict[str, Any]:
+    """Carry a complete-task proof through a distance-preserving scene move."""
+
+    path = reference_root / "complete_task_semantic_audit.json"
+    if not path.is_file():
+        raise SchemaValidationError("R1 scene reference lacks its semantic proof")
+    source = json.loads(path.read_text(encoding="utf-8"))
+    expected_knots = sum(len(target_phases[phase].knots) for phase in _PHASES)
+    if (
+        source.get("status") != "accepted"
+        or source.get("checked_phases") != list(_PHASES)
+        or int(source.get("checked_knot_count", -1)) != expected_knots
+        or abs(float(source.get("retreat_offset_m", math.nan)) - 0.10) > 1.0e-12
+        or abs(float(source.get("measured_retreat_path_length_m", math.nan)) - 0.10)
+        > 1.0e-9
+    ):
+        raise SchemaValidationError("R1 scene reference semantic proof is invalid")
+    return {
+        "audit_version": "order9_r1_planar_scene_semantic_inheritance_v1",
+        "status": "accepted",
+        "checked_phases": list(_PHASES),
+        "checked_knot_count": expected_knots,
+        "phase_boundary_count": 7,
+        "retreat_offset_m": 0.10,
+        "measured_retreat_path_length_m": float(
+            source["measured_retreat_path_length_m"]
+        ),
+        "fixed_scene_delta_pose_world": list(delta_pose_world),
+        "source_semantic_audit_path": str(path),
+        "source_semantic_audit_sha256": hash_file(path),
+        "source_semantic_audit_hash": stable_hash(source),
+        "rigid_planar_length_and_phase_invariance_used": True,
+        "controller_layers_invoked": False,
+        "ik_resolve_invoked": False,
+        "isaac_invoked": False,
+        "trajectory_optimization_invoked": False,
+        "training_eligible": False,
+    }
+
+
+def _validated_task_scene_rigid_transform(
+    reference: TaskSpec,
+    target: TaskSpec,
+) -> Pose7D:
+    """Return and verify the one transform shared by the complete task scene."""
+
+    _require_scene_task_compatibility(reference, target)
+    reference_start, _reference_goal = _object_start_and_goal(reference)
+    target_start, _target_goal = _object_start_and_goal(target)
+    delta = _bounded_planar_scene_delta(reference_start, target_start)
+    pose_groups = (
+        (
+            [value.pose_world for value in reference.scene.objects],
+            [value.pose_world for value in target.scene.objects],
+        ),
+        (
+            [
+                value.pose_world
+                for value in reference.scene.environment.support_surfaces
+            ],
+            [value.pose_world for value in target.scene.environment.support_surfaces],
+        ),
+        (
+            [value.pose_world for value in reference.scene.environment.obstacles],
+            [value.pose_world for value in target.scene.environment.obstacles],
+        ),
+        (
+            [value.target_pose_world for value in reference.goals],
+            [value.target_pose_world for value in target.goals],
+        ),
+    )
+    for source_poses, target_poses in pose_groups:
+        for source_pose, target_pose in zip(source_poses, target_poses):
+            if (source_pose is None) != (target_pose is None):
+                raise SchemaValidationError("R1 scene transfer pose presence differs")
+            if source_pose is None or target_pose is None:
+                continue
+            expected = compose_pose(delta, tuple(source_pose))
+            if not _pose_close(expected, target_pose, position=1.0e-7, angle=1.0e-7):
+                raise SchemaValidationError(
+                    "R1 scene transfer did not move every task pose together"
+                )
+    if (
+        target.metadata.get("r1_support_pose_transformed_with_scene") is not True
+        or target.metadata.get("r1_robot_reset_transformed_with_scene") is not True
+    ):
+        raise SchemaValidationError("R1 scene transfer metadata is incomplete")
+    return delta
 
 
 def _centered_yaw_delta(
@@ -1000,6 +2185,8 @@ def _transform_reset_bank(
     source_path: Path,
     destination_path: Path,
     yaw_rotation_world: Pose7D,
+    translation_world: Sequence[float] = (0.0, 0.0, 0.0),
+    delta_pose_world: Pose7D | None = None,
     morphology_hash: str,
     task_spec_hash: str,
     nominal_set_path: Path,
@@ -1011,8 +2198,9 @@ def _transform_reset_bank(
     payload = torch.load(source_path, map_location="cpu", weights_only=False)
     if not isinstance(payload, dict) or not isinstance(payload.get("states"), list):
         raise SchemaValidationError("R1 yaw repair reset bank is invalid")
+    rotation_pose = yaw_rotation_world if delta_pose_world is None else delta_pose_world
     rotation = torch.tensor(
-        transform_from_pose(yaw_rotation_world).rotation, dtype=torch.float32
+        transform_from_pose(rotation_pose).rotation, dtype=torch.float32
     )
     for state in payload["states"]:
         pose_pairs = (
@@ -1028,12 +2216,23 @@ def _transform_reset_bank(
             for key in {value for pair in pose_pairs for value in pair}
         }
         for key, center_key in pose_pairs:
-            delta_pose_world = _centered_yaw_delta(
-                original[center_key], yaw_rotation_world
+            pose_delta = (
+                delta_pose_world
+                if delta_pose_world is not None
+                else compose_pose(
+                    (
+                        *tuple(float(value) for value in translation_world),
+                        0.0,
+                        0.0,
+                        0.0,
+                        1.0,
+                    ),
+                    _centered_yaw_delta(original[center_key], yaw_rotation_world),
+                )
             )
             state[key] = torch.tensor(
                 compose_pose(
-                    delta_pose_world,
+                    pose_delta,
                     original[key],
                 ),
                 dtype=state[key].dtype,
@@ -1135,10 +2334,19 @@ def _portable(path: Path, repository: Path) -> str:
 
 
 __all__ = [
+    "ORDER9_R1_PLANAR_NOMINAL_TRANSFER_VERSION",
+    "ORDER9_R1_PLANAR_SCENE_TRANSFER_VERSION",
     "ORDER9_R1_YAW_BRANCH_LIGHTWEIGHT_AUDIT_VERSION",
     "ORDER9_R1_YAW_BRANCH_REPAIR_VERSION",
     "audit_order9_r1_yaw_branch_path",
+    "audit_order9_r1_planar_transfer_invariants",
+    "audit_order9_r1_scene_transfer_case",
+    "audit_order9_r1_scene_transfer_invariants",
+    "derive_order9_r1_planar_nominal_transfer_case",
     "derive_order9_r1_yaw_branch_case",
     "transform_order9_r1_contact_candidates",
+    "transform_order9_r1_planar_trajectory",
+    "transform_order9_r1_planar_task_scene",
+    "transform_order9_r1_scene_trajectory",
     "transform_order9_r1_trajectory",
 ]

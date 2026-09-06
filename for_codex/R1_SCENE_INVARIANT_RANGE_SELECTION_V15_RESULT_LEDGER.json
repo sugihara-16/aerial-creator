@@ -1,0 +1,102 @@
+{
+  "ledger_version": "order9_r1_scene_invariant_range_selection_result_ledger_v15",
+  "date": "2026-08-31",
+  "status": "accepted",
+  "decision": "accepted_largest_configured_passing_level",
+  "selection_split": "train",
+  "selection_bucket_count": 22,
+  "selected_level_id": "r1_l4_40mm_20deg",
+  "selected_position_half_span_m": 0.04,
+  "selected_yaw_half_span_rad": 0.3490658503988659,
+  "source_level_id": "r1_l2_20mm_10deg",
+  "source_candidate_count": 682,
+  "source_episode_count": 1364,
+  "source_success_count": 1364,
+  "source_safety_failure_count": 0,
+  "source_fallback_count": 0,
+  "level_three_candidate_count": 682,
+  "level_three_accepted_proof_count": 682,
+  "level_four_candidate_count": 682,
+  "level_four_accepted_proof_count": 682,
+  "representative_isaac_candidate_count": 7,
+  "representative_isaac_episode_count": 7,
+  "representative_isaac_success_count": 7,
+  "representative_isaac_safety_failure_count": 0,
+  "representative_isaac_fallback_count": 0,
+  "complete_scene_transform_required": true,
+  "support_transformed_with_scene": true,
+  "joint_targets_exactly_preserved": true,
+  "contact_assignments_exactly_preserved": true,
+  "all_eight_phases_required": true,
+  "temporal_two_stage_method_used": false,
+  "pi_l_system_retained": true,
+  "pi_l_actor_command_applied": false,
+  "qpid_qp_applied_for_representative_isaac": true,
+  "local_servo_applied_for_representative_isaac": true,
+  "held_out_confirmation_executed": false,
+  "formal_teacher_collection_authorized": false,
+  "learning_started": false,
+  "training_eligible": false,
+  "bindings": {
+    "protocol": {
+      "path": "configs/training/order9_r1_scene_invariant_range_selection_protocol_v15.json",
+      "sha256": "e985cfbaa5511beef97df4e4d023ddf0a86711af0965f596939908003470c6d6"
+    },
+    "approval": {
+      "path": "for_codex/R1_SCENE_INVARIANT_RANGE_SELECTION_PROTOCOL_V15_APPROVAL.json",
+      "sha256": "cb510d9a1698118286f77d87b9b1849324c79b52f6cce682fd35b932206db55d"
+    },
+    "result_document": {
+      "path": "for_codex/R1_SCENE_INVARIANT_RANGE_SELECTION_V15_RESULT.md",
+      "sha256": "04ab4c83df5b80f37caf8821f064b91aa4f99270b36dabf7ccaa2179761492ac"
+    },
+    "artifact_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/range_selection_scene_transfer_v15/range_selection_result.json",
+      "sha256": "ce20fe7ade3321459586a66c5780b55f6f05b4f33d8202d2719e646d56b7f497"
+    },
+    "source_level_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/range_selection_scene_transfer_v15/results/r1_l2_20mm_10deg.json",
+      "sha256": "6a042c9b8ee6001076257871deb04c674a92236cd20bb9f04dc066ee1d16d9dc"
+    },
+    "level_three_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/range_selection_scene_transfer_v15/results/r1_l3_30mm_15deg.json",
+      "sha256": "39fe0bb8517abfc02cc93b849f120905d29afd32495c39aeb726baf31ff5a3ff"
+    },
+    "level_four_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/range_selection_scene_transfer_v15/results/r1_l4_40mm_20deg.json",
+      "sha256": "6780b9621932e124161bcc6eec5ca49ee237cac61b17065eb8b6c4145293fdc8"
+    },
+    "representative_isaac_result": {
+      "path": "artifacts/p4_full/order9/r1_teacher/range_selection_scene_transfer_v15/results/l4_representative_isaac.json",
+      "sha256": "a56ad00f9b94a4107f5378e6bca45286ad3c4f299b76047a4ed303b615e582e6"
+    },
+    "scene_transfer_implementation": {
+      "path": "amsrr/training/order9_r1_yaw_branch_repair.py",
+      "sha256": "9f19e97cae885597772657417de6dc1091f44fe14bd949f76bdf160b8fc2331d"
+    },
+    "runner_implementation": {
+      "path": "scripts/order9_run_r1_scene_invariant_range_selection_v15.py",
+      "sha256": "22c1184c7d734c8e3a4cae87f02e0ed1482de3c0a5ab4883862781dcc449df52"
+    },
+    "isaac_wrapper_implementation": {
+      "path": "scripts/order9_r1_batched_nominal_compression_rollout.py",
+      "sha256": "3187c9dfdfc568f76ea07acb3f0f8b3e86acfe9593965dd61870fa7d1a71a862"
+    },
+    "protected_c3_checkpoint": {
+      "path": "artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt",
+      "sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b"
+    },
+    "protected_c3_rollout": {
+      "path": "scripts/order9_vectorized_isaac_rollout.py",
+      "sha256": "e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2"
+    },
+    "protected_c3_curriculum": {
+      "path": "configs/training/order9_learning_curriculum.yaml",
+      "sha256": "965b1abc180d3dab80369c150c55a774c4ceee186befda68f3093c22f7d6f9d4"
+    },
+    "protected_c3_release_ledger": {
+      "path": "for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json",
+      "sha256": "7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729"
+    }
+  }
+}
