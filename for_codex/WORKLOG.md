@@ -11963,3 +11963,27 @@
 - Handoff notes: `for_codex/R1_RANGE_SELECTION_V13_PAUSE_HANDOFF_20260831.md`を先に読む。
 - Open questions: 正しい順序で22機体側の範囲を確定後、候補修正に未使用の14機体を
   一度だけ正式確認する必要がある。
+
+### Codex: R1同一候補MuJoCo / Isaac比較v1
+
+#### 2026-08-31
+
+- Scope: 保存済みIsaac成功候補1件をMuJoCoへ移し、物理速度と結果対応を診断する。
+- Candidate: 6モジュール機
+  `r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_08`、Isaac環境0、
+  episode serial 0、3686制御周期、73.72秒。参照Isaacは成功。
+- Implemented: 部品別凸包URDF生成、同じ印加値再生、現行QPID/QP閉ループ再生、同じ
+  タスク・衝突対象・段階合否値による結果比較、単体試験3件、結果文書・目録。
+- Speed result: 同じ印加値によるMuJoCo物理再生13.965秒、実時間の5.279倍、263.947
+  制御周期/秒。保存Isaacの8環境合計62.394環境制御周期/秒に対し4.230倍。
+- Full-loop result: 単体CPUの現行QPID/QP閉ループは114.044秒、実時間の0.646倍。
+  Python/PyTorchの逐次機体集約・QPが支配し、MuJoCo物理の速度利点を相殺した。
+- Outcome: MuJoCo閉ループは接近・接触獲得まで合格後、搬送中59.44秒で物体を落とし、
+  最終物体位置がIsaacから0.191 mずれた。Isaac成功と一致しないため正式置換不可。
+- Verification: 新規単体試験3/3、Python構文、Black、JSON構文、差分空白検査。C3
+  checkpoint、保護実行器、release ledger、curriculumの4ハッシュは不変。
+- Evidence: `for_codex/R1_MUJOCO_ISAAC_SINGLE_CANDIDATE_COMPARISON_V1_LEDGER.json`。
+- Not advanced: 22機体側の範囲決定、未使用14機体確認、正式教師収集、π_H模倣学習、
+  π_L再学習、C3変更、commit。
+- Next: 接触取得から搬送開始だけを短区間化して両エンジンの接触力・相対姿勢・材料を
+  照合し、結果一致後にQPID/QPを一括またはコンパイル済み経路へ移す。

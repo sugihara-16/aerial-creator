@@ -1,0 +1,91 @@
+{
+  "candidate": {
+    "candidate_id": "r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_08",
+    "case_manifest": {
+      "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/prepared/r1_l2_20mm_10deg/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_08/case_manifest.json",
+      "sha256": "36cdde3f3fd1374ee9056ec9798058ab94197665fff4b39feb665872894004c8"
+    },
+    "isaac_environment_index": 0,
+    "isaac_episode_serial": 0,
+    "isaac_reference_success": true,
+    "isaac_rollout": {
+      "path": "artifacts/p4_full/order9/r1_teacher/range_selection_v13/isaac/r1_l2_20mm_10deg/batches/train-000004-190f3a425b3e/chunk_000_59c8d12532cb/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_08/isaac/evaluation_rollout.pt",
+      "sha256": "3f168eb1a6017261a786032cc42b1b638e5312e9785bc2594d3b544dd9bf63e0"
+    },
+    "module_count": 6,
+    "source_bucket_id": "train-000004-190f3a425b3e"
+  },
+  "comparison_contract": {
+    "control_dt_s": 0.02,
+    "mujoco_physics_dt_s": 0.002,
+    "physics_substeps_per_control": 10,
+    "scope": "single_candidate_diagnostic_not_formal_r1_evidence",
+    "source_mesh_conversion": "one_convex_hull_per_authored_stl_without_vertex_decimation",
+    "version": "order9_mujoco_closed_loop_isaac_trace_comparison_v1"
+  },
+  "implementations": [
+    {
+      "path": "amsrr/simulation/order9_mujoco_trace_replay.py",
+      "sha256": "fc230856799d786207b63c0efc59dac8bcde3d0a63613109b98f59888e551205"
+    },
+    {
+      "path": "scripts/order9_compare_r1_mujoco_isaac.py",
+      "sha256": "2eaa2f67bec1a9902b2a0308df72856b30d32612624e6c26284823e5d6ab840a"
+    },
+    {
+      "path": "tests/unit/simulation/test_order9_mujoco_trace_replay.py",
+      "sha256": "f12fccdb0ca73532a3429fb3f331df434b7c00f189ec64cd92191ed1f5f70ca3"
+    }
+  ],
+  "ledger_version": "r1_mujoco_isaac_single_candidate_comparison_ledger_v1",
+  "protected_inputs": {
+    "c3_checkpoint": {
+      "path": "artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1/checkpoint_update_000018.pt",
+      "sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b"
+    },
+    "c3_release_ledger": {
+      "path": "for_codex/C3_PROMOTED_UPDATE18_RELEASE_LEDGER.json",
+      "sha256": "7515d537665c0bb10ef6bab02f1d4bb6404e76dbcedf55b8e1b455e224267729"
+    },
+    "c3_rollout_implementation": {
+      "path": "scripts/order9_vectorized_isaac_rollout.py",
+      "sha256": "e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2"
+    },
+    "curriculum": {
+      "path": "configs/training/order9_learning_curriculum.yaml",
+      "sha256": "965b1abc180d3dab80369c150c55a774c4ceee186befda68f3093c22f7d6f9d4"
+    },
+    "source_urdf": {
+      "path": "artifacts/p4_full/order9/c3_preparation/morphology_assets_grasp_frame_mesh_v2/190f3a425b3ee281c0369cbde5672fa840925a9ab292f4ff3b55d52540963e86/holon_order9_articulated_v2_190f3a425b3e.urdf",
+      "sha256": "8686ba802255ed318e8c5dee6873a756151dc10642fe67fe78257a78c6b4b691"
+    }
+  },
+  "report": {
+    "path": "for_codex/R1_MUJOCO_ISAAC_SINGLE_CANDIDATE_COMPARISON_V1.md",
+    "sha256": "9840d8178a07f632a93f88b4306003302dfd5bfdf2274eedd2246b2030f8219c"
+  },
+  "results": {
+    "closed_loop_qpid": {
+      "mujoco_success": false,
+      "path": "artifacts/p4_full/order9/r1_teacher/mujoco_isaac_comparison_v1/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_08/closed_loop_qpid/comparison_result.json",
+      "realtime_factor": 0.6464147993218956,
+      "sha256": "11de801ba5a653a2910595f695b01c7535d064ac0428e50c274260776a985ad1",
+      "simulation_wall_s": 114.04441865708213,
+      "terminal_reason": "object_dropped_during_transport"
+    },
+    "saved_actuator_trace": {
+      "mujoco_success": false,
+      "path": "artifacts/p4_full/order9/r1_teacher/mujoco_isaac_comparison_v1/r1_l2_20mm_10deg__train__train-000004-190f3a425b3e__lattice_08/saved_actuator_trace/comparison_result.json",
+      "realtime_factor": 5.278936405666947,
+      "sha256": "a99f99894ade6c61cc2033b6c49eb7000ff02a71f570b05cc7096cae1e4db287",
+      "simulation_wall_s": 13.964934285031632,
+      "throughput_ratio_vs_saved_isaac_aggregate_env_steps": 4.23030124607607
+    }
+  },
+  "status": {
+    "mujoco_drop_in_acceptance_replacement_allowed": false,
+    "mujoco_physics_speed_advantage_confirmed": true,
+    "r1_formal_range_selection_advanced": false,
+    "teacher_collection_or_learning_started": false
+  }
+}
