@@ -1,0 +1,42 @@
+{
+  "ledger_version": "order9_r1_held_out_object_drop_repair_v18_result_ledger_v1",
+  "status": "accepted",
+  "result": {
+    "path": "artifacts/p4_full/order9/r1_teacher/diagnostics/held_out_object_drop_repair_v18_formatted_acceptance/result.json",
+    "sha256": "cf306f1b7d9bc9f9cb449ada6af5252ab9e6029eada89332931916094398f5a3"
+  },
+  "structural_hash": "58a5c015f4db032c765412d4827d64629ccb6ae4fb2b3ce5feb0d0e6d7a03ece",
+  "sample_indices": [
+    0,
+    26
+  ],
+  "success_count": 2,
+  "failure_count": 0,
+  "hard_collision_count": 0,
+  "object_dropped_count": 0,
+  "qp_infeasible_terminal_count": 0,
+  "timeout_count": 0,
+  "fallback_decision_count": 0,
+  "pi_l_actor_command_applied": false,
+  "implementation": {
+    "runtime": {
+      "path": "amsrr/training/order9_r1_batched_nominal_runtime.py",
+      "sha256": "7cb27730199fb0a2e9fed952aaf136f621788a9f53558b85dfa9d12fbe3d5971"
+    },
+    "wrapper": {
+      "path": "scripts/order9_r1_batched_nominal_compression_rollout.py",
+      "sha256": "383eb2b0d19402f1f13957fe49856edeea126200e0fe339d736972dccfd1e3ba"
+    },
+    "runner": {
+      "path": "scripts/order9_run_r1_object_drop_repair_v18.py",
+      "sha256": "3162359a72ae9f98150093b6cb65377d19fec5a115f5230b8ffee655dd12d5e6"
+    }
+  },
+  "protected": {
+    "c3_rollout_sha256": "e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2",
+    "c3_checkpoint_sha256": "6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b"
+  },
+  "promotion_evidence_eligible": false,
+  "training_eligible": false,
+  "formal_teacher_collection_authorized": false
+}

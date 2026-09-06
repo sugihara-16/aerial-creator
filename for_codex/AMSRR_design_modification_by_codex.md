@@ -3831,3 +3831,51 @@ file remains the chronological decision/evidence log.
 - 規範証拠: `for_codex/R1_HELD_OUT_SCENE_CONFIRMATION_V16_RESULT_LEDGER.json`、
   SHA-256 `fb3a8083bdbdbbc3891bfc2da6b316ca180e023682b55f74656f83521b3612c8`。
   次の入口は、3失敗機体について重大衝突と搬送時把持力低下を分離する短区間診断である。
+
+### R1 7モジュール衝突2件の把持点変更による解消（v17診断）
+
+#### 2026-09-03
+
+- 対象: v16で開始区間の重大衝突となった7モジュール機体
+  `ba94152a03e4`の対角格子点0・26。物体、支持台、タスク、機体構造および場面全体の
+  平面移送条件は変更していない。
+- 原因と決定: 把持面の組`(12, 21)`で得た姿勢自体がこの機体では衝突しやすく、衝突後も
+  その姿勢を保持する局所的な関節回避は推力配分不能を起こした。未使用の把持面の組を
+  幾何判定し、同じ候補群で成立する`(13, 21)`を選択した。実行時だけ関節を曲げる回避、
+  二段階接近および自由関節の強制目標は最終採用結果では使っていない。
+- 軌道条件: 接近前距離80 mm、支持台との検査余裕10 mm、接触点高さ補正50 mm、
+  世界座標Y方向の逃げ20 mm、接近時間倍率0.75。Isaac前の全区間検査を通した軌道だけを
+  実行した。
+- Isaac結果: 格子点0・26とも`task_success=true`。重大衝突、推力配分不能、物体落下、
+  時間切れ、安全不合格および代替制御はすべて0で、最終区間8まで到達した。実行は各
+  2671環境ステップだった。
+- 制御境界: π_Lの学習済み動作量は0のまま、QPID/QPと局所サーボは有効。C3 promoted
+  update 18のcheckpoint、保護実行器、release ledgerおよび合否基準は変更していない。
+- 証拠: `artifacts/p4_full/order9/r1_teacher/diagnostics/held_out_collision_avoidance_v17/result.json`
+  （SHA-256 `e8a6271daa9eef56e9758609023ed345a7327fbbf320c866f0ad6404520f22f3`）。
+  これは使用済み機体に対する原因修正の診断証拠であり、`training_eligible=false`、
+  `formal_teacher_collection_authorized=false`を維持する。別の未使用集合による正式な
+  一般化確認を代替しない。
+
+### R1 6モジュール物体落下2件の左右別押し込み・低高さ搬送による解消（v18診断）
+
+- 対象: v16で物体落下した6モジュール機体`58a5c015f4db`の格子点0・26。同じ物体、
+  支持台、機体構造、把持点および合否基準を維持した。
+- 原因と決定: 両把持点へ同じ追加押し込みを与えると、異なるDock機構のてこ比と追従差に
+  より実把持力が偏った。10/30 mmでは保持できたが物体が約30度傾いたため不採用とし、
+  17/23 mmへ差を縮めた。把持全体を物体座標+Yへ30 mm移し、持ち上げ生成高さを
+  300 mmから必要十分な30 mmへ縮め、持ち上げ時間を3倍にした。
+- 実装境界: 左右別押し込み、物体相対の把持中心補正、時間倍率および高さ倍率は、単独1回の
+  R1診断にだけ許可する。軌道参照と工程終端目標を同じ高さ倍率で変更し、制御器内部だけを
+  変更して判定目標が残る不整合を禁止する。
+- Isaac結果: 格子点0は4096制御周期、格子点26は4100制御周期で最終段階8へ到達し、
+  2/2成功した。硬い衝突、物体落下、推力配分不能、時間切れ、安全不合格、代替制御は0。
+- 制御境界: π_Lの学習済み動作量は0。QPID/QPと局所サーボは有効。C3 promoted
+  update 18のcheckpoint、保護実行器およびrelease ledgerは不変。
+- 証拠: `for_codex/R1_HELD_OUT_OBJECT_DROP_REPAIR_V18_RESULT_LEDGER.json`。
+  整形・単体試験後の最終コードで2件を連続再実行した集計結果は
+  `artifacts/p4_full/order9/r1_teacher/diagnostics/held_out_object_drop_repair_v18_formatted_acceptance/result.json`
+  （SHA-256 `cf306f1b7d9bc9f9cb449ada6af5252ab9e6029eada89332931916094398f5a3`）。
+  使用済み機体の診断であるため、`training_eligible=false`、
+  `formal_teacher_collection_authorized=false`とし、新しい未使用集合による正式確認を
+  代替しない。

@@ -12197,6 +12197,99 @@
 - Open questions: 7・8モジュールの重大衝突が初期姿勢配置か制御初動か、6モジュールの
   搬送時法線力低下が把持点・押し込み・機体変形のどれに支配されるか。
 
+### Codex: R1 7モジュール衝突2件の解消v17
+
+#### 2026-09-03
+
+- Spec version: A-MSRR v0.5。
+- Scope / work package: v16で開始区間に重大衝突した7モジュール機体
+  `ba94152a03e4`の対角格子点0・26を、2時間の作業上限内で解消する。
+- Summary: 衝突しやすい把持面の組`(12, 21)`を局所関節回避で維持する案を不採用とし、
+  同じ物体・支持台・タスク・機体構造に対する候補検査から`(13, 21)`を選んだ。新しい
+  決定論的軌道を一次判定後にIsaacで実行し、対象2/2を成功させた。
+- Files changed: `amsrr/training/order9_r1_collision_avoidance_v17.py`、
+  `scripts/order9_run_r1_collision_avoidance_v17.py`、R1診断用の独立実行処理と単体試験、
+  `AMSRR_design_modification_by_codex.md`、本記録。既存の未関連差分は変更・破棄していない。
+- Schema/interface changes: 共有schema、C3の方策・動作・制御境界、QPID/QP、局所サーボ、
+  合否基準に変更なし。追加処理はR1診断に限定した。
+- Upstream dependencies used: v0.5、v16不合格結果、v13/v14教師生成、v15場面全体移送、
+  C3 promoted update 18保護物。
+- Downstream impact: 7モジュールの既知の衝突2件は解消した。使用済み機体による診断なので、
+  R1範囲の正式昇格や教師収集開始を単独では許可しない。
+- Tests added or run: v17把持点選択・診断契約と、R1独立実行処理の単体試験。
+- Execution result: 対象2件とも2671環境ステップで最終区間8へ到達。
+  `task_success=true`、重大衝突0、推力配分不能0、物体落下0、時間切れ0、安全不合格0、
+  代替制御0。π_Lの学習済み動作量は0、QPID/QPと局所サーボは有効。
+- Evidence: 集計結果
+  `artifacts/p4_full/order9/r1_teacher/diagnostics/held_out_collision_avoidance_v17/result.json`
+  （SHA-256 `e8a6271daa9eef56e9758609023ed345a7327fbbf320c866f0ad6404520f22f3`）。
+  格子点0のepisode SHA-256は
+  `d4e3280b622df8ebf74fcd3edfc2be5db6aaaa2cec8885109c6bff77fdbb1b8f`、格子点26は
+  `44c44cf1b9e3714b3acf0c81c25920bfbf0ff9000be13f056b7339b6efada0f0`。
+- Assumptions: 対象は失敗原因の修正確認であり、使用済み14機体を再び未使用とは扱わない。
+- Blockers / open questions: 7モジュール2件についてはなし。v16の6モジュール落下2件は別問題。
+  正式教師収集には、承認済み実行契約のハッシュ更新審査と別の未使用集合による確認が必要。
+- Next steps: この2件への追加Isaac試行は行わず停止する。正式化する場合だけ、診断専用変更を
+  審査済み契約へ昇格させ、別の未使用集合で確認する。
+- Protection / handoff: C3 checkpoint
+  `6ea412ccdfe983cb2b030b3514bc8982424522673b49def188d547120984357b`と保護Isaac実行器
+  `e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2`は不変。削除・commitなし。
+
+## Global Worklog
+
+### 2026-09-04 (R1 6モジュール物体落下2件の解消v18)
+
+- Spec version: A-MSRR v0.5。
+- Work package / Agent label: R1教師軌道の既知物体落下修正。
+- Summary: v16で落下した6モジュール機体`58a5c015f4db`の格子点0・26について、左右別の
+  押し込み、物体相対の把持中心補正、持ち上げ低速化および30 mmの低高さ軌道を実装した。
+  Isaacで2/2を全工程成功させた。
+- Files changed: `amsrr/training/order9_r1_batched_nominal_runtime.py`、
+  `scripts/order9_r1_batched_nominal_compression_rollout.py`、
+  `scripts/order9_run_r1_object_drop_repair_v18.py`、対応単体試験、v18結果文書・結果台帳、
+  `AMSRR_design_modification_by_codex.md`、本記録。
+- Schema/interface changes: 共有schemaなし。単独1回のR1診断用manifestに、左右別押し込みと
+  高さ倍率の任意項目を追加した。C3、π_L/QPID/QP/局所サーボ境界、合否基準は不変。
+- Upstream dependencies used: v0.5、v16不合格結果、v15場面全体移送、C3 promoted
+  update 18保護物。
+- Downstream impact: 既知の物体落下2件は解消した。ただし使用済み機体の診断結果なので、
+  正式教師収集開始には新しい未使用集合による確認と実行契約の昇格審査が必要。
+- Tests added or run: 左右別値と接触スロット順の対応、個数不一致拒否、持ち上げ時間倍率、
+  軌道参照と工程終端目標の同時高さ変更。関連14/14合格、Python構文、JSON構文、差分空白、
+  Black整形、C3保護ハッシュを確認した。整形後の最終コードでも対象2件を連続再実行し、
+  2/2成功を再現した。
+- Commands run: `pytest`、`py_compile`、`black --check`、`git diff --check`、`sha256sum`、
+  Isaac単独実行。
+- Assumptions: 30 mmの持ち上げ生成高さは対象物を支持台から分離して搬送する最小軌道として
+  扱う。物体・支持台・把持点・機体構造・最終目標は変更しない。
+- Blockers / open questions: 対象2件についてなし。v16全体を正式合格へ変更はしない。
+- Next steps: 追加Isaac試行を止め、診断専用修正を正式R1契約へ採用するかを審査する。
+
+---
+
+## Work Package Logs
+
+### Codex: R1 6モジュール物体落下2件の解消v18
+
+#### 2026-09-04
+
+- Scope: v16の格子点0・26に残った物体落下だけを修正し、全工程をIsaacで確認する。
+- Implemented: 接触割当順17/23 mmの追加押し込み、物体座標+Yへ30 mmの把持中心補正、
+  持ち上げ時間3倍、持ち上げ生成高さ30 mm。制御指令と合否判定が同じ高さ参照を使う。
+- Not implemented: 正式教師収集、π_H模倣学習、π_L再学習、C3変更、削除、commit。
+- Execution result: 格子点0は4096周期、格子点26は4100周期で最終段階8へ到達。
+  2/2成功、硬い衝突0、落下0、推力配分不能0、時間切れ0、安全不合格0、代替制御0。
+- Tests passed: 関連14/14、Python/JSON構文、差分空白、成果物ハッシュ、C3保護2ハッシュ。
+- Evidence: `for_codex/R1_HELD_OUT_OBJECT_DROP_REPAIR_V18_RESULT_LEDGER.json`。
+  最終集計は
+  `artifacts/p4_full/order9/r1_teacher/diagnostics/held_out_object_drop_repair_v18_formatted_acceptance/result.json`
+  （SHA-256 `cf306f1b7d9bc9f9cb449ada6af5252ab9e6029eada89332931916094398f5a3`）。
+- Handoff notes: π_Lの学習済み動作量は0、QPID/QPと局所サーボは有効。
+  `training_eligible=false`、`formal_teacher_collection_authorized=false`を維持する。
+- Open questions: この診断手法を正式R1実行契約へ昇格させるか、新しい未使用集合をどう構成
+  するか。
+## Global Worklog
+
 ### 2026-09-06 (R1共通実行処理の分割保存)
 
 - Spec version: A-MSRR v0.5。
