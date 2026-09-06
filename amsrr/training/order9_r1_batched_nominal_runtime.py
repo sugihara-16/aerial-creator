@@ -3,6 +3,7 @@ from __future__ import annotations
 """Environment-wise R1 nominal and wrench references for one Isaac scene."""
 
 from dataclasses import replace
+import math
 from typing import Any, Sequence
 
 import torch
@@ -28,6 +29,8 @@ _ACTIVE_BUNDLES: tuple[Any, ...] = ()
 _ACTIVE_TASKS: tuple[TaskSpec, ...] = ()
 _ACTIVE_WRENCH_TRAJECTORIES: tuple[Any, ...] = ()
 _ACTIVE_REPLAY_COUNT = 0
+_ACTIVE_PHASE_TIME_DILATIONS: dict[str, float] = {}
+_ACTIVE_MAINTAIN_VERTICAL_SCALE: float | None = None
 
 
 def configure_order9_r1_batched_nominal_runtime(
@@ -36,9 +39,12 @@ def configure_order9_r1_batched_nominal_runtime(
     tasks: Sequence[TaskSpec],
     wrench_trajectories: Sequence[Any],
     replay_count: int,
+    phase_time_dilations: dict[str, float] | None = None,
+    maintain_vertical_scale: float | None = None,
 ) -> None:
     global _ACTIVE_BUNDLES, _ACTIVE_TASKS, _ACTIVE_WRENCH_TRAJECTORIES
-    global _ACTIVE_REPLAY_COUNT
+    global _ACTIVE_REPLAY_COUNT, _ACTIVE_PHASE_TIME_DILATIONS
+    global _ACTIVE_MAINTAIN_VERTICAL_SCALE
     if (
         not bundles
         or len(bundles) != len(tasks)
@@ -46,10 +52,27 @@ def configure_order9_r1_batched_nominal_runtime(
         or replay_count < 1
     ):
         raise ValueError("R1 batched nominal runtime inputs are not aligned")
+    dilations = {
+        str(phase): float(value)
+        for phase, value in (phase_time_dilations or {}).items()
+    }
+    known_phases = {phase.value for phase in ORDER9_OBJECT_TASK_PHASES}
+    if any(
+        phase not in known_phases or not math.isfinite(value) or value < 1.0
+        for phase, value in dilations.items()
+    ):
+        raise ValueError("R1 phase time dilation is invalid")
+    if maintain_vertical_scale is not None and (
+        not math.isfinite(maintain_vertical_scale)
+        or not 0.10 <= maintain_vertical_scale < 1.0
+    ):
+        raise ValueError("R1 maintain vertical scale is invalid")
     _ACTIVE_BUNDLES = tuple(bundles)
     _ACTIVE_TASKS = tuple(tasks)
     _ACTIVE_WRENCH_TRAJECTORIES = tuple(wrench_trajectories)
     _ACTIVE_REPLAY_COUNT = int(replay_count)
+    _ACTIVE_PHASE_TIME_DILATIONS = dilations
+    _ACTIVE_MAINTAIN_VERTICAL_SCALE = maintain_vertical_scale
 
 
 class Order9R1BatchedNominalTensorReference:
@@ -186,30 +209,61 @@ class Order9R1BatchedNominalTensorReference:
                 continue
             cases = cases_by_environment.index_select(0, ids)
             elapsed = phase_elapsed_s.index_select(0, ids)
-            sampled = self._sample(self._banks[phase_value.value], cases, elapsed)
-            origins = scene_origins.index_select(0, ids).to(
-                device=self.device, dtype=self.dtype
+            dilation = _ACTIVE_PHASE_TIME_DILATIONS.get(phase_value.value, 1.0)
+            sampled = self._sample(
+                self._banks[phase_value.value], cases, elapsed / dilation
             )
-            pose = sampled[0]
-            pose[:, :3] += origins
-            object_pose = sampled[4]
-            object_pose[:, :3] += origins
+            sampled_pose = sampled[0]
+            sampled_twist = sampled[1]
+            sampled_object_pose = sampled[4]
             goal = self._banks[phase_value.value]["body_pose"][cases, -1].clone()
-            goal[:, :3] += origins
             object_goal = self._banks[phase_value.value]["object_pose"][
                 cases, -1
             ].clone()
+            if _ACTIVE_MAINTAIN_VERTICAL_SCALE is not None and phase_value in {
+                Order9ObjectTaskPhase.LIFT,
+                Order9ObjectTaskPhase.TRANSPORT,
+                Order9ObjectTaskPhase.PLACE,
+            }:
+                scale = _ACTIVE_MAINTAIN_VERTICAL_SCALE
+                body_base = self._banks[Order9ObjectTaskPhase.LIFT.value]["body_pose"][
+                    cases, 0, 2
+                ]
+                object_base = self._banks[Order9ObjectTaskPhase.LIFT.value][
+                    "object_pose"
+                ][cases, 0, 2]
+                sampled_pose[:, 2] = body_base + scale * (
+                    sampled_pose[:, 2] - body_base
+                )
+                sampled_twist[:, 2] *= scale
+                goal[:, 2] = body_base + scale * (goal[:, 2] - body_base)
+                sampled_object_pose[:, 2] = object_base + scale * (
+                    sampled_object_pose[:, 2] - object_base
+                )
+                object_goal[:, 2] = object_base + scale * (
+                    object_goal[:, 2] - object_base
+                )
+            origins = scene_origins.index_select(0, ids).to(
+                device=self.device, dtype=self.dtype
+            )
+            pose = sampled_pose
+            pose[:, :3] += origins
+            object_pose = sampled_object_pose
+            object_pose[:, :3] += origins
+            goal[:, :3] += origins
             object_goal[:, :3] += origins
             desired_pose.index_copy_(0, ids, pose)
-            desired_twist.index_copy_(0, ids, sampled[1])
+            desired_twist.index_copy_(0, ids, sampled_twist / dilation)
             joint_position.index_copy_(0, ids, sampled[2])
-            joint_velocity.index_copy_(0, ids, sampled[3])
+            joint_velocity.index_copy_(0, ids, sampled[3] / dilation)
             desired_object_pose.index_copy_(0, ids, object_pose)
             phase_goal.index_copy_(0, ids, goal)
             phase_goal_object.index_copy_(0, ids, object_goal)
             duration = self._banks[phase_value.value]["duration"].index_select(0, cases)
             phase_progress.index_copy_(
-                0, ids, (elapsed / duration.clamp_min(1.0e-6)).clamp(0.0, 1.0)
+                0,
+                ids,
+                (elapsed / (duration * dilation).clamp_min(1.0e-6)).clamp(0.0, 1.0),
             )
         return replace(
             target,

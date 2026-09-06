@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from amsrr.simulation.order9_object_task_runtime import ORDER9_OBJECT_TASK_PHASES
+from amsrr.simulation.order9_tensor_object_task import Order9TensorObjectTaskTarget
 from amsrr.training import order9_r1_batched_nominal_runtime as runtime_module
 
 
@@ -35,7 +37,7 @@ class _FakeReference:
             self._references[phase.value] = SimpleNamespace(
                 times_s=torch.tensor([0.0, end], device=self.device, dtype=dtype),
                 body_pose_world=torch.tensor(
-                    [[offset, 0, 0, 0, 0, 0, 1], [offset + 2, 0, 0, 0, 0, 0, 1]],
+                    [[offset, 0, 0, 0, 0, 0, 1], [offset + 2, 0, 2, 0, 0, 0, 1]],
                     device=self.device,
                     dtype=dtype,
                 ),
@@ -47,7 +49,7 @@ class _FakeReference:
                     (2, 1, 1), device=self.device, dtype=dtype
                 ),
                 object_pose_world=torch.tensor(
-                    [[0, offset, 0, 0, 0, 0, 1], [0, offset + 2, 0, 0, 0, 0, 1]],
+                    [[0, offset, 0, 0, 0, 0, 1], [0, offset + 2, 2, 0, 0, 0, 1]],
                     device=self.device,
                     dtype=dtype,
                 ),
@@ -104,3 +106,94 @@ def test_batched_nominal_keeps_environment_wise_paths_and_maximum_timeout(
         torch.tensor([0.5, 0.5, 1.0, 1.0]),
     )
     assert torch.allclose(sampled[0][:, 0], torch.tensor([1.0, 1.0, 11.0, 11.0]))
+
+
+def test_batched_nominal_dilates_lift_without_changing_bundle_provenance(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        runtime_module, "Order9C3NominalTensorReference", _FakeReference
+    )
+    bundle = SimpleNamespace(phase_trajectories=0, provenance={"case": 0})
+    runtime_module.configure_order9_r1_batched_nominal_runtime(
+        bundles=[bundle],
+        tasks=[SimpleNamespace()],
+        wrench_trajectories=[SimpleNamespace()],
+        replay_count=1,
+        phase_time_dilations={"lift": 3.0},
+    )
+    reference = runtime_module.Order9R1BatchedNominalTensorReference(
+        phase_trajectories=None,
+        module_ids=(0,),
+        joint_ids=("joint",),
+        device="cpu",
+    )
+    target = Order9TensorObjectTaskTarget(
+        desired_robot_root_pose_world=torch.zeros((1, 7)),
+        desired_robot_root_twist_world=torch.zeros((1, 6)),
+        nominal_joint_positions_rad=torch.zeros((1, 1, 1)),
+        nominal_joint_velocities_radps=torch.zeros((1, 1, 1)),
+        desired_object_pose_world=torch.zeros((1, 7)),
+        phase_goal_robot_root_pose_world=torch.zeros((1, 7)),
+        phase_goal_object_pose_world=torch.zeros((1, 7)),
+        phase_progress=torch.zeros(1),
+        contact_schedule_index=torch.zeros(1, dtype=torch.long),
+    )
+
+    conditioned = reference.condition(
+        target,
+        phase_index=torch.tensor([2]),
+        phase_elapsed_s=torch.tensor([1.5]),
+        scene_origins=torch.zeros((1, 3)),
+    )
+
+    assert reference.provenance == {"case": 0}
+    assert conditioned.desired_robot_root_pose_world[0, 0].item() == pytest.approx(
+        2.0 + (2.0 / 6.0)
+    )
+    assert conditioned.phase_progress.item() == pytest.approx(1.0 / 6.0)
+
+
+def test_batched_nominal_scales_lift_reference_and_goal_together(monkeypatch) -> None:
+    monkeypatch.setattr(
+        runtime_module, "Order9C3NominalTensorReference", _FakeReference
+    )
+    bundle = SimpleNamespace(phase_trajectories=0, provenance={"case": 0})
+    runtime_module.configure_order9_r1_batched_nominal_runtime(
+        bundles=[bundle],
+        tasks=[SimpleNamespace()],
+        wrench_trajectories=[SimpleNamespace()],
+        replay_count=1,
+        maintain_vertical_scale=0.5,
+    )
+    reference = runtime_module.Order9R1BatchedNominalTensorReference(
+        phase_trajectories=None,
+        module_ids=(0,),
+        joint_ids=("joint",),
+        device="cpu",
+    )
+    target = Order9TensorObjectTaskTarget(
+        desired_robot_root_pose_world=torch.zeros((1, 7)),
+        desired_robot_root_twist_world=torch.zeros((1, 6)),
+        nominal_joint_positions_rad=torch.zeros((1, 1, 1)),
+        nominal_joint_velocities_radps=torch.zeros((1, 1, 1)),
+        desired_object_pose_world=torch.zeros((1, 7)),
+        phase_goal_robot_root_pose_world=torch.zeros((1, 7)),
+        phase_goal_object_pose_world=torch.zeros((1, 7)),
+        phase_progress=torch.zeros(1),
+        contact_schedule_index=torch.zeros(1, dtype=torch.long),
+    )
+
+    conditioned = reference.condition(
+        target,
+        phase_index=torch.tensor([2]),
+        phase_elapsed_s=torch.tensor([3.0]),
+        scene_origins=torch.zeros((1, 3)),
+    )
+
+    assert conditioned.desired_robot_root_pose_world[0, 2].item() == pytest.approx(1.0)
+    assert conditioned.desired_object_pose_world[0, 2].item() == pytest.approx(1.0)
+    assert conditioned.phase_goal_robot_root_pose_world[0, 2].item() == pytest.approx(
+        1.0
+    )
+    assert conditioned.phase_goal_object_pose_world[0, 2].item() == pytest.approx(1.0)

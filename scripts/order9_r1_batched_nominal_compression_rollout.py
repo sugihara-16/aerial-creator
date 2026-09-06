@@ -7,6 +7,7 @@ from copy import deepcopy
 from dataclasses import replace
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -25,6 +26,12 @@ from amsrr.schemas.task_spec import TaskSpec  # noqa: E402
 from amsrr.simulation.order9_object_task_runtime import (  # noqa: E402
     Order9ObjectTaskPhase,
 )
+from amsrr.simulation.order9_tensor_object_task import (  # noqa: E402
+    ORDER9_CONTACT_SCHEDULE_APPROACH,
+    ORDER9_CONTACT_SCHEDULE_ATTACH,
+    ORDER9_CONTACT_SCHEDULE_MAINTAIN,
+    ORDER9_CONTACT_SCHEDULE_RELEASE,
+)
 from amsrr.training.order9_r1_batched_nominal_runtime import (  # noqa: E402
     Order9R1BatchedNominalTensorReference,
     Order9R1BatchedWrenchRangeReference,
@@ -40,6 +47,7 @@ from amsrr.training.order9_r1_nominal_calibration import (  # noqa: E402
 from amsrr.training.order9_r1_nominal_calibration_v7 import (  # noqa: E402
     validate_order9_r1_nominal_v7_isaac_result,
 )
+from amsrr.training.order9_r1_nominal_retime import _retime_trajectory  # noqa: E402
 from amsrr.training.order9_r1_release_clearance_repair import (  # noqa: E402
     apply_order9_r1_release_clearance_repair,
 )
@@ -602,6 +610,13 @@ def _split_outputs(
     output_root: Path | None,
     additional_compression_mm: float,
     release_height_offset_m: float,
+    scene_support_from_task: bool,
+    lift_time_dilation: float | None,
+    grasp_centering: dict[str, Any] | None,
+    grasp_torque_bias_fraction: float | None,
+    contact_compression_by_slot_mm: tuple[float, ...] | None,
+    maintain_vertical_scale: float | None,
+    formal_teacher_collection: bool = False,
 ) -> tuple[tuple[Path, Path], ...]:
     payload = torch.load(combined_raw, map_location="cpu", weights_only=False)
     tensors = payload.get("tensors") if isinstance(payload, dict) else None
@@ -675,6 +690,7 @@ def _split_outputs(
                 "r1_batched_nominal_wrapper_sha256": hash_file(Path(__file__)),
                 "r1_batched_nominal_runtime_sha256": hash_file(BATCH_RUNTIME),
                 "r1_batched_candidate_count": len(jobs),
+                "r1_batched_replay_count": REPLAY_COUNT,
                 "r1_batched_environment_range": [start, stop],
                 "r1_batched_physics_translation_invariant": False,
                 "r1_batched_environment_origin_packed": False,
@@ -688,8 +704,21 @@ def _split_outputs(
                 "pi_l_actor_command_applied": False,
                 "promotion_evidence_eligible": False,
                 "training_eligible": False,
-                "formal_teacher_collection_authorized": False,
+                "formal_teacher_collection_authorized": formal_teacher_collection,
+                "r1_formal_teacher_collection_candidate": formal_teacher_collection,
                 "r1_release_height_offset_m": release_height_offset_m,
+                "r1_scene_support_from_task": scene_support_from_task,
+                "r1_diagnostic_lift_time_dilation": lift_time_dilation,
+                "r1_diagnostic_grasp_centering": grasp_centering,
+                "r1_diagnostic_grasp_torque_bias_fraction": (
+                    grasp_torque_bias_fraction
+                ),
+                "r1_diagnostic_contact_compression_by_slot_mm": (
+                    None
+                    if contact_compression_by_slot_mm is None
+                    else list(contact_compression_by_slot_mm)
+                ),
+                "r1_diagnostic_maintain_vertical_scale": maintain_vertical_scale,
             }
         )
         case_payload = {
@@ -722,6 +751,26 @@ def _split_outputs(
             record["metadata"]["r1_batched_nominal_runtime_sha256"] = hash_file(
                 BATCH_RUNTIME
             )
+            record["metadata"]["r1_scene_support_from_task"] = scene_support_from_task
+            record["metadata"][
+                "formal_teacher_collection_authorized"
+            ] = formal_teacher_collection
+            record["metadata"][
+                "r1_formal_teacher_collection_candidate"
+            ] = formal_teacher_collection
+            record["metadata"]["r1_diagnostic_lift_time_dilation"] = lift_time_dilation
+            record["metadata"]["r1_diagnostic_grasp_centering"] = grasp_centering
+            record["metadata"][
+                "r1_diagnostic_grasp_torque_bias_fraction"
+            ] = grasp_torque_bias_fraction
+            record["metadata"]["r1_diagnostic_contact_compression_by_slot_mm"] = (
+                None
+                if contact_compression_by_slot_mm is None
+                else list(contact_compression_by_slot_mm)
+            )
+            record["metadata"][
+                "r1_diagnostic_maintain_vertical_scale"
+            ] = maintain_vertical_scale
             case_records.append(record)
         _atomic_text_write(
             episode_path,
@@ -759,13 +808,629 @@ def namespace_assignments(trajectory):
     return tuple(by_slot[index] for index in sorted(by_slot))
 
 
+def _diagnostic_grasp_centering_target(
+    target,
+    *,
+    profile: dict[str, Any] | None,
+):
+    """Apply a bounded whole-grasp offset while object contact is active."""
+
+    if profile is None:
+        return target
+    if set(profile) != {"translation_world_m"}:
+        raise SchemaValidationError("R1 grasp-centering profile keys differ")
+    raw_translation = profile["translation_world_m"]
+    if not isinstance(raw_translation, list) or len(raw_translation) != 3:
+        raise SchemaValidationError("R1 grasp-centering translation is invalid")
+    translation = torch.tensor(
+        [float(value) for value in raw_translation],
+        device=target.desired_robot_root_pose_world.device,
+        dtype=target.desired_robot_root_pose_world.dtype,
+    )
+    if (
+        not bool(torch.isfinite(translation).all())
+        or not 0.0 < float(torch.linalg.vector_norm(translation)) <= 0.030 + 1.0e-7
+    ):
+        raise SchemaValidationError("R1 grasp-centering translation is out of range")
+    progress = target.phase_progress.clamp(0.0, 1.0)
+    smooth = progress.square() * (3.0 - 2.0 * progress)
+    schedule = target.contact_schedule_index
+    weight = torch.where(
+        schedule == ORDER9_CONTACT_SCHEDULE_ATTACH,
+        smooth,
+        torch.where(
+            schedule == ORDER9_CONTACT_SCHEDULE_MAINTAIN,
+            torch.ones_like(progress),
+            torch.where(
+                schedule == ORDER9_CONTACT_SCHEDULE_RELEASE,
+                1.0 - smooth,
+                torch.zeros_like(progress),
+            ),
+        ),
+    )
+    offset = weight.unsqueeze(-1) * translation.reshape(1, 3)
+    pose = target.desired_robot_root_pose_world.clone()
+    goal = target.phase_goal_robot_root_pose_world.clone()
+    pose[:, :3] += offset
+    goal[:, :3] += offset
+    return replace(
+        target,
+        desired_robot_root_pose_world=pose,
+        phase_goal_robot_root_pose_world=goal,
+    )
+
+
+def _diagnostic_grasp_torque_bias(
+    result,
+    *,
+    target,
+    compression_direction: torch.Tensor,
+    effort_limits_nm: torch.Tensor,
+    fraction: float | None,
+):
+    """Hold bounded actuator effort in the same direction as grasp closure."""
+
+    if fraction is None:
+        return result
+    command = result.policy_command
+    if (
+        not 0.0 < fraction <= 0.20
+        or compression_direction.shape != command.joint_torque_bias_nm.shape
+        or effort_limits_nm.shape != (command.joint_torque_bias_nm.shape[-1],)
+    ):
+        raise SchemaValidationError("R1 grasp torque-bias inputs differ")
+    maximum = compression_direction.abs().amax(dim=(1, 2), keepdim=True)
+    direction = compression_direction / maximum.clamp_min(1.0e-9)
+    active = _compression_scale(target).reshape(-1, 1, 1)
+    limit = effort_limits_nm.reshape(1, 1, -1) * fraction
+    bias = direction * limit * active
+    return replace(
+        result,
+        policy_command=replace(command, joint_torque_bias_nm=bias),
+    )
+
+
+def _contact_compression_values_by_active_slot(
+    contact_slot_mask: torch.Tensor,
+    active_values_mm: tuple[float, ...],
+) -> torch.Tensor:
+    """Expand values ordered by active contact into the fixed contact slots."""
+    if contact_slot_mask.ndim != 2 or contact_slot_mask.dtype != torch.bool:
+        raise SchemaValidationError("R1 contact compression mask is invalid")
+    if not active_values_mm or any(
+        not math.isfinite(value) or not 0.0 <= value <= 80.0
+        for value in active_values_mm
+    ):
+        raise SchemaValidationError("R1 contact compression values are invalid")
+    active_counts = contact_slot_mask.sum(dim=1)
+    if torch.any(active_counts != len(active_values_mm)):
+        raise SchemaValidationError(
+            "R1 contact compression count differs from active contacts"
+        )
+    ranks = contact_slot_mask.to(dtype=torch.long).cumsum(dim=1) - 1
+    ordered = torch.tensor(
+        active_values_mm,
+        device=contact_slot_mask.device,
+        dtype=torch.float32,
+    )
+    expanded = ordered[ranks.clamp(min=0)]
+    return torch.where(contact_slot_mask, expanded, torch.zeros_like(expanded))
+
+
+def _diagnostic_free_joint_unfold_target(
+    target,
+    *,
+    profile: dict[str, Any] | None,
+    module_ids: Sequence[int],
+    joint_ids: Sequence[str],
+):
+    """Return an R1-only target that unfolds one unused Dock after clearance.
+
+    The override is intentionally restricted by ``main`` to isolated,
+    one-replay diagnostics.  It changes neither the protected C3 runner nor
+    any selected grasp/structural joint.
+    """
+
+    if profile is None:
+        return target
+    required = {
+        "global_joint_id",
+        "approach_unfold_start_fraction",
+        "approach_unfold_end_fraction",
+        "final_target_rad",
+    }
+    if set(profile) != required:
+        raise SchemaValidationError("R1 free-joint unfold profile keys differ")
+    global_id = profile["global_joint_id"]
+    if not isinstance(global_id, str) or ":" not in global_id:
+        raise SchemaValidationError("R1 free-joint unfold joint id is invalid")
+    module_text, local_joint_id = global_id.split(":", 1)
+    if not module_text.startswith("module_"):
+        raise SchemaValidationError("R1 free-joint unfold module id is invalid")
+    try:
+        module_index = tuple(module_ids).index(int(module_text[7:]))
+        joint_index = tuple(joint_ids).index(local_joint_id)
+    except (ValueError, TypeError) as error:
+        raise SchemaValidationError(
+            "R1 free-joint unfold target is absent from the runtime"
+        ) from error
+    start = float(profile["approach_unfold_start_fraction"])
+    end = float(profile["approach_unfold_end_fraction"])
+    final = float(profile["final_target_rad"])
+    if not (0.0 < start < end < 1.0) or not torch.isfinite(torch.tensor(final)):
+        raise SchemaValidationError("R1 free-joint unfold interval is invalid")
+
+    progress = target.phase_progress.clamp(0.0, 1.0)
+    normalized = ((progress - start) / (end - start)).clamp(0.0, 1.0)
+    smooth = normalized.square() * (3.0 - 2.0 * normalized)
+    approach = target.contact_schedule_index == ORDER9_CONTACT_SCHEDULE_APPROACH
+    weight = torch.where(approach, smooth, torch.ones_like(smooth))
+    positions = target.nominal_joint_positions_rad.clone()
+    current = positions[:, module_index, joint_index]
+    positions[:, module_index, joint_index] = current + weight * (final - current)
+    velocities = target.nominal_joint_velocities_radps.clone()
+    # QPID nominal hold deliberately commands zero reference velocity.  Keep
+    # this component zero as well so the override cannot inject a feedforward
+    # speed outside the local-servo contract.
+    velocities[:, module_index, joint_index] = 0.0
+    return replace(
+        target,
+        nominal_joint_positions_rad=positions,
+        nominal_joint_velocities_radps=velocities,
+    )
+
+
+def _diagnostic_late_approach_clearance_target(
+    target,
+    *,
+    profile: dict[str, Any] | None,
+):
+    """Offset only the late approach, then smoothly return to its endpoint."""
+
+    if profile is None:
+        return target
+    required = {
+        "translation_world_m",
+        "rise_start_fraction",
+        "rise_end_fraction",
+        "fall_start_fraction",
+        "fall_end_fraction",
+    }
+    if set(profile) != required:
+        raise SchemaValidationError("R1 late-approach clearance keys differ")
+    raw_translation = profile["translation_world_m"]
+    rise_start = float(profile["rise_start_fraction"])
+    rise_end = float(profile["rise_end_fraction"])
+    fall_start = float(profile["fall_start_fraction"])
+    fall_end = float(profile["fall_end_fraction"])
+    if not isinstance(raw_translation, list) or len(raw_translation) != 3:
+        raise SchemaValidationError("R1 late-approach translation is invalid")
+    translation = tuple(float(value) for value in raw_translation)
+    if not (
+        0.0 < float(torch.linalg.vector_norm(torch.tensor(translation))) <= 0.20
+        and 0.0 < rise_start < rise_end < fall_start < fall_end <= 1.0
+    ):
+        raise SchemaValidationError("R1 late-approach clearance profile is invalid")
+    progress = target.phase_progress.clamp(0.0, 1.0)
+    rise_u = ((progress - rise_start) / (rise_end - rise_start)).clamp(0.0, 1.0)
+    fall_u = ((progress - fall_start) / (fall_end - fall_start)).clamp(0.0, 1.0)
+    rise = rise_u.square() * (3.0 - 2.0 * rise_u)
+    fall = fall_u.square() * (3.0 - 2.0 * fall_u)
+    approach = target.contact_schedule_index == ORDER9_CONTACT_SCHEDULE_APPROACH
+    weight = torch.where(approach, rise * (1.0 - fall), torch.zeros_like(rise))
+    pose = target.desired_robot_root_pose_world.clone()
+    pose[:, :3] += weight.unsqueeze(-1) * torch.tensor(
+        translation, device=pose.device, dtype=pose.dtype
+    ).reshape(1, 3)
+    return replace(target, desired_robot_root_pose_world=pose)
+
+
+def _diagnostic_joint_clearance_pulse_target(
+    target,
+    *,
+    profile: dict[str, Any] | None,
+    module_ids: Sequence[int],
+    joint_ids: Sequence[str],
+):
+    """Temporarily move one non-grasp joint during the approach."""
+
+    if profile is None:
+        return target
+    required = {
+        "global_joint_id",
+        "offset_rad",
+        "rise_start_fraction",
+        "rise_end_fraction",
+        "fall_start_fraction",
+        "fall_end_fraction",
+    }
+    if set(profile) != required:
+        raise SchemaValidationError("R1 joint-clearance pulse keys differ")
+    global_id = profile["global_joint_id"]
+    if not isinstance(global_id, str) or ":" not in global_id:
+        raise SchemaValidationError("R1 joint-clearance pulse id is invalid")
+    module_text, local_joint_id = global_id.split(":", 1)
+    try:
+        module_index = tuple(module_ids).index(int(module_text.removeprefix("module_")))
+        joint_index = tuple(joint_ids).index(local_joint_id)
+    except (ValueError, TypeError) as error:
+        raise SchemaValidationError(
+            "R1 joint-clearance pulse target is absent"
+        ) from error
+    offset = float(profile["offset_rad"])
+    rise_start = float(profile["rise_start_fraction"])
+    rise_end = float(profile["rise_end_fraction"])
+    fall_start = float(profile["fall_start_fraction"])
+    fall_end = float(profile["fall_end_fraction"])
+    if not (
+        0.0 < abs(offset) <= 0.35
+        and 0.0 < rise_start < rise_end < fall_start < fall_end <= 1.0
+    ):
+        raise SchemaValidationError("R1 joint-clearance pulse profile is invalid")
+    progress = target.phase_progress.clamp(0.0, 1.0)
+    rise_u = ((progress - rise_start) / (rise_end - rise_start)).clamp(0.0, 1.0)
+    fall_u = ((progress - fall_start) / (fall_end - fall_start)).clamp(0.0, 1.0)
+    rise = rise_u.square() * (3.0 - 2.0 * rise_u)
+    fall = fall_u.square() * (3.0 - 2.0 * fall_u)
+    approach = target.contact_schedule_index == ORDER9_CONTACT_SCHEDULE_APPROACH
+    weight = torch.where(approach, rise * (1.0 - fall), torch.zeros_like(rise))
+    positions = target.nominal_joint_positions_rad.clone()
+    positions[:, module_index, joint_index] += weight * offset
+    return replace(target, nominal_joint_positions_rad=positions)
+
+
+def _diagnostic_two_stage_approach_target(
+    target,
+    *,
+    profile: dict[str, Any] | None,
+    start_joint_positions_rad: torch.Tensor | None = None,
+    goal_joint_positions_rad: torch.Tensor | None = None,
+):
+    """Replace the approach translation by a clearance transit and descent.
+
+    This is an isolated R1 diagnostic override.  The start is represented
+    relative to the phase goal, so the same construction remains invariant to
+    Isaac environment origins and planar scene translations.
+    """
+
+    if profile is None:
+        return target
+    required = {
+        "start_position_offset_from_goal_m",
+        "clearance_height_above_goal_m",
+        "rise_end_fraction",
+        "transit_end_fraction",
+        "descent_start_fraction",
+        "phase_duration_s",
+        "joint_motion_start_fraction",
+        "joint_motion_end_fraction",
+    }
+    if set(profile) != required:
+        raise SchemaValidationError("R1 two-stage approach profile keys differ")
+    raw_offset = profile["start_position_offset_from_goal_m"]
+    clearance = float(profile["clearance_height_above_goal_m"])
+    rise_end = float(profile["rise_end_fraction"])
+    transit_end = float(profile["transit_end_fraction"])
+    descent_start = float(profile["descent_start_fraction"])
+    duration = float(profile["phase_duration_s"])
+    joint_start = float(profile["joint_motion_start_fraction"])
+    joint_end = float(profile["joint_motion_end_fraction"])
+    if (
+        not isinstance(raw_offset, list)
+        or len(raw_offset) != 3
+        or not all(torch.isfinite(torch.tensor(float(value))) for value in raw_offset)
+        or not 0.25 <= clearance <= 0.60
+        or not 0.10 <= rise_end < transit_end <= descent_start <= 0.90
+        or not 10.0 <= duration <= 120.0
+        or not 0.0 <= joint_start < joint_end < descent_start
+        or start_joint_positions_rad is None
+        or goal_joint_positions_rad is None
+        or start_joint_positions_rad.shape != target.nominal_joint_positions_rad.shape
+        or goal_joint_positions_rad.shape != target.nominal_joint_positions_rad.shape
+    ):
+        raise SchemaValidationError("R1 two-stage approach profile is invalid")
+
+    pose = target.desired_robot_root_pose_world.clone()
+    twist = target.desired_robot_root_twist_world.clone()
+    goal = target.phase_goal_robot_root_pose_world[:, :3]
+    offset = torch.tensor(
+        tuple(float(value) for value in raw_offset),
+        device=pose.device,
+        dtype=pose.dtype,
+    ).reshape(1, 3)
+    start = goal + offset
+    overhead_start = start.clone()
+    overhead_goal = goal.clone()
+    overhead_start[:, 2] = goal[:, 2] + clearance
+    overhead_goal[:, 2] = goal[:, 2] + clearance
+    progress = target.phase_progress.clamp(0.0, 1.0)
+
+    def interpolate(
+        first: torch.Tensor,
+        second: torch.Tensor,
+        begin: float,
+        end: float,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        u = ((progress - begin) / (end - begin)).clamp(0.0, 1.0)
+        weight = u.square() * (3.0 - 2.0 * u)
+        position = first + weight.unsqueeze(-1) * (second - first)
+        derivative = ((6.0 * u * (1.0 - u)) / ((end - begin) * duration)).unsqueeze(
+            -1
+        ) * (second - first)
+        return position, derivative
+
+    rise_position, rise_velocity = interpolate(start, overhead_start, 0.0, rise_end)
+    transit_position, transit_velocity = interpolate(
+        overhead_start, overhead_goal, rise_end, transit_end
+    )
+    descent_position, descent_velocity = interpolate(
+        overhead_goal, goal, descent_start, 1.0
+    )
+    rising = progress < rise_end
+    transiting = (progress >= rise_end) & (progress < transit_end)
+    waiting = (progress >= transit_end) & (progress < descent_start)
+    position = torch.where(
+        rising.unsqueeze(-1),
+        rise_position,
+        torch.where(
+            transiting.unsqueeze(-1),
+            transit_position,
+            torch.where(waiting.unsqueeze(-1), overhead_goal, descent_position),
+        ),
+    )
+    velocity = torch.where(
+        rising.unsqueeze(-1),
+        rise_velocity,
+        torch.where(
+            transiting.unsqueeze(-1),
+            transit_velocity,
+            torch.where(
+                waiting.unsqueeze(-1),
+                torch.zeros_like(transit_velocity),
+                descent_velocity,
+            ),
+        ),
+    )
+    joint_u = ((progress - joint_start) / (joint_end - joint_start)).clamp(0.0, 1.0)
+    joint_weight = joint_u.square() * (3.0 - 2.0 * joint_u)
+    joint_positions = start_joint_positions_rad + joint_weight.reshape(-1, 1, 1) * (
+        goal_joint_positions_rad - start_joint_positions_rad
+    )
+    zero_joint_velocities = torch.zeros_like(target.nominal_joint_velocities_radps)
+    approach = target.contact_schedule_index == ORDER9_CONTACT_SCHEDULE_APPROACH
+    pose[:, :3] = torch.where(approach.unsqueeze(-1), position, pose[:, :3])
+    twist[:, :3] = torch.where(approach.unsqueeze(-1), velocity, twist[:, :3])
+    positions = torch.where(
+        approach.reshape(-1, 1, 1),
+        joint_positions,
+        target.nominal_joint_positions_rad,
+    )
+    joint_velocities = torch.where(
+        approach.reshape(-1, 1, 1),
+        zero_joint_velocities,
+        target.nominal_joint_velocities_radps,
+    )
+    return replace(
+        target,
+        desired_robot_root_pose_world=pose,
+        desired_robot_root_twist_world=twist,
+        nominal_joint_positions_rad=positions,
+        nominal_joint_velocities_radps=joint_velocities,
+    )
+
+
 def main() -> int:
+    global REPLAY_COUNT
     args = _parser().parse_args()
     if hash_file(PROTECTED_ROLLOUT) != PROTECTED_ROLLOUT_SHA256:
         raise SchemaValidationError("protected C3 rollout bytes changed")
     manifest_payload = json.loads(
         Path(args.r1_batched_jobs).read_text(encoding="utf-8")
     )
+    formal_teacher_collection = bool(
+        manifest_payload.get("r1_formal_teacher_collection", False)
+    )
+    if formal_teacher_collection:
+        authorization = manifest_payload.get(
+            "r1_teacher_collection_launch_authorization"
+        )
+        if (
+            not isinstance(authorization, dict)
+            or not isinstance(authorization.get("path"), str)
+            or not isinstance(authorization.get("sha256"), str)
+        ):
+            raise SchemaValidationError(
+                "R1 formal teacher collection lacks launch authorization"
+            )
+        authorization_path = (REPOSITORY / authorization["path"]).resolve()
+        if (
+            (
+                REPOSITORY != authorization_path
+                and REPOSITORY not in authorization_path.parents
+            )
+            or not authorization_path.is_file()
+            or hash_file(authorization_path) != authorization.get("sha256")
+        ):
+            raise SchemaValidationError(
+                "R1 formal teacher collection launch authorization changed"
+            )
+        authorization_payload = json.loads(
+            authorization_path.read_text(encoding="utf-8")
+        )
+        if (
+            authorization_payload.get("authorization_version")
+            != "order9_r1_teacher_collection_launch_v19"
+            or authorization_payload.get("status") != "approved"
+            or authorization_payload.get("collection_launch_authorized") is not True
+            or authorization_payload.get("training_authorized") is not False
+        ):
+            raise SchemaValidationError(
+                "R1 formal teacher collection is not explicitly authorized"
+            )
+        if not args.no_formal_annotation or args.r1_batched_output_root is None:
+            raise SchemaValidationError(
+                "R1 formal teacher collection requires isolated raw output"
+            )
+        REPLAY_COUNT = 1
+    diagnostic_replay_count = manifest_payload.get("r1_diagnostic_replay_count")
+    if diagnostic_replay_count is not None:
+        if (
+            diagnostic_replay_count != 1
+            or not args.no_formal_annotation
+            or args.r1_batched_output_root is None
+        ):
+            raise SchemaValidationError(
+                "R1 one-replay mode is restricted to isolated diagnostic output"
+            )
+        REPLAY_COUNT = 1
+    free_joint_unfold = manifest_payload.get("r1_diagnostic_free_joint_unfold")
+    if free_joint_unfold is not None and (
+        diagnostic_replay_count != 1
+        or not args.no_formal_annotation
+        or args.r1_batched_output_root is None
+    ):
+        raise SchemaValidationError(
+            "R1 free-joint unfold is restricted to isolated one-replay diagnostics"
+        )
+    raw_time_dilation = manifest_payload.get("r1_diagnostic_phase_time_dilation")
+    phase_time_dilation = None
+    if raw_time_dilation is not None:
+        if (
+            diagnostic_replay_count != 1
+            or not args.no_formal_annotation
+            or args.r1_batched_output_root is None
+            or not isinstance(raw_time_dilation, dict)
+            or set(raw_time_dilation) != {"approach"}
+        ):
+            raise SchemaValidationError(
+                "R1 phase-time dilation is restricted to isolated approach diagnostics"
+            )
+        phase_time_dilation = float(raw_time_dilation["approach"])
+        if not 1.0 < phase_time_dilation <= 2.0:
+            raise SchemaValidationError("R1 approach dilation is outside (1, 2]")
+    raw_lift_time_dilation = manifest_payload.get("r1_diagnostic_lift_time_dilation")
+    lift_time_dilation = (
+        None if raw_lift_time_dilation is None else float(raw_lift_time_dilation)
+    )
+    if lift_time_dilation is not None and (
+        diagnostic_replay_count != 1
+        or not args.no_formal_annotation
+        or args.r1_batched_output_root is None
+        or not 1.0 < lift_time_dilation <= 10.0
+    ):
+        raise SchemaValidationError(
+            "R1 lift dilation is restricted to isolated diagnostics in (1, 10]"
+        )
+    grasp_centering = manifest_payload.get("r1_diagnostic_grasp_centering")
+    if grasp_centering is not None and (
+        diagnostic_replay_count != 1
+        or not args.no_formal_annotation
+        or args.r1_batched_output_root is None
+        or not isinstance(grasp_centering, dict)
+    ):
+        raise SchemaValidationError(
+            "R1 grasp centering is restricted to isolated diagnostics"
+        )
+    raw_torque_fraction = manifest_payload.get(
+        "r1_diagnostic_grasp_torque_bias_fraction"
+    )
+    grasp_torque_bias_fraction = (
+        None if raw_torque_fraction is None else float(raw_torque_fraction)
+    )
+    if grasp_torque_bias_fraction is not None and (
+        diagnostic_replay_count != 1
+        or not args.no_formal_annotation
+        or args.r1_batched_output_root is None
+        or not 0.0 < grasp_torque_bias_fraction <= 0.20
+    ):
+        raise SchemaValidationError(
+            "R1 grasp torque bias is restricted to isolated diagnostics"
+        )
+    raw_contact_compression = manifest_payload.get(
+        "r1_diagnostic_contact_compression_by_slot_mm"
+    )
+    contact_compression_by_slot_mm = (
+        None
+        if raw_contact_compression is None
+        else tuple(float(value) for value in raw_contact_compression)
+    )
+    if contact_compression_by_slot_mm is not None and (
+        diagnostic_replay_count != 1
+        or not args.no_formal_annotation
+        or args.r1_batched_output_root is None
+        or not isinstance(raw_contact_compression, list)
+        or not contact_compression_by_slot_mm
+        or any(
+            not math.isfinite(value) or not 0.0 <= value <= 80.0
+            for value in contact_compression_by_slot_mm
+        )
+    ):
+        raise SchemaValidationError(
+            "R1 contact-wise compression is restricted to isolated diagnostics"
+        )
+    raw_vertical_scale = manifest_payload.get("r1_diagnostic_maintain_vertical_scale")
+    maintain_vertical_scale = (
+        None if raw_vertical_scale is None else float(raw_vertical_scale)
+    )
+    if maintain_vertical_scale is not None and (
+        diagnostic_replay_count != 1
+        or not args.no_formal_annotation
+        or args.r1_batched_output_root is None
+        or not math.isfinite(maintain_vertical_scale)
+        or not 0.10 <= maintain_vertical_scale < 1.0
+    ):
+        raise SchemaValidationError(
+            "R1 maintain vertical scaling is restricted to isolated diagnostics"
+        )
+    late_approach_clearance = manifest_payload.get(
+        "r1_diagnostic_late_approach_clearance"
+    )
+    if late_approach_clearance is not None and (
+        diagnostic_replay_count != 1
+        or not args.no_formal_annotation
+        or args.r1_batched_output_root is None
+        or not isinstance(late_approach_clearance, dict)
+    ):
+        raise SchemaValidationError(
+            "R1 late-approach clearance is restricted to isolated diagnostics"
+        )
+    joint_clearance_pulse = manifest_payload.get("r1_diagnostic_joint_clearance_pulse")
+    if joint_clearance_pulse is not None and (
+        diagnostic_replay_count != 1
+        or not args.no_formal_annotation
+        or args.r1_batched_output_root is None
+        or not isinstance(joint_clearance_pulse, dict)
+    ):
+        raise SchemaValidationError(
+            "R1 joint-clearance pulse is restricted to isolated diagnostics"
+        )
+    two_stage_approach = manifest_payload.get("r1_diagnostic_two_stage_approach")
+    if two_stage_approach is not None and (
+        diagnostic_replay_count != 1
+        or not args.no_formal_annotation
+        or args.r1_batched_output_root is None
+        or not isinstance(two_stage_approach, dict)
+        or free_joint_unfold is not None
+        or late_approach_clearance is not None
+    ):
+        raise SchemaValidationError(
+            "R1 two-stage approach is restricted to an isolated, uncombined diagnostic"
+        )
+    scene_support_from_task = manifest_payload.get("r1_scene_support_from_task", False)
+    if not isinstance(scene_support_from_task, bool):
+        raise SchemaValidationError("R1 scene-support switch is not boolean")
+    if (
+        scene_support_from_task
+        and not formal_teacher_collection
+        and (
+            diagnostic_replay_count != 1
+            or not args.no_formal_annotation
+            or args.r1_batched_output_root is None
+        )
+    ):
+        raise SchemaValidationError(
+            "R1 task-scene support is restricted to isolated one-replay diagnostics"
+        )
     raw_release_height = manifest_payload.get("r1_release_height_offset_m", 0.0)
     if isinstance(raw_release_height, bool) or not isinstance(
         raw_release_height, (int, float)
@@ -828,6 +1493,55 @@ def main() -> int:
                 jobs,
                 release_height_offset_m=release_height_offset_m,
             )
+            if phase_time_dilation is not None:
+                bundles = tuple(
+                    replace(
+                        bundle,
+                        phase_trajectories={
+                            **bundle.phase_trajectories,
+                            "approach": _retime_trajectory(
+                                bundle.phase_trajectories["approach"],
+                                scale=phase_time_dilation,
+                            ),
+                        },
+                    )
+                    for bundle in bundles
+                )
+            if scene_support_from_task:
+                if len(tasks) != 1:
+                    raise SchemaValidationError(
+                        "R1 task-scene support requires exactly one task"
+                    )
+                surfaces = tasks[0].scene.environment.support_surfaces
+                if len(surfaces) != 1:
+                    raise SchemaValidationError(
+                        "R1 task-scene support requires exactly one support"
+                    )
+                surface = surfaces[0]
+                geometries = {
+                    value.geometry_id: value
+                    for value in tasks[0].scene.geometry_library
+                }
+                geometry = geometries.get(surface.geometry_id)
+                raw_size = (
+                    None
+                    if geometry is None
+                    else (geometry.primitive_params or {}).get("size_m")
+                )
+                if not isinstance(raw_size, list) or len(raw_size) != 3:
+                    raise SchemaValidationError(
+                        "R1 task-scene support lacks box dimensions"
+                    )
+                task_support_size = tuple(float(value) for value in raw_size)
+                task_support_pose = tuple(float(value) for value in surface.pose_world)
+                original_scene_cfg = namespace["_scene_cfg"]
+
+                def scene_cfg_with_task_support(**kwargs):
+                    kwargs["support_size"] = task_support_size
+                    kwargs["support_pose"] = task_support_pose
+                    return original_scene_cfg(**kwargs)
+
+                namespace["_scene_cfg"] = scene_cfg_with_task_support
             first_bundle = bundles[0]
             module_ids = tuple(
                 sorted(module.module_id for module in first_bundle.morphology.modules)
@@ -841,6 +1555,44 @@ def main() -> int:
                     }
                 )
             )
+            approach_start_joint_bank = torch.tensor(
+                [
+                    [
+                        [
+                            float(
+                                bundle.phase_trajectories["approach"]
+                                .knots[0]
+                                .posture_target.joint_pos_target[
+                                    f"module_{module_id}:{joint_id}"
+                                ]
+                            )
+                            for joint_id in joint_ids
+                        ]
+                        for module_id in module_ids
+                    ]
+                    for bundle in bundles
+                ],
+                dtype=torch.float32,
+            ).repeat_interleave(REPLAY_COUNT, dim=0)
+            approach_goal_joint_bank = torch.tensor(
+                [
+                    [
+                        [
+                            float(
+                                bundle.phase_trajectories["approach"]
+                                .knots[-1]
+                                .posture_target.joint_pos_target[
+                                    f"module_{module_id}:{joint_id}"
+                                ]
+                            )
+                            for joint_id in joint_ids
+                        ]
+                        for module_id in module_ids
+                    ]
+                    for bundle in bundles
+                ],
+                dtype=torch.float32,
+            ).repeat_interleave(REPLAY_COUNT, dim=0)
             base_deltas = []
             bases = []
             for index, (task, bundle, job) in enumerate(zip(tasks, bundles, jobs)):
@@ -885,6 +1637,10 @@ def main() -> int:
                 tasks=tasks,
                 wrench_trajectories=wrench_trajectories,
                 replay_count=REPLAY_COUNT,
+                phase_time_dilations=(
+                    {} if lift_time_dilation is None else {"lift": lift_time_dilation}
+                ),
+                maintain_vertical_scale=maintain_vertical_scale,
             )
             namespace["Order9C3NominalTensorReference"] = (
                 Order9R1BatchedNominalTensorReference
@@ -960,10 +1716,20 @@ def main() -> int:
             mask_bank = torch.stack(
                 [basis.contact_slot_mask for basis in bases]
             ).repeat_interleave(REPLAY_COUNT, dim=0)
+            contact_values_m = None
+            if contact_compression_by_slot_mm is not None:
+                contact_values_m = (
+                    _contact_compression_values_by_active_slot(
+                        mask_bank,
+                        contact_compression_by_slot_mm,
+                    )
+                    * 1.0e-3
+                )
 
             def compute_batched(runtime, **kwargs):
                 target = kwargs["task_target"]
-                if additional_mm > 0.0:
+                compression_delta = torch.zeros_like(target.nominal_joint_positions_rad)
+                if additional_mm > 0.0 or contact_values_m is not None:
                     matrices = matrix_bank.to(
                         device=target.nominal_joint_positions_rad.device,
                         dtype=target.nominal_joint_positions_rad.dtype,
@@ -975,10 +1741,15 @@ def main() -> int:
                         device=matrices.device,
                         dtype=matrices.dtype,
                     )
+                    if contact_values_m is None:
+                        normal_values = values.unsqueeze(1).expand(-1, masks.shape[1])
+                    else:
+                        normal_values = contact_values_m.to(
+                            device=matrices.device,
+                            dtype=matrices.dtype,
+                        )
                     physical_action[:, :, 0] = torch.where(
-                        masks,
-                        values.unsqueeze(1).expand(-1, masks.shape[1]),
-                        physical_action[:, :, 0],
+                        masks, normal_values, physical_action[:, :, 0]
                     )
                     flat = torch.einsum(
                         "bij,bj->bi",
@@ -987,13 +1758,58 @@ def main() -> int:
                     )
                     delta = flat.reshape_as(target.nominal_joint_positions_rad)
                     delta *= _compression_scale(target).reshape(environment_count, 1, 1)
-                    kwargs["task_target"] = replace(
+                    compression_delta = delta
+                    target = replace(
                         target,
                         nominal_joint_positions_rad=(
                             target.nominal_joint_positions_rad + delta
                         ),
                     )
-                return original_compute(runtime, **kwargs)
+                target = _diagnostic_free_joint_unfold_target(
+                    target,
+                    profile=free_joint_unfold,
+                    module_ids=module_ids,
+                    joint_ids=joint_ids,
+                )
+                target = _diagnostic_late_approach_clearance_target(
+                    target,
+                    profile=late_approach_clearance,
+                )
+                target = _diagnostic_joint_clearance_pulse_target(
+                    target,
+                    profile=joint_clearance_pulse,
+                    module_ids=module_ids,
+                    joint_ids=joint_ids,
+                )
+                target = _diagnostic_two_stage_approach_target(
+                    target,
+                    profile=two_stage_approach,
+                    start_joint_positions_rad=approach_start_joint_bank.to(
+                        device=target.nominal_joint_positions_rad.device,
+                        dtype=target.nominal_joint_positions_rad.dtype,
+                    ),
+                    goal_joint_positions_rad=approach_goal_joint_bank.to(
+                        device=target.nominal_joint_positions_rad.device,
+                        dtype=target.nominal_joint_positions_rad.dtype,
+                    ),
+                )
+                target = _diagnostic_grasp_centering_target(
+                    target,
+                    profile=grasp_centering,
+                )
+                kwargs["task_target"] = target
+                result = original_compute(runtime, **kwargs)
+                return _diagnostic_grasp_torque_bias(
+                    result,
+                    target=target,
+                    compression_direction=compression_delta,
+                    effort_limits_nm=torch.tensor(
+                        tuple(float(value) for value in runtime.decoder._effort_limits),
+                        device=target.nominal_joint_positions_rad.device,
+                        dtype=target.nominal_joint_positions_rad.dtype,
+                    ),
+                    fraction=grasp_torque_bias_fraction,
+                )
 
             Order9TensorPiLRuntime.compute_nominal_qpid_hold = compute_batched
             print(
@@ -1004,6 +1820,12 @@ def main() -> int:
                         "candidate_count": len(jobs),
                         "environment_count": environment_count,
                         "additional_compression_mm": additional_mm,
+                        "contact_compression_by_slot_mm": (
+                            None
+                            if contact_compression_by_slot_mm is None
+                            else list(contact_compression_by_slot_mm)
+                        ),
+                        "maintain_vertical_scale": maintain_vertical_scale,
                         "release_height_offset_m": release_height_offset_m,
                     },
                     sort_keys=True,
@@ -1025,6 +1847,13 @@ def main() -> int:
                 ),
                 additional_compression_mm=additional_mm,
                 release_height_offset_m=release_height_offset_m,
+                scene_support_from_task=scene_support_from_task,
+                lift_time_dilation=lift_time_dilation,
+                grasp_centering=grasp_centering,
+                grasp_torque_bias_fraction=grasp_torque_bias_fraction,
+                contact_compression_by_slot_mm=contact_compression_by_slot_mm,
+                maintain_vertical_scale=maintain_vertical_scale,
+                formal_teacher_collection=formal_teacher_collection,
             )
             if not args.no_formal_annotation and args.r1_batched_output_root is None:
                 for job, (raw_path, episode_path) in zip(jobs, outputs):

@@ -11987,3 +11987,37 @@
   π_L再学習、C3変更、commit。
 - Next: 接触取得から搬送開始だけを短区間化して両エンジンの接触力・相対姿勢・材料を
   照合し、結果一致後にQPID/QPを一括またはコンパイル済み経路へ移す。
+
+### 2026-09-06 (R1共通実行処理の分割保存)
+
+- Spec version: A-MSRR v0.5。
+- Work package / Agent label: Codex / R1共通実行処理。
+- Summary: 既存の未commit変更から、支持台同伴実行、単独診断、接近回避、左右別押し込み、
+  持ち上げ時間・高さの調整、正式収集開始条件の検査を共通基盤として先に保存する。
+  これらを使用するv15--v19の実行器・結果記録は後続の個別commitへ分ける。
+- Files changed: `amsrr/training/order9_r1_batched_nominal_runtime.py`、
+  `scripts/order9_r1_batched_nominal_compression_rollout.py`、対応する単体試験2ファイル。
+- Schema/interface changes: この保存作業による追加変更はNone。既存のR1専用引数追加と
+  使用制限は各作業の設計変更記録に従う。C3保護実行器は不変。
+- Upstream dependencies used: v0.5、既存R1名目実行処理、C3 promoted update 18。
+- Downstream impact: 場面移送、修復診断、正式収集の共通依存を先行commitで利用可能にする。
+- Tests added or run: 本保存対象を含む関連58試験すべて合格。
+- Commands run: `git diff`、`pytest`、Python/JSON構文確認、台帳参照・C3保護ハッシュ確認。
+- Assumptions: 実装内容と成果物のハッシュを維持し、既存差分の保存単位だけを整理する。
+- Blockers / open questions: 分割保存にはなし。
+- Next steps: 共通基盤に依存する各工程の実装・結果を個別commitする。
+
+## Work Package Logs
+
+### Codex: R1共通実行処理の分割保存
+
+#### 2026-09-06
+
+- Scope / implemented: 上記共通実行処理と単体試験を1つの先行commitへまとめる。
+- Files changed / upstream dependencies: 上記Global Worklog参照。
+- Schema/interface changes: 保存作業による追加変更はNone。
+- Tests passed: 関連58/58。新しいIsaac実行・学習は行っていない。
+- Handoff notes: 共通実行処理の保存は、診断結果の正式昇格や学習開始を意味しない。
+- Open questions: なし。
+
+## Global Worklog
