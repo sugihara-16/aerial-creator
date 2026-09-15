@@ -5,9 +5,10 @@
 **Target reader:** Codex multi-agent implementation system and human researchers<br>
 **Assumed prior knowledge of this project:** none<br>
 **Primary implementation target:** Ubuntu 22.04 native, NVIDIA GPU, Python 3.10+, PyTorch, Isaac Sim / Isaac Lab, optional C++ QP backend<br>
-**Design status:** consolidated as-built implementation specification for Version 1<br>
+**Design status:** C3 as-built baseline + approved, not-yet-implemented high-level redesign<br>
 **Consolidated through:** Order-9 C3 promoted update 18<br>
-**Consolidation date:** 2026-08-22
+**Consolidation date:** 2026-08-22<br>
+**Approved design revision:** 2026-09-15 (`high_level_request_planning_v1`)
 
 ---
 
@@ -57,10 +58,11 @@ chronological audit log である。したがって、実装時の優先順位�
 5. 同文書の historical diagnostic / rejected / superseded 記録
 ```
 
-下位項目が上位項目と矛盾するときは上位項目を採用する。特に、design modification
+下位項目が上位項目と矛盾するときは上位項目を採用する。特に、C3の再現ではdesign modification
 log に残る module-count action mask、固定 12 mm contact margin、controller-side
 contact preload、exact 6D wrench-range hard gate、rounded-Gaussian normal action、
-compression-only actor、および診断 checkpoint は現行 production contract ではない。
+compression-only actor、および診断 checkpoint は現行C3 production contractではない。
+新規runtimeの接触feedbackはSection 20.6で定義し、過去の不採用実装を自動的に復活させない。
 
 Order-9 C3 の byte identity については、本文の説明より次を優先する。
 
@@ -71,6 +73,9 @@ artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1
 ```
 
 ### 0.2 v0.4からの主要変更
+
+下表の contact-space residual、categorical action、nominal preload 数値は保護済みC3の
+契約を表す。新規runtimeの標準低レベル経路はπ_L無効の名目制御であり、Section 20に従う。
 
 | Area | v0.5 current rule |
 | --- | --- |
@@ -84,10 +89,31 @@ artifacts/p4_full/order9/releases/c3_pi_l_promoted_update18_v1
 | C3 phase/success | exact wrench-box membership を hard gate または actor reward にせず、task outcome と deterministic safety で判定する |
 | C3 curriculum | 同一 v9 action/runtime contract で 2--8 modules を topology-stratified に段階拡張する |
 | C3 status | update 18 が 14 held-out buckets、448/448、safety failure 0、fallback 0 で promoted |
-| next curriculum | C3後は名目制御で R1--R4 の object-condition rings、`pi_H`、post-R4 `pi_D` を先に進め、`pi_L` は他要素完成後に必要性を再判定する |
+| π_H | 有限の接触群・IRG遷移要求・サブゴール候補を選択／順位付けする |
+| trajectory generation | 決定論的なオンライン制約付き計画器が全身・物体・接触力・時刻を整合させる |
+| execution | 実行器が観測から段階遷移を確定し、検証済みの同一関節軌道を名目制御で追従する |
+| next curriculum | 未学習の選択則＋計画器＋名目制御を先に検証し、必要に応じπ_H順位付けを学習する。R1--R4後にπ_D、π_Lは測定済みの不足がある場合のみ再検討する |
 
 本版では、実装証跡の数値を再現性に必要な範囲だけ残す。個々の failed trial の全結果は
 source-of-truth ではなく、上記 chronological audit log に保存する。
+
+---
+
+### 0.3 2026-09-15 approved redesign and implementation boundary
+
+`high_level_request_planning_v1` を新しい高レベル契約とする。π_Hの最終的な学習出力は
+有限候補の選択であり、full ContactWrenchTrajectory BC/PPOへ進むための暫定段階ではない。
+Section 19、20、24.5.5--24.5.9、27.4が新規開発の基準となる。
+
+この改訂は設計変更であり、既存コード、YAML、checkpoint、datasetを移行済みと宣言しない。
+旧trajectory action、raw/resolved resolver契約、旧R1 full-trajectory学習工程は新契約と
+非互換である。新しいrequest/catalog、execution context、plan/check record、feature/action
+契約と設定を版付きで実装し、移行検査に合格するまで旧設定を新設計として起動してはならない。
+既存C3 replayのschema・制御・評価・hashはAppendix Fどおり保持する。
+
+Sections 20.9、22.9、24.5.8と日付付きの過去のR1記録は、各時点の実装・実験の証跡である。
+それらの「現在」「次の入口」は当時の状態を示し、新設計の工程を上書きしない。旧C3の
+成功率も、新しいオンライン計画器の速度・頑健性・多タスク対応を証明しない。
 
 ---
 
@@ -115,7 +141,7 @@ structured task specification と利用可能な A-MSRR modules の集合が与�
 2. contact, wrench, state, safety requirements を導出する。
 3. それらの requirements を実現できる connected A-MSRR morphology を設計する。
 4. morphology を構築するための deterministic assembly sequence を計画する。
-5. task execution のための contact-wrench trajectories を生成する。
+5. 接触群・IRG遷移要求・サブゴールを選び、決定論的な制約付き計画器で contact-wrench trajectories を生成する。
 6. low-level control intents を生成する。
 7. deterministic controller / QP / safety layers によって、それらの intent を physically feasible actuator commands に変換する。
 
@@ -136,7 +162,8 @@ Output:
   InteractionEnvelope
   Target MorphologyGraph G_static
   AssemblyPlan
-  Contact-Wrench Trajectory
+  HighLevelRequest
+  Validated execution plan with Contact-Wrench Trajectory
   Low-level PolicyCommand
   ControllerCommand
   EpisodeArchive and metrics
@@ -149,7 +176,8 @@ TaskSpec
   -> interaction requirements
   -> morphology design
   -> assembly plan
-  -> contact-wrench trajectory
+  -> high-level request selection
+  -> constrained trajectory planning and independent validation
   -> low-level control intent
   -> deterministic controller / allocator
 ```
@@ -222,22 +250,24 @@ Order 9:
   C1 fixed-morphology pi_L BC
   C2 conservative fixed-morphology pi_L PPO
   C3 arbitrary 2--8-module pi_L PPO
-  R1--R4 progressive object-condition and pi_H learning under nominal control
+  model-based online planning + nominal control baseline
+  R1--R4 progressive object conditions; optional pi_H request ranking learning
   post-R4 pi_D learning
   optional pi_L application/readaptation only after measured need
-  joint object-task PPO
+  optional request/design-level fine-tuning after separate validation
   held-out full-system evaluation
 ```
 
-本版時点で C3 は promoted 済みである。R1 以降は C3 の common policy/controller
-contract を初期値として利用するが、C3 の morphology-only 成果を object diversity、
+本版時点で C3 は promoted 済みである。R1以降の新規開発はSection 19の契約を使う。
+C3の保護された制御・物理モデルは明示的な互換性確認の上で再利用してよいが、C3 の morphology-only 成果を object diversity、
 learned `pi_H`、learned `pi_D`、または別 task family の達成と解釈してはならない。
 C3までのcanonical stage list、stage index、budget、およびgateは、保護済み
-`configs/training/order9_learning_curriculum.yaml`を正本とする。2026-08-25に承認された
-π_L適用延期後のR1以降については、同ファイルを変更せず、版付き追加契約
-`configs/training/order9_r1_nominal_calibration_protocol_v2.yaml`を先に適用する。
+`configs/training/order9_learning_curriculum.yaml`を正本とする。2026-08-25のπ_L適用延期時は、
+同ファイルを変更せず、版付き追加契約
+`configs/training/order9_r1_nominal_calibration_protocol_v2.yaml`を適用した。
 旧設定中のR1--R4 π_L BC/PPO/再調整stageは宣言を保存するが、再適用条件が別途
-承認されるまで実行対象ではない。
+承認されるまで実行対象ではない。2026-09-15以降の新規開発ではSection 24.5.9を
+優先する。v2の過去の較正手順や旧full-trajectory BC/PPOを新工程へ暗黙に引き継がない。
 
 ### 2.3 Version 1 inclusions
 
@@ -255,8 +285,8 @@ Version 1 は以下を **MUST** implement する。
 - deterministic FeasibilityChecker
 - deterministic π_A GraphEditAssemblyPlanner
 - morphology design 後の morphology-conditioned ContactCandidateSampler
-- π_H Contact-Wrench Trajectory Planner interface
-- π_L low-level policy interface
+- π_H request-selection interface、deterministic constrained planner、execution supervisor
+- nominal low-level control interface、および保護C3／任意再適用用のπ_L interface
 - QP/PID controller interface
 - controller bridge / actuator mapping for Isaac Lab execution
 - Isaac Lab backend for module, morphology, object, and floor rollout
@@ -422,11 +452,14 @@ AssemblyPlan:
 ContactCandidateSet:
   morphology-conditioned finite contact proposal pool after morphology is known, with unary scores, masks, pairwise compatibility, optional group proposals, and selected-assignment feasibility cache
 
+HighLevelRequest:
+  finite contact-group / IRG-transition / subgoal selection from a bound catalog
+
 ContactWrenchTrajectory:
-  horizon-level contact assignment, contact wrench bounds, centroidal/posture/object targets
+  deterministic planner output, bound to the same validated whole-body/joint solution
 
 PolicyCommand:
-  low-level intent from π_L
+  nominal low-level intent; learned π_L residual disabled in the standard path
 
 ControllerCommand:
   actuator-level command from QP/PID/controller layer
@@ -489,7 +522,7 @@ task-level interaction requirements を表す typed heterogeneous factor graph�
 
 ### 5.8 InteractionEnvelope
 
-IRG から抽出される compact summary。π_D は morphology を design するために使い、π_H は contact-wrench trajectories を instantiate するために使う。
+IRG から抽出される compact summary。π_D は morphology を design するために使い、π_Hは接触群・遷移要求・サブゴールを選ぶために、計画器は軌道制約を構成するために使う。
 
 NN へ入力する場合、InteractionEnvelope は raw dict ではなく envelope summary tokens として encoding する。実装は `InteractionEnvelopeEncoder` を提供しなければならない。
 
@@ -502,8 +535,10 @@ connected A-MSRR structure の graph。nodes は modules、edges は docked conn
 ```text
 π_D: Design Policy. Creates target morphology and robot anchors.
 π_A: Assembly Planner. Deterministic in v1. Creates assembly sequence.
-π_H: Contact-Wrench Trajectory Planner. Creates horizon-level interaction trajectory.
-π_L: Low-Level Policy. Creates short-period tracking intent, not final actuator commands.
+π_H: High-Level Request Policy. Selects/ranks contact group, IRG transition, and subgoal.
+Constrained Planner: Deterministic online generator of whole-body contact-wrench trajectories.
+Execution Supervisor: Owns observed phase completion, contact continuity, and recovery.
+π_L: Optional Low-Level Residual Policy. Disabled in the standard new runtime.
 ```
 
 ### 5.11 FeasibilityChecker
@@ -512,7 +547,7 @@ hard safety decisions を所有する deterministic checker。learned feasibilit
 
 ### 5.12 QP/PID safety layer
 
-final actuator authority。π_L intent を physical constraints の下で thrust、vectoring、joint commands に変換する。
+final actuator authority。名目制御のPolicyCommand（π_L再適用時はそのbounded intentを含む）をphysical constraintsの下でthrust、vectoring、joint commandsに変換する。
 
 ---
 
@@ -556,14 +591,23 @@ flowchart TD
     AE --> AF
     AF --> AG[ContactCandidateSet]
 
-    G --> AH[π_H Contact-Wrench Trajectory Planner]
+    G --> AH[π_H Request Selection]
     H --> AH
     W --> AH
     AG --> AH
     AE --> AH
-    AH --> AI[Contact-Wrench Trajectory]
-
-    AI --> AJ[π_L Low-Level Policy]
+    AH --> AR[HighLevelRequest]
+    AR --> AP[Constrained Trajectory Planner]
+    T --> AP
+    AE --> AP
+    AG --> AP
+    AP --> AQ[C_H Plan Validation]
+    AQ -->|accepted| AI[Verified CWT + Joint Trajectory]
+    AI --> AX[Execution Supervisor]
+    AE --> AX
+    AX --> AH
+    AX --> AP
+    AX --> AJ[Nominal Command Builder + Contact Feedback]
     AE --> AJ
     W --> AJ
     AJ --> AK[PolicyCommand]
@@ -581,10 +625,10 @@ Key constraints:
 IRGBuilder produces abstract interaction requirements, not final contact points.
 π_D designs morphology and robot anchors.
 ContactCandidateSampler runs after π_D.
-π_H selects/refines contact assignments over a finite horizon.
+π_H selects/ranks finite grounded requests; the deterministic planner generates trajectories.
 ContactCandidateSet is a finite proposal pool, not a proof that every subset is feasible.
-Assignment-level wrench/friction/collision/QP feasibility is evaluated after π_H selects a contact assignment set.
-π_L outputs intent only.
+The planner and independent C_H validate the selected assignment and the same executable trajectory.
+The executor owns observed phase transitions; π_L is disabled in the standard path.
 QP/PID/controller layer outputs actuator commands.
 ```
 
@@ -1882,7 +1926,7 @@ IRG = detailed typed graph
 InteractionEnvelope = compact design/control requirement summary
 ```
 
-π_D は morphology and anchors を design するために使う。π_H は contact-wrench trajectories を instantiate するために使う。
+π_D は morphology and anchors を design するために使う。π_Hは接触群・遷移要求・サブゴールを選ぶために、計画器は軌道制約を構成するために使う。
 
 ### 13.2 Schema
 
@@ -1986,7 +2030,7 @@ simulator initialization reference pose
 
 これらは、可動関節の現在角度や、task execution 中の module relative pose を表してはならない。
 
-したがって、`pose_in_design_frame` や `relative_pose_src_to_dst` を用いて、π_D が「特定の関節姿勢込みの構造」を生成していると解釈してはならない。関節姿勢、関節角度、姿勢軌道は、π_D ではなく、π_H、π_L、QP/PID controller、および runtime state estimator / simulator が扱う。
+したがって、`pose_in_design_frame` や `relative_pose_src_to_dst` を用いて、π_D が「特定の関節姿勢込みの構造」を生成していると解釈してはならない。関節姿勢、関節角度、姿勢軌道は、π_D ではなく、制約付き軌道計画器、実行器、低レベル制御、および runtime state estimator / simulator が扱う。
 
 ### 14.3 ModuleNode
 
@@ -2081,7 +2125,7 @@ ContactCandidateID:
   scene/object-side concrete contact candidate generated after morphology is known
 ```
 
-π_H は次を assign する。
+π_Hが選ぶ接触群は次の対応を参照する。時間ごとのassignmentは計画器が生成する。
 
 ```text
 ContactSlotID -> RobotAnchorID -> ContactCandidateID
@@ -2145,7 +2189,7 @@ joint torque
 vectoring joint target
 ```
 
-可動関節の姿勢、関節角度、姿勢軌道は、π_D ではなく、π_H、π_L、QP/PID controller が扱う。
+可動関節の姿勢、関節角度、姿勢軌道は、π_D ではなく、制約付き軌道計画器、実行器、低レベル制御が扱う。
 
 ### 15.2 Action vocabulary
 
@@ -2341,7 +2385,7 @@ design-level feasibility:
   この nominal pose で required wrench を満たせるか
   ```
 
-  design-level coarse reachability / wrench / collision checks は、接続 topology、dock port compatibility、RobotAnchor capability、allowed ContactRegion、module count、thrust/payload margin などの graph-level / capability-level 必要条件を評価する。可動関節の具体角度や task execution 中の pose trajectory は、π_H、π_L、assignment-level feasibility、runtime QP/PID controller、または simulator/controller state の責務である。
+  design-level coarse reachability / wrench / collision checks は、接続 topology、dock port compatibility、RobotAnchor capability、allowed ContactRegion、module count、thrust/payload margin などの graph-level / capability-level 必要条件を評価する。可動関節の具体角度や task execution 中の pose trajectory は、制約付き軌道計画器、assignment-level feasibility、実行器、runtime QP/PID controller、または simulator/controller state の責務である。
 
 candidate-level unary screening:
   1つの ContactCandidate について capability, local reachability, local collision, normal alignment, friction plausibility を評価する。
@@ -2350,7 +2394,7 @@ pairwise/group candidate compatibility:
   candidate pairs or small groups について anchor conflict, module conflict, opposing normals, separation, local collision, support/grasp geometry を評価する。
 
 assignment-level feasibility:
-  π_H が選んだ ContactAssignment set について slot cardinality, wrench feasibility, friction cones, multi-contact collision, QP residual を評価する。
+  π_Hの要求を受けて計画器が構成するContactAssignment setと軌道について slot cardinality, wrench feasibility, friction cones, multi-contact collision, QP residual を評価する。
 
 runtime controller feasibility:
   actual RuntimeObservation と controller state に対して QP/PID が actuator limits, joint limits, safety bounds を満たすか評価する。
@@ -2657,7 +2701,7 @@ actuator feasibility of a selected contact set
 full QP feasibility of a trajectory knot
 ```
 
-これらは pairwise/group compatibility または π_H が選択した `ContactAssignment` set に対する assignment-level feasibility として評価する。
+これらは pairwise/group compatibility または π_Hが要求した接触群から計画器が構成する`ContactAssignment` set に対する assignment-level feasibility として評価する。
 
 ### 18.7 No exhaustive subset enumeration
 
@@ -2668,59 +2712,75 @@ ContactCandidateSet の任意の subset を全列挙して feasibility を判定
 2. diversity-preserving top-K per slot × region × anchor × mode
 3. pairwise conflict / compatibility matrix
 4. task-specific small group proposals
-5. π_H selection over finite horizon
+5. π_H finite request ranking -> bounded constrained planning -> independent C_H validation
 6. assignment-level feasibility for selected ContactAssignment sets
 7. cache infeasible assignments and feed violation labels to datasets/training
 ```
 
 ---
 
-## 19. π_H: Contact-Wrench Trajectory Planner
+## 19. π_H: High-Level Request Policy and Constrained Planning
 
-### 19.1 Role
+### 19.1 Responsibility and output boundary
 
-π_H は operation-mode output を置き換える。finite-horizon contact-wrench interaction trajectories を計画する。
+π_Hは、実行可能性を検証できる有限の要求候補を選択／順位付けする。決定論的なオンライン
+制約付き軌道計画器が、その要求を具体的なContactWrenchTrajectory（CWT）へ変換する。
+初期検証ではπ_Hの代わりに固定の優先則を使い、学習なしで計画・制御系を成立させる。
+
+| 旧π_Hの出力 | 新契約での所有者 |
+| --- | --- |
+| slot / anchor / candidate assignment | π_Hが接触群を選択し、計画器がその群の具体的assignmentを展開 |
+| 段階・モードの時系列 | π_HはIRG遷移を要求。実行器が観測guardを満たした遷移だけを確定 |
+| wrench target / lower / upper | IRG・物理制約を入力とする計画器 |
+| centroidal pose / twist / wrench preference | 全身・物体運動を同時に扱う計画器 |
+| free-anchor pose、object pose / twist軌道 | 同一全身解から計画器が導出 |
+| knot時刻、接触schedule、duration | 計画器と実行器。π_Hの連続出力から除外 |
+| priority weights / guard conditions | TaskSpec・IRG・版付き計画設定。学習器は変更不可 |
+| joint position / velocity reference | 計画器の検証済み全身解。π_Hの出力ではない |
+
+`grasp`、`carry`等のderived mode labelはログ用途である。π_Hは連続的な位置、力、時間、
+安全閾値、関節指令、最終actuator commandを **MUST NOT** 出力する。候補のscore／選択確率
+を連続値で出すことは許す。候補IDを任意の連続軌道を隠したcodebookにしてはならない。
+
+### 19.2 Decision context and HighLevelRequest
 
 Input:
 
 ```text
-IRG
-InteractionEnvelope
-MorphologyGraph
-RobotAnchors
-ContactCandidateSet
-RuntimeObservation
+IRG + InteractionEnvelope
+MorphologyGraph + RobotAnchors + ContactCandidateSet
+pre-decision deployable RuntimeObservation
+active_execution_state + previous request outcome
+finite request catalog tied to this observation/model/geometry snapshot
 ```
 
-Output:
+Action schema（新設、contract = `high_level_request_planning_v1`）:
 
-```text
-ContactWrenchTrajectory over horizon H
+```python
+class HighLevelRequest:
+    contact_group_id: str | None
+    transition_id: str | None
+    subgoal_id: str
 ```
 
-`grasp`, `carry`, `perch`, `walking` などの operation mode labels は logging / curriculum / debugging 用の derived labels である。primary policy output ではない。
+- `contact_group_id`は`ContactCandidateGroupProposal.group_id`を参照する。接触候補の
+  `candidate_id / slot_id / anchor_id`は元schemaのIDを保つ。`None`はカタログが明示した
+  contact-free要求だけに使い、維持中の接触を暗黙に解除する記号にしてはならない。
+- `transition_id`は決定論的な遷移カタログのIDとする。既存IRGEdgeには`edge_id`がないため、
+  IRG identity、`src_id / dst_id / edge_type`、condition/paramsを含むedge内容との対応を
+  カタログに保存する。`None`は現在の実行phaseを継続する要求である。初期phaseはTaskSpec／
+  IRGの開始条件と観測から初期化する。回復要求もIRGの宣言済み遷移を参照する。
+- `subgoal_id`はIRGのStateTarget node群またはphaseの完了条件に結び付いたサブゴール
+  カタログを参照する。対象entity、座標系、目標領域／姿勢、許容差と導出根拠を保持する。
+  現在の物体・支持台・障害物geometryから具体化し、ケースID別の手書き目標を使わない。
+- カタログは有限個の許可された三つ組を列挙する。各headの独立maskだけで任意の組合せを
+  許可せず、IRG・接触継続・対象entityの整合を組合せ単位で検査する。空なら要求を捏造せず
+  計画不能として実行器へ返す。事前screen合格は軌道の実行可能性を保証しない。
+- IDはそのカタログsnapshotの内容に束縛し、別sceneのIDやtensor内部indexを流用しない。
+  Request recordにはdecision ID、観測時刻/hash、catalog hash、IRG/model/geometry/config
+  identity、policy version、候補順・scoreを保存する。再計画後も同じ接触の意味を追跡する。
 
-π_H は ContactCandidateSet から `candidate_id` を選び、`slot_id`, `anchor_id`, `contact_mode`, `schedule_state`, wrench bounds, targets を時系列に割り当てる。π_H は ContactCandidateSet の任意 subset を前提にせず、選択した assignment set について assignment-level feasibility を evaluator / checker に問い合わせてよい。
-
-π_H は joint command を出力しては **MUST NOT** ならない。Raw learned proposalとraw
-teacher trajectoryでは `PostureTarget.joint_pos_target` と `joint_vel_target` を空にし、
-`free_anchor_pose_targets` だけをhigh-level targetとして出力してよい。Deterministic teacherが
-collision-free configuration routeを作るためにjoint statesを内部利用しても、それらは
-nominal IKのseed/evidenceであってraw π_H actionではない。
-
-Raw proposalをarchiveして `C_H` のproposal checkを通した後、deterministic posture resolverが
-proposalをdeep-copyし、測定joint stateとtrajectory geometryから実行用copyのjoint
-position/velocity targetsを生成する。Raw proposalを変更してはならず、raw/resolved trajectory
-hash、resolver version/config、per-knot residual/limit/collision evidenceを別々に保存する。
-`C_H` はraw proposalとresolved execution candidateを各境界でaccept/rejectするが、joint routeを
-生成またはprojectしない。
-
-Learned π_H proposal は deterministic `C_H` により unmodified のまま accept/reject する。
-`C_H` は action projection を行わず、wrench-box witness QP、collision、actuator/controller
-feasibility、および isolated Isaac shadow execution を fail-closed に確認する。Rejected
-proposal と deterministic fallback の return を learned proposal に帰属させてはならない。
-
-### 19.2 Trajectory schema
+### 19.3 Planner-produced CWT and execution reference
 
 ```python
 class ContactWrenchTrajectory:
@@ -2741,11 +2801,9 @@ class InteractionKnot:
     guard_conditions: list[Condition]
 ```
 
-このschemaはraw proposalとresolved execution trajectoryの両方をserializeする。Raw π_H
-proposalでは `posture_target.joint_pos_target` と `joint_vel_target` は `None`、resolver後の
-detached copyでは両fieldを設定してよい。Artifactは両者をcontract/version/hashで区別する。
+このCWTは計画器の出力であり、π_Hのaction tensorではない。以下の全fieldは計画器が生成する。
 
-### 19.3 ContactAssignment
+#### 19.3.1 ContactAssignment
 
 ```python
 class ContactAssignment:
@@ -2760,7 +2818,7 @@ class ContactAssignment:
     priority: float
 ```
 
-### 19.4 Targets
+#### 19.3.2 Targets
 
 ```python
 class CentroidalTarget:
@@ -2777,10 +2835,6 @@ class PostureTarget:
     free_anchor_pose_targets: dict[int, Pose7D] | None
 ```
 
-Field ownershipは一様ではない。`free_anchor_pose_targets` はraw π_H proposalに属する。
-`joint_pos_target` と `joint_vel_target` はdeterministic posture resolverがresolved copyへ
-追加する実行referenceであり、learned π_H headの出力ではない。
-
 ```python
 class ObjectTarget:
     object_id: str
@@ -2790,57 +2844,139 @@ class ObjectTarget:
     generalized_qdot_target: list[float] | None
 ```
 
-### 19.5 π_H diagram
+
+`PostureTarget.joint_pos_target / joint_vel_target`は非vectoring関節について、計画器が
+同時最適化した解から設定する。free-anchor姿勢とCoMは同じ全身状態のFKとPhysicalModel
+から導出する。旧契約の「raw CWTでは関節値を空にし、検証後に別IKで追加する」処理を
+新契約へ持ち込んではならない。
+
+Generated plan recordはrequest recordへの参照、初期状態／生成時刻、有効期限、CWT、
+全身・関節・物体の解、時間補間の定義、制約残差、solver/config/versionを一体で保持する。
+Checkerとexecutorは同一の時間評価器とframe定義を使用する。Knot値だけを一致させて
+区間内を別のIKやCartesian線形補間で作り直してはならない。
+
+要求された接触面の幾何位置と、compliance/preloadを含む実行姿勢も区別して記録する。
+Preloadを計画後に無検査で加えて関節余裕・障害物間隔を消費してはならない。
+
+### 19.4 Deterministic constrained trajectory planner
+
+計画器は単なる書式変換器や最近傍教師軌道の再生器ではない。現在の観測、PhysicalModel、
+TaskSpec、IRG、接触候補、SafetySpecを用い、少なくとも次を同じ解に課す。
+
+```text
+whole-body pose, non-vectoring joint motion, object motion, contact wrench, timing
+FK / CoM / contact geometry consistency from one body-and-joint trajectory
+robot self-collision, object, support and obstacle clearance along motion intervals
+joint position margins, velocity, acceleration and effort limits
+centroidal dynamics, object force/moment balance, friction and contact capability
+rotor/vectoring authority, thrust reserve and controller allocation feasibility
+contact continuity, feasible loading/unloading, placement and release clearance
+tracking, estimation and compliance uncertainty margins
+```
+
+非vectoring関節の運動はSection 20の準静的モデルが妥当な速度・加速度に制限する。
+必要な運動がその範囲を超える場合はモデル／制御契約の拡張を別途設計し、モデル誤差を
+無視して成功扱いしない。必要接触力を計画できても、局所サーボがその力を実現できるとは
+限らないため、Section 20の観測feedbackと実行評価を必須とする。
+
+一回の連続最適化では接触群と離散接触scheduleを固定し、IRGから得た少数のschedule候補
+を設定上限内で比較する。全接触組合せ・全phaseを巨大な混合整数／相補性問題として
+毎周期解くことを標準設計にしない。短い実行horizonに加え、残りタスクの粗い見通しで
+配置・解放・退避の成立を確認し、把持だけ成功して後段を塞ぐ選択を避ける。
+
+warm start、候補数、反復回数、総wall-clock deadlineを版付き設定で制限する。同じ
+snapshot／seed／設定で候補順を再現できるようにする。観測が変われば物体相対geometryと
+制約を再構成し、10 mmの物体単独移動をNNによる軌道暗記や場面全体の移送だけで補わない。
+
+### 19.5 Execution state, transitions and recovery
+
+次の三つは別のrecordとauthorityを持つ。
+
+| 状態 | 内容・更新者 |
+| --- | --- |
+| observed state | sensor/FK/object-state estimate/contact-load estimate。状態推定器が更新 |
+| active_execution_state | 実行中phase、接触binding、plan ID、有効区間、未完了guard。実行器が更新 |
+| requested_transition | π_Hが望む次のIRG遷移。要求だけでは実行中phaseを変更しない |
+
+IRGのentry/exit/failure guardは、deployable観測、推定の信頼度、必要な維持時間に基づき
+決定論的に評価する。例えばliftの要求だけで接触成立とみなさず、支持が実測上成立して
+から荷重を移す。releaseの要求だけで接触やpayload feedforwardを消さず、支持台への
+荷重移行を確認する。動作計画に含まれる未来のschedule_stateは現在の接触の証拠ではない。
+
+実行器は接触群のbindingを維持し、正当なtransfer/releaseまで候補の再sampleや順位変動で
+anchor/candidateを切り替えない。接触喪失、滑り、推定信頼度不足、追従誤差、限界接近を
+検出したら、再計画またはIRGで宣言された回復へ進む。任意phaseへ飛ぶteacher supervisorを
+runtime authorityとして残してはならない。把持用8phaseを全タスク共通の固定分類器にしない。
+
+教師データもruntimeも「観測snapshotを固定 → 要求を選択 → 実行・遷移判定」の順とする。
+教師が選んだ次phase、future state、post-decision task_progressを同じdecisionの入力へ
+先に書き込んではならない。現在の実行phaseは入力にできるが、要求先phaseとは分離する。
+
+### 19.6 Independent validation, time budgets and failure handling
 
 ```mermaid
 flowchart TD
-    A[IRG + InteractionEnvelope] --> E[π_H Encoder Context]
-    B[MorphologyGraph + RobotAnchors] --> E
-    C[ContactCandidateSet] --> E
-    D[RuntimeObservation] --> E
-    E --> F[Contact Assignment Head]
-    E --> G[Wrench Bounds Head]
-    E --> H[Centroidal/Free-anchor/Object Target Head]
-    E --> I[Guard/Priority Head]
-    F --> J[Contact-Wrench Trajectory]
-    G --> J
-    H --> J
-    I --> J
+    O[Deployable observation + Execution state] --> C[Finite Request Catalog]
+    C --> H[π_H Ranking or Initial Heuristic]
+    H --> R[Archived HighLevelRequest]
+    R --> P[Bounded Constrained Planner]
+    O --> P
+    P --> A[Archived Generated Plan]
+    A --> V[Independent C_H]
+    V -->|accepted| E[Execution Supervisor]
+    E --> N[Nominal Control + Contact Feedback]
+    N --> O
+    V -->|rejected| B[Bounded Next Candidate or Declared Recovery]
+    B --> P
+    B -->|verified recovery| E
 ```
 
-### 19.6 Time scales
+`C_H`は生成済みplanを変更せずaccept/rejectする。計画器内部の最適化はarchive前の
+生成処理であり、archive済み不合格軌道をcheckerが黙って修復してはならない。Requestと
+planは別々にhash保存し、実行器はC_Hが合格にした同一解だけを受け取る。修正案は新しい
+plan IDと再検証を必要とする。安全制約・閾値はNNのscoreや報酬では変更できない。
+Solverのsuccess flagや自己申告の残差だけを合格根拠にせず、C_Hは保存された解と入力モデル
+から必要な制約を再評価する。
 
-Recommended defaults:
+計画結果は、少なくとも`solution_found / no_solution_found / timeout / invalid_request`
+とC_Hの`accepted / rejected / not_checked`を分けて保存する。`no_solution_found`や
+時間切れは物理的実行不能の証明ではない。拒否・時間切れの原因、探索数、計画／検証時間、
+使用した制約marginを記録する。第一候補の成功、上限内の候補探索でのsystem成功、緊急
+fallback成功を別々に評価し、拒否された要求へfallbackの成功報酬を帰属させない。
 
-```yaml
-pi_H:
-  update_rate_hz: 2.0
-  horizon_s: 2.0
-  knot_dt_s: 0.25
-```
-
-### 19.7 Teacher, C3 replay, and learned-runtime boundary
-
-Order-9 C3 の deterministic configuration-space planner は offline teacher tooling である。
-C3 learning/evaluation は human-accepted、SHA-256-bound の complete nominal trajectory を
-tensor replay し、rollout中に planner を起動してはならない。実機または R1 以降の learned
-runtime は次の境界を使う。
+π_Hの離散選択は主にphase境界・失敗・再選択が必要なeventで行い、同じ要求を使う
+連続軌道の再計画と低レベル制御は別周期にする。旧2 Hz／2 s／0.25 sはlegacy実験値であり、
+オンライン成立の保証値ではない。実装するdeployment profileは次を明示して測定する。
 
 ```text
-learned pi_H contact/centroidal/free-anchor/object trajectory
-  -> C_H raw-proposal check
-  -> deterministic posture resolver and resolved-candidate check
-  -> trajectory IK / contact-space basis
-  -> pi_L PolicyCommand intent
-  -> QPID/QP and local joint servos
+decision / replanning / control rates and horizon / discretization
+maximum candidate count, solver iterations and end-to-end planning/checking deadline
+allowed observation age, plan validity interval and tracking-error envelope
+safe continuation / stop / retreat conditions and recovery deadline
+latency distribution, worst observed latency, timeout and missed-deadline rates
 ```
 
-C3 の compact runtime phase は `approach / contact_acquisition / lift / transport /
-place / release / retreat / settle` の8相である。Actor-visible phase identity は task
-adapter schemaを用い、compact indexを直接 actor token として使ってはならない。
-C3では outcome supervision に privileged PhysX truthを利用できるが、R1以降の learned
-π_H phase/timing decisionでは deployable observationへ戻す。Deterministic collision、QP、
-drop、actuator、および feasibility safety authority は常に残す。
+遅れて返った解は現在状態と有効範囲を再確認してから使う。期限内に新解がないときは、
+状態が保証範囲内にある検証済み継続区間または宣言済み回復だけを実行する。last commandの
+保持を一般に安全とはみなさない。接触タスクでは停止にも荷重支持が必要である。
+
+独立Isaac shadow executionはモデル・checker・controllerの受入試験と回帰確認に残す。
+全候補の高忠実度shadow rolloutを恒久的なオンライン必須処理とする設計は採らないが、
+検証済みのonline validation profileがない間は既存shadow gateを単に無効化してはならない。
+高速checkerへの移行には、同じhard safety基準、区間衝突、力・actuator余裕、推定／追従
+誤差を扱えることをshadow比較とfull-task Isaac評価で確認する。未検証profileはfail closed。
+新しい安全基準や許容値の緩和をこの責務変更に便乗して導入してはならない。
+
+### 19.7 Legacy teacher and promoted C3 boundary
+
+C3のconfiguration-space plannerはoffline teacher toolingであり、保護されたC3実行は
+hash-bound complete nominal trajectoryをreplayする。この契約をオンライン再計画へ
+変更しない。C3の`approach / contact_acquisition / lift / transport / place / release /
+retreat / settle`、compact phase adapter、privileged outcome evaluationも履歴契約に従う。
+
+新規runtimeではC3 privileged phase supervisor、full-CWT NN head、検証後に別IKを解く
+raw/resolved pathを用いない。既存CWTのfield layoutを再利用しても、producer、補間、
+検証対象、policy actionの意味が変わるため、同一契約としてcheckpointをloadしてはならない。
 
 ---
 
@@ -2848,13 +2984,19 @@ drop、actuator、および feasibility safety authority は常に残す。
 
 ### 20.1 Role split
 
-π_L は π_H trajectory に condition された short-period intent を出力する。final actuator commands は出力しない。
+新規runtimeの標準経路は、検証済みplanを追従する名目制御であり、π_Lの学習済み補正は0
+とする。名目制御はplanの関節・centroidal参照、決定論的な接触／荷重feedback、QPID/QP、
+local servoを含む。π_Lは必要性が測定された後の任意拡張であり、最終actuator commandを
+出してはならない。Section 20.2のπ_L入力と20.9のv9 actionは保護C3／将来の再適用用である。
 
 ```text
-π_H: 1-3 s horizon interaction plan
-π_L: 50-200 Hz complete bounded PolicyCommand intent
-QP/PID: 200-1000 Hz actuator command
+π_H: event-driven request selection
+Constrained Planner: bounded online replanning under the active request
+Nominal builder / contact feedback: short-period bounded PolicyCommand
+QPID/QP + local servo: actuator command at the validated control rate
 ```
+
+各周期・deadlineはSection 19.6のdeployment profileで決める。
 
 現行 `centroidal_local_joint_v2` では、通常制御を次の二経路に分ける。
 
@@ -2965,8 +3107,9 @@ subject to:
 ```
 
 通常 path の変数は rotor thrust、thrust-vectoring、および必要な slack に限定する。
-Contact wrench requirements は feasibility、π_L context、privileged reward/evaluation、
-loggingに用いるが、個別 contact wrench tracking termとして通常QPへ入れない。
+Contact wrench requirementsは計画・feasibility・接触feedbackの目標／制限、任意π_Lの
+context、reward/evaluation、loggingに用いる。個別contact wrench tracking termとして
+通常のcentroidal QPへは入れない。計画器が接触力を最適化することとは区別する。
 
 Non-vectoring joint commandは別の deterministic local servoで生成する。
 
@@ -2979,41 +3122,47 @@ tau_requested = Kp * (q_target - q)
 Controllerは position、velocity、rate、effort、torque-bias、finite-value、joint-limitを
 検査・clampし、`pi_A` latch/detach overrideとdeterministic holdを優先する。
 
-### 20.6 Desired Wrench / Pose / Joint Bias Builder
+### 20.6 Nominal command builder and closed-loop contact feedback
 
-`CentroidalTarget` と `PostureTarget` は別の target 種別である。`CentroidalTarget` は
-CoM、control-body orientation、および高レベルwrench requirementを表す。
-`PostureTarget` は nominal joint reference と free-anchor pose referenceを表す。
-現行decoderは bounded policy residualを適用した後、absolute joint targetを
-`PolicyCommand`へ格納する。
-
-Builder は以下を行う。
+`CentroidalTarget`と`PostureTarget`はSection 19で検証済みの同じ全身解に属する。
+Builderはその時間評価器からabsolute referenceを得る。制約付き計画で得た関節軌道を
+捨てて、実行時に別IKでanchor poseから再生成してはならない。
 
 ```text
-q_nom, qdot_nom = active PostureTarget / deterministic trajectory IK
-delta_q, delta_qdot = bounded learned intent after contact-space projection
-q_target = clip(q_nom + delta_q, joint limits and local trust region)
-qdot_target = clip(qdot_nom + delta_qdot, velocity limits)
-
-w_res = PolicyCommand.residual_wrench_body
-w_pose = pose tracking wrench from desired_body_pose / desired_body_twist
-w_payload = controller-owned payload/gravity/inertia feedforward when active
-w_des = w_pose + w_res + w_payload
-
-contact requirements = pi_L context + feasibility/reward/evaluation only
+q_plan, qdot_plan, centroidal_ref = evaluate the accepted plan at execution time
+learned_delta_q, learned_delta_qdot, learned_wrench = 0 in the standard path
+q_target, qdot_target = planned references + bounded deterministic contact correction
+w_pose = centroidal pose/twist tracking wrench
+w_payload = estimated supported payload / gravity / inertia feedforward
+w_des = w_pose + w_payload + bounded deterministic feedback
+PolicyCommand = absolute references and bounded biases for QPID/QP and local servos
 ```
 
-Payload feedforwardは grasped objectを機体が支持する `lift / transport / place`だけで
-有効にし、支持面へ置いた後の `release`開始時に無効化する。PID integral stateは
-QP infeasible、saturation、mode/reset境界で anti-windupを適用する。
+接触制御には、FK、anchor/object相対距離・速度、object-state estimate、motor-current-
+equivalent load、接触推定の信頼度を使う。名目preloadの初期値だけを与える開ループ制御を
+標準解としない。荷重不足・過大圧縮・滑りを観測して、同定したcomplianceとactuator上限
+の下で参照／biasを調整する。必要feedbackが取得できない場合は0という架空の測定値で
+継続せず、信頼度不足として遷移を止め、再計画・回復する。
 
-最終 actuator command は常に QPID/QP、local servo、safety/controller bridgeが出力する。
+この補正には、計画時に検証したjoint／collision／effort／接触許容範囲を適用する。
+補正量、追従誤差、saturationを記録し、範囲を超える要求は新しいplanと再検証へ戻す。
+安全clampが作動した指令を元planの完全追従と報告してはならない。単一の固定押し込み量や
+module-count別の応急ruleでcontact feedbackを代用してはならない。
+
+Payload feedforwardは現在の荷重分担の推定に基づく。lift/releaseを要求しただけでは
+on/offせず、支持台との荷重移行を観測して変更する。PIDにはQP infeasible、saturation、
+resetでanti-windupを適用する。接触力の最適化がservoで実現されるかはfull-task評価で確認する。
+
+`centroidal_local_joint_v2`のPolicyCommand field layoutは保持する。新しいnominal builderと
+feedbackの意味・設定は新runtime contractに束縛し、π_Lのlearned residualとログで区別する。
+C3 replayでは旧v9 decoder／nominal preload規則を変更しない。最終actuator commandの
+authorityは常にQPID/QP、local servo、safety/controller bridgeである。
 
 ### 20.7 Control diagram
 
 ```mermaid
 flowchart TD
-    A[π_H Contact-Wrench Trajectory] --> B[π_L Low-Level Policy]
+    A[C_H Accepted Plan + Execution State] --> B[Nominal Builder + Bounded Contact Feedback]
     C[RuntimeObservation] --> B
     D[MorphologyGraph + PhysicalModel] --> B
     B --> E[PolicyCommand]
@@ -3066,6 +3215,9 @@ Requirements:
 π_L は actuator command を直接出力してはならない。最終 actuator authority は常に controller / QP / safety layer と controller bridge に属する。
 
 ### 20.9 Order-9 v9 common contact-space action contract
+
+本節は保護されたC3のas-built契約であり、新規runtimeの標準経路へのπ_L適用を要求しない。
+本節のπ_H軌道はC3用teacher/replayを指す。以下の数値・preload・action規則を保持する。
 
 Order-9 C3以降の現行 `pi_L` は、全 2--8-module morphology で同一の
 `order9_categorical_contact_normal_policy_command_pi_l_v9` contractを使う。
@@ -3308,7 +3460,10 @@ capability
 contact_candidates optional, only for π_H contexts
 ```
 
-各 head は `source_ids` を使って output ids を元 schema ids へ戻せなければならない。特に π_H の `candidate_id`, `slot_id`, `anchor_id` は workspace 内部 index ではなく source schema id を参照する。
+各 head は `source_ids` を使って output ids を元 schema ids へ戻せなければならない。π_Hのgroup／transition／subgoal選択はSection 19.2のcatalog IDへ戻す。参照先の
+`candidate_id`, `slot_id`, `anchor_id`もworkspace内部indexではなくsource schema IDとする。
+新request catalogのtokens、joint tuple mask、action headは新しいfeature/action versionで
+定義し、旧CWT headやAppendix Aのpadding寸法をshape一致だけで流用しない。
 
 ### 21.7 Learned queries
 
@@ -3326,7 +3481,7 @@ Recommended minimum:
 
 ```text
 query_D: design context for π_D
-query_H: contact-wrench trajectory context for π_H
+query_H: grounded request catalog and current execution context for π_H
 query_L: low-level control context for π_L
 query_V: critic context
 query_F: feasibility/proxy context
@@ -3357,7 +3512,7 @@ Proxy と critic は相関しうるが、同一の object ではない。
 
 ```text
 V_D: evaluates design-stage decisions
-V_H: evaluates high-level contact-wrench trajectory decisions
+V_H: evaluates high-level request decisions, only if request-level RL is used
 V_L: evaluates low-level control decisions
 ```
 
@@ -3411,14 +3566,21 @@ R_D = R_task_summary
     - λ_feas * C_feas_violation
 ```
 
-### 22.6 High-level reward
+### 22.6 High-level selection objective
+
+初期のπ_H学習は、実行結果と計画costを用いた候補の分類／順位付けでよい。連続CWTの
+wrench・pose・knot timingを回帰対象にしない。必要性が実測された場合だけrequest-level RL
+を追加し、その場合の例を次とする。
 
 ```text
-R_H = R_task_progress
-    + R_contact_schedule_success
-    + R_wrench_requirement_satisfaction
-    - R_mode_switch_instability
+R_H = task completion and observed progress
+    - execution time / planning cost
+    - unnecessary contact switches / failed requests
 ```
+
+静止した接触維持や時間経過だけでtask完了を上回る報酬を累積させてはならない。接触力の
+実現可能性と安全性は決定論的制約であり、報酬と引き換えに違反を許さない。要求、生成plan、
+実行結果を結び付け、別候補や回復が得た成功を拒否された要求の教師正例にしない。
 
 ### 22.7 Low-level reward
 
@@ -3440,6 +3602,10 @@ A_stage = G_stage - V_stage(context_stage)
 ```
 
 corresponding stage mask が active のときのみ、その head を update する。
+Event駆動のπ_Hではdecision間の実経過時間を記録し、return/discountをその時間に整合させる。
+RLのaction/log probabilityは実際にsampleしたrequestまたはrankingに対して定義し、
+決定論的計画器が生成した連続CWTをNNがsampleしたactionとして扱わない。
+教師順位付けのみの段階でcritic/PPOを必須としない。
 
 ### 22.9 Order-9 C3 outcome and factorized actor-credit contract
 
@@ -3521,6 +3687,13 @@ class RuntimeObservation:
     controller_status: ControllerStatus
     task_progress: TaskProgressState
 ```
+
+新契約では、この観測にSection 19.2/19.5の版付きexecution contextとcatalogを関連付ける。
+`task_progress`は実行器が観測から確定した進捗だけを表す。次phaseの教師labelや未受理の
+requestで上書きしてはならない。接触／荷重推定には値だけでなく時刻・信頼度・有効性を
+保持する。これらのrecord追加は明示的schema migrationとし、既存C3観測の意味を変更しない。
+新しい実行器のphase guardもactorと同じdeployable情報境界に従う。PhysX truthは
+学習label・診断・評価専用とし、runtime phase決定の隠れた入力にしてはならない。
 
 ### 23.3 Contact modeling v1
 
@@ -3621,6 +3794,11 @@ statusに限定する。Privileged labelからheadを補助学習してもよい
 ---
 
 ## 24. Training Curriculum and Evaluation Phases
+
+Sections 24.1--24.5.4は既存P0--P4.2の工程・受入記録として保持する。その中のbaseline
+π_H trajectory／π_L表記は当時の接続を示す。新規開発ではSection 19のrequest／planner／
+executor／名目制御に置き換え、以下の改訂済み学習工程を使う。C3 promotionを再実施した
+ことにも、新規オンライン経路が受入済みであることにもしてはならない。
 
 ### 24.1 P0 acceptance
 
@@ -3830,156 +4008,85 @@ rollout archive を保存する。
 deterministic fallback が残っている。
 ```
 
-#### 24.5.5 P4.3: Isaac learning bootstrap
+#### 24.5.5 P4.3: Baseline-first learning bootstrap
 
-Goal: Isaac-backed rollout から、π_L、π_H、π_D scorer / selector の段階的な最小学習 run を開始する。
+新契約では、学習器が未完成の物理経路を補う前提を置かない。次を順に実施する。
 
-P4.3 learning bootstrap は π_L だけを意味しない。P4.3 では以下の3系統を段階的に学習対象とする。ただし、最初から全 policy を同時に RL してはならない。deterministic fallback と deterministic safety gate を常に残すこと。
-
-1. π_L / residual controller learning
-
-```text
-Input:
-  Isaac RuntimeObservation
-  MorphologyGraph
-  PhysicalModel summary
-  active ContactWrenchTrajectory / InteractionKnot
-  controller status
-
-Output:
-  PolicyCommand
-  residual control intent
-```
-
-π_L / residual controller learning は、Isaac 上の `RuntimeObservation` を入力に、`PolicyCommand` または residual control intent を学習する。最終 actuator command は引き続き controller layer が出す。deterministic π_L fallback を残す。
-
-2. π_H contact / trajectory policy learning
-
-```text
-Input:
-  ContactCandidateSet
-  InteractionEnvelope
-  MorphologyGraph
-  RuntimeObservation
-  assignment feasibility cache
-
-Output:
-  contact assignment
-  ContactWrenchTrajectory
-  phase / knot timing
-  priority weights
-```
-
-π_H learning は、ContactCandidateSet、InteractionEnvelope、MorphologyGraph、RuntimeObservation を入力に、contact assignment、`ContactWrenchTrajectory`、phase/knot timing、priority weights を学習する。最初は baseline π_H trajectory を teacher にした imitation / supervised learning でもよい。その後、Isaac rollout reward を使った RL または fine-tuning へ進める。deterministic π_H fallback を残す。
-
-3. π_D outcome-conditioned design scorer / selector fine-tuning
-
-```text
-Input:
-  P2 candidate DesignOutput set
-  FeasibilityResult
-  Isaac rollout outcome
-  task success / object drop / collision / controller infeasible
-  reward / return
-
-Output:
-  candidate morphology scoring
-  candidate ranking
-  selected DesignOutput
-```
-
-π_D scorer fine-tuning は、P2.5 で学習した π_D scorer を初期値または補助モデルとして使ってよい。Isaac rollout 結果、task success、object drop、collision、controller infeasible、reward を使って、candidate morphology scoring / ranking を fine-tune する。π_D は引き続き final actuator command を出さない。deterministic `P2DesignPolicy` と `FeasibilityChecker` fallback を残す。hard safety 判定は `FeasibilityChecker` が source of truth であり、learned feasibility head で置き換えてはならない。
-
-P4.3 推奨順序:
-
-```text
-P4.3a:
-  deterministic π_D / π_H / π_L rollout で Isaac dataset を収集する。
-
-P4.3b:
-  π_L または residual controller を最小学習する。
-
-P4.3c:
-  π_H を teacher imitation または rollout reward で学習する。
-
-P4.3d:
-  π_D scorer を Isaac rollout outcome で fine-tune する。
-
-P4.3e:
-  必要に応じて π_D / π_H / π_L の joint fine-tuning を行う。
-  ただし最初から全 policy を同時に RL しない。
-```
-
-P2.5 の π_D scorer / feasibility head は補助モデルであり、P4 開始時点の production source of truth ではない。learned models を production path で使う場合は、deterministic safety gate を必ず通す。
+1. **未学習baseline**: 固定の有限候補優先則、オンライン制約付き計画器、実行器、π_L無効の
+   名目制御でfull grasp/carry/place/release/retreatを成立させる。Section 27.4の因果性、
+   同一軌道実行、contact feedback、計画時間と安全性の検査を先に通す。
+2. **π_H候補順位付け**: 同一入力snapshotに対する候補ごとの計画結果、実行成否、costを
+   dataset化する。初期学習は分類／rankingとし、固定優先則に対する成功率・候補試行数・
+   end-to-end時間の改善を同条件で評価する。全CWTの教師模倣を必須工程にしない。
+3. **必要時のrequest-level RL**: 順位付けだけでは不足することを測定した場合に限る。
+   deterministic safetyは維持し、fallbackによる成功やpost-decision phaseを教師に混ぜない。
+4. **π_D**: R1--R4で計画・制御の条件範囲を検証してからmorphology ranking／selectorを
+   outcomeで学習する。π_Dが生成した構造にも同じ計画器・checkerを適用する。
+5. **任意のπ_L**: 他要素完成後に、名目制御では埋まらない測定済みの不足がある場合だけ
+   再検討する。新しい学習系統、補正上限、同条件の改善、安全性非劣化を必要とする。
 
 Required artifacts:
 
 ```text
-π_L または residual controller checkpoint
-π_L / residual controller metrics
-π_L / residual controller reward curve
-π_H checkpoint
-π_H metrics
-π_H rollout evaluation
-π_D scorer fine-tuning checkpoint
-π_D scorer fine-tuning metrics
-π_D rollout outcome evaluation
-Isaac rollout archive
-training config hash
-deterministic fallback path metadata for π_D / π_H / π_L
+unlearned baseline full-task Isaac archive and held-out metrics
+request/catalog/execution-state records and solver/checker timing/outcome records
+same-plan tracking, contact estimation, clearance, actuator and recovery metrics
+learned π_H checkpoint and ranking comparison only when π_H learning is claimed
+π_D checkpoint and held-out design outcome evaluation when π_D learning is claimed
+request-level PPO or π_L artifacts only when those optional stages are actually used
+source/config/model/feature/action/controller identities and fixed train/validation/test splits
 ```
 
-full end-to-end fine-tuning は、P4.3 の minimum learning run が保存され、rollout / controller / safety metrics が確認された後の段階とする。
+未学習baselineの合格はlearned π_H／π_Dの達成を意味しない。全policy同時RLを開始条件に
+せず、比較で有効性を示せない学習器を導入し続けない。小さな条件変更でbaselineが失敗する
+間はdataset拡大や長時間学習へ進まず、計画・観測・制御のどの仮定が破れたかを特定する。
 
 #### 24.5.6 P4 full acceptance
 
-P4 full completion は、P4.0 simplified acceptance だけでは満たされない。以下を含む必要がある。
-
-```text
-P4.0 simplified full-pipeline wiring accepted
-P4-control low-level flight validation accepted
-P4.1 Isaac backend smoke accepted
-P4.2 Isaac deterministic rollout archived
-P4.3 minimum learning run archived
-```
-
-P4 full acceptance:
+P4.0のsimplified acceptanceだけではP4 full completionを満たさない。新契約での完了は
+low-level flight、Isaac backend、オンラインbaseline、Section 24.5.5で採用した学習要素、
+Section 27.4の受入検査を含む。既存P4の最低数値基準は保持する。
 
 ```text
 success_rate >= 50% on held-out Isaac object distribution
 object_drop_rate <= 20%
 hard_collision_rate <= 5%
 controller/QP infeasible terminal <= 10%
-reward curve exists
-π_L or residual controller checkpoint / metrics / reward curve exist
-π_H checkpoint / metrics / rollout evaluation exist
-π_D scorer fine-tuning checkpoint / metrics / rollout outcome evaluation exist
-rollout archive exists
-deterministic fallback remains available for π_D / π_H / π_L
+rollout archive and contract-bound metrics exist
+learned components claimed as complete have checkpoint and held-out outcome comparison
+online planning/checking/execution satisfy the declared deadline and validity profile
+first-choice, bounded-search, and emergency-fallback outcomes are reported separately
 learned production path passes deterministic safety gates
 ```
+
+この最低数値はP4 milestoneの基準であり、実機安全性やR1--R4の頑健性を保証しない。
+Ringごとの分布・成功／安全基準・計算予算は実行前に固定し、失敗後に条件を狭めて同じ
+評価として報告しない。π_L checkpointやfull-CWT BC/PPOを新契約の必須成果物としない。
+π_D／π_Hを未学習のまま使う場合は、その範囲をbaseline completionと明記する。
 
 #### 24.5.7 P4 full-pipeline diagram
 
 ```mermaid
 flowchart TD
-    A[P2 selected DesignOutput / π_D candidate scoring] --> B[P3 assembly result]
-    B --> C[ContactCandidateSampler]
-    C --> D[π_H: Contact assignment + ContactWrenchTrajectory]
-    D --> E[π_L: PolicyCommand / residual intent]
-    E --> F[Controller / QP-PID]
-    F --> G[Controller bridge]
-    G --> H[Isaac actuator targets]
-    H --> I[Isaac Lab step]
-    I --> J[RuntimeObservation]
-    J --> K[EpisodeArchive]
-    J --> L[Reward / metrics]
-    L --> M[Training loop]
-    M -. updates π_D scoring / selector .-> A
-    M -. updates π_H contact / trajectory policy .-> D
-    M -. updates π_L PolicyCommand / residual intent .-> E
-    F -. final actuator command only here .-> G
+    A[P2 DesignOutput / π_D Ranking] --> B[P3 Assembly Result]
+    B --> C[Contact Candidates + Grounded Request Catalog]
+    C --> D[Heuristic or Learned π_H Ranking]
+    D --> E[Constrained Planner + Independent C_H]
+    E --> F[Execution Supervisor]
+    F --> G[Nominal Control / QPID / Local Servo]
+    G --> H[Controller Bridge / Isaac Actuator Targets]
+    H --> I[Isaac Lab Step]
+    I --> J[Deployable Observation]
+    J --> C
+    J --> E
+    J --> F
+    J --> K[Archive / Task and Timing Metrics]
+    K --> L[Candidate Ranking Dataset / Optional Learning]
+    L -. updates request selection .-> D
+    L -. after R4 updates design ranking .-> A
 ```
+
+π_Lの再適用は標準経路とは別の比較実験とし、採用条件を満たすまでこの経路へ挿入しない。
 
 #### 24.5.8 Order-9 staged learning and promoted C3 baseline
 
@@ -4050,40 +4157,45 @@ assembly end-to-end、または別task familyをpromoteしない。
 
 #### 24.5.9 R1--R4 and post-R4 curriculum
 
-C3後はobject conditionを一度に全面randomizeせず、次のringsを順に追加する。
+2026-09-15以降は、次の順序を標準とする。旧assignment BC → full-trajectory BC →
+full-CWT PPOの系列は廃止する。C3は保護したまま、新runtime contractと専用設定で進める。
 
 ```text
-R1: reachable pose / yaw expansion
+contract / causal-input / same-plan execution checks
+unlearned request selection + constrained planning + nominal contact feedback
+small fixed-morphology full-task robustness and latency acceptance
+R1--R4 cumulative object-condition expansion
+optional π_H request-ranking learning with baseline comparison
+post-R4 π_D learning and shared planner/controller verification
+optional request-level RL / π_L only after measured need
+held-out full-system evaluation
+```
+
+Rings:
+
+```text
+R1: object-relative reachable pose / yaw expansion, including object-only perturbations
 R2: box size, aspect, density, mass, CoM, inertia expansion
 R3: box / sphere / cylinder training primitives
 R4: morphology x object-condition full training cross-product
 ```
 
-2026-08-25の承認済み変更により、各ringでπ_Lを先行または交互に再学習する旧7段階
-patternは延期する。R1以降の当面の標準低レベル経路は次とする。
+R1では、支持台・障害物を固定して物体だけを10 mm動かす条件を含め、現在geometryから
+再計画して評価する。場面全体の剛体移送による成功は座標変換の整合確認として別に報告し、
+物体相対配置の汎化の証拠に代用しない。小規模baselineが通る前に全形態・全条件を展開しない。
 
-```text
-teacher trajectory collection
-pi_H assignment BC
-pi_H full-trajectory BC
-pi_H PPO through deterministic IK + nominal preload + QPID/QP + local servo
-```
+各ringは固定したtrain/validation/test分割と累積分布で評価する。成功例だけを選んだ再生や
+ケース別の手修正をオンライン計画の成功と数えない。失敗原因を切り分ける小規模実験、
+試行回数・wall-clock上限、終了条件を事前に定め、同じ仮説のパラメータ調整を無制限に
+連鎖させない。期限内に解けない場合は、その実行可能性／速度の未達を記録して止める。
 
-この期間もπ_Lのschema、実装、C3 promoted checkpoint、回帰検査は削除しないが、
-π_L actor commandを標準経路へ適用しない。名目制御とは、決定論的IK、形態・接触・
-荷重に応じたnominal preload、QPID/QP、local servo、およびdeterministic safetyを含む。
-π_Lを使わないことを、preloadやcontrollerを使わないことと解釈してはならない。
+π_Lは標準経路では無効とし、再適用には測定済みの改善、安全性非劣化、bounded correction、
+新しいhash-bound学習系統が必要である。旧YAMLのπ_L stagesおよびfull-CWT学習stageの
+存在を起動許可と解釈してはならない。この設計改訂ではYAML・コード・既存artifactを変更しない。
 
-Learned π_Hはassignmentだけでなくcomplete contact-wrench
-trajectoryを出し、deterministic `C_H`を通る。R1以降のphase/timing decisionはdeployable
-observationに基づくlearned π_Hへ移し、C3 privileged phase supervisorをruntime authority
-として残してはならない。
-
-π_LはR1--R4の物体条件、π_H、post-R4 π_D、および対象タスク要素が完成した後に、
-名目経路の測定済み不足がある場合だけ再適用候補とする。再適用には、同条件での改善、
-累積分布での安全性非劣化、危険な関節・接触補正を縮小または0へ戻す決定論的境界、
-新しい学習系統とhash-bound検査が必要である。これらを満たす承認がない限り、既存設定の
-`r*_pi_l_bc_*`、`r*_pi_l_ppo_*`、`r*_pi_l_readaptation_*`を起動してはならない。
+**以下は過去のR1較正記録であり、新設計の工程・達成状況を定義しない。**
+各記録の採否とhashは当時のledgerに束縛される。後日の収集／変換前検査を含む履歴は
+設計変更記録と各結果台帳を参照する。これらを新オンライン計画器の受入結果として使わない。
 
 2026-08-25にR1名目較正v2を実行した結果、最小の10 mm/5度段階は不合格となった。
 学習側22機体の最外側格子点を一次判定し、5モジュール機と7モジュール機の2件が、
@@ -4297,7 +4409,10 @@ P6 perching_manipulation
 P7 contact_mediated_locomotion
 ```
 
-各 phase は task-specific success metrics を持ち、同じ IRG/Morphology/π_H/π_L interfaces を使わなければならない。
+各phaseはtask-specific success metricsを持ち、同じIRG/Morphology/request/planner/
+executor/nominal-control interfaceを使う。接近・接触確立・維持・荷重移行・解放・回復の
+共通要素を組み合わせ、task固有の接触／物体運動モデルとguardを追加する。把持用phase列を
+そのまま全タスクへ当てはめない。共有interfaceだけで新タスクが解けたと主張しない。
 
 ---
 
@@ -4333,6 +4448,11 @@ class EpisodeArchive:
 
 `runtime_observations` と `actuator_target_records` は P4-control / Isaac-backed P4 で必須である。simplified P1-P4.0 archives では空 list でもよいが、Isaac rollout を P4 full completion の根拠にする場合は各 step の observation と actuator target conversion record を保存しなければならない。`learning_artifacts` は checkpoint、metrics、reward curve、rollout archive path などの reproducibility references を保存するために使う。
 
+新runtimeは`rollout_artifacts`に版付きhigh-level decision recordへの参照を追加する。
+Section 19のpre-decision観測・catalog・request、planと補間定義、C_H結果、実行中phase、
+contact binding、guard評価、solver deadline/結果、再計画／回復、実行補正とその上限を
+hashで結ぶ。既存CWTや`task_progress`へ異なる意味の値を詰め込んではならない。
+
 ### 25.2 Dataset types
 
 ```text
@@ -4345,11 +4465,16 @@ FeasibilityDataset:
 ContactCandidateDataset:
   morphology, robot anchors, ContactSlots, ContactCandidateSet, unary scores, pairwise compatibility, group proposals, assignment feasibility results
 
+HighLevelRequestDataset:
+  pre-decision observation, execution state, finite catalog, selected/ranked request,
+  planner/checker outcomes, actual execution outcome, candidate cost and provenance
+
 InteractionTrajectoryDataset:
-  IRG, morphology, contact candidates, π_H trajectory, selected assignments, assignment feasibility results, returns
+  planner-produced CWT + same whole-body/joint solution, feasibility and execution evidence
+  legacy full-CWT teacher records remain under their original contract
 
 LowLevelControlDataset:
-  runtime obs, π_H plan, π_L command, controller status, reward
+  runtime obs, accepted plan, nominal/optional residual PolicyCommand, controller status, reward
 
 LowLevelFlightDataset:
   Isaac single-module/fixed-morphology runtime obs, controller commands, actuator targets, pose errors, controller metrics
@@ -4381,6 +4506,11 @@ simulator version
 ```
 
 ### 25.4 Order-9 tensor lineage and artifact retention
+
+新request policy、catalog features、plan/execution semanticsは新しいcontract identityを持つ。
+旧full-CWT checkpoint/datasetをshape一致だけでloadしない。旧教師軌道は計画器検証用の
+資料にできるが、新request教師にするにはpre-decision因果性、候補との対応、実行結果を
+再構成して検査する。以下のπ_L tensor/PPO規則は保護C3と明示的な再適用に対する規則である。
 
 Production `pi_L` PPOではreal-Isaac tensor rollout artifactをcanonical stochastic
 transition payloadとする。Learning hot pathで全transitionをnested JSON recordへ展開して
@@ -4443,6 +4573,9 @@ flowchart TD
 ```
 
 ### 26.1 Agent A: Schemas and validation
+
+新契約の所有対象: HighLevelRequest、有限catalog、execution context、plan/check record、
+時間補間・版付きserialization。既存IRG IDとC3 action/schemaを暗黙に変更しない。
 
 Deliverables:
 
@@ -4529,9 +4662,12 @@ amsrr/assembly/control_handoff.py
 amsrr/assembly/executor_interface.py
 ```
 
-### 26.8 Agent H: ContactCandidateSampler + π_H
+### 26.8 Agent H: ContactCandidateSampler + π_H + constrained planner
 
-Deliverables:
+新契約の所有対象: 接触群・遷移・サブゴールのカタログ生成、heuristic／learned ranking、
+有限予算の全身軌道計画、同一解からのCWT生成。独立C_HのauthorityはAgent Fと分離する。
+
+Existing interface locations to migrate explicitly:
 
 ```text
 amsrr/policies/contact_candidate_sampler.py
@@ -4541,7 +4677,10 @@ amsrr/policies/high_level_policy_base.py
 amsrr/policies/contact_wrench_trajectory.py
 ```
 
-### 26.9 Agent I: π_L + Controller interface
+### 26.9 Agent I: Nominal control + optional π_L + Controller interface
+
+新契約の所有対象: 同一planの時間評価、contact/load推定feedback、bounded correction、
+QPID/QPとlocal servo。C3 replayは保持し、新経路のπ_Lを既定で無効にする。
 
 Deliverables:
 
@@ -4566,6 +4705,7 @@ Agent J:
   Isaac Lab backend
   Holon / assembled morphology / object / floor spawn
   reset / step / RuntimeObservation extraction
+  execution supervisor, causal phase guards, deadline and recovery handling
   Isaac actuator target execution
   P4-control low-level flight validation environments
 
@@ -4573,14 +4713,15 @@ Agent K:
   P4.0 simplified full-pipeline runner
   P4-control rollout logging
   P4.1 / P4.2 Isaac rollout runners
-  P4.3 minimum learning bootstrap
-  checkpoint / metrics / reward curve / rollout archive logging
+  P4.3 baseline-first request ranking and optional learning
+  candidate / plan / timeout / execution attribution and checkpoint logging
 
 Agent L:
   P4.0 simplified acceptance
   P4-control acceptance
   P4 full acceptance
   archive completeness and no-mislabeling checks
+  Section 27.4 causal / same-plan / robustness / latency acceptance
 ```
 
 ---
@@ -4603,8 +4744,8 @@ Agent L:
 11. deterministic design teacher and π_D scaffolding
 12. π_A GraphEditAssemblyPlanner
 13. ContactCandidateSampler and ContactCandidateSet compatibility schema
-14. π_H trajectory schema, baseline planner, and assignment-level feasibility interface
-15. π_L command schema and baseline policy
+14. versioned request/catalog, constrained planner, same-plan C_H and execution supervisor
+15. nominal command builder and contact feedback; preserve optional π_L contract
 16. Desired Wrench / Pose / Joint Bias Builder
 17. QP/PID controller interface
 18. P4.0 simplified full-pipeline integration runner
@@ -4615,9 +4756,9 @@ Agent L:
 23. Isaac Lab backend smoke
 24. Isaac deterministic full grasp & carry rollout
 25. Isaac rollout datasets/logging
-26. minimum P4.3 learning bootstrap
+26. baseline-first P4.3 acceptance, then useful request-ranking / design learning
 27. P4 full acceptance tests
-28. later training loops and joint fine-tuning
+28. measured-need request-level fine-tuning / optional π_L
 ```
 
 ### 27.2 P0 unit tests
@@ -4642,6 +4783,9 @@ test_padded_tensor_masks
 
 ### 27.3 Integration tests
 
+以下は既存baseline/C3の試験名を含む。新契約では旧π_H trajectory headの存在を合格条件に
+せず、対応するrequest→plan→execution試験をSection 27.4の条件で追加する。
+
 ```text
 test_task_to_irg_to_envelope
 test_task_to_design_teacher_to_feasibility
@@ -4663,6 +4807,34 @@ test_isaac_full_grasp_carry_rollout_archives_runtime_observations
 test_p4_minimum_learning_run_writes_checkpoint_metrics_reward_curve
 test_p4_full_acceptance_requires_isaac_rollout_and_learning_artifacts
 ```
+
+---
+
+### 27.4 New high-level contract acceptance
+
+実装時に以下を検証する。本設計改訂そのものはこれらの試験を実行済みとは主張しない。
+
+1. **因果性**: 同じ観測・実行状態に対して教師の次phase labelだけを変更しても、入力tensor
+   が変わらない。未受理requestが`task_progress`やactive phaseを進めない。
+2. **候補とID**: 無効な三つ組、空catalog、別snapshotのIDをrejectする。維持接触のbindingが
+   再sampleで変わらず、合法なtransfer/releaseだけで更新される。
+3. **同一解**: C_Hとexecutorのplan hashと時間評価が一致する。区間内collision／joint限界／
+   速度・加速度／force feasibilityを検査し、検証後の別IKや無検査preload追加を検出する。
+4. **接触閉ループ**: 小さい位置・摩擦・荷重ずれに対し、deployable推定とbounded feedbackで
+   成立／不足を識別する。接触喪失、支持未成立、過大補正をguardが検出し、早過ぎるlift／
+   releaseを禁止する。PhysX truthを抜いたruntimeでも同じ情報境界で動く。
+5. **期限と失敗**: solver timeout、全候補不合格、古い観測、遅延plan、推定無効を注入し、
+   deadline内の継続／停止／回復とarchiveへの正しい帰属を確認する。
+6. **小規模頑健性**: 未学習baselineで物体だけを±10 mm移動、yaw変更、固定支持台との相対
+   位置変更を含むfull taskを行う。全scene移送、teacher replay、手修正結果は別集計にする。
+7. **有効性と費用**: heuristicとlearned rankingを同一予算・同一分割で比較し、第一候補／
+   bounded search／緊急fallbackの成功、計画時間分布、timeout率、最低marginを報告する。
+8. **移行と回帰**: 新旧action/feature/plan契約の誤loadをrejectする。C3保護artifact・
+   replay・評価契約を変更せず、新checker profileの検証なしにshadow gateを解除しない。
+
+受入用分布、success/safety閾値、latency上限、最大試行数、モデルの適用範囲は実験前に
+設定へ固定する。未決定のまま大規模収集や学習を起動しない。失敗は原因と未達条件を記録し、
+同じrun内で評価条件を変更して成功扱いしない。
 
 ---
 
@@ -4821,12 +4993,17 @@ for each object ContactSlot
       sample anchor-conditioned points on box face ContactRegions
       apply unary screens: capability, reachability, approach direction, collision, friction plausibility
       build pairwise compatibility and grasp-pair group proposals
-      do not claim task feasibility until π_H selected assignment is checked
+      build grounded request tuples; task feasibility requires planner and C_H validation
 ```
 
-### 28.10 π_H output
+### 28.10 π_H request and planner output
 
-π_H produces horizon knots:
+π_Hは、例えば現在phaseからcontact establishmentへ進むIRG遷移、box両側面の接触群、
+IRGに定義された接触確立subgoalの三つ組を選ぶ。IDは実際のcatalogを参照する。
+力、CoM、関節角度、knot時刻は出力しない。
+
+以下は計画器が扱う動作列の概念例であり、一回のπ_H出力ではない。実際のhorizonには
+必要な部分を含め、短期計画と後段の見通しを更新する。段階遷移の確定は観測guardによる。
 
 ```text
 Knot 0:
@@ -4850,18 +5027,22 @@ Knot 4:
   place and release
 ```
 
-### 28.11 π_L / controller flow
+### 28.11 Nominal controller flow
 
 ```text
-π_L reads current π_H knot and RuntimeObservation
-π_L outputs desired body twist, joint bias, residual wrench, contact tracking bias
-QP/PID converts to rotor thrusts, vectoring joint targets, and joint commands
-Simulator updates RuntimeObservation
+C_H accepts the planner's immutable body/joint/object/contact solution
+Executor confirms observed guards and evaluates the same accepted plan
+Nominal builder applies bounded deployable contact feedback; learned π_L residual = 0
+QPID / rotor-vectoring QP and local joint servo produce actuator commands
+Simulator / real system updates observations; executor continues, replans or recovers
 ```
 
 ---
 
 ## Appendix A. Complete Feature Layout Defaults
+
+本付録は既存feature layoutの既定値を保持する。新π_Hのrequest catalog／headの容量と
+paddingは版付きschemaで定義し、旧CWT headの寸法を暗黙に流用しない。
 
 ### A.1 Constants
 
@@ -5053,7 +5234,8 @@ Automated robot design は歴史的に evolutionary または search-based morph
 
 ```text
 Use explicit schemas and deterministic compilers/checkers for structure and safety.
-Use learned policies for design ranking, contact-wrench trajectory planning, and residual control.
+Use learned policies for design ranking and grounded high-level request ranking.
+Use deterministic constrained planning for trajectories; residual learning is optional.
 Represent task interaction requirements as IRG.
 Represent robot morphology as MorphologyGraph.
 Keep exact physical models separate from NN feature tokens.
@@ -5187,7 +5369,8 @@ actor-free nominal success used as promotion evidence
 | C3 failed/diagnostic action and reward trials | historical evidence only |
 | actuator-aware nominal preload + v9 categorical contact action | normative。Sections 20.9、24.5.8へ統合 |
 | promoted common C3 update 18 | normative and hash-bound。Appendix Fを正本入口とする |
-| approved deferred-π_L post-C3 rule | normative。Section 24.5.9とR1名目較正v2追加契約へ統合 |
+| approved deferred-π_L post-C3 rule | π_L適用延期を維持。新規工程はSection 24.5.9、旧v2較正手順は履歴として保持 |
+| approved 2026-09-15 high-level redesign | normative design, not yet implemented。Sections 19、20、24、27を新規開発へ適用。C3は保持 |
 | future recommendations in chronological log | non-normative until curriculum/config and acceptance are approved |
 
 実装者はchronological logの後に書かれた項目を単に「新しいから採用」と判断してはならない。
@@ -5198,23 +5381,22 @@ current C3 production contractとする。
 
 ## Final Implementation Rule
 
-Codex は次の順序でシステムを実装しなければならない。
+新規開発では次の責務順序を守る。完了済みの上流stageを再実装する指示ではない。
 
 ```text
-Schemas -> GeometryProcessor -> URDF/PhysicalModel -> IRGBuilder -> Envelope -> MorphologyGraph -> FeasibilityChecker -> π_D scaffolding -> π_A -> ContactCandidateSampler -> π_H -> π_L -> Controller -> P4.0 simplified integration -> Controller bridge / actuator mapping -> P4-control Isaac low-level flight validation -> Isaac backend -> Isaac deterministic rollout -> P4.3 minimum learning bootstrap -> Training / fine-tuning
+Schemas -> Geometry / URDF / PhysicalModel -> IRG / Envelope -> Morphology / Feasibility
+-> π_D / π_A -> ContactCandidateSampler -> Finite Request Catalog
+-> Heuristic or π_H Request Selection -> Constrained Planner -> Independent C_H
+-> Execution Supervisor -> Nominal Contact Feedback -> QPID/QP + Local Servo
+-> Isaac Full-task / Robustness / Latency Acceptance -> Useful Request/Design Learning
 ```
 
-P0 schema、geometry、URDF、IRGBuilder、feasibility tests が pass する前に policy training を開始してはならない。
-P4.0 simplified acceptance が pass しても P4 full completion と見なしてはならない。P4 full completion には Isaac-backed rollout、controller bridge / actuator mapping、minimum learning run、checkpoint、metrics、reward curve、rollout archive が必要である。
+2026-09-15の改訂は設計のみである。次の開発入口はSection 19のschema／責務境界の実装と
+Section 27.4の小規模baseline検証であり、旧full-CWT教師変換・BC/PPOの継続ではない。
+計画器・接触feedback・実行器が小さい条件変化と時間予算を満たさないまま、学習量や
+対象タスクを増やして完了を目指してはならない。
 
-既存repositoryから作業を継続する場合は、完了済みstageを再実装せず、protected releaseと
-current curriculumを検証してから次stageへ進む。本v0.5時点ではOrder-9 C3がpromoted済み
-である。π_Lを適用しないR1名目較正v9は第1段階10 mm/5度で、682軌道・1364回の
-Isaac確認に全件合格した。その後、名目物体高さ、把持点高さ、固定支持台の単一入力、
-STL実形状の8段階事前検査をv11で導入した。v11正式範囲選定では22機体側の第2段階
-20 mm/10度が一次判定で不合格となり、親結果v9の第1段階10 mm/5度を未使用14機体へ
-適用した確認も、5モジュール機の配置時支持台間隔不足により一次判定で不合格となった。
-補正後名目物体について採用済みのR1範囲はない。次の入口は教師軌道収集またはπ_H模倣
-学習ではなく、配置時支持台間隔を直接扱う教師生成法の設計と再承認である。
-π_Lのv9実装と保護成果物は保持するが、再適用条件の承認前にR1以降のactor command
-として使ってはならない。
+C3 promoted update 18、既存R1の台帳・収集結果は元の契約で保持する。これらの実績から
+新runtimeの頑健性、オンライン速度、learned π_D、複数タスク対応を達成済みとしない。
+新しいruntime設定・schema migration・受入profileを揃えるまでは旧YAMLを新契約として
+起動しない。π_Lは再適用条件を満たすまで標準経路で無効とする。

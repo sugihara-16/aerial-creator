@@ -3981,3 +3981,37 @@ file remains the chronological decision/evidence log.
   π_H教師を復元する。共有schemaと共通変換器は変更せず、次の書き出しはv20経路を使う。
 - 次の入口: 15,878件を`InteractionTrajectoryRecord`として分割別に書き出し、目録を固定
   する。π_H模倣学習開始は別の明示指示を必要とする。
+
+### π_H要求選択と決定論的軌道計画への設計変更
+
+#### 2026-09-15
+
+- 承認・状態: ユーザーとの設計協議で合意した変更をv0.5本文へ反映した。
+  契約名は`high_level_request_planning_v1`。今回は設計文書のみで、コード、YAML、
+  checkpoint、datasetの移行や学習・Isaac実行は行っていない。
+- 変更理由: 連続CWTの学習、実現可能性、段階遷移、追従を分けて検証できる設計にする。
+  小さな相対配置変更と計算予算を未学習baselineで検証し、学習量やケース別調整で
+  物理経路の未達を覆わない。
+- π_H出力: 有限catalogから`contact_group_id / transition_id / subgoal_id`を選択／順位付け
+  する。wrench、centroidal/free-anchor/object軌道、knot timing、priority/guardの連続出力
+  を除く。既存IRGEdgeにedge IDがない点は、edge内容へ束縛した遷移catalogで扱う。
+- 計画・検証: 決定論的オンライン計画器が全身・関節・物体・接触力・時刻を整合させ、
+  独立C_Hが生成済みの同一解をaccept/rejectする。既存CWT field layoutは保持するが、
+  producerと実行契約は変更する。検証後に別IKで関節軌道を作り直す旧raw/resolved経路は
+  新契約へ持ち込まない。
+- 実行・制御: 観測、実行中phase、遷移要求を分離し、実行器がdeployable guardから遷移を
+  確定する。π_Lは標準経路で無効。名目制御には接触／荷重推定と検証範囲内のfeedbackを
+  含める。QPID/QPとlocal servoの最終actuator authorityは保持する。
+- 学習・費用: 未学習選択則と計画・制御を先に評価し、必要に応じ候補順位付けを学習する。
+  full-CWT BC/PPOを必須工程から除く。候補数・反復・deadline、古いplan、回復、第一候補と
+  候補探索・緊急fallbackの結果帰属を定義する。timeoutを物理的不能の証明にしない。
+- 安全・受入: 物体だけを10 mm動かす相対配置変更、因果的入力、同一解の区間検証、接触
+  feedback、計画時間を受入対象にする。高速online checkerはshadow比較とfull-task評価で
+  検証してから使い、既存shadow gateの単純無効化や安全閾値の緩和を許可しない。
+- 履歴境界: C3のSections 20.9、22.9、24.5.8、Appendix Fと過去のR1記録を保持する。
+  過去の「次の入口」は当時の工程であり、新規開発では今回のSection 19/24/27を優先する。
+- 検証: 差分空白、コードフェンス、節番号・Section参照、schema例の構文を確認した。
+  CWTの既存6クラス定義、C3契約本文、Appendix F、R1過去記録、カリキュラムYAMLの
+  不変性をHEADと比較確認した。新設計の物理性能・計算速度は未検証である。
+- 次工程: schema migration、計画器・接触feedback・実行器の最小実装と、Section 27.4の
+  小規模受入検証。旧full-CWT教師変換・BC/PPOの継続を新工程の前提にしない。

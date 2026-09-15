@@ -12540,3 +12540,128 @@
 - Tests passed: 関連58/58、構文確認、現行台帳14参照、C3保護ハッシュ。
 - Handoff notes: ローカルcommitのみ。大容量実データは既存の`artifacts/`に保持する。
 - Open questions: なし。
+
+## Global Worklog
+
+### 2026-09-15 (π_Hの責務変更をv0.5仕様へ反映)
+
+- Spec version: v0.5 + `high_level_request_planning_v1`（承認済み設計、未実装）。
+- Work package / Agent label: Codex / Agent A・H・I・J・K・Lに関係する仕様整合。
+  単一エージェントで実施。
+- Summary: π_Hを接触群・IRG遷移要求・サブゴールの有限候補選択へ変更した。決定論的な
+  制約付き軌道計画、同一解へのC_H検証・実行、観測に基づく段階遷移、π_L無効の名目
+  接触feedback、未学習baseline先行の学習工程と計算予算・受入条件を本文へ反映した。
+- Files changed: `for_codex/A-MSRR_codex_ready_spec_v0_5_ja.md`、
+  `for_codex/AMSRR_design_modification_by_codex.md`、`for_codex/WORKLOG.md`。
+- Schema/interface changes: 設計上HighLevelRequest、有限catalog、execution context、
+  plan/check recordと版付きaction/feature契約を追加。CWTの既存field layoutは保持し、
+  所有者をNNから計画器へ変更。コード側のschema変更・移行は未実施。
+- Upstream dependencies used: ユーザー承認済みの責務分担、`for_codex/AGENTS.md`、
+  HEAD `568887c0207d91e3b457d2d84aa145b1c173c680`のv0.5本文・C3/R1履歴。
+- Downstream impact: 旧full-CWT BC/PPOと検証後の別IKを新runtimeに使わない。既存設定を
+  新設計として起動する前にschema migrationと小規模計画・制御検証が必要。
+- Tests added or run: 文書の差分空白、コードフェンス、節番号と参照、schema例の構文、
+  CWT既存6クラス定義とC3契約本文・Appendix F・R1過去記録の保持を検査。
+  カリキュラムYAMLがHEADと同一であることを確認。コード試験・Isaac・学習は未実行。
+- Commands run: `rg`、`sed`、`git show`、`git diff`、一時Python編集・文書整合検査、
+  `git diff --check`、`git status --short`。
+- Assumptions: 設計改訂を実装済み・受入済みと表記しない。C3保護契約と新runtimeを区別する。
+- Blockers / open questions: 文書編集のblockerなし。solver選定、具体的な時間予算、接触推定
+  とfeedbackの実装・同定、online checkerの受入profileは後続実装で具体化・検証する。
+- Next steps: 新しい高レベルschemaと計画・実行・制御の最小経路を実装し、Section 27.4を
+  小規模に検証する。今回の作業ではコード・YAML・実験成果物の変更やcommitは行わない。
+
+## Work Package Logs
+
+### Codex: π_H要求選択・制約付き計画の仕様改訂
+
+#### 2026-09-15
+
+- Scope / implemented: v0.5仕様と設計変更記録の更新。対象箇所・schema変更・依存は
+  上記Global Worklog参照。実装ファイルは変更していない。
+- Tests passed: 文書整合検査、既存CWT layoutとC3/R1履歴の保持、カリキュラム不変性。
+- Handoff notes: Aはrequest/catalog/plan schema、Hは候補選択と制約付き計画、Fは独立C_H、
+  Iは名目接触feedback、Jは実行器、K/Lは因果性・結果帰属・小規模受入を担当する。
+  Agent labelは責務名であり、今回の並列エージェント実行を意味しない。
+- Open questions: 新runtimeの計算時間・物理頑健性は未検証。旧C3の成功率で代替しない。
+
+## Global Worklog
+
+### 2026-09-15 (Codex作業手順の収束・点検・複雑化防止)
+
+- Spec version: v0.5 + `high_level_request_planning_v1`。システム設計の追加変更なし。
+- Work package / Agent label: Codex / repository作業手順。
+- Summary: AGENTS.mdへ、作業の成功・終了条件、既定60分の累積予算、単発診断10分、
+  同一仮説の高コスト試行3回まで、改善なし2回で再実行停止の規則を追記した。
+  長時間job前の最小実経路検査、因果性・正解漏洩・制御経路等の点検、原因単位の修正、
+  runner／互換分岐の増殖防止、不要な仮実装の除去、短い引継ぎを定めた。
+- Files changed: `for_codex/AGENTS.md`、`for_codex/WORKLOG.md`への追記。
+- Schema/interface changes: None。運用規則のみ。
+- Upstream dependencies used: ユーザーの今回の依頼、既存AGENTS.md、v0.5の新計画・実行契約、
+  baseline先行の学習工程とSection 27.4受入条件。
+- Downstream impact: 既定予算を超える反復を自動延長せず、未達の原因と証拠を報告する。
+  既存承認は尊重し、局所修正や文書編集に不要な承認待ち・物理検証を追加しない。
+- Tests added or run: `git diff --check`、追記前の本文保持、コードフェンスと見出しの確認、
+  今回の変更範囲を検査。仕様書・設計変更記録・カリキュラムは着手時の内容を保持。
+  高コスト実行0回。文書のみのためunit test・学習・Isaacは実行していない。
+- Commands run: `rg`、`cat`、`sed`、`tail`、`git status`、`git diff --check`、
+  Pythonによる編集前identity保存と文書・変更範囲検査。
+- Assumptions: 時間と回数は無制限試行を防ぐ既定上限であり、所要時間の性能保証ではない。
+  ユーザーの既存指示・承認済み計画を優先する。
+- Blockers / open questions: なし。指示の追記だけで全ての実装ミスを防げるとは主張しない。
+- Next steps: 次の実装・診断からこの作業手順を適用する。今回commitは行わない。
+
+## Work Package Logs
+
+### Codex: 作業手順の収束と初歩的な誤りの検出
+
+#### 2026-09-15
+
+- Scope / implemented: AGENTS.mdへの運用規則追記。変更内容・依存・検証は上記Global
+  Worklog参照。既存指示と前の仕様編集を保持した。
+- Handoff notes: 既定予算と試行履歴を引き継ぎ、最小実経路検査後に長時間実行へ進む。
+  失敗した仮実装を積み重ねず、既に得た有効な証拠・承認を再利用する。
+- Open questions: なし。
+
+## Global Worklog
+
+### 2026-09-15 (既定の作業上限を2時間へ変更)
+
+- Spec version / Work package: v0.5 / Codex・repository作業手順。
+- Summary / Downstream impact: ユーザーの指定により、1依頼の累積wall-clock上限を
+  60分から2時間（120分）へ変更。30分時点の見直しと診断・再試行の上限は維持する。
+- Files changed: `for_codex/AGENTS.md`、`for_codex/WORKLOG.md`。
+- Schema/interface changes: None。
+- Upstream dependencies / Assumptions: 今回のユーザー指示。既存ルールの作業時間上限のみ変更。
+- Tests / Commands: 対象行確認、`git diff --check`。文書のみのためコード試験は不要。
+- Blockers / Next steps: なし。以後の作業に2時間上限を適用する。
+
+## Work Package Logs
+
+### Codex: 既定作業予算の変更
+
+#### 2026-09-15
+
+- Scope / Validation / Handoff: 上記Global Worklog参照。既定予算を120分として引き継ぐ。
+
+## Global Worklog
+
+### 2026-09-15 (仕様・作業ルールのcommit)
+
+- Spec version / Work package: v0.5 + `high_level_request_planning_v1` / Codex・Git保存。
+- Summary / Files changed: ユーザーの指示により、v0.5仕様、AGENTS.md、設計変更記録、
+  WORKLOG.mdの4文書を1つのcommitへ保存する。AGENTS.mdの既定作業上限は2時間。
+- Schema/interface changes: 保存作業による追加変更なし。設計変更の内容は前の記録を参照。
+- Upstream dependencies / Assumptions: 今回のcommit指示と確認済みの未commit差分4ファイル。
+- Downstream impact: 承認済み設計と運用規則を同一commitから参照できる。
+- Tests / Commands: `git diff --check`、差分・stage対象確認、`git commit`、commit後の状態確認。
+  文書編集時の検証結果を再利用し、コード試験・Isaac・学習は実行しない。
+- Blockers / Next steps: なし。ローカルcommit結果を報告する。
+
+## Work Package Logs
+
+### Codex: 仕様・作業ルールのGit保存
+
+#### 2026-09-15
+
+- Scope / Validation / Handoff: 上記Global Worklog参照。4文書をまとめて保存する。
