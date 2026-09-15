@@ -5,7 +5,7 @@
 **Target reader:** Codex multi-agent implementation system and human researchers<br>
 **Assumed prior knowledge of this project:** none<br>
 **Primary implementation target:** Ubuntu 22.04 native, NVIDIA GPU, Python 3.10+, PyTorch, Isaac Sim / Isaac Lab, optional C++ QP backend<br>
-**Design status:** C3 as-built baseline + approved, not-yet-implemented high-level redesign<br>
+**Design status:** C3 as-built baseline + partially implemented high-level redesign; physical planning/control integration pending<br>
 **Consolidated through:** Order-9 C3 promoted update 18<br>
 **Consolidation date:** 2026-08-22<br>
 **Approved design revision:** 2026-09-15 (`high_level_request_planning_v1`)
@@ -110,6 +110,16 @@ Section 19、20、24.5.5--24.5.9、27.4が新規開発の基準となる。
 非互換である。新しいrequest/catalog、execution context、plan/check record、feature/action
 契約と設定を版付きで実装し、移行検査に合格するまで旧設定を新設計として起動してはならない。
 既存C3 replayのschema・制御・評価・hashはAppendix Fどおり保持する。
+
+2026-09-15の実装では、`HighLevelRequest`、有限catalog、要求順位付けπ_H、計画／検証／
+実行の新しい境界を追加した。入口は`amsrr/policies/request_high_level_policy.py`および
+`amsrr/policies/request_runtime.py`である。既存Order-9 full-CWTモデルは履歴・再現用に
+保持し、新契約へ自動変換しない。新π_Hの学習済みcheckpointはまだ作成していない。
+汎用制約付きsolverと実行参照の局所試験はあるが、Holon用の全制約を構築する計画model、
+独立した追加物理制約評価、deployable guard observer、Section 20.6の接触荷重feedbackは
+未接続／未実装である。新契約の物理制約評価が欠ければ、既存shadow検査だけの合格では
+実行を許可しない。現実装の時間評価器は各knotで静止するquintic/FKに限定し、移動中状態
+からの継続再計画を合格扱いしない。Section 27.4の物理受入完了を意味しない。
 
 Sections 20.9、22.9、24.5.8と日付付きの過去のR1記録は、各時点の実装・実験の証跡である。
 それらの「現在」「次の入口」は当時の状態を示し、新設計の工程を上書きしない。旧C3の
@@ -2888,6 +2898,30 @@ warm start、候補数、反復回数、総wall-clock deadlineを版付き設定
 snapshot／seed／設定で候補順を再現できるようにする。観測が変われば物体相対geometryと
 制約を再構成し、10 mmの物体単独移動をNNによる軌道暗記や場面全体の移送だけで補わない。
 
+#### 19.4.1 暫定的な接触計画（2026-09-16承認）
+
+π_H後段は、次の順序で初期実装する。正確な接触レンチの推定・追従は成立条件にしない。
+
+1. サブゴール、接触幾何、質量・摩擦等から必要な支持力／接触力の名目配分を計算する。
+2. 名目の関節・接触complianceから法線方向の押し込み参照を計算する。これは暫定的な
+   近似手法であり、計算どおりの接触レンチを保証しない。問題が観測された段階で改良する。
+3. 幾何学的な接触面と予圧参照を区別し、予圧を含む全身姿勢・関節角を生成する。
+4. 接触獲得、保持、荷重移行、解放を含む関節軌道を生成し、同じ補間器で検査・実行する。
+
+初期の教師検証では、既存の把持・搬送教師を接触binding・幾何経路・サブゴールの入力に
+使用してよい。準静的な鉛直支持の名目力配分と既存接触IKを再利用し、接触獲得／解放で
+予圧を滑らかに増減する。教師の幾何経路、計算した力／押し込み、生成後の関節軌道、
+補間定義、検査結果を保存する。実行中に追加IKや未検査の予圧を加えてはならない。
+
+モータfeedbackは使用できるが、そこから各接触点の正確な6Dレンチを復元できると仮定
+しない。最初は名目予圧と既存の関節・機体feedback／actuator制限を使い、タスク成立と
+過負荷・滑り等の実行結果で評価する。精密な接触力observerや適応予圧制御を、この暫定
+手法の導入前提に追加しない。幾何／負荷に応じた名目計算を全条件共通の固定値で代用しない。
+
+教師の段階進行を既存Isaac teacher supervisorで行う検証は、下段の教師軌道実行の証拠
+として区別する。自主的なπ_H要求選択・deployable guard・新C_H全制約の受入とはしない。
+有限時刻の衝突検査はsampled checkと明記し、連続時間の衝突証明と呼ばない。
+
 ### 19.5 Execution state, transitions and recovery
 
 次の三つは別のrecordとauthorityを持つ。
@@ -3139,8 +3173,9 @@ PolicyCommand = absolute references and bounded biases for QPID/QP and local ser
 ```
 
 接触制御には、FK、anchor/object相対距離・速度、object-state estimate、motor-current-
-equivalent load、接触推定の信頼度を使う。名目preloadの初期値だけを与える開ループ制御を
-標準解としない。荷重不足・過大圧縮・滑りを観測して、同定したcomplianceとactuator上限
+equivalent load、接触推定の信頼度を使う。19.4.1の暫定段階では名目preloadと既存の
+関節・機体feedbackから開始し、実際に問題が観測された部分を改良する。接触制御の
+拡張時は荷重不足・過大圧縮・滑りを観測して、同定したcomplianceとactuator上限
 の下で参照／biasを調整する。必要feedbackが取得できない場合は0という架空の測定値で
 継続せず、信頼度不足として遷移を止め、再計画・回復する。
 

@@ -6,19 +6,22 @@ import subprocess
 from pathlib import Path
 import sys
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
 from amsrr.schemas.order9 import Order9PolicyFamily
-from amsrr.training.order9_curriculum import load_order9_learning_config
+from amsrr.training.order9_curriculum import (
+    load_order9_learning_config,
+    Order9LearningTarget,
+)
 from amsrr.training.order9_offline_training import train_order9_behavior_cloning
 from amsrr.training.order9_pipeline import (
     load_order9_stage_manifest,
     preflight_order9_stage,
     record_order9_stage_training_outputs,
+    order9_stage_by_id,
 )
 
 
@@ -37,9 +40,23 @@ def main() -> int:
     parser.add_argument("--prior-stage-manifest", action="append", default=[])
     parser.add_argument("--device")
     parser.add_argument("--git-revision")
+    parser.add_argument(
+        "--legacy-full-cwt-pi-h",
+        action="store_true",
+        help="Explicitly reproduce historical full-CWT pi_H BC; this does not train the current request policy.",
+    )
     args = parser.parse_args()
 
     config = load_order9_learning_config(args.config)
+    stage = order9_stage_by_id(config, args.stage)
+    if (
+        stage.learning_target
+        in {Order9LearningTarget.PI_H_ASSIGNMENT, Order9LearningTarget.PI_H_TRAJECTORY}
+        and not args.legacy_full_cwt_pi_h
+    ):
+        parser.error(
+            "This stage trains legacy full-CWT pi_H. Current pi_H is RequestHighLevelPolicy (high_level_request_planning_v1); begin with HeuristicHighLevelPolicy and validated planner/control results. Historical reproduction requires --legacy-full-cwt-pi-h."
+        )
     output = Path(
         args.output_dir
         or Path(config.production_runtime.artifact_root) / "stages" / args.stage
@@ -47,9 +64,7 @@ def main() -> int:
     output.mkdir(parents=True, exist_ok=True)
     physical_model_path = config.production_runtime.robot_model_config_path
     physical_model = build_physical_model_from_config(physical_model_path)
-    prior = [
-        load_order9_stage_manifest(path) for path in args.prior_stage_manifest
-    ]
+    prior = [load_order9_stage_manifest(path) for path in args.prior_stage_manifest]
     inputs: dict[str, str | Path] = {
         "curriculum_config": args.config,
         "robot_model_config": physical_model_path,

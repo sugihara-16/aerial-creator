@@ -1,5 +1,34 @@
 # AMSRR_design_modification_by_codex.md
 
+## 2026-09-16: provisional naive contact planner and teacher execution
+
+- User decision: use nominal support-force allocation, joint/contact compliance
+  to servo lead, contact posture IK, and a resulting joint trajectory initially;
+  improve observed failure mechanisms later. Accurate contact-wrench sensing,
+  estimation or tracking is not a prerequisite. Motor feedback is available.
+- Implementation scope: `amsrr/policies/naive_contact_planner.py` reuses the
+  existing quasi-static preload and contact IK, composes preload into teacher
+  joint knots before validation, and binds a cubic-Hermite joint evaluator to
+  both checks and execution. Geometric seed/contact identity is preserved in
+  the source hash and executable anchor targets are recomputed by FK.
+- `scripts/run_teacher_contact_pipeline.py` prepares immutable plan/job files
+  and adapts the protected Isaac teacher harness in an isolated namespace.
+  `amsrr/simulation/teacher_contact_execution.py` uses existing QPID/decoder
+  with zero learned actions and preserves planned position/velocity references.
+  The historical hold-only method intentionally zeros velocities and is not
+  changed. Protected C3 source/config/checkpoints are not edited.
+- Evidence scope: sampled interpolated joint-limit/speed/collision checks and
+  actual teacher-assisted Isaac task outcomes. This does not implement all
+  online request-planner constraints or deployable phase guards. Teacher phase
+  supervision remains explicitly privileged physical-outcome evaluation in
+  this isolated harness; no raw contact wrench is fed to the nominal controller.
+- Validation: real Isaac passed 4/4 full teacher episodes (five/eight modules,
+  two each), with zero learned correction, drops, hard collisions, safety
+  failures or fallback. Related tests passed 40/40. Reproduction and detailed
+  results are in `artifacts/p4_full/order9/naive_contact_pipeline/20260916/` and
+  the matching WORKLOG entry. The eight-module nominal load exceeds continuous
+  rating (1.745 utilization), so this does not establish hardware duty feasibility.
+
 This file records implementation-time supplements or deviations that were
 originally accumulated against `A-MSRR_codex_ready_spec_v0_4_ja.md`. Current
 normative state is consolidated in `A-MSRR_codex_ready_spec_v0_5_ja.md`; this
@@ -4015,3 +4044,55 @@ file remains the chronological decision/evidence log.
   不変性をHEADと比較確認した。新設計の物理性能・計算速度は未検証である。
 - 次工程: schema migration、計画器・接触feedback・実行器の最小実装と、Section 27.4の
   小規模受入検証。旧full-CWT教師変換・BC/PPOの継続を新工程の前提にしない。
+
+### π_H要求選択の実装と、物理統合を未達として扱う境界
+
+#### 2026-09-15
+
+- 承認範囲: 合意済み`high_level_request_planning_v1`の実装。既存CWTや保護C3のschemaは
+  変更せず、新しいrequest、catalog、観測／実行状態、plan/check、実行後labelを別型にした。
+- π_H: `HighLevelPolicyBase.rank`を現行interfaceとし、`RequestHighLevelPolicy`は三つ組への
+  scalar scoreのみを出力する。連続CWT headは持たない。既存の候補・形態・envelope encoderを
+  再利用し、現在／要求先phase、物体相対目標、回転誤差、許容差、接触推定、前回結果を入力にする。
+  `HeuristicHighLevelPolicy`が新runtimeの既定で、未学習NNを既定動作にはしない。
+- 因果性: TaskProgress、raw contact truth、ControllerStatusの任意metadata、IRGの可変
+  active_phase_idを入力経路から除き、実行phaseはexecutor stateを参照する。実際のencoderへ
+  渡すRuntimeObservationもsnapshot hashに含める。次phase/future labelを変更してもfeature／
+  scoreが変わらないことを試験した。新旧checkpointの互換性を明示的に拒否する。
+- 接触候補: 現在の物体姿勢へ候補を再配置し、mask、pair conflict、slot数、anchor重複を検査する。
+  維持中の接触はcandidate/slot/anchor/entityと物体局所の接触面hashへ束縛する。物体の剛体運動と、
+  同じIDで接触点を差し替える操作を区別する。静的な支持台は物体と一緒に移動しない。
+- 計画入口: `ConstrainedRequestPlanner`はmodelが与える数値問題をSLSQPで解き、11分類の制約、
+  変数bounds、有限値、反復上限、期限を確認する。solver残差はplanへ保存し、独立C_Hの代用に
+  しない。**Holon用の具体的な計画問題builderは未実装**。教師CWTへの暗黙fallbackはない。
+- 検証: `RequestPlanChecker`は既存のproduction QP＋shadow＋reachabilityを維持し、関節集合、
+  初期状態、位置／速度／加速度、FK、区間内標本、plan改変を追加検査する。旧C_Hが不足する
+  effort・不確かさ・残りタスク等は独立`constraint_evaluator`を必須とし、欠ければrejectする。
+  この実装で完全な物理制約評価器を提供済みとはしない。旧C_Hへのphaseラベルは、decision後の
+  検証専用コピーへ検証済みcatalogから与える。教師のphaseをactor入力へ戻さない。
+- 実行: `RequestPlanExecutor`は同一plan hashと同一quintic/FK評価器を使い、絶対関節参照を
+  `centroidal_local_joint_v2`の名目PolicyCommandへ渡す。検証後のIK／π_Lは呼ばない。
+  現段階は静止knot・静止初期状態のみ。body/object回転も同じSLERPの微分を用いる。
+  遷移、接触binding確定、releaseには観測guard／荷重・鮮度・信頼度を要求する。guardの
+  `held_for_s`は観測器の維持時間で、予定scheduleやphase経過時間から捏造しない。
+- 時間・記録: `HighLevelRequestRuntime.begin/poll`は要求を先に保存し、spawnしたworkerで
+  計画と検証を実行する。候補上限・総deadline・worker process group終了を持つ。factoryは
+  process内でmodelとcheckerを構築／接続する必要がある。CUDAをforkせず、実運用では既存の
+  persistent shadow serviceへ接続する。既定2秒は性能実証値ではなく、起動も含む上限である。
+  request、各plan/check、outcomeを別保存し、第一候補の受理／候補探索後の受理／実行成功を
+  混同しない。空catalogや探索失敗で未検証holdを作らず、回復要求を返す。
+- 学習境界: 任意の順位付けlossはdecision hash・checked plan hash・実行結果を別labelに要求し、
+  fallback成功や失敗を採用要求の成功labelとして受理しない。実データ収集と学習は未実行。
+  `scripts/order9_train_bc.py`の旧π_H stageは`--legacy-full-cwt-pi-h`で明示した場合のみ起動する。
+  保護された旧trainer／PPO入口・YAML・checkpointは履歴契約のまま保持する。
+- 検証範囲: 実TaskSpec→IRG→候補→encoder／π_H、実Holon FK→名目指令→既存QPID/QP、
+  subprocessの記録・期限終了を局所試験した。solver用の小さな数値問題とshadow／追加制約の
+  fixtureを使用した箇所は物理受入ではない。10 mm試験も候補再配置／古いplan拒否の確認であり、
+  把持の頑健性改善を示さない。
+- 次の実装単位: 固定形態・固定物体でのHolon計画modelと独立制約評価、deployable guard observer／
+  接触荷重feedbackを接続し、未学習選択則でSection 27.4を評価する。新規runnerや旧教師再学習を
+  増やす前にこの物理経路を成立させる。
+- CPU費用: 3モジュール、20回の参照生成だけの局所測定は平均23.4 ms。profileで重複した
+  FK/CoM計算とserializationを確認し、同一時刻の再評価と保存済み静的入力の再hashを除いて
+  16.3 msになった。現観測・現model・planの検査は保持した。これはQPID／Isaacを含まず、
+  200 Hzの実行経路が成立した証拠ではない。高速な低レベル実行との統合は未達に含める。

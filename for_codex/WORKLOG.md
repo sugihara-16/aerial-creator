@@ -2,6 +2,110 @@
 
 ## Global Worklog
 
+### 2026-09-16 (naive contact planning / teacher execution, completed)
+
+- Spec: v0.5 plus the user-approved provisional force-to-preload pipeline.
+- Work package: H/I/J/K; one agent, no training. Started 2026-09-15 15:39 UTC.
+- Scope / success: reuse teacher contact/task paths; calculate nominal support
+  force and compliance lead, solve contact posture, archive and check the
+  resulting joint trajectory, then execute with nominal QPID in real Isaac.
+  Preselected examples: validation buckets 38 (five modules) and 34 (eight),
+  two phase-zero episodes each. This is teacher-assisted downstream evidence,
+  not learned pi_H, autonomous phase selection, C3 promotion, or generalization.
+- Budget: 120 minutes total; 30-minute review; initial Isaac ceiling 600 s
+  (the measured full-path exception below raises it to 900 s);
+  at most three high-cost attempts for one hypothesis, stop after two results
+  without improvement. CPU pipeline checks precede physical runs.
+- Existing work: uncommitted request-policy/planner boundary implementation
+  is preserved. Protected C3 source and artifacts are not overwritten.
+- Reuse: actuator-aware preload, virtual-contact IK, accepted teacher bundle,
+  native posture collision checking, tensor nominal reference, Isaac/QPID.
+- Accepted assumptions: approximate quasi-static load allocation and nominal
+  compliance; exact contact wrench reconstruction/tracking is not required.
+  Motor feedback is available. Raw contact remains evaluation/teacher evidence.
+- Implemented: `naive_contact_planner.py`, `teacher_contact_execution.py`, and
+  `run_teacher_contact_pipeline.py` (prepare/execute). Final posture comes from
+  the existing bounded contact IK; preload is incorporated into teacher joint
+  knots, with bounded shape-preserving cubic slopes and the same joint
+  interpolator in validation and Isaac. Nominal QPID retains planned q/qdot
+  and body twist, with zero learned actions. Decoder changes to checked joint
+  references are rejected. Plan/job bytes and execution source hashes are bound.
+- CPU findings: the IK `saturated` field includes intermediate continuation
+  clipping even when final refinement succeeds; admission now checks final
+  achieved displacement and actual joint bounds. Adding a fixed joint delta
+  to the contact-acquisition seed exceeded one limit by up to 6.23e-5 rad;
+  bounded knot generation and shape-preserving interpolation fix this before
+  collision checking. The physical joint limit was not relaxed.
+- CPU evidence: bucket 38 nominal lead 7 mm, 13,808 sampled configurations,
+  maximum joint speed 0.40026 rad/s; bucket 34 nominal lead 30 mm, 10,508 samples,
+  maximum joint speed 0.28590 rad/s. Both sampled joint/collision checks passed.
+  Planning took 83.64 / 95.15 s. Samples are 0.02 s apart or closer, not a
+  continuous-time collision or full-dynamics certificate.
+- Tests: related suite 40 passed (4.47 s); interpolation metadata clarification
+  and unused-counter cleanup followed by 18 relevant tests (1.03 s).
+- Files changed in this task: the three implementation files above,
+  `tests/unit/policies/test_naive_contact_planner.py`, specification Section
+  19.4.1/20.6, `AMSRR_design_modification_by_codex.md`, and this log.
+  Existing uncommitted request-policy changes remain separate.
+- Schema/interface: new versioned plan/job/result records; shared
+  ContactWrenchTrajectory and PolicyCommand schemas are unchanged. The new
+  adapter preserves the planned velocity in the existing nominal QPID call.
+- Commands: `scripts/run_teacher_contact_pipeline.py prepare` and `execute`
+  using the saved job arguments; `PYTHONPATH=. PYTEST_DISABLE_PLUGIN_AUTOLOAD=1`
+  with Isaac-environment pytest for the new planner, actuator-aware preload,
+  virtual compression, C3 nominal runtime and request-execution test modules;
+  Black, Python compilation, `git diff --check`, and SHA-256 comparisons.
+- Preservation audit: all 159 critical implementation files equal the current
+  committed baseline ac13c5b. Six already differ from the historical release
+  ledger (committed R1 changes); this task did not change those files. Both the
+  historical mismatch report and baseline comparison are retained, without
+  claiming that the complete historical release matches the current checkout.
+- Physical limits: the reused quasi-static allocator bounds predicted peak
+  effort, not thermal/continuous-duty feasibility. Bucket 34 predicts 0.553
+  peak utilization but 1.745 continuous-rated utilization (bucket 38: 0.247 /
+  0.778). This Isaac result cannot establish hardware continuous-load feasibility.
+  Motor feedback remains available to the existing execution path; this run
+  does not add a motor-torque time-series recorder or an exact wrench observer.
+- Physical budget update: the first bucket-38 throughput pilot measured
+  17.53 controller steps/wall second. The 276 s teacher schedule cannot fit
+  the default 600 s diagnostic ceiling. The pilot was stopped early using
+  SIGINT only on our Isaac process; no task success is claimed. After explaining
+  the measured estimate, fixed-plan full validation uses a 900 s internal
+  timeout and a 930 s outer process timeout, within the 120-minute total budget.
+  Validated plans are reused byte-for-byte in new immutable jobs; only adapter
+  interpolation metadata was clarified, with focused tests rerun. No trajectory,
+  physics, gains, seed, or success threshold was tuned after the pilot.
+- Artifacts: `artifacts/p4_full/order9/naive_contact_pipeline/20260916/`;
+  `val38_execution/throughput_pilot.json`, `val38_full/`, `val34_full/`.
+- 30-minute review: bucket 38 full Isaac run passed **2/2**, 12,309 controller
+  steps each, 728.92 s wall time. Both reached terminal phase 8, with no hard
+  collision, drop, safety failure, fallback, QPID terminal infeasibility or
+  timeout. The compiled reference was sampled 12,318 times and reached the
+  nominal controller on all 12,309 steps. About 90 minutes remain; proceed
+  with the already prepared bucket 34, without changing the implementation.
+- Final Isaac result: bucket 34 also passed **2/2**, 9,008 controller steps
+  each, 604.27 s wall time; all terminal phases 8 and the same failure counts
+  zero. Total: **4/4 episodes across two morphologies**, two full executions,
+  no failed full runs, and one intentionally stopped throughput pilot.
+- Independent recorded-state check: bucket 38 lifted 95.5--95.6 mm, transported
+  approximately 200 mm, and finished with 1.8--2.3 mm position error. Bucket 34
+  lifted 83.4--85.0 mm, transported approximately 202 mm, and finished with
+  4.1--5.1 mm error. Applied learned global/contact actions are exactly zero;
+  maximum commanded-versus-checked joint-position error is 1.2e-7 rad.
+  Both executed jobs still match current source and compiled-plan hashes.
+- Final evidence: `validation_summary.json` and `README.md` under the artifact
+  directory above contain outcomes, scope, input/output hashes and reproduction
+  commands. Both Isaac processes exited 0. Completed in approximately 42 minutes
+  from the 15:39 UTC start, within the 120-minute budget.
+- Blockers / open questions: none for the requested teacher-pipeline check.
+  Autonomous pi_H integration/phase guards, unfamiliar object/task robustness,
+  complete C_H constraints and hardware continuous-duty feasibility remain open.
+- Next steps: use this fixed prepare/execute entry for subsequent downstream
+  work; expand only when a concrete next condition is selected. No full teacher
+  collection, policy training, checkpoint update, or commit was performed.
+
+## Global Worklog
+
 ### 2026-08-31 (R1場面全体移送による範囲再選定v15完了)
 
 - Spec version: v0.5、およびユーザー承認済みR1場面全体移送範囲選定v15追加契約。
@@ -6984,6 +7088,20 @@
 
 ## Work Package Logs
 
+### Agent H/I/J/K: Provisional contact planner and teacher execution
+
+#### 2026-09-16
+
+- Scope: teacher-seeded nominal force/compliance planning, bounded joint path,
+  shared validation/execution interpolation, and real Isaac task verification.
+- Ownership: H/I implements the plan and nominal QPID adapter; J/K owns the
+  isolated teacher runner, evidence and tests. One coding agent performed the work.
+- Files, dependencies, schema changes, commands and results: see the
+  2026-09-16 naive contact planning entry at the top of Global Worklog.
+- Downstream impact: a callable prepare/execute path for testing the provisional
+  downstream design. Autonomous request selection, deployment phase guards and
+  the complete new C_H constraint set remain outside this teacher validation.
+
 ### Codex: R1正式教師軌道収集v19
 
 #### 2026-09-06
@@ -12665,3 +12783,79 @@
 #### 2026-09-15
 
 - Scope / Validation / Handoff: 上記Global Worklog参照。4文書をまとめて保存する。
+
+## Global Worklog
+
+### 2026-09-15 (π_H要求選択と計画・実行境界の実装)
+
+- Spec version: v0.5 / `high_level_request_planning_v1`。
+- Work package / Agent label: A/H/F/J、Iの名目指令接続、K/Lの局所検証。責務区分であり、
+  subagentは起動していない。起点commitは`ac13c5b`、着手時のworking treeはclean。
+- Scope / success condition: π_Hの連続CWT出力を有限要求の選択へ置き換え、教師の未来phase、
+  旧checkpoint、検証後IKを新経路へ持ち込まない。実際のencoderとHolon FK／名目controller
+  接続で検証する。新方式による把持成功や物理受入を達成済みとはしない。
+- Time / retry budget: 既定2時間、約30分時点で見直し。Isaac・大規模収集・学習の高コスト実行は
+  0回。CPUの小さなsolver問題、subprocess境界、unit test、参照生成20回の速度測定を使用した。
+  本依頼の作業時間は約36分（14:03--14:39 UTC）。
+- Summary: 新schema、有限catalog、heuristic／学習可能ranker、汎用SLSQP planner境界、独立
+  C_H adapter、同一quintic/FK実行参照、期限付きworkerとarchiveを実装した。実行phase、
+  contact binding、releaseは観測guardから確定し、受理と実行成功、候補探索とfallbackを分離する。
+  旧BC CLIのπ_H stageは`--legacy-full-cwt-pi-h`による履歴再現の明示を必要とする。
+- Files changed: `amsrr/schemas/high_level.py`、`amsrr/policies/high_level_requests.py`、
+  `request_high_level_policy.py`、`request_trajectory_planner.py`、`request_execution.py`、
+  `request_runtime.py`、`amsrr/feasibility/request_plan.py`を新設。
+  `amsrr/policies/{__init__,high_level_policy_base,high_level_runtime}.py`、
+  `scripts/order9_train_bc.py`、v0.5の実装状態、設計変更記録、本WORKLOGを更新。
+  `tests/unit/policies/{test_high_level_requests,test_request_execution}.py`を追加。
+- Schema/interface changes: `HighLevelPolicyBase.rank(context)`、3 IDのHighLevelRequest、
+  snapshot-bound catalog／decision／plan／check、deployable observation、executor state、
+  separate execution label。既存CWT／PolicyCommand layoutと保護済み旧checkpoint契約は不変。
+- Upstream dependencies used: 実TaskSpec→IRG／envelope／候補、既存候補・形態・envelope encoder、
+  PhysicalModel／mesh-backed anchor／全身FK、既存production C_H・shadow・reachability、QPID/QP。
+- Findings / corrections: 最小の実経路試験で、global joint IDが`module_N:joint`である点、
+  mesh-backed surface identityを持つ形態が必要な点を確認した。package exportの循環importを
+  別processの直接importで検出し、runtimeは責務moduleからimportする形に整理した。
+  encoderへ渡す観測コピーの改変、catalog改変、物体局所接触点の差替えもhash検査対象にした。
+  長時間jobに進まず局所で修正した。
+- Tests / commands: `PYTHONPATH=. PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 pytest -q --tb=short`で
+  新規2ファイルと旧high-level policy/baseline、CWT checker/runtime、全身FK、Order9 checkpoint
+  を検証し、最終状態で**64 passed (6.37 s)**。新規24件を含み、異常に大きなhorizonでも
+  配列確保前に標本数上限でrejectすることを確認した。
+  `python -m black`は新設／編集対象に限定。`git diff --check`、直接import、BC CLIの
+  dataset読込前reject、C3保護対象のHEADとの差分を確認した。
+- Physical evidence limit: solverの小さな数値問題、shadow／追加制約のfixtureは物理検証ではない。
+  10 mm試験は候補再配置とstale plan拒否を確認する。把持成功率や多タスク汎化は測っていない。
+- Runtime cost: 3モジュール、20呼出しのCPU参照生成は平均23.4 ms。cProfileで重複FK／CoM計算
+  とserializationを確認し、一回の局所修正で16.3 msになった。QPID・Isaacは含まず、200 Hzの
+  制御周期は未達。速度改善のために現観測やmodelの検査を省略していない。
+- Preservation: C3台帳のimplementation inventory **159ファイル**と
+  `configs/training/order9_learning_curriculum.yaml`はHEADから変更していない。
+  保護コピー180ファイルは台帳SHA-256と一致し、欠損・不一致ともに0件。
+  保護成果物、既存dataset、checkpointを上書きせず、新checkpointも作成していない。
+- Assumptions: 新runtimeはheuristic既定。順位付け学習は実行成功と結合したlabel取得後の任意工程。
+  worker factoryはspawn内でmodel／checkerを構築またはpersistent shadow serviceへ接続する。
+  既定deadlineは実証済み性能ではない。quintic-rest評価器は静止初期状態／静止knot限定。
+- Blockers / open questions: **Holon用の具体的な全身制約付き計画問題、独立した追加物理制約評価、
+  deployable guard observer、接触荷重feedback、高速制御への統合は未実装／未接続**。
+  既存teacher／posture resolver／旧C_Hだけではこれらを満たさない。新経路は必要評価が欠けると
+  rejectする。今回の変更を新方式の実動作移行完了と扱わない。
+- Downstream impact / next step: 上記物理依存を固定形態・固定物体で実装して、新規
+  `HighLevelRequestRuntime`へ接続する。最初はheuristic＋名目制御でSection 27.4を検証する。
+  unit fixtureをproduction factoryへ流用しない。旧CWT学習やπ_L調整で未達を埋めない。
+  今回commitは依頼されていないため行わない。
+
+## Work Package Logs
+
+### Agent A/H/F/J/I/K/L: π_H要求契約の実装と局所検証
+
+#### 2026-09-15
+
+- Scope / files / dependencies / tests: 上記Global Worklogおよび設計変更記録の同日項目を参照。
+- Implemented: request選択π_H、因果的catalog、versioned checkpoint、計画／C_H境界、executor、
+  名目指令接続、bounded worker、結果帰属、実経路を含む局所試験。
+- Not implemented: Holonの具体的な計画modelと追加独立制約評価、接触荷重feedback／guard観測器、
+  高速controller統合、物理受入、実データ収集／学習。
+- Handoff: `RequestPlanningModel.build_problem`は全11分類の制約を構築し、独立
+  `RequestPlanChecker.constraint_evaluator`は保存planから再評価する必要がある。
+  `HighLevelRequestRuntime.begin/poll`が要求記録→候補探索→検証→同一plan installを所有する。
+  新APIの成功した数値fixtureを、Holon計画器またはshadowの実装済み証拠に読み替えない。

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-"""Order 9 high-level responsibility boundary.
+"""Legacy Order 9 full-CWT runtime, retained for existing release/replay paths.
 
-``pi_H`` is only the learned proposal policy. The deterministic teacher,
-hard checker C_H, fallback, and rolling executor remain separate objects.
+The current request-selection entry is
+``amsrr.policies.request_runtime.HighLevelRequestRuntime``. This historical
+coordinator is not used by the new request contract.
 """
 
 from dataclasses import dataclass

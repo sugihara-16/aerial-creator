@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from amsrr.policies.high_level_requests import HighLevelDecisionContext
+    from amsrr.schemas.high_level import HighLevelRequest
 
 from amsrr.schemas.contact_candidates import ContactCandidateSet
 from amsrr.schemas.interaction_envelope import InteractionEnvelope
@@ -21,7 +25,15 @@ class HighLevelPolicyContext:
 
 
 class HighLevelPolicyBase(Protocol):
-    """pi_H interface: plans contact-wrench trajectories, not actuator commands."""
+    """Current pi_H interface: rank finite requests, never generate a CWT."""
 
-    def plan(self, context: HighLevelPolicyContext) -> ContactWrenchTrajectory:
-        ...
+    @property
+    def policy_version(self) -> str: ...
+
+    def rank(self, context: HighLevelDecisionContext) -> list[HighLevelRequest]: ...
+
+
+class LegacyHighLevelTrajectoryPlanner(Protocol):
+    """Explicit pre-redesign teacher/replay interface, retained for C3 history."""
+
+    def plan(self, context: HighLevelPolicyContext) -> ContactWrenchTrajectory: ...

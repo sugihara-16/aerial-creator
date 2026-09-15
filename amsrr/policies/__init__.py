@@ -41,7 +41,15 @@ from amsrr.policies.design_policy_p2 import (
 )
 from amsrr.policies.design_policy_base import DesignPolicyBase, DesignPolicyContext, FixedSimpleDesignPolicy
 from amsrr.policies.design_teacher import DesignTeacherExample, DesignTeacherVariant, DeterministicDesignTeacher
-from amsrr.policies.high_level_policy_base import HighLevelPolicyBase, HighLevelPolicyContext
+from amsrr.policies.high_level_policy_base import (
+    HighLevelPolicyBase, HighLevelPolicyContext, LegacyHighLevelTrajectoryPlanner,
+)
+from amsrr.policies.high_level_requests import (
+    HighLevelDecisionContext, RequestCatalogBuilder, HeuristicHighLevelPolicy,
+)
+from amsrr.policies.request_high_level_policy import (
+    RequestHighLevelPolicy, RequestHighLevelPolicyConfig,
+)
 from amsrr.policies.low_level_policy_base import (
     BaselineLowLevelPolicy,
     BaselineLowLevelPolicyConfig,
@@ -85,6 +93,12 @@ __all__ = [
     "GraspCarryBaselinePlanner",
     "HighLevelPolicyBase",
     "HighLevelPolicyContext",
+    "LegacyHighLevelTrajectoryPlanner",
+    "HighLevelDecisionContext",
+    "RequestCatalogBuilder",
+    "HeuristicHighLevelPolicy",
+    "RequestHighLevelPolicy",
+    "RequestHighLevelPolicyConfig",
     "LowLevelPolicyBase",
     "LowLevelPolicyContext",
     "assignment_key_from_assignments",
