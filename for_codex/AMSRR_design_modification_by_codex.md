@@ -1,5 +1,254 @@
 # AMSRR_design_modification_by_codex.md
 
+## 2026-09-16: historical teacher decision replay is conditional on its configuration
+
+- Scope: H/K, v0.5 Section22.8; diagnose the six train-side disagreements with
+  the simplified IK probe. No teacher labels, splits, schemas, actor features,
+  controllers or acceptance thresholds are changed by this investigation.
+- Fresh first-decision replay matches all six historical groups. Episodes20/101
+  reject cheaper IK candidates during collision-aware pregrasp/configuration
+  resolution;62 rejects group7 before IK because its contact normals are not
+  sufficiently opposing. That filter is a geometric proxy, not a measurement
+  or proof of realizable contact wrench.
+- Episode40 exposes solver initialization dependence: original-frame group1
+  fails IK, the rigidly rotated problem with the default world-identity seed
+  succeeds, and transforming the seed with the scene restores the failure.
+  Solver failure therefore must not be interpreted as physical impossibility.
+- Episodes80/121 include historical source-specific preferred groups.80 tries
+  group0 before1 under a payload-rotation rule.121 tries group3 before2 and uses
+  a saved configuration joint seed. These are conditional teacher replays, not
+  demonstrations that an observation-only policy can infer the same choice.
+- Actual accepted records inherit the original contact branch through rigid
+  scene transfers; the transfer does not rerun IK or ranking. Eleven transfer
+  links preserve contact groups and executable joint references. Episode121's
+  accepted repair uses lattice12, not the reference in its original collection
+  plan. Use the accepted record and hash-bound repair lineage as authority.
+- Consequence for subsequent work: simple IK rank is not equivalent to the
+  historical teacher. Before collecting new-morphology supervision, specify a
+  teacher procedure available for those morphologies, including eligibility,
+  trajectory admission and coordinate-consistent initialization. Do not copy
+  historical preferred-group IDs into actor inputs or relabel the corpus from
+  this diagnostic. These observations do not prove imitation is impossible or
+  establish model acceptance. Evidence and replay limits are in
+  `artifacts/p4_full/order9/request_imitation/20260916_teacher_decision_replay/README.md`.
+
+## 2026-09-16: measured gripper FK must start at the module baselink
+
+- Supersedes the v3/v4 numeric geometry contract below. The Isaac state adapter
+  records the configured `baselink` body (`fc`); `link_poses_at_joint_positions`
+  instead returns transforms from the URDF root. The contact encoder previously
+  composed those directly. Holon's root-to-fc translation is
+  `(0, 0.0001, 0.060935)` m, causing a60.935082 mm anchor-position error.
+- `observed_anchor_poses` now inserts the inverse root-to-baselink transform
+  evaluated at the same observed motor angles. Baselink comes from the configured
+  URDF, not a hard-coded fc offset. Required ancestor motor feedback is checked.
+  Feature width55, network architecture and request output schemas are unchanged.
+- Version is `request_module_frame_gripper_member_geometry_v5`; v3/v4 datasets
+  and checkpoints cannot be used as current acceptance. Prior sources/artifacts
+  remain under `20260916_preselection/pre_module_frame_fix` and earlier roots.
+- Independent PhysicalModel whole-structure FK tests fail before the correction
+  at both zero/nonzero joint angles, and pass after it, including rotated bodies.
+  Related45 tests pass. On28 actual train/validation observations, a separate
+  controller tensor-FK implementation agrees within4.45e-16 m after correction;
+  the old error is60.935082 mm. This identifies a real coordinate bug, without
+  claiming that it alone explains all generalization failures.
+- Old legacy-feature equality tests did not validate the coordinate origin.
+  New evidence: `20260916_module_frame/geometry_audit.json` and the archived
+  failing regression. No simulator/controller/URDF or protected C3 code changed.
+- The planned14-new-training-morphology IK collection completed (49.34s pilot,
+ 243.47s remainder). Ranking training was stopped BEFORE launch on discovering
+  this bug. Teacher diagnostics are not success labels; old encoded features
+  must be rebuilt before any use. No new ranking head/runtime path is introduced.
+- Full fixed-corpus v5 regeneration completed in733.90s. Labels, splits, requests,
+  masks and graph inputs remain identical; only candidate columns33/34/35 change.
+  Standard training reaches initial98/98 train and11/21 validation. Saved-model
+  scores agree exactly with runtime on28 real observations. Historical v3/v4
+  performance does not establish v5 acceptance.
+- Isolated owner-conditioned graph diagnostics reach17/21 with training-only IK
+  ranking supervision; relative-start augmentation gives14/21, and the same
+  architecture without auxiliary loss gives13/21. All fit train98/98. None meet
+  the fixed19/21 gate, so no new graph input, auxiliary head, flag or runtime
+  branch is promoted. Diagnostic checkpoints explicitly reject normal runtime
+  use. These single-seed validation-selected results are not final test results.
+- No held-out inference or Isaac rollout in this attempt. Validation and held-out
+  share11 morphology identities (neither overlaps the19 train identities), and
+  held-out was exposed in an earlier joint-policy run. Preserve the fixed split,
+  disclose these limits, and do not claim independent unseen-morphology testing.
+  Evidence: `20260916_module_frame/README.md`, `baseline_audit.json`,
+  `owner_diagnostics_audit.json`, and `split_identity_audit.json`.
+
+## 2026-09-16: preselection candidate geometry provenance correction
+
+- The legacy R1 clearance producer shifts only the selected group's candidate
+  points and records `r1_vertical_clearance_shift_m`. The request importer had
+  copied that execution catalog into initial actor input. A hash-bound audit
+  found four affected train episodes (123/125/129/133), each exposing exactly
+  the teacher's group via its refined members; validation21 has none. Removing
+  current labels/phases from observations did not cover this source-level path.
+- For uncommitted teacher scenes, restore the recorded vertical shift before
+  measured-object re-grounding. This importer handles R1 whole-scene planar
+  transfers, which preserve the shift axis. Unknown refinements are rejected.
+  Keep original source catalogs, labels, splits, and committed plan references.
+  Runtime rejects R1 teacher-refinement metadata in uncommitted actor inputs.
+- Input semantics are versioned as
+  `request_preselection_gripper_member_geometry_v4`; v3 checkpoints require
+  retraining. Local feature width55, network architecture and shared request
+  output schemas stay unchanged. New dataset source records bind the original
+  and restored candidate catalogs and list removed shifts.
+- Counterfactual tests use the actual legacy refinement producer, change the
+  selected group, and verify unchanged initial numerical features. They also
+  check source immutability, runtime rejection, committed-reference admission,
+  unsupported/nonfinite refinements, and old-checkpoint rejection.
+- Geometry/IK auxiliary experiments remain isolated. The original auxiliary
+  attempt stopped before training when provenance checks exposed this defect.
+  After fixed-corpus regeneration, fresh v4 training gives98/98 initial train
+  and12/21 validation. A matched training-only IK auxiliary comparison does not
+  improve this score. The earlier15/21 is historical v3, not v4 acceptance.
+  No auxiliary head or failed geometry feature has been added to production.
+
+## 2026-09-16: initial-choice acceptance and validation selection correction
+
+- Contact-stage validation checkpoint selection and validation patience now use
+  `initial_group` exact agreement. Earlier code mixed initial and teacher-state
+  category accuracies for the main checkpoint and used all-row top1 for the
+  auxiliary validation checkpoint. A later-state gain must not hide an initial
+  decision regression. Train-fit stopping at full train agreement remains an
+  explicit capacity diagnostic; the full-request profile is unchanged.
+- No action/schema, feature dimension/version or runtime architecture changes.
+  Eight bounded training comparisons used fixed seed 9017 without held-out
+  inference. Best usable v3 model: train initial 98/98, validation initial 15/21;
+  fixed 90% validation gate remains unmet. This is not imitation acceptance or
+  evidence of learned-policy physical success.
+- 302 independently verified successful train initial states were admitted for
+  a diagnostic (400 total, still the same 19 train structures). Neither these
+  states, explicit pair geometry, whole-morphology graph conditioning nor
+  gripper-frame surface directions improved the best result. These model/input
+  variants remain isolated artifacts and are not runtime implementations.
+- Legacy v32 replay is only 10/21 on initial validation. Historical all-state
+  acceptance does not establish initial-choice acceptance. The precise cause of
+  remaining morphology generalization errors is unresolved; no impossibility
+  claim or teacher relabeling follows from these comparisons.
+- Evidence and reproducible commands:
+  `artifacts/p4_full/order9/request_imitation/20260916_initial_acceptance/README.md`.
+  Best checkpoint/source and failed comparisons are retained. Dataset source
+  identity checks remain strict after the trainer-only selection correction.
+
+## 2026-09-16: restore measured local geometry and explicit train-fit learning
+
+- Supersedes the earlier initial-only warmup profile below. The user authorized
+  incorporating the legacy improvements and training procedure. Request output
+  remains `(contact_group_id, transition_id, subgoal_id)`; no continuous heads.
+- Feature version is `request_measured_gripper_member_geometry_v3`. The prior
+  v2 checkpoint is intentionally incompatible; source/checkpoint artifacts are
+  retained. Scope is explicitly `contact_group`, including observed later-state
+  queries without selected-group history, plan, binding or teacher-phase inputs.
+  Ordinary inference rejects committed state. This profile learns group identity,
+  not temporal transitions or a rollout policy.
+- `contact_group_geometry.py` computes measured anchor FK from motor q and the
+  configured, hash-validated URDF. It reproduces the legacy v32 local 55-column
+  subset, including anchor-to-target and base-to-owner relative poses, physical
+  contact attributes and port type. Candidate MLP width 96 precedes group mean,
+  second moment and count/12; a separate group MLP gives request scores. The
+  local branch does not consume raw world request features or graph embeddings.
+- Local features match archived v28/v29 definitions on six real train states
+  (initial and later states at three morphologies), max difference 2.09e-7.
+  Production imports no archived experiment code. Profile requires one rigid
+  object; expanding to other tasks needs explicit input design and evidence.
+- Training normalizers use train candidates only, std floor 0.05. Seed 9017,
+  AdamW lr 0.001/decay 0.01, width 96/dropout 0.1 match the legacy local model.
+  This train-fit run visits all train rows per epoch rather than the legacy
+  module-balanced fixed 32 updates, to measure full-set reproduction directly.
+  It uses original 140 episodes; old extra teacher collections are not substituted.
+- CLI defaults to `--stopping-rule train_fit`: full train evaluation every epoch,
+  stop at exact fit or fixed limit. Save train-best `checkpoint.pt`, `last.pt`,
+  and `validation_best.pt` separately. Validation stagnation does not stop fitting;
+  held-out remains opt-in. Initial-only metrics remain separate from later-state
+  scores. Neither is an Isaac task-success measurement.
+- Internal encoded-policy interface now requires candidate features and group
+  membership; dataset/checkpoint versions enforce the new feature contract.
+  Shared action/runtime schemas are unchanged. Full-request scope retains its
+  graph/request inputs with the same local member branch but is not trained here.
+- Result: the fixed train-fit run reached 100% train agreement in three epochs,
+  including 98/98 initial decisions. Its initial validation is only 7/21; full
+  validation is 1,692/2,336. The separate epoch-2 validation-best model has 10/21
+  initial validation. Thus input/model restoration establishes exact training
+  reproduction, not improved generalization or completion of autonomous pi_H.
+
+## 2026-09-16: contact-group-only warmup before temporal request learning
+
+- The user approved separating contact selection from continuation/transition
+  training. The existing request-imitation CLI and ranker now expose an explicit
+  `initial_contact` selection scope. This is saved in checkpoint configuration;
+  the three-ID action and v2 feature layout are unchanged.
+- Only the first observation of each teacher trajectory supervises this stage.
+  Later teacher states contain the earlier group choice and its consequences,
+  so they are not treated as independent initial-selection demonstrations.
+  A current-phase, transition=None catalog mask fixes the temporal part without
+  reading the teacher label. Only contact groups compete; already committed
+  execution state is rejected by this restricted policy at ordinary inference.
+- Train normalization uses only the eligible initial training candidates. The
+  old jointly trained model is compared under the identical candidate restriction.
+  Stage checkpoint selection uses validation initial-group accuracy. Held-out
+  inference is now an explicit opt-in in the training CLI and is omitted here;
+  the previous run already evaluated that split, so it is not a new unseen test.
+- Pre-edit sources are preserved alongside the old checkpoint's immutable
+  artifacts. Initial-only data are regenerated by the current converter with
+  fresh hashes; no source-hash bypass or overwritten manifest is used.
+- The restricted checkpoint is a contact selector, not a trained transition
+  policy. Results and limitations are recorded in the matching WORKLOG entry.
+- One fixed run completed in 1.61 s: 72 epochs, validation best at epoch 12.
+  Initial validation selection changed from 9/21 to 11/21 (seven improvements,
+  five regressions). The saved model fits 62/98 training choices. Further fitting
+  lowered training loss but validation fell to 4/21 by epoch 72. Scope separation
+  alone has not resolved the selection problem; held-out and Isaac were not run.
+  Ordinary scoped inference was verified on 14 real contexts across 2--8 modules.
+
+## 2026-09-16: request pi_H imitation from accepted R1 demonstrations
+
+- The user authorized imitation learning of the current three-ID request
+  policy. Historical v20 full-CWT targets are not used as current policy outputs.
+  The accepted v19 trajectory and morphology split is preserved.
+- The teacher execution schedule is declared in a derived IRG: contact
+  acquisition includes preload, followed by lift, transport, place, release,
+  retreat and settle. Original contact/force constraints are retained. Before
+  the first request, goals come only from TaskSpec and the existing task lift
+  clearance, and plan durations are absent. After a past request has committed
+  the plan, its goals, duration and declared height transform are available
+  as execution context, with a recorded active plan identity.
+  The default historical IRG and source teacher artifacts remain unchanged.
+- At observation t, the active phase/start time are reconstructed strictly
+  from execution history before t. The current recorded phase is read only
+  after input tensorization to identify the teacher request. Recorded contact
+  truth, success and phase-progress fields do not enter the actor. Past selected
+  group/binding is legitimate execution history; initial group choice has no
+  previous-group hint and is evaluated separately.
+- The initial conversion was stopped before training when the first decision
+  was found to receive teacher-selected plan information. The corrected path
+  passes a real-data counterfactual: changing the current teacher group and
+  removing its chosen plan leaves the first decision input unchanged. Partial
+  conversion evidence is retained and excluded from training.
+- Real-data inspection found distinct contact groups with identical averaged
+  tokens. Request feature v2 adds candidate-to-owner relative geometry and the
+  known plan duration/elapsed fraction, without changing the three-ID action
+  schema. Normalization is fitted on training data only and saved in the strict
+  checkpoint. The shared `forward_encoded` path trains the morphology encoder
+  and request head and is checked against ordinary context-based inference.
+- A request dataset/CLI reuses existing accepted-record validation, observation
+  loading, catalog construction and morphology tensorization. Labels refer to
+  actually executed successful teacher choices; other candidates are not labeled
+  as physical failures. Offline imitation metrics do not establish new C_H
+  acceptance, autonomous phase guards, or learned-policy Isaac task success.
+- Validation/model-selection details and final results are recorded in the
+  matching WORKLOG entry and `artifacts/p4_full/order9/request_imitation/20260916/`.
+- The fixed offline run produced a checkpoint (26 epochs, best 11). Held-out
+  first-group imitation is 9/21, continuation 1,792/2,123, transitions 147/147.
+  This is not sufficient evidence of a usable learned pi_H. Validation shows
+  368 premature transition requests among 2,168 continuation decisions; initial
+  training accuracy 100% versus validation 42.86% exposes a generalization gap.
+  The small initial-choice dataset and owner-geometry representation are possible
+  contributors, not established root causes. No further fitting used held-out
+  results, and no autonomous learned-policy Isaac success is claimed.
+
 ## 2026-09-16: provisional naive contact planner and teacher execution
 
 - User decision: use nominal support-force allocation, joint/contact compliance
@@ -4096,3 +4345,29 @@ file remains the chronological decision/evidence log.
   FK/CoM計算とserializationを確認し、同一時刻の再評価と保存済み静的入力の再hashを除いて
   16.3 msになった。現観測・現model・planの検査は保持した。これはQPID／Isaacを含まず、
   200 Hzの実行経路が成立した証拠ではない。高速な低レベル実行との統合は未達に含める。
+
+## 2026-09-16 — Causal event imitation / categorical PPO warmup (implementation in progress)
+
+- Authorized scope: user requested autonomous completion of imitation through actual PPO readiness within five hours, and permits alternative successful contacts/trajectories. Exact teacher agreement is diagnostic, not the completion gate.
+- Initial-contact demonstrations must be actual pre-choice observations (`raw_index == 0`). Artificially resetting execution state on mid-trajectory teacher observations is rejected. Execution demonstrations retain a causally prior contact binding and active phase, and supervise continuation/successor requests from current measured observations.
+- `RequestActorCritic` preserves the three-field request schema. Its initial logits use local observed contact geometry; committed execution logits use the current execution/IRG/observation features. Selection scope is frozen in the logged mask. A value head and categorical log probability are added for PPO; legacy full-CWT PPO/checkpoints remain incompatible. Dropout is disabled so training/runtime replay probabilities agree exactly.
+- The grasp/carry execution profile keeps the contact group after selection, requests only an IRG successor or continuation, and advances only when the measured-state guard permits it. The provisional guard uses kinematics, motor-load magnitude, observed object pose/velocity, dwell and controller status; accurate reconstructed contact wrench is not assumed. PhysX contact truth remains separate reward/evaluation evidence.
+- Deterministic IK/configuration planning is reused after request selection. A cached joint configuration may seed IK after selecting that group; it is never an actor input. Fresh geometry, preload, trajectory interpolation and collision checks are archived. This does not replace the all-task constrained planner specification or claim a continuous-time collision certificate.
+- PPO accepts only complete categorical rollouts produced by the hash-identical actor. Greedy/teacher-forced/stale trajectories are rejected; initial old/new probability identity, nonzero finite actor update and exact checkpoint reload are checked.
+
+### 2026-09-17 JST — Final warmup profile clarification
+
+- Request categorical draws use semantic phase/group/candidate/target ordering. Opaque request/subgoal hashes may change catalog order between equivalent authored and live scenes; they must not change a seeded semantic choice. Log probabilities still refer to the original catalog action indices.
+- The provisional grasp/carry backend may reuse reviewed geometric routes only after the actor selects the same contact binding. The measured initial boundary, nominal force/compliance preload and complete sampled trajectory checks are rebuilt. An unavailable binding uses bounded fresh planning. This reuses the approved teacher-seeded control pipeline and does not claim completion of the generic constrained planner. Actor holdout and geometric-library holdout are separate notions.
+- Cached geometry does not supply the initial actor with a terminal posture or selected group. During execution, the previously committed plan and group are legitimate current state. The actor requests transitions; measured geometry/load/object-state/controller guards authorize them. Teacher phase-success flags remain audit evidence only.
+- PPO returns discount by elapsed simulation seconds (gamma_per_second**delta_t), not count of decisions. Complete failures belong in the same collection as successes. Obsolete backend cohorts and diagnostics are excluded as complete cohorts, rather than discarding only their failures.
+
+
+### 2026-09-17 JST — Request imitation warmup completed and PPO integration verified
+
+- Completion evidence: `artifacts/p4_full/order9/request_imitation/20260916_ppo_ready/ppo_ready.json`. BC checkpoint `bc_ready/checkpoint.pt` gives6/6 phase-zero full-mesh task successes, zero collision/drop/safety failure/fallback, zero pi_L residual. Independent object pose/twist audits confirm every outcome and every authored150s object-goal deadline.
+- Data correction is explicit: the first BC physical cohort had5/6 successes and an unsafe alternative-group failure in000074. That episode was promoted as a whole from validation to training for additional supervised imitation;99 train,20 validation,21 held-out episodes remain. Tensor observations and labels are unchanged. The final physical regression has five training cases and one retained BC-validation case. The geometric library remains separately scoped. No claim of six held-out successes is made.
+- Training selection fix: when the train-fit stopping condition is satisfied, retain that exact checkpoint rather than an earlier epoch with a smaller minibatch loss. The final fit is99/99 initial,693/693 continuation and693/693 transition. Shared request fields and feature encoding remain unchanged.
+- PPO used all six current-policy episodes /56 categorical events,4 epochs,lr1e-4, elapsed-time discount0.99/s. Runtime log-probability replay error5.25e-6, finite nonzero contact/transition head changes and exact reload passed. The reloaded PPO checkpoint completed a new full000074 episode; its9 events replay within9.54e-7. This episode is a training regression, not a held-out generalization test.
+- The provisional motor-load guard can be conservative:000074 waited117.74s for contact confirmation, reached the object goal at148.975s, then finished release/retreat/settle at156.86s. PhysX force evidence explaining that delay is diagnostic only. No actor/guard received contact truth and no threshold was relaxed. Inherited physical evaluator timeout semantics and outer finite deadlines are documented in the artifact README.
+- Legacy C3 source/config and the three-ID action schema are preserved. Current entry points are `train_request_imitation.py warmup/ppo` and `run_request_policy.py prepare/execute`. This completes the declared grasp/carry imitation warmup and its PPO handoff.
