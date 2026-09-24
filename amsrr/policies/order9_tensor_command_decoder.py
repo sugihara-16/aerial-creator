@@ -84,6 +84,40 @@ class Order9TensorPolicyCommandDecoder:
         )
         self._policy_identity_validated = False
 
+    def decode_nominal(self, *, reference_body_pose_world, reference_body_twist,
+                       reference_local_joint_positions_rad, reference_local_joint_velocities_radps,
+                       total_mass_kg):
+        """Zero-residual specialization, retaining normalization and hard bounds.
+
+        The request controller has no pi_L action. Avoid manufacturing and then
+        decoding hundreds of zeros on every tick; the general learned decoder
+        remains the independent reference for this specialization.
+        """
+        pose, twist = reference_body_pose_world, reference_body_twist
+        q, qdot = reference_local_joint_positions_rad, reference_local_joint_velocities_radps
+        batch = pose.shape[0]
+        shape = (batch, len(self.module_ids), len(self.local_joint_ids))
+        if pose.shape != (batch, 7) or twist.shape != (batch, 6) or q.shape != shape or qdot.shape != shape or total_mass_kg.shape != (batch,):
+            raise ValueError('nominal command input shape differs')
+        if not bool(torch.stack([torch.isfinite(v).all() for v in (pose, twist, q, qdot, total_mass_kg)]).all()):
+            raise ValueError('Order9 tensor command input must be finite')
+        # General decode normalizes the reference, then its identity product.
+        orientation = _normalize_quaternion(_normalize_quaternion(pose[:, 3:7]))
+        lower = torch.as_tensor(self._position_lower_limits, device=q.device, dtype=q.dtype)
+        upper = torch.as_tensor(self._position_upper_limits, device=q.device, dtype=q.dtype)
+        scalar_zero = torch.zeros(batch, device=q.device, dtype=q.dtype)
+        return Order9TensorPolicyCommand(
+            desired_body_pose_world=torch.cat((pose[:, :3], orientation), dim=-1),
+            desired_body_twist=twist.clone(), residual_wrench_body=torch.zeros_like(twist),
+            joint_position_targets_rad=torch.maximum(torch.minimum(q, upper), lower),
+            joint_velocity_targets_radps=qdot.clone(), joint_torque_bias_nm=torch.zeros_like(q),
+            joint_target_mask=torch.ones_like(q, dtype=torch.bool),
+            module_ids=self.module_ids, local_joint_ids=self.local_joint_ids,
+            contact_compression_legacy_joint_action=scalar_zero.clone(),
+            contact_compression_residual_action=scalar_zero.clone(),
+            contact_compression_action=scalar_zero,
+            contact_compression_joint_delta_rad=torch.zeros_like(q))
+
     def decode(
         self,
         *,

@@ -466,6 +466,15 @@ class CollisionAwareNativeCentroidalPostureIKSolver(
             collision_config or CollisionAwareIKConfig()
         )
         self._scene_morphology = None
+        self._runtime_morphology = None
+        self._runtime_contact_references = {}
+
+    def _prepare_runtime_morphology(self, morphology):
+        self.kinematics._ensure_graph(morphology)
+        if morphology is not self._runtime_morphology:
+            self._runtime_morphology = morphology
+            self._runtime_joint_ids = ordered_global_dock_joint_ids(morphology, self.physical_model)
+            self._runtime_contact_references.clear()
 
     def set_collision_scene(
         self,
@@ -475,12 +484,12 @@ class CollisionAwareNativeCentroidalPostureIKSolver(
         object_size_m: tuple[float, float, float] | None,
         allowed_anchor_ids: Iterable[int],
     ) -> None:
-        self.kinematics._ensure_graph(morphology)
-        references = resolve_mesh_backed_anchor_references(
-            morphology,
-            self.physical_model,
-            tuple(sorted(int(value) for value in allowed_anchor_ids)),
-        )
+        self._prepare_runtime_morphology(morphology)
+        anchor_ids = tuple(sorted(int(value) for value in allowed_anchor_ids))
+        if anchor_ids not in self._runtime_contact_references:
+            self._runtime_contact_references[anchor_ids] = resolve_mesh_backed_anchor_references(
+                morphology, self.physical_model, anchor_ids)
+        references = self._runtime_contact_references[anchor_ids]
         set_kernel_collision_scene(
             kernel=self.kinematics._cpp_kernel,
             object_pose_world=object_pose_world,
@@ -511,14 +520,12 @@ class CollisionAwareNativeCentroidalPostureIKSolver(
         margin_m: float,
         ground_plane_z_m: float | None = None,
     ) -> dict[str, object]:
-        self.kinematics._ensure_graph(morphology)
+        self._prepare_runtime_morphology(morphology)
         if morphology is not self._scene_morphology:
             raise RuntimeError(
                 "collision scene must be installed for this morphology"
             )
-        ordered_ids = ordered_global_dock_joint_ids(
-            morphology, self.physical_model
-        )
+        ordered_ids = self._runtime_joint_ids
         q = np.asarray(
             [joint_positions_rad[joint_id] for joint_id in ordered_ids],
             dtype=np.float64,

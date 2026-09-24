@@ -25,6 +25,34 @@ def _decoder():
     )
 
 
+def test_nominal_specialization_matches_zero_residual_general_decoder():
+    decoder, config = _decoder()
+    torch.manual_seed(87)
+    batch = 8
+    q = torch.randn(batch, 2, len(decoder.local_joint_ids)) * 10
+    inputs = dict(reference_body_pose_world=torch.randn(batch, 7),
+                  reference_body_twist=torch.randn(batch, 6),
+                  reference_local_joint_positions_rad=q,
+                  reference_local_joint_velocities_radps=torch.randn_like(q),
+                  total_mass_kg=torch.rand(batch) * 10)
+    # Includes negative-scalar and non-unit quaternions, and joint limit clipping.
+    reference = decoder.decode(**inputs,
+        normalized_global_action=torch.zeros(batch, ORDER9_GLOBAL_ACTION_SIZE),
+        normalized_joint_action=torch.zeros(batch, 2, 3 * config.max_local_joint_slots),
+        policy_module_ids=torch.tensor([[0, 2]] * batch),
+        reference_local_joint_mask=torch.ones_like(q, dtype=torch.bool))
+    nominal = decoder.decode_nominal(**inputs)
+    for name in reference.__dataclass_fields__:
+        a, b = getattr(reference, name), getattr(nominal, name)
+        if isinstance(a, torch.Tensor):
+            torch.testing.assert_close(a, b, atol=0, rtol=0)
+        else:
+            assert a == b
+    inputs['reference_body_pose_world'][0, 0] = float('nan')
+    with pytest.raises(ValueError, match='finite'):
+        decoder.decode_nominal(**inputs)
+
+
 def test_tensor_command_decoder_preserves_policy_controller_boundary() -> None:
     decoder, config = _decoder()
     batch_size = 2

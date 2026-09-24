@@ -190,6 +190,40 @@ class CppWholeStructureKinematics(BatchedWholeStructureKinematics):
             )
         self._cpp_morphology = morphology
 
+    def bind_centroidal_anchor_fk(self, morphology, references, ordered_joint_ids):
+        """Bind immutable topology/reference data once for feedback-loop array FK.
+
+        The returned function uses the same kernel and independently recomputes
+        CoM for every joint sample. The graph object is treated as immutable,
+        like the existing compiled kinematics cache.
+        """
+        self._ensure_graph(morphology)
+        kernel = self._cpp_kernel
+        columns = [tuple(ordered_joint_ids).index(j) for j in self._global_joint_ids]
+        modules = np.asarray([self._module_index[r.anchor.module_id] for r in references], dtype=np.int32)
+        links = np.asarray([self._link_index[r.surface.mechanism_link_id] for r in references], dtype=np.int32)
+        local = [_pose_arrays(r.anchor.local_pose) for r in references]
+        local_r = np.asarray([r for r, _ in local], dtype=np.float64).reshape(-1, 3, 3)
+        local_p = np.asarray([p for _, p in local], dtype=np.float64).reshape(-1, 3)
+        base_r, base_p = np.eye(3), np.zeros(3)
+        modules_count, joints_count = len(self._module_ids), len(self._joint_ids)
+        def evaluate(q_samples):
+            q = np.asarray(q_samples, dtype=np.float64)
+            if q.ndim != 2 or q.shape[1] != len(ordered_joint_ids) or not np.isfinite(q).all():
+                raise ValueError('invalid bound FK joint samples')
+            _, _, rotations, positions, com = kernel.evaluate(
+                np.ascontiguousarray(q[:, columns]).reshape(len(q), modules_count, joints_count),
+                base_r, base_p, modules, links, local_r, local_p)
+            return positions - com[:, None, :], rotations
+        def residual(q, offsets, normalized, body, target_p, target_r, nominal_p, nominal_r):
+            body_r, body_p = _pose_arrays(body)
+            return kernel.grasp_residual(
+                np.ascontiguousarray((q[None, :] + offsets[:, 6:])[:, columns]).reshape(len(offsets), modules_count, joints_count),
+                offsets, normalized, body_r, body_p, modules, links, local_r, local_p,
+                target_r, target_p, nominal_r, nominal_p)
+        evaluate.residual_batch = residual
+        return evaluate
+
     def _evaluate_batch(
         self,
         *,

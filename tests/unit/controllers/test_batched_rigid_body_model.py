@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from dataclasses import fields
+import math
+
+import pytest
 import torch
 
 from amsrr.controllers.batched_rigid_body_model import (
@@ -16,6 +20,78 @@ from amsrr.schemas.runtime import (
 from amsrr.simulation.order8_natural_contact import (
     build_representative_order8_morphology,
 )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="requires CUDA graphs")
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("grad_enabled", [False, True])
+def test_cuda_graph_model_preserves_eager_values_and_output_lifetime(dtype, grad_enabled):
+    physical = build_physical_model_from_config("configs/robot/robot_model.yaml")
+    morphology = build_representative_order8_morphology(physical)
+    eager = BatchedRigidBodyControlModelBuilder(morphology, physical)
+    captured = BatchedRigidBodyControlModelBuilder(morphology, physical)
+    captured._use_cuda_graph = True
+    previous = None
+    # Changing joints, poses, twists, and batch shape must use current values.
+    with torch.set_grad_enabled(grad_enabled):
+        for batch, offset in ((1, 0.0), (1, 0.13), (2, -0.08), (1, 0.04)):
+            pose = torch.zeros(batch, eager.module_count, 7, device="cuda", dtype=dtype)
+            pose[..., 5] = math.sin(offset / 2)
+            pose[..., 6] = math.cos(offset / 2)
+            pose[..., 0] = torch.arange(eager.module_count, device="cuda") * .3 + offset
+            twist = torch.full((*pose.shape[:2], 6), offset, device="cuda", dtype=dtype)
+            joints = torch.full((*pose.shape[:2], eager.local_joint_count), offset,
+                                device="cuda", dtype=dtype)
+            inputs = dict(module_pose_world=pose, module_twist_world=twist,
+                          local_joint_positions_rad=joints)
+            expected = eager.build(**inputs)
+            actual = captured.build(**inputs)
+            for field in fields(expected):
+                left, right = getattr(expected, field.name), getattr(actual, field.name)
+                if isinstance(left, torch.Tensor):
+                    torch.testing.assert_close(left, right, rtol=0, atol=0)
+                else:
+                    assert left == right
+            if previous is not None:
+                old, snapshots = previous
+                for name, snapshot in snapshots.items():
+                    torch.testing.assert_close(getattr(old, name), snapshot, rtol=0, atol=0)
+            previous = actual, {f.name: getattr(actual, f.name).clone() for f in fields(actual)
+                                if isinstance(getattr(actual, f.name), torch.Tensor)}
+        pose[..., 0] = torch.nan
+        with pytest.raises(ValueError, match="finite"):
+            captured.build(**inputs)
+
+
+def test_compiled_cpu_model_uses_fresh_state_and_preserves_previous_output():
+    physical = build_physical_model_from_config("configs/robot/robot_model.yaml")
+    morphology = build_representative_order8_morphology(physical)
+    eager = BatchedRigidBodyControlModelBuilder(morphology, physical)
+    compiled = BatchedRigidBodyControlModelBuilder(morphology, physical)
+    compiled._use_cpu_compile = True
+    previous = None
+    with torch.no_grad():
+        for offset in (0.0, .13, -.08):
+            pose = torch.zeros(1, eager.module_count, 7)
+            pose[..., 5], pose[..., 6] = math.sin(offset / 2), math.cos(offset / 2)
+            pose[..., 0] = torch.arange(eager.module_count) * .3 + offset
+            twist = torch.full((*pose.shape[:2], 6), offset)
+            joints = torch.full((*pose.shape[:2], eager.local_joint_count), offset)
+            inputs = dict(module_pose_world=pose, module_twist_world=twist,
+                          local_joint_positions_rad=joints)
+            expected, actual = eager.build(**inputs), compiled.build(**inputs)
+            for field in fields(expected):
+                left, right = getattr(expected, field.name), getattr(actual, field.name)
+                if isinstance(left, torch.Tensor):
+                    torch.testing.assert_close(left, right, rtol=1e-5, atol=1e-5)
+                else:
+                    assert left == right
+            if previous is not None:
+                old, snapshots = previous
+                for name, snapshot in snapshots.items():
+                    torch.testing.assert_close(getattr(old, name), snapshot, rtol=0, atol=0)
+            previous = actual, {f.name: getattr(actual, f.name).clone() for f in fields(actual)
+                                if isinstance(getattr(actual, f.name), torch.Tensor)}
 
 
 def _wrench_column(origin, axis, reaction):

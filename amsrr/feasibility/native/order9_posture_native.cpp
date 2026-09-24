@@ -804,6 +804,77 @@ class Kernel {
     active_collision_scene_ = CollisionScene{};
   }
 
+  // Same nonlinear posture residual as the readable NumPy reference, evaluated
+  // with FK/CoM in one native batch (also used for finite differences).
+  py::array_t<double> grasp_residual(
+      py::array_t<double, py::array::c_style | py::array::forcecast> q,
+      py::array_t<double, py::array::c_style | py::array::forcecast> offsets,
+      py::array_t<double, py::array::c_style | py::array::forcecast> normalized,
+      py::array_t<double, py::array::c_style | py::array::forcecast> body_r,
+      py::array_t<double, py::array::c_style | py::array::forcecast> body_p,
+      py::array_t<int, py::array::c_style | py::array::forcecast> modules,
+      py::array_t<int, py::array::c_style | py::array::forcecast> links,
+      py::array_t<double, py::array::c_style | py::array::forcecast> local_r,
+      py::array_t<double, py::array::c_style | py::array::forcecast> local_p,
+      py::array_t<double, py::array::c_style | py::array::forcecast> target_r,
+      py::array_t<double, py::array::c_style | py::array::forcecast> target_p,
+      py::array_t<double, py::array::c_style | py::array::forcecast> nominal_r,
+      py::array_t<double, py::array::c_style | py::array::forcecast> nominal_p) const {
+    require_rank(q,3,"q"); require_rank(offsets,2,"offsets"); require_rank(normalized,2,"normalized");
+    require_rank(modules,1,"modules"); require_rank(links,1,"links");
+    require_rank(body_r,2,"body rotation"); require_rank(body_p,1,"body position");
+    const int count=q.shape(0), anchors_count=modules.shape(0), dimension=6+module_count_*local_joint_count_;
+    if (q.shape(1)!=module_count_ || q.shape(2)!=local_joint_count_ || offsets.shape(0)!=count || normalized.shape(0)!=count || offsets.shape(1)!=dimension || normalized.shape(1)!=dimension || anchors_count<1 || links.shape(0)!=anchors_count || body_r.shape(0)!=3 || body_r.shape(1)!=3 || body_p.shape(0)!=3)
+      throw std::invalid_argument("invalid grasp residual dimensions");
+    for (const auto* a : {&local_r,&target_r,&nominal_r}) if (a->ndim()!=3 || a->shape(0)!=anchors_count || a->shape(1)!=3 || a->shape(2)!=3) throw std::invalid_argument("invalid grasp rotation array");
+    for (const auto* a : {&local_p,&target_p,&nominal_p}) if (a->ndim()!=2 || a->shape(0)!=anchors_count || a->shape(1)!=3) throw std::invalid_argument("invalid grasp position array");
+    std::vector<AnchorSpec> anchors(anchors_count);
+    for(int a=0;a<anchors_count;++a) {
+      if(modules.data()[a]<0 || modules.data()[a]>=module_count_ || links.data()[a]<0 || links.data()[a]>=link_count_) throw std::invalid_argument("invalid grasp anchor index");
+      anchors[a].module=modules.data()[a];anchors[a].link=links.data()[a];
+      anchors[a].local={read_matrix(local_r.data()+a*9),read_vector(local_p.data()+a*3)};
+    }
+    const Matrix3 rb=read_matrix(body_r.data()), nr0=read_matrix(nominal_r.data());
+    const Vector3 bp=read_vector(body_p.data()), np0=read_vector(nominal_p.data());
+    const int width=anchors_count*12+dimension;
+    py::array_t<double> result({count,width});double* output=result.mutable_data();
+    auto logarithm = [](const Matrix3& r) -> Vector3 {
+      Eigen::Quaterniond quaternion(r); quaternion.normalize();
+      if(quaternion.w()<0)quaternion.coeffs() *= -1.;
+      const double length=quaternion.vec().norm();
+      if(length<=1e-15)return 2.*quaternion.vec();
+      return (2.*std::atan2(length,quaternion.w())/length)*quaternion.vec();
+    };
+    py::gil_scoped_release release;
+    for(int s=0;s<count;++s) {
+      const double* offset=offsets.data()+s*dimension;
+      const Vector3 rv=read_vector(offset+3);const double angle=rv.norm();
+      Matrix3 turn=Matrix3::Identity();if(angle>1e-15)turn=Eigen::AngleAxisd(angle,rv/angle).toRotationMatrix();
+      const Transform body{turn*rb,bp+read_vector(offset)};
+      Eigen::Map<const Eigen::VectorXd> joints(q.data()+s*(dimension-6),dimension-6);
+      Evaluation evaluation=evaluate_one(joints,Transform{},anchors);
+      for(auto& anchor : evaluation.anchors) {
+        anchor.translation=body.translation+body.rotation*(anchor.translation-evaluation.com);
+        anchor.rotation=body.rotation*anchor.rotation;
+      }
+      double* row=output+s*width;
+      const Transform& first=evaluation.anchors[0];
+      for(int a=0;a<anchors_count;++a) {
+        const auto& actual=evaluation.anchors[a];
+        write_vector(row+a*3,(actual.translation-read_vector(target_p.data()+a*3))/.001);
+        write_vector(row+anchors_count*3+a*3,logarithm(actual.rotation*read_matrix(target_r.data()+a*9).transpose())/.01);
+        const Vector3 relative_p=first.rotation.transpose()*(actual.translation-first.translation);
+        const Vector3 nominal_relative_p=nr0.transpose()*(read_vector(nominal_p.data()+a*3)-np0);
+        write_vector(row+anchors_count*6+a*3,(relative_p-nominal_relative_p)/.00005);
+        const Matrix3 relative_r=first.rotation.transpose()*actual.rotation;
+        const Matrix3 nominal_relative_r=nr0.transpose()*read_matrix(nominal_r.data()+a*9);
+        write_vector(row+anchors_count*9+a*3,logarithm(relative_r*nominal_relative_r.transpose())/.0005);
+      }
+      for(int i=0;i<dimension;++i)row[anchors_count*12+i]=normalized.data()[s*dimension+i]*.1;
+    }
+    return result;
+  }
+
   py::tuple evaluate(
       py::array_t<double, py::array::c_style | py::array::forcecast> q,
       py::array_t<double, py::array::c_style | py::array::forcecast> base_r,
@@ -1203,19 +1274,18 @@ class Kernel {
         read_vector(centroidal_p.data())};
     const Evaluation evaluation =
         evaluate_recentered(q_values, centroidal, {}).second;
+    const CollisionFrameCache frames = collision_frame_cache(evaluation, active_collision_scene_, exact);
     const CollisionMetrics metrics = collision_metrics(
         evaluation,
         active_collision_scene_,
         exact,
-        margin_m);
+        margin_m, &frames);
     const bool ground_plane_enabled = std::isfinite(ground_plane_z_m);
     double minimum_ground_clearance_m =
         std::numeric_limits<double>::infinity();
     int ground_violating_proxy_count = 0;
     py::list ground_violating_proxies;
     if (ground_plane_enabled) {
-      const CollisionFrameCache frames = collision_frame_cache(
-          evaluation, active_collision_scene_, exact);
       for (int instance = 0;
            instance < static_cast<int>(frames.proxy_aabbs.size());
            ++instance) {
@@ -1238,8 +1308,9 @@ class Kernel {
     py::list selected_contact_pairs;
     for (const CollisionPair& pair :
          active_collision_scene_.selected_contact_pairs) {
-      const double clearance = pair_clearance(
-          evaluation, active_collision_scene_, pair, exact);
+      const double clearance = exact
+          ? pair_clearance(evaluation, active_collision_scene_, pair, true)
+          : cached_pair_clearance(active_collision_scene_, pair, false, frames);
       const double penetration = std::max(0.0, -clearance);
       const bool violating =
           penetration > max_selected_contact_penetration_m + 1.0e-12;
@@ -1327,11 +1398,14 @@ class Kernel {
         selected_contact_penetration_violating_pair_count;
     output["selected_contact_pairs"] =
         std::move(selected_contact_pairs);
-    std::vector<int> ordered(metrics.clearances.size());
+    // Only near/violating pairs can appear in the diagnostic list. Sorting
+    // all O(body_count^2) distant pairs used to dominate this control query.
+    std::vector<int> ordered;
     for (int index = 0;
-         index < static_cast<int>(ordered.size());
+         index < static_cast<int>(metrics.clearances.size());
          ++index) {
-      ordered[index] = index;
+      if (metrics.colliding[index] || metrics.clearances[index] <= std::max(margin_m, 0.001))
+        ordered.push_back(index);
     }
     std::sort(
         ordered.begin(),
@@ -1815,12 +1889,14 @@ class Kernel {
       const Evaluation& evaluation,
       const CollisionScene& scene,
       bool exact,
-      double activation_distance) const {
+      double activation_distance,
+      const CollisionFrameCache* prepared_frames = nullptr) const {
     CollisionMetrics output;
     output.clearances.reserve(scene.pairs.size());
     output.colliding.reserve(scene.pairs.size());
-    const CollisionFrameCache frames =
-        collision_frame_cache(evaluation, scene, exact);
+    const CollisionFrameCache local_frames = prepared_frames == nullptr
+        ? collision_frame_cache(evaluation, scene, exact) : CollisionFrameCache{};
+    const CollisionFrameCache& frames = prepared_frames == nullptr ? local_frames : *prepared_frames;
     for (const CollisionPair& pair : scene.pairs) {
       if (!exact && !pair.proxy_enabled) {
         output.clearances.push_back(
@@ -2617,10 +2693,171 @@ class Kernel {
   mutable bool nominal_collision_pair_table_complete_ = false;
 };
 
+// Small dense bounded least squares for the feedback increment. QR solves only
+// free columns; blocking bounds enter the active set, violated KKT bounds leave.
+py::tuple bounded_least_squares(
+    py::array_t<double, py::array::c_style | py::array::forcecast> a_array,
+    py::array_t<double, py::array::c_style | py::array::forcecast> b_array,
+    py::array_t<double, py::array::c_style | py::array::forcecast> lo_array,
+    py::array_t<double, py::array::c_style | py::array::forcecast> hi_array,
+    int maximum_iterations, double tolerance) {
+  require_rank(a_array, 2, "matrix"); require_rank(b_array, 1, "rhs");
+  require_rank(lo_array, 1, "lower"); require_rank(hi_array, 1, "upper");
+  const int rows = a_array.shape(0), cols = a_array.shape(1);
+  if (cols < 1 || rows < cols || b_array.shape(0) != rows || lo_array.shape(0) != cols || hi_array.shape(0) != cols || maximum_iterations < 1 || !(tolerance > 0) || !std::isfinite(tolerance))
+    throw std::invalid_argument("invalid bounded least squares dimensions/budget");
+  using Mat = Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+  Eigen::Map<const Mat> a(a_array.data(), rows, cols);
+  Eigen::Map<const Eigen::VectorXd> b(b_array.data(), rows), lo(lo_array.data(), cols), hi(hi_array.data(), cols);
+  if (!a.allFinite() || !b.allFinite() || !lo.allFinite() || !hi.allFinite() || (lo.array() >= hi.array()).any())
+    throw std::invalid_argument("invalid bounded least squares data/bounds");
+  Eigen::VectorXd x(cols), g(cols);
+  std::vector<int> active(cols, 0), free;
+  bool converged = false; int iteration = 0; double optimality = std::numeric_limits<double>::infinity();
+  {
+    py::gil_scoped_release release;
+    x = a.colPivHouseholderQr().solve(b);
+    for (int i = 0; i < cols; ++i) {
+      if (x[i] <= lo[i]) { x[i] = lo[i]; active[i] = -1; }
+      else if (x[i] >= hi[i]) { x[i] = hi[i]; active[i] = 1; }
+    }
+    for (; iteration < maximum_iterations; ++iteration) {
+      free.clear(); Eigen::VectorXd rhs = b;
+      for (int i = 0; i < cols; ++i) {
+        if (active[i] == 0) free.push_back(i); else rhs -= a.col(i) * x[i];
+      }
+      Eigen::VectorXd candidate = x;
+      if (!free.empty()) {
+        Eigen::MatrixXd af(rows, free.size());
+        for (std::size_t j = 0; j < free.size(); ++j) af.col(j) = a.col(free[j]);
+        Eigen::VectorXd xf = af.colPivHouseholderQr().solve(rhs);
+        for (std::size_t j = 0; j < free.size(); ++j) candidate[free[j]] = xf[j];
+      }
+      double alpha = 1.; int blocking = -1, side = 0;
+      for (int i : free) {
+        if (candidate[i] < lo[i]) {
+          double t = (lo[i] - x[i]) / (candidate[i] - x[i]);
+          if (t < alpha) { alpha = std::max(0., t); blocking = i; side = -1; }
+        } else if (candidate[i] > hi[i]) {
+          double t = (hi[i] - x[i]) / (candidate[i] - x[i]);
+          if (t < alpha) { alpha = std::max(0., t); blocking = i; side = 1; }
+        }
+      }
+      x += alpha * (candidate - x);
+      x = x.cwiseMax(lo).cwiseMin(hi);
+      if (blocking >= 0) { x[blocking] = side < 0 ? lo[blocking] : hi[blocking]; active[blocking] = side; continue; }
+      g = a.transpose() * (a * x - b);
+      double violation = 0.; int release_index = -1; optimality = 0.;
+      for (int i = 0; i < cols; ++i) {
+        double kkt = active[i] == 0 ? std::abs(g[i]) : g[i] * active[i];
+        optimality = std::max(optimality, kkt);
+        if (active[i] != 0 && kkt > violation) { violation = kkt; release_index = i; }
+      }
+      if (violation <= tolerance || release_index < 0) { converged = optimality <= tolerance; break; }
+      active[release_index] = 0;
+    }
+  }
+  py::array_t<double> output(cols); std::copy(x.data(), x.data()+cols, output.mutable_data());
+  return py::make_tuple(output, converged, std::min(iteration+1, maximum_iterations), optimality);
+}
+
+// Fixed-iteration CPU allocator core. Same six-halfspace Euclidean projection
+// as batched_virtual_thrust_qp.py; no stopping or feasibility relaxation.
+template <typename T>
+py::array_t<T> virtual_thrust_admm(
+    py::array_t<T, py::array::c_style | py::array::forcecast> lower_factor,
+    py::array_t<T, py::array::c_style | py::array::forcecast> rhs_array,
+    py::array_t<T, py::array::c_style | py::array::forcecast> previous_array,
+    py::array_t<T, py::array::c_style | py::array::forcecast> bounds_array,
+    T penalty, int iterations) {
+  using Vec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
+  using Mat = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+  using Point = Eigen::Matrix<T, 2, 1>;
+  if (previous_array.ndim() != 3 || previous_array.shape(2) != 2)
+    throw std::invalid_argument("invalid native ADMM previous channels");
+  const int batch = previous_array.shape(0), rotors = previous_array.shape(1), width = rotors * 2;
+  if (batch < 1 || rotors < 1 ||
+      lower_factor.ndim() != 3 || lower_factor.shape(0) != batch ||
+      lower_factor.shape(1) != width || lower_factor.shape(2) != width ||
+      rhs_array.ndim() != 2 || rhs_array.shape(0) != batch || rhs_array.shape(1) != width ||
+      bounds_array.ndim() != 3 || bounds_array.shape(0) != batch ||
+      bounds_array.shape(1) != rotors || bounds_array.shape(2) != 5 ||
+      !(penalty > T(0)) || iterations < 1) throw std::invalid_argument("invalid native ADMM inputs");
+  py::array_t<T> output({3, batch, width});
+  T* out = output.mutable_data();
+  const T eps = std::numeric_limits<T>::epsilon();
+  struct Polygon {
+    Point a[6]; T b[6], norm[6], tolerance;
+    std::vector<Point> vertices;
+    bool feasible(const Point& p) const {
+      for (int i = 0; i < 6; ++i) if (a[i].dot(p) > b[i] + tolerance) return false;
+      return true;
+    }
+    Point project(const Point& p) const {
+      if (feasible(p)) return p;
+      T best = std::numeric_limits<T>::infinity();
+      Point result = p;
+      for (int i = 0; i < 6; ++i) {
+        Point v = p - ((a[i].dot(p) - b[i]) / norm[i]) * a[i];
+        T d = (v - p).squaredNorm();
+        if (d < best && feasible(v)) { best = d; result = v; }
+      }
+      for (const auto& v : vertices) {
+        T d = (v - p).squaredNorm();
+        if (d < best) { best = d; result = v; }
+      }
+      if (!std::isfinite(best)) throw std::runtime_error("empty native ADMM projection");
+      return result;
+    }
+  };
+  py::gil_scoped_release release;
+  for (int env = 0; env < batch; ++env) {
+    Eigen::Map<const Mat> l(lower_factor.data() + env * width * width, width, width);
+    Eigen::Map<const Vec> rhs(rhs_array.data() + env * width, width);
+    Eigen::Map<const Vec> previous(previous_array.data() + env * width, width);
+    std::vector<Polygon> polygons(rotors);
+    for (int rotor = 0; rotor < rotors; ++rotor) {
+      auto& p = polygons[rotor];
+      const T* v = bounds_array.data() + (env * rotors + rotor) * 5;
+      // [minimum z, maximum z, maximum x, lower angle, upper angle]
+      p.a[0] = Point(1,0); p.a[1] = Point(-1,0); p.a[2] = Point(0,1);
+      p.a[3] = Point(0,-1); p.a[4] = Point(1,-std::tan(v[4])); p.a[5] = Point(-1,std::tan(v[3]));
+      p.b[0] = p.b[1] = v[2]; p.b[2] = v[1]; p.b[3] = -v[0]; p.b[4] = p.b[5] = 0;
+      T largest = 0;
+      for (int i = 0; i < 6; ++i) { p.norm[i] = std::max(eps, p.a[i].squaredNorm()); largest = std::max(largest, std::abs(p.b[i])); }
+      p.tolerance = T(64) * eps * (T(1) + largest);
+      for (int i = 0; i < 6; ++i) for (int j = i + 1; j < 6; ++j) {
+        T det = p.a[i].x() * p.a[j].y() - p.a[i].y() * p.a[j].x();
+        if (std::abs(det) <= T(32) * eps) continue;
+        Point vertex((p.b[i]*p.a[j].y()-p.a[i].y()*p.b[j])/det,
+                     (p.a[i].x()*p.b[j]-p.b[i]*p.a[j].x())/det);
+        if (p.feasible(vertex)) p.vertices.push_back(vertex);
+      }
+    }
+    Vec z(width), x(width), dual = Vec::Zero(width), previous_z(width), solve_rhs(width);
+    for (int rotor = 0; rotor < rotors; ++rotor) z.template segment<2>(rotor*2) = polygons[rotor].project(previous.template segment<2>(rotor*2));
+    for (int k = 0; k < iterations; ++k) {
+      solve_rhs = rhs + penalty * (z - dual);
+      x = l.template triangularView<Eigen::Lower>().solve(solve_rhs);
+      l.transpose().template triangularView<Eigen::Upper>().solveInPlace(x);
+      previous_z = z;
+      for (int rotor = 0; rotor < rotors; ++rotor) z.template segment<2>(rotor*2) = polygons[rotor].project(x.template segment<2>(rotor*2) + dual.template segment<2>(rotor*2));
+      dual = dual + x - z;
+    }
+    Eigen::Map<Vec>(out + env*width, width) = x;
+    Eigen::Map<Vec>(out + batch*width + env*width, width) = z;
+    Eigen::Map<Vec>(out + 2*batch*width + env*width, width) = previous_z;
+  }
+  return output;
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_order9_posture_native, module) {
-  module.doc() = "Experimental C++/Eigen FK kernel for Order 9";
+  module.doc() = "C++/Eigen FK, collision and fixed-iteration allocation kernels";
+  module.def("bounded_least_squares", &bounded_least_squares);
+  module.def("virtual_thrust_admm_float32", &virtual_thrust_admm<float>);
+  module.def("virtual_thrust_admm_float64", &virtual_thrust_admm<double>);
   py::class_<Kernel>(module, "Kernel")
       .def(py::init<
            int,
@@ -2645,6 +2882,7 @@ PYBIND11_MODULE(_order9_posture_native, module) {
            py::array_t<double, py::array::c_style | py::array::forcecast>,
            py::array_t<double, py::array::c_style | py::array::forcecast>>())
       .def("evaluate", &Kernel::evaluate)
+      .def("grasp_residual", &Kernel::grasp_residual)
       .def("solve_centroidal", &Kernel::solve_centroidal)
       .def(
           "configure_collision_geometry",

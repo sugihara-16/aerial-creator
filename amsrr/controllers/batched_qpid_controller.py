@@ -70,6 +70,7 @@ class BatchedQPIDController:
             raise ValueError("batched QPID requires rigid_body_qp allocation mode")
         self.qp_config = qp_config or BatchedVirtualThrustQPConfig()
         self.qp_config.validate()
+        self._default_profiles = {}
 
     def initial_state(
         self,
@@ -115,9 +116,13 @@ class BatchedQPIDController:
         batch_size = current_pose.shape[0]
         device = current_pose.device
         dtype = current_pose.dtype
-        profile = tracking_profile or BatchedQPIDTrackingProfile.ones(
-            batch_size, device=device, dtype=dtype
-        )
+        if tracking_profile is None:
+            key = (batch_size, device, dtype)
+            if key not in self._default_profiles:
+                self._default_profiles[key] = BatchedQPIDTrackingProfile.ones(batch_size, device=device, dtype=dtype)
+            profile = self._default_profiles[key]
+        else:
+            profile = tracking_profile
         self._validate_inputs(
             control_model=control_model,
             desired_body_pose_world=desired_body_pose_world,
@@ -125,6 +130,7 @@ class BatchedQPIDController:
             residual_wrench_body=residual_wrench_body,
             state=state,
             tracking_profile=profile,
+            validate_tracking_values=tracking_profile is not None,
             payload_active=payload_active,
             payload_mass_kg=payload_mass_kg,
             payload_inertia_body=payload_inertia_body,
@@ -365,24 +371,23 @@ class BatchedQPIDController:
         ):
             raise ValueError("batched QPID previous allocation shape differs")
         profile = values["tracking_profile"]
-        for value in (
+        profile_values = (
             profile.proportional_gain_scale,
             profile.integral_gain_scale,
             profile.derivative_gain_scale,
             profile.integrator_accumulation_scale,
             profile.integrator_decay_rate_per_s,
-        ):
+        )
+        for value in profile_values:
             if value.shape != (batch_size,):
                 raise ValueError("batched QPID tracking profile shape differs")
-            if bool((value < 0.0).any()) or not bool(torch.isfinite(value).all()):
+        if values.get('validate_tracking_values', True):
+            flags = torch.stack([*(((value < 0.0).any() | ~torch.isfinite(value).all()).to(device=device)
+                                   for value in profile_values),
+                                 *((value > 1.0).any().to(device=device) for value in profile_values[:4])]).tolist()
+            if any(flags[:5]):
                 raise ValueError("batched QPID tracking profile is invalid")
-        for value in (
-            profile.proportional_gain_scale,
-            profile.integral_gain_scale,
-            profile.derivative_gain_scale,
-            profile.integrator_accumulation_scale,
-        ):
-            if bool((value > 1.0).any()):
+            if any(flags[5:]):
                 raise ValueError("batched QPID tracking scale exceeds one")
         payload_active = values["payload_active"]
         payload_values = (
