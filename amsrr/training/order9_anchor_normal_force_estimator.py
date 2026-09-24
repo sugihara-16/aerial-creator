@@ -269,6 +269,8 @@ class Order9AnchorNormalForceEstimator:
     ) -> None:
         self.config = config or Order9AnchorNormalForceEstimatorConfig()
         self.config.validate()
+        self._use_cuda_graph = False
+        self._cuda_call = None
 
     def initial_state(
         self,
@@ -307,7 +309,7 @@ class Order9AnchorNormalForceEstimator:
         estimation_active_mask: torch.Tensor,
         state: Order9AnchorNormalForceEstimatorState,
     ) -> Order9AnchorNormalForceEstimate:
-        self._validate(
+        values = dict(
             applied_joint_torque_nm=applied_joint_torque_nm,
             gravity_joint_torque_nm=gravity_joint_torque_nm,
             grasp_point_linear_jacobian_world=(
@@ -320,6 +322,18 @@ class Order9AnchorNormalForceEstimator:
             estimation_active_mask=estimation_active_mask,
             state=state,
         )
+        self._validate(**values)
+        if self._use_cuda_graph:
+            from amsrr.utils.tensor_dataclass_graph import TensorDataclassGraph
+            if self._cuda_call is None:
+                self._cuda_call = TensorDataclassGraph()
+            return self._cuda_call.call(self._compute, kwargs=values, configuration=repr(self.config))
+        return self._compute(**values)
+
+    def _compute(self, *, applied_joint_torque_nm, gravity_joint_torque_nm,
+                 grasp_point_linear_jacobian_world, contact_normal_world,
+                 anchor_joint_owner_mask, selected_anchor_mask, baseline_update_mask,
+                 estimation_active_mask, state):
         cfg = self.config
         drive_minus_gravity = applied_joint_torque_nm - gravity_joint_torque_nm
         if baseline_update_mask.ndim == 1:
@@ -528,10 +542,11 @@ class Order9AnchorNormalForceEstimator:
             or state.baseline_initialized.dtype != torch.bool
         ):
             raise ValueError("Order9 force estimator state shape differs")
-        for value in values.values():
-            if isinstance(value, torch.Tensor) and value.dtype != torch.bool:
-                if not bool(torch.isfinite(value).all()):
-                    raise ValueError("Order9 force estimator input is non-finite")
+        finite_flat = torch.cat([value.reshape(-1).to(device=applied.device)
+                                 for value in values.values()
+                                 if isinstance(value, torch.Tensor) and value.dtype != torch.bool])
+        if not bool(torch.isfinite(finite_flat).all()):
+            raise ValueError("Order9 force estimator input is non-finite")
 
 
 def order9_required_anchor_normal_force_n(

@@ -448,3 +448,23 @@ def test_transport_penalizes_but_does_not_gate_wrench_range_membership() -> None
     assert result.terms[
         "weighted_wrench_range_violation_penalty"
     ].item() < 0.0
+
+
+def test_supported_place_only_exempts_contact_break_and_is_not_latched():
+    from dataclasses import replace
+    engine = Order9TensorRewardEngine(control_dt_s=.02)
+    evidence = _evidence(Order9ObjectTaskPhase.PLACE, contact=False)
+    state = engine.initial_state(object_pose_world=evidence.object_pose_world,
+                                 desired_object_pose_world=evidence.desired_object_pose_world)
+    state = replace(state, grasp_acquired=torch.tensor([True]), contact_break_s=torch.tensor([.06]))
+    supported = replace(evidence, supported_placement=torch.tensor([True]))
+    outcome = engine.step(supported, state)
+    assert not outcome.object_dropped.item()
+    assert not outcome.phase_success.item()  # not a fabricated grasp or task success
+    assert engine.step(evidence, outcome.next_state).object_dropped.item()
+    assert engine.step(replace(supported, phase_index=torch.tensor([3])), state).object_dropped.item()
+    falling = supported.object_twist_world.clone(); falling[:, 2] = -.251
+    assert engine.step(replace(supported, object_twist_world=falling), state).object_dropped.item()
+    below = supported.object_pose_world.clone(); below[:, 2] = .15
+    assert engine.step(replace(supported, object_pose_world=below), state).object_dropped.item()
+    assert engine.step(replace(supported, prohibited_collision=torch.tensor([True])), state).hard_collision.item()

@@ -111,6 +111,8 @@ class Order9DeployablePhaseGate:
         if control_dt_s <= 0.0:
             raise ValueError("deployable phase gate dt must be positive")
         self.control_dt_s = float(control_dt_s)
+        self._use_cuda_graph = False
+        self._cuda_call = None
 
     def initial_state(
         self, *, batch_size: int, device: torch.device | str
@@ -132,6 +134,15 @@ class Order9DeployablePhaseGate:
         state: Order9DeployablePhaseGateState,
     ) -> Order9DeployablePhaseGateResult:
         self._validate(evidence, state)
+        if self._use_cuda_graph:
+            from amsrr.utils.tensor_dataclass_graph import TensorDataclassGraph
+            if self._cuda_call is None:
+                self._cuda_call = TensorDataclassGraph()
+            return self._cuda_call.call(self._compute, (evidence, state),
+                configuration=(repr(self.config), self.control_dt_s))
+        return self._compute(evidence, state)
+
+    def _compute(self, evidence, state):
         cfg = self.config
         phase = evidence.phase_index.long()
         selected = evidence.selected_anchor_mask
@@ -327,17 +338,21 @@ class Order9DeployablePhaseGate:
             or state.release_latched.dtype != torch.bool
         ):
             raise ValueError("deployable phase gate posture/state shape differs")
-        if bool((evidence.selected_required_normal_force_n < 0.0).any()):
+        device = evidence.phase_index.device
+        invalid = [(evidence.selected_required_normal_force_n < 0.0).any().to(device=device),
+                   ((evidence.selected_force_estimator_confidence < 0.0)
+                    | (evidence.selected_force_estimator_confidence > 1.0)).any().to(device=device)]
+        finite_flat = torch.cat([value.reshape(-1).to(device=device)
+                                for value in evidence.__dict__.values()
+                                if isinstance(value, torch.Tensor) and value.dtype != torch.bool])
+        invalid.append(~torch.isfinite(finite_flat).all())
+        flags = torch.stack(invalid).tolist()
+        if flags[0]:
             raise ValueError("deployable phase gate required force must be non-negative")
-        if bool(
-            ((evidence.selected_force_estimator_confidence < 0.0)
-             | (evidence.selected_force_estimator_confidence > 1.0)).any()
-        ):
+        if flags[1]:
             raise ValueError("deployable phase gate estimator confidence is invalid")
-        for value in evidence.__dict__.values():
-            if isinstance(value, torch.Tensor) and value.dtype != torch.bool:
-                if not bool(torch.isfinite(value).all()):
-                    raise ValueError("deployable phase gate input is non-finite")
+        if any(flags[2:]):
+            raise ValueError("deployable phase gate input is non-finite")
 
 
 def _phase(value: Order9ObjectTaskPhase) -> int:

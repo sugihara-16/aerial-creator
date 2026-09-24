@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import torch
+import pytest
 
 from amsrr.policies.order9_tensor_command_decoder import Order9TensorPolicyCommand
 from amsrr.robot_model.physical_model_builder import build_physical_model_from_config
@@ -291,6 +292,51 @@ def test_tensor_isaac_io_tracks_only_planner_selected_anchor_pairs() -> None:
         full.selected_anchor_body_names[-1],
         full.selected_anchor_body_names[0],
     )
+
+
+def test_cached_command_indices_follow_reordered_joints_and_fresh_values():
+    _, _, io = _fixture()
+    robot = _Robot()
+    for batch, dtype, order in ((1, torch.float32, (0, 2)),
+                                (2, torch.float64, (2, 0)),
+                                (1, torch.float32, (0, 2))):
+        shape = (batch, io.module_count, len(order))
+        q = torch.arange(batch * io.module_count * len(order), dtype=dtype).reshape(shape)
+        command = SimpleNamespace(module_ids=io.module_ids,
+            local_joint_ids=tuple(io.local_joint_ids[i] for i in order),
+            joint_position_targets_rad=q, joint_velocity_targets_radps=-q,
+            joint_torque_bias_nm=q + .3, joint_target_mask=torch.ones(shape, dtype=torch.bool))
+        io._apply_policy_joints(robot=robot, command=command, batch_size=batch,
+                               device=torch.device('cpu'), dtype=dtype)
+        expected_ids = [row[i] for row in io.local_joint_indices for i in order]
+        for actual, expected in zip(robot.calls[-3:], (q, -q, q + .3)):
+            assert actual[2].tolist() == expected_ids
+            torch.testing.assert_close(actual[1], expected.reshape(batch, -1), rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="CUDA contact reduction"))])
+def test_patch_reduction_preserves_empty_rows_and_rejects_invalid_ranges(device):
+    from amsrr.simulation.order9_tensor_isaac_io import _aggregate_selected_patch_wrenches
+    args = dict(forces_world=torch.tensor([[1., 2., 3.], [float('nan')]*3], device=device),
+                points_world=torch.tensor([[0., 1., 0.], [float('nan')]*3], device=device),
+                counts=torch.tensor([[1, 0]], device=device),
+                starts=torch.tensor([[0, 999]], device=device),
+                selected_filter_indices=torch.tensor([1, 0], device=device),
+                reference_origins_world=torch.zeros(1, 2, 3, device=device))
+    actual = _aggregate_selected_patch_wrenches(**args)
+    torch.testing.assert_close(actual, torch.tensor([[[0., 0., 0., 0., 0., 0.],
+                                                    [1., 2., 3., 3., 0., -1.]]], device=device))
+    for counts, starts, message in (([-1, 0], [0, 0], "non-negative"),
+                                    ([1, 0], [-1, 0], "non-negative"),
+                                    ([3, 0], [0, 0], "range is invalid"),
+                                    ([1, 0], [1, 0], "non-finite")):
+        changed = dict(args, counts=torch.tensor([counts], device=device),
+                       starts=torch.tensor([starts], device=device))
+        with pytest.raises(ValueError, match=message):
+            _aggregate_selected_patch_wrenches(**changed)
+    args['counts'].zero_()
+    assert not _aggregate_selected_patch_wrenches(**args).any()
 
 
 def test_tensor_isaac_io_zero_fills_physx_merged_fixed_joints() -> None:

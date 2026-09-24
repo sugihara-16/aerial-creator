@@ -140,6 +140,9 @@ class Order9TensorRewardInput:
     rotor_thrusts_n: torch.Tensor
     rotor_saturation: torch.Tensor
     joint_torque_bias_nm: torch.Tensor
+    # Privileged outcome evidence, never an actor/controller input. Omitted by
+    # historical callers: the legacy grasp-loss semantics remain unchanged.
+    supported_placement: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -176,6 +179,8 @@ class Order9TensorRewardEngine:
         if control_dt_s <= 0.0:
             raise ValueError("Order9 tensor reward dt must be positive")
         self.control_dt_s = float(control_dt_s)
+        self._use_cuda_graph = False
+        self._cuda_call = None
 
     def initial_state(
         self,
@@ -207,6 +212,15 @@ class Order9TensorRewardEngine:
         state: Order9TensorRewardState,
     ) -> Order9TensorRewardResult:
         self._validate(evidence, state)
+        if self._use_cuda_graph:
+            from amsrr.utils.tensor_dataclass_graph import TensorDataclassGraph
+            if self._cuda_call is None:
+                self._cuda_call = TensorDataclassGraph()
+            return self._cuda_call.call(self._compute, (evidence, state),
+                configuration=(repr(self.reward_config), repr(self.gate_config), self.control_dt_s))
+        return self._compute(evidence, state)
+
+    def _compute(self, evidence, state):
         cfg = self.reward_config
         gate = self.gate_config
         dt = self.control_dt_s
@@ -416,8 +430,10 @@ class Order9TensorRewardEngine:
         phase_success |= settle & (settle_dwell >= gate.settle_dwell_s)
 
         maintain_phase = lift | transport | place
+        supported_place = (torch.zeros_like(place) if evidence.supported_placement is None
+                           else place & evidence.supported_placement)
         object_dropped = maintain_phase & (
-            (contact_break >= gate.contact_break_grace_s)
+            ((contact_break >= gate.contact_break_grace_s) & ~supported_place)
             | (
                 evidence.object_twist_world[:, 2]
                 < -gate.downward_drop_velocity_threshold_mps
@@ -642,6 +658,11 @@ class Order9TensorRewardEngine:
         evidence: Order9TensorRewardInput, state: Order9TensorRewardState
     ) -> None:
         batch = evidence.phase_index.shape[0]
+        if evidence.supported_placement is not None and (
+            evidence.supported_placement.shape != (batch,)
+            or evidence.supported_placement.dtype != torch.bool
+        ):
+            raise ValueError("supported placement evidence must be a batch boolean")
         if evidence.phase_index.shape != (batch,):
             raise ValueError("Order9 tensor reward phase shape differs")
         if evidence.object_pose_world.shape != (batch, 7):
@@ -653,12 +674,8 @@ class Order9TensorRewardEngine:
             or evidence.local_joint_positions_rad.shape[0] != batch
         ):
             raise ValueError("Order9 release joint posture shape differs")
-        if not bool(
-            torch.isfinite(evidence.local_joint_positions_rad).all()
-        ) or not bool(
-            torch.isfinite(evidence.phase_goal_joint_positions_rad).all()
-        ):
-            raise ValueError("Order9 release joint posture is non-finite")
+        finite_values = [evidence.local_joint_positions_rad, evidence.phase_goal_joint_positions_rad]
+        finite_messages = ["Order9 release joint posture is non-finite"] * 2
         if evidence.selected_contact_forces_world.ndim != 3 or (
             evidence.selected_contact_forces_world.shape[0] != batch
             or evidence.selected_contact_forces_world.shape[-1] != 3
@@ -676,8 +693,10 @@ class Order9TensorRewardEngine:
             "target_motor_load_proxy",
         ):
             value = getattr(evidence, name)
-            if value.shape != selected_shape or not bool(torch.isfinite(value).all()):
+            if value.shape != selected_shape:
                 raise ValueError(f"Order9 {name} shape or finiteness differs")
+            finite_values.append(value)
+            finite_messages.append(f"Order9 {name} shape or finiteness differs")
         if evidence.contact_preload_complete.shape != (batch,):
             raise ValueError("Order9 contact preload completion shape differs")
         wrench_shape = (*selected_shape, 6)
@@ -688,27 +707,29 @@ class Order9TensorRewardEngine:
             or evidence.wrench_bound_mask.shape != selected_shape
         ):
             raise ValueError("Order9 selected contact-wrench range shape differs")
-        if not bool(
-            torch.isfinite(evidence.selected_contact_wrenches_contact).all()
-        ):
-            raise ValueError("Order9 selected contact wrench is non-finite")
-        if not bool(
-            torch.isfinite(
-                evidence.wrench_lower_contact[evidence.wrench_bound_mask]
-            ).all()
-        ) or not bool(
-            torch.isfinite(
-                evidence.wrench_upper_contact[evidence.wrench_bound_mask]
-            ).all()
-        ):
-            raise ValueError("Order9 contact-wrench bound is non-finite")
-        if bool(
-            (
-                evidence.wrench_lower_contact
-                > evidence.wrench_upper_contact
-            )[evidence.wrench_bound_mask].any()
-        ):
-            raise ValueError("Order9 contact-wrench lower bound exceeds upper")
+        finite_values.append(evidence.selected_contact_wrenches_contact)
+        finite_messages.append("Order9 selected contact wrench is non-finite")
+        # Masked reductions keep unused NaN bounds legal without dynamic-size
+        # advanced indexing (which synchronizes CUDA to discover its length).
+        active = evidence.wrench_bound_mask.unsqueeze(-1)
+        device = evidence.phase_index.device
+        finite_flat = torch.cat([value.reshape(-1).to(device=device) for value in finite_values])
+        invalid = [~torch.isfinite(finite_flat).all()]
+        invalid += [((~torch.isfinite(evidence.wrench_lower_contact)
+                      | ~torch.isfinite(evidence.wrench_upper_contact)) & active).any().to(device=device),
+                    ((evidence.wrench_lower_contact > evidence.wrench_upper_contact) & active).any().to(device=device)]
+        flags = torch.stack(invalid).tolist()
+        if flags[0]:
+            # Preserve the specific error without many tiny GPU reductions on
+            # the usual all-finite path.
+            for value, message in zip(finite_values, finite_messages):
+                if not bool(torch.isfinite(value).all()):
+                    raise ValueError(message)
+        messages = ["Order9 contact-wrench bound is non-finite",
+                    "Order9 contact-wrench lower bound exceeds upper"]
+        for failed, message in zip(flags[1:], messages):
+            if failed:
+                raise ValueError(message)
         if state.contact_dwell_s.shape != (batch,):
             raise ValueError("Order9 tensor reward state batch differs")
 

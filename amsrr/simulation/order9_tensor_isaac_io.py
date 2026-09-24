@@ -93,6 +93,8 @@ class Order9TensorIsaacIO:
                 "Order9 object contact filters must cover every robot body exactly"
             )
         self.contact_force_threshold_n = float(contact_force_threshold_n)
+        self._constant_cache = {}
+        self._command_index_cache = {}
         self.rigid_body_builder = BatchedRigidBodyControlModelBuilder(
             self.morphology_graph, self.physical_model
         )
@@ -194,22 +196,37 @@ class Order9TensorIsaacIO:
     def selected_anchor_count(self) -> int:
         return len(self.selected_anchor_ids)
 
+    def _constants(self, device, dtype):
+        """Immutable topology tensors; observed values are never cached."""
+        key = (torch.device(device), dtype)
+        if key not in self._constant_cache:
+            index = lambda values: torch.tensor(values, device=device, dtype=torch.long)
+            local = index(self.local_joint_indices)
+            filter_index = {name: i for i, name in enumerate(self.object_filter_body_names)}
+            self._constant_cache[key] = dict(
+                module=index(self.module_body_indices), local=local.clamp_min(0),
+                local_present=(local >= 0).unsqueeze(0),
+                body_by_filter=index([filter_index[name] for name in self.robot_body_names]),
+                selected_filter=index(self.selected_anchor_filter_indices),
+                selected_body=index(self.selected_anchor_body_indices),
+                axes=torch.tensor(self.rotor_thrust_axes_local, device=device, dtype=dtype),
+                coefficients=torch.tensor(self.rotor_reaction_coefficients, device=device, dtype=dtype),
+                rotor=index(self.rotor_body_indices).to(torch.int32),
+                vectoring=index(self.vectoring_joint_indices).to(torch.int32),
+            )
+        return self._constant_cache[key]
+
     def gather_state(self, *, robot: Any, object_asset: Any) -> Order9TensorIsaacState:
         body_pose = _torch(robot.data.body_pose_w)
         body_linear = _torch(robot.data.body_lin_vel_w)
         body_angular = _torch(robot.data.body_ang_vel_w)
         joint_position = _torch(robot.data.joint_pos)
         joint_velocity = _torch(robot.data.joint_vel)
-        module_indices = torch.tensor(
-            self.module_body_indices, device=body_pose.device, dtype=torch.long
-        )
-        local_indices = torch.tensor(
-            self.local_joint_indices,
-            device=joint_position.device,
-            dtype=torch.long,
-        )
-        local_present = local_indices >= 0
-        safe_local_indices = local_indices.clamp_min(0)
+        constants = self._constants(body_pose.device, body_pose.dtype)
+        module_indices = constants["module"]
+        joint_constants = self._constants(joint_position.device, joint_position.dtype)
+        local_present = joint_constants["local_present"]
+        safe_local_indices = joint_constants["local"]
         module_pose = body_pose.index_select(1, module_indices)
         module_twist = torch.cat(
             (
@@ -220,8 +237,8 @@ class Order9TensorIsaacIO:
         )
         local_q = joint_position[:, safe_local_indices]
         local_qdot = joint_velocity[:, safe_local_indices]
-        local_q = torch.where(local_present.unsqueeze(0), local_q, 0.0)
-        local_qdot = torch.where(local_present.unsqueeze(0), local_qdot, 0.0)
+        local_q = torch.where(local_present, local_q, 0.0)
+        local_qdot = torch.where(local_present, local_qdot, 0.0)
         root_pose = _torch(robot.data.root_pose_w)
         root_twist = torch.cat(
             (
@@ -230,9 +247,9 @@ class Order9TensorIsaacIO:
             ),
             dim=-1,
         )
-        object_pose_source = getattr(
-            object_asset.data, "root_com_pose_w", object_asset.data.root_pose_w
-        )
+        object_pose_source = getattr(object_asset.data, "root_com_pose_w", None)
+        if object_pose_source is None:
+            object_pose_source = object_asset.data.root_pose_w
         object_velocity_source = getattr(
             object_asset.data, "root_com_vel_w", None
         )
@@ -303,23 +320,11 @@ class Order9TensorIsaacIO:
             3,
         ):
             raise ValueError("Order9 robot body velocity shape differs")
-        # Convert the object's filter order to robot body order once per call.
-        body_by_filter = torch.tensor(
-            [self.object_filter_body_names.index(name) for name in self.robot_body_names],
-            device=matrix.device,
-            dtype=torch.long,
-        )
+        constants = self._constants(matrix.device, matrix.dtype)
+        body_by_filter = constants["body_by_filter"]
         object_by_body = matrix.index_select(1, body_by_filter)
-        selected_filter = torch.tensor(
-            self.selected_anchor_filter_indices,
-            device=matrix.device,
-            dtype=torch.long,
-        )
-        selected_body = torch.tensor(
-            self.selected_anchor_body_indices,
-            device=matrix.device,
-            dtype=torch.long,
-        )
+        selected_filter = constants["selected_filter"]
+        selected_body = constants["selected_body"]
         selected_forces = -matrix.index_select(1, selected_filter)
         selected_twist = torch.cat(
             (
@@ -407,11 +412,7 @@ class Order9TensorIsaacIO:
             raise ValueError("Order9 contact-frame evidence is non-finite")
         device = contact_frame_pose_world.device
         dtype = contact_frame_pose_world.dtype
-        selected_filter = torch.tensor(
-            self.selected_anchor_filter_indices,
-            device=device,
-            dtype=torch.long,
-        )
+        selected_filter = self._constants(device, dtype)["selected_filter"]
         origins = contact_frame_pose_world[..., :3]
         normal_world = _aggregate_selected_patch_wrenches(
             forces_world=(
@@ -467,27 +468,20 @@ class Order9TensorIsaacIO:
         if rotor_count != len(self.rotor_body_indices):
             raise ValueError("Order9 allocation rotor count differs from Isaac layout")
         device, dtype = thrust.device, thrust.dtype
-        axes = torch.tensor(
-            self.rotor_thrust_axes_local, device=device, dtype=dtype
-        )
-        coefficients = torch.tensor(
-            self.rotor_reaction_coefficients, device=device, dtype=dtype
-        )
+        constants = self._constants(device, dtype)
+        axes = constants["axes"]
+        coefficients = constants["coefficients"]
         forces = thrust.unsqueeze(-1) * axes.unsqueeze(0)
         torques = thrust.unsqueeze(-1) * coefficients.reshape(1, -1, 1) * axes.unsqueeze(0)
         robot.permanent_wrench_composer.set_forces_and_torques_index(
             forces=forces,
             torques=torques,
-            body_ids=torch.tensor(
-                self.rotor_body_indices, device=device, dtype=torch.int32
-            ),
+            body_ids=constants["rotor"],
             is_global=False,
         )
         robot.set_joint_position_target_index(
             target=allocation.vectoring_joint_targets_rad,
-            joint_ids=torch.tensor(
-                self.vectoring_joint_indices, device=device, dtype=torch.int32
-            ),
+            joint_ids=constants["vectoring"],
         )
         self._apply_policy_joints(
             robot=robot,
@@ -510,36 +504,25 @@ class Order9TensorIsaacIO:
             raise ValueError("Order9 policy command module order differs")
         if not command.local_joint_ids:
             return
-        local_lookup = {
-            joint_id: index for index, joint_id in enumerate(self.local_joint_ids)
-        }
-        indices: list[int] = []
-        command_slots: list[tuple[int, int]] = []
-        for module_index, module_id in enumerate(self.module_ids):
-            for command_index, joint_id in enumerate(command.local_joint_ids):
-                if joint_id not in local_lookup:
-                    raise ValueError("Order9 policy command references unknown local joint")
-                indices.append(self.local_joint_indices[module_index][local_lookup[joint_id]])
-                command_slots.append((module_index, command_index))
-        q = torch.stack(
-            [command.joint_position_targets_rad[:, module, slot] for module, slot in command_slots],
-            dim=1,
-        ).to(device=device, dtype=dtype)
-        qdot = torch.stack(
-            [command.joint_velocity_targets_radps[:, module, slot] for module, slot in command_slots],
-            dim=1,
-        ).to(device=device, dtype=dtype)
-        effort = torch.stack(
-            [command.joint_torque_bias_nm[:, module, slot] for module, slot in command_slots],
-            dim=1,
-        ).to(device=device, dtype=dtype)
-        mask = torch.stack(
-            [command.joint_target_mask[:, module, slot] for module, slot in command_slots],
-            dim=1,
-        )
-        if mask.shape != (batch_size, len(indices)) or not bool(mask.all()):
+        key = (tuple(command.local_joint_ids), torch.device(device))
+        if key not in self._command_index_cache:
+            local_lookup = {joint_id: i for i, joint_id in enumerate(self.local_joint_ids)}
+            if any(joint_id not in local_lookup for joint_id in command.local_joint_ids):
+                raise ValueError("Order9 policy command references unknown local joint")
+            indices = [self.local_joint_indices[module][local_lookup[joint_id]]
+                       for module in range(len(self.module_ids)) for joint_id in command.local_joint_ids]
+            self._command_index_cache[key] = torch.tensor(indices, device=device, dtype=torch.int32)
+        joint_ids = self._command_index_cache[key]
+        expected_shape = (batch_size, len(self.module_ids), len(command.local_joint_ids))
+        values = (command.joint_position_targets_rad, command.joint_velocity_targets_radps,
+                  command.joint_torque_bias_nm, command.joint_target_mask)
+        if any(value.shape != expected_shape for value in values):
+            raise ValueError("Order9 policy joint target shape differs")
+        q, qdot, effort = [value.reshape(batch_size, -1).to(device=device, dtype=dtype)
+                          for value in values[:3]]
+        mask = command.joint_target_mask.reshape(batch_size, -1)
+        if not bool(mask.all()):
             raise ValueError("Order9 policy joint target mask is incomplete")
-        joint_ids = torch.tensor(indices, device=device, dtype=torch.int32)
         robot.set_joint_position_target_index(target=q, joint_ids=joint_ids)
         robot.set_joint_velocity_target_index(target=qdot, joint_ids=joint_ids)
         robot.set_joint_effort_target_index(target=effort, joint_ids=joint_ids)
@@ -561,29 +544,34 @@ def _aggregate_selected_patch_wrenches(
     batch_size, selected_count, _ = reference_origins_world.shape
     selected_counts = counts.index_select(1, selected_filter_indices).reshape(-1).long()
     selected_starts = starts.index_select(1, selected_filter_indices).reshape(-1).long()
-    if bool((selected_counts < 0).any()) or bool((selected_starts < 0).any()):
+    invalid_offsets, invalid_range, patch_count = torch.stack((
+        ((selected_counts < 0) | (selected_starts < 0)).any().long(),
+        ((selected_counts > 0) & (selected_starts + selected_counts > forces_world.shape[0])).any().long(),
+        selected_counts.sum(),
+    )).tolist()
+    if invalid_offsets:
         raise ValueError("Order9 raw contact offsets must be non-negative")
+    if invalid_range:
+        raise ValueError("Order9 raw contact buffer range is invalid")
     pair_count = batch_size * selected_count
-    pair_ids = torch.repeat_interleave(
-        torch.arange(pair_count, device=counts.device, dtype=torch.long),
-        selected_counts,
-    )
     output = torch.zeros(
         (pair_count, 6), device=forces_world.device, dtype=forces_world.dtype
     )
-    if pair_ids.numel() == 0:
+    if patch_count == 0:
         return output.reshape(batch_size, selected_count, 6)
-    repeated_starts = torch.repeat_interleave(selected_starts, selected_counts)
+    pair_ids = torch.repeat_interleave(
+        torch.arange(pair_count, device=counts.device, dtype=torch.long),
+        selected_counts, output_size=patch_count,
+    )
+    repeated_starts = torch.repeat_interleave(selected_starts, selected_counts, output_size=patch_count)
     repeated_offsets = torch.repeat_interleave(
         torch.cumsum(selected_counts, dim=0) - selected_counts,
-        selected_counts,
+        selected_counts, output_size=patch_count,
     )
     patch_indices = repeated_starts + (
         torch.arange(pair_ids.numel(), device=counts.device, dtype=torch.long)
         - repeated_offsets
     )
-    if bool((patch_indices >= forces_world.shape[0]).any()):
-        raise ValueError("Order9 raw contact buffer range is invalid")
     force = forces_world.index_select(0, patch_indices)
     point = points_world.index_select(0, patch_indices)
     if not bool(torch.isfinite(force).all()) or not bool(torch.isfinite(point).all()):
