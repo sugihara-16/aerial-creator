@@ -10,7 +10,10 @@ from dataclasses import replace
 from types import SimpleNamespace
 import time
 
-from amsrr.feasibility.articulated_reachability import ArticulatedContactIKSolver
+from amsrr.feasibility.articulated_reachability import (
+    ArticulatedContactIKSolver, ArticulatedIKConfig,
+    _global_joint_limits, _joint_limit_branch_seeds, ordered_global_dock_joint_ids,
+)
 from amsrr.training.order9_articulated_teacher import (
     Order9ArticulatedTrajectoryTeacher,
     Order9ArticulatedTeacherConfig,
@@ -29,6 +32,7 @@ from amsrr.training.order9_r1_nominal_retreat import (
 )
 from amsrr.training.order9_teacher import compile_high_level_context
 from amsrr.schemas.runtime import TaskProgressState
+from amsrr.schemas.common import SchemaValidationError
 from amsrr.utils.hashing import stable_hash
 
 
@@ -157,8 +161,98 @@ def complete_request_phases(grasp_phases, task):
     return vertical_clearance_retreat(phases)
 
 
+class _ContactGoalInitializationError(RuntimeError):
+    """The selected group's initial contact IK exhausted its iteration budget."""
+
+
+class _PregraspGoalInitializationError(ValueError):
+    """The nominal open-grasp intermediate target has no IK solution."""
+
+
+def _plan_with_pregrasp_clearance(context, request, **kwargs):
+    """Shorten only an unreachable open-grasp intermediate target, finitely.
+
+    Every candidate still traverses the unchanged full collision/path checks.
+    This neither changes the selected contact nor relaxes any safety margin.
+    """
+    started = time.monotonic()
+    deadline = kwargs["deadline_s"]
+    nominal = Order9ArticulatedTeacherConfig().pregrasp_clearance_m
+    failure = None
+    for index in range(3):
+        remaining = deadline - (time.monotonic() - started)
+        if remaining <= 0:
+            raise TimeoutError("request geometric planning deadline")
+        attempt = dict(kwargs, deadline_s=remaining)
+        if index:
+            attempt["pregrasp_clearance_m"] = nominal / (2 ** index)
+        try:
+            result = _plan_request_geometry(context, request, **attempt)
+        except _PregraspGoalInitializationError as error:
+            failure = error
+            continue
+        if index:
+            result.provenance["pregrasp_clearance_retry"] = dict(
+                version="bounded_pregrasp_clearance_v1", attempts=index + 1,
+                nominal_clearance_m=nominal, accepted_clearance_m=attempt["pregrasp_clearance_m"],
+                maximum_attempts=3, collision_margin_unchanged=True,
+            )
+        return result
+    raise failure
+
+
 def plan_request_geometry(
     context, request, *, joint_seed=None, base_seed=None, deadline_s=480.0
+):
+    """Plan one selected binding, with bounded retries of its contact posture."""
+    started = time.monotonic()
+    try:
+        return _plan_with_pregrasp_clearance(
+            context, request, joint_seed=joint_seed, base_seed=base_seed,
+            deadline_s=deadline_s,
+        )
+    except _ContactGoalInitializationError as error:
+        failure = error
+    morphology = context.scene.morphology_graph
+    physical = context.physical_model
+    joint_ids = ordered_global_dock_joint_ids(morphology, physical)
+    seeds = _joint_limit_branch_seeds(
+        _global_joint_limits(morphology, physical, joint_ids)
+    )
+    measured_base = next(
+        state.pose_world for state in context.scene.runtime_observation.module_states
+        if state.module_id == morphology.base_module_id
+    )
+    config = ArticulatedIKConfig()
+    retry_config = replace(
+        config, maximum_iterations=4 * config.maximum_iterations, preserve_base_tilt=True
+    )
+    for index, seed in enumerate(seeds):
+        remaining = deadline_s - (time.monotonic() - started)
+        if remaining <= 0.0:
+            raise TimeoutError("request geometric planning deadline")
+        try:
+            # The same seed reaches contact IK AND configuration-space planning.
+            result = _plan_with_pregrasp_clearance(
+                context, request, joint_seed=seed, base_seed=measured_base,
+                deadline_s=remaining, initial_ik_config=retry_config,
+            )
+        except (_ContactGoalInitializationError, ValueError) as error:
+            failure = error
+            continue
+        result.provenance["planning_seconds"] = time.monotonic() - started
+        result.provenance["contact_goal_initialization_retry"] = dict(
+            version="bounded_flying_contact_goal_v2", branch_index=index,
+            maximum_branches=len(seeds), maximum_iterations=retry_config.maximum_iterations,
+            joint_seed_hash=stable_hash(seed), base_seed_hash=stable_hash(measured_base),
+        )
+        return result
+    raise ValueError(str(failure)) from failure
+
+
+def _plan_request_geometry(
+    context, request, *, joint_seed=None, base_seed=None, deadline_s=480.0,
+    initial_ik_config=None, pregrasp_clearance_m=None,
 ):
     context.catalog.resolve(request)
     if context.execution_state.plan_id is not None or request.transition_id is not None:
@@ -188,16 +282,26 @@ def plan_request_geometry(
                 and kwargs.get("initial_base_pose_world") is None
             ):
                 kwargs["initial_base_pose_world"] = base_seed
-            return super().solve(**kwargs)
+            solution = super().solve(**kwargs)
+            if not solution.feasible:
+                raise _ContactGoalInitializationError(
+                    "selected contact goal IK did not converge: "
+                    f"position={solution.maximum_position_error_m:.6g},"
+                    f"normal={solution.maximum_normal_error_rad:.6g}"
+                )
+            return solution
 
+    teacher_config = Order9ArticulatedTeacherConfig(
+        preferred_candidate_group_id=request.contact_group_id,
+        maximum_candidate_group_attempts=1,
+        collision_margin_m=0.005,
+    )
+    if pregrasp_clearance_m is not None:
+        teacher_config = replace(teacher_config, pregrasp_clearance_m=pregrasp_clearance_m)
     planner = Order9ArticulatedTrajectoryTeacher(
         physical,
-        config=Order9ArticulatedTeacherConfig(
-            preferred_candidate_group_id=request.contact_group_id,
-            maximum_candidate_group_attempts=1,
-            collision_margin_m=0.005,
-        ),
-        ik_solver=CompletePoseSeedIK(physical),
+        config=teacher_config,
+        ik_solver=CompletePoseSeedIK(physical, config=initial_ik_config),
         collision_object=build_order9_c3_posture_collision_object(task),
     )
     windows = []
@@ -209,12 +313,17 @@ def plan_request_geometry(
             if time.monotonic() - start > deadline_s:
                 raise TimeoutError("request geometric planning deadline")
             current = replace(scene, runtime_observation=observation)
-            plan = planner.plan(
-                current,
-                initial_object_poses_world=observed,
-                contact_goal_joint_seed_positions_rad=joint_seed,
-                configuration_goal_joint_seed_positions_rad=joint_seed,
-            )
+            try:
+                plan = planner.plan(
+                    current,
+                    initial_object_poses_world=observed,
+                    contact_goal_joint_seed_positions_rad=joint_seed,
+                    configuration_goal_joint_seed_positions_rad=joint_seed,
+                )
+            except SchemaValidationError as error:
+                if "could not resolve its collision-clear pregrasp configuration" not in str(error):
+                    raise
+                raise _PregraspGoalInitializationError(str(error)) from error
             if plan.candidate_group_id != request.contact_group_id:
                 raise ValueError("planner replaced selected group")
             windows.append(Order9C3NominalWindow(len(windows), phase, elapsed, plan))

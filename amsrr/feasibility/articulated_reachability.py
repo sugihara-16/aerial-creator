@@ -97,6 +97,7 @@ class ArticulatedReachabilityConfig:
 @dataclass(frozen=True)
 class ArticulatedIKConfig:
     maximum_iterations: int = 60
+    preserve_base_tilt: bool = False
     damping: float = 2.0e-3
     position_weight: float = 1.0
     normal_weight: float = 0.35
@@ -110,6 +111,8 @@ class ArticulatedIKConfig:
     minimum_normalized_joint_limit_reserve: float = 0.0
 
     def __post_init__(self) -> None:
+        if not isinstance(self.preserve_base_tilt, bool):
+            raise ValueError("preserve_base_tilt must be boolean")
         if self.maximum_iterations < 1:
             raise ValueError("maximum_iterations must be positive")
         for name in (
@@ -449,6 +452,10 @@ class ArticulatedContactIKSolver:
                 )
 
             matrix = np.asarray(rows, dtype=float)
+            if self.config.preserve_base_tilt:
+                # Base increments are world-frame rotations. Keep the measured
+                # tilt and solve only world yaw for a flying approach posture.
+                matrix[:, len(ordered_ids):len(ordered_ids) + 2] = 0.0
             residual = np.asarray(residuals, dtype=float)
             variable_count = matrix.shape[1]
             normal = matrix.T @ matrix

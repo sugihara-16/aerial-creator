@@ -196,6 +196,42 @@ def test_empty_catalog_does_not_invent_fallback(request_scene):
     assert RequestHighLevelPolicy().rank(context) == []
 
 
+@pytest.mark.parametrize(
+    "mode,normal_dot,friction,admitted",
+    [
+        ("grasp", -1.0, 0.6, True),
+        ("grasp", 1.0, 0.6, False),
+        ("grasp", -1.0, 0.01, False),
+        ("support", 1.0, 0.6, True),
+        ("push", 1.0, 0.6, True),
+    ],
+)
+def test_catalog_shares_planner_assignment_prerequisites(
+    request_scene, mode, normal_dot, friction, admitted
+):
+    from amsrr.schemas.task_spec import ContactMode
+
+    context = decision(request_scene)
+    selected = context.catalog.entries[0]
+    candidates = context.scene.contact_candidate_set
+    group = next(
+        g for g in candidates.group_proposals
+        if g.group_id == selected.request.contact_group_id
+    )
+    candidates.group_proposals = [group]
+    by_id = {c.candidate_id: c for c in candidates.candidates}
+    assert len(group.candidate_ids) == 2
+    for i, cid in enumerate(group.candidate_ids):
+        candidate = by_id[cid]
+        candidate.contact_mode = ContactMode(mode)
+        candidate.normal_world = (1.0 if i == 0 else normal_dot, 0.0, 0.0)
+        candidate.friction = friction
+    cache_before = deepcopy(candidates.assignment_feasibility_cache)
+    entries = RequestCatalogBuilder()._entries(context)
+    assert bool(entries) is admitted
+    assert candidates.assignment_feasibility_cache == cache_before
+
+
 def test_request_ranking_backward_and_strict_checkpoint(request_scene):
     context = decision(request_scene)
     policy = RequestHighLevelPolicy()
@@ -333,3 +369,68 @@ def test_active_contact_point_identity_survives_object_motion_but_not_resampling
     )
     with pytest.raises(SchemaValidationError, match="surface identity"):
         decision(request_scene)
+
+
+@pytest.mark.parametrize('yaw', [0.0, 0.73])
+@pytest.mark.parametrize('local_point,local_normal,blocked', [
+    ((0., 0., 0.99), (0., 0., -1.), True),
+    ((0., 0., 1.0), (0., 0., -1.), True),
+    ((0., 0., 1.0), (0., 0., 1.), False),
+    ((0., 0., 1.01), (0., 0., -1.), False),
+    ((1.01, 0., 0.99), (0., 0., -1.), False),
+    ((1., 0., 1.), (0., 0., -1.), False),
+])
+def test_contact_occlusion_respects_solid_pose_boundary_and_overhang(
+    request_scene, yaw, local_point, local_normal, blocked,
+):
+    import math
+    from amsrr.geometry.pose_math import transform_from_pose
+    from amsrr.policies.high_level_requests import _occluded_contact_points
+    from amsrr.schemas.task_spec import GeometrySpec, GeometryType, CollisionModel, ObstacleSpec
+    context = decision(request_scene)
+    scene = context.task_spec.scene
+    scene.objects = []
+    scene.environment.support_surfaces = []
+    pose = (3., -2., 4., 0., 0., math.sin(yaw / 2), math.cos(yaw / 2))
+    scene.geometry_library.append(GeometrySpec('occluder', GeometryType.BOX,
+        {'size_m': [1., 2., 2.]}, None, CollisionModel.PRIMITIVE, scale=(2., 1., 1.)))
+    scene.environment.obstacles = [ObstacleSpec('other_body', 'occluder', pose)]
+    transform = transform_from_pose(pose)
+    candidate = context.scene.contact_candidate_set.candidates[0]
+    point = tuple(pose[i] + sum(transform.rotation[i][j] * local_point[j] for j in range(3)) for i in range(3))
+    candidate.contact_pose_world = (*point, 0., 0., 0., 1.)
+    candidate.normal_world = tuple(sum(transform.rotation[i][j] * local_normal[j] for j in range(3)) for i in range(3))
+    assert (candidate.candidate_id in _occluded_contact_points(context)) == blocked
+    # The intended contact partner must never occlude its own surface.
+    candidate.target_entity_id = 'other_body'
+    assert candidate.candidate_id not in _occluded_contact_points(context)
+
+
+def test_catalog_excludes_new_contacts_inside_other_obstacle(request_scene):
+    from amsrr.schemas.task_spec import GeometrySpec, GeometryType, CollisionModel, ObstacleSpec
+    context = decision(request_scene)
+    selected = context.catalog.entries[0]
+    candidate = next(c for c in context.scene.contact_candidate_set.candidates if c.candidate_id in selected.candidate_ids)
+    task = request_scene[1]
+    task.scene.geometry_library.append(GeometrySpec('blocker', GeometryType.BOX,
+        {'size_m': [.02, .02, .02]}, None, CollisionModel.PRIMITIVE))
+    task.scene.environment.obstacles.append(ObstacleSpec('blocker', 'blocker', candidate.contact_pose_world))
+    changed = decision(request_scene)
+    assert all(candidate.candidate_id not in entry.candidate_ids for entry in changed.catalog.entries)
+
+
+def test_contact_occlusion_uses_current_other_object_pose(request_scene):
+    from amsrr.policies.high_level_requests import _occluded_contact_points
+    context = decision(request_scene)
+    candidate = context.scene.contact_candidate_set.candidates[0]
+    other = deepcopy(context.task_spec.scene.objects[0])
+    other.object_id = 'moving_occluder'
+    other.pose_world = candidate.contact_pose_world
+    context.task_spec.scene.objects.append(other)
+    observation = deepcopy(context.observation.object_states[0])
+    observation.object_id = other.object_id
+    observation.pose_world = candidate.contact_pose_world
+    context.observation.object_states.append(observation)
+    assert candidate.candidate_id in _occluded_contact_points(context)
+    observation.pose_world = (other.pose_world[0] + 10., *other.pose_world[1:])
+    assert candidate.candidate_id not in _occluded_contact_points(context)

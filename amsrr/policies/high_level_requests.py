@@ -7,6 +7,8 @@ from copy import deepcopy
 import math
 
 from amsrr.geometry.pose_math import compose_pose, inverse_pose, transform_from_pose
+from amsrr.geometry.convex_clearance import OrientedBox
+from amsrr.policies.assignment_feasibility import evaluate_selected_assignment_feasibility
 from amsrr.policies.high_level_policy_base import HighLevelPolicyContext
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.high_level import (
@@ -21,10 +23,62 @@ from amsrr.schemas.high_level import (
 )
 from amsrr.schemas.irg import IRGEdgeType, IRGNodeType, PhaseType
 from amsrr.schemas.physical_model import PhysicalModel
-from amsrr.schemas.policies import ControllerStatus
+from amsrr.schemas.policies import ContactAssignment, ControllerStatus
 from amsrr.schemas.runtime import RuntimeObservation, TaskProgressState
 from amsrr.schemas.task_spec import TaskSpec
 from amsrr.utils.hashing import stable_hash
+
+
+REQUEST_ADMISSION_CONTRACT = "selected_assignment_and_contact_occlusion_v2"
+
+
+def _occluded_contact_points(context: "HighLevelDecisionContext") -> set[int]:
+    """Reject contact points occupied by another observed box solid.
+
+    This is a necessary point-accessibility test, not a gripper collision or IK
+    certificate. Other geometry types still require the downstream checker.
+    No clearance margin is invented here: only strict interiors, or a surface
+    whose outward contact normal immediately enters the other solid, are blocked.
+    """
+    scene = context.task_spec.scene
+    geometries = {g.geometry_id: g for g in scene.geometry_library}
+    observed = {o.object_id: o.pose_world for o in context.observation.object_states}
+    solids = []
+    for entity in [*scene.objects, *scene.environment.support_surfaces,
+                   *scene.environment.obstacles]:
+        identifier = getattr(entity, "object_id", getattr(
+            entity, "surface_id", getattr(entity, "obstacle_id", None)))
+        geometry = geometries.get(entity.geometry_id)
+        # Some task surfaces are semantic references without supplied solids.
+        # Their geometry must be checked downstream, not guessed here.
+        if geometry is None or geometry.geometry_type.value != "box":
+            continue
+        if getattr(entity, "movable", False) and identifier not in observed:
+            continue
+        half = tuple(0.5 * float(size) * float(scale) for size, scale in zip(
+            geometry.primitive_params["size_m"], geometry.scale))
+        solids.append((identifier, OrientedBox.from_pose_and_local_bounds(
+            observed.get(identifier, entity.pose_world), tuple(-x for x in half), half)))
+    blocked = set()
+    tolerance = 1.0e-12  # round-off only, not a physical collision margin
+    for candidate in context.scene.contact_candidate_set.candidates:
+        for identifier, box in solids:
+            if identifier == candidate.target_entity_id:
+                continue
+            delta = tuple(candidate.contact_pose_world[i] - box.center[i] for i in range(3))
+            local = tuple(sum(a * b for a, b in zip(delta, axis)) for axis in box.axes)
+            if any(abs(x) > h + tolerance for x, h in zip(local, box.half_extents)):
+                continue
+            boundary = [i for i, (x, h) in enumerate(zip(local, box.half_extents))
+                        if abs(x) >= h - tolerance]
+            if not boundary or all(
+                math.copysign(1.0, local[i]) * sum(
+                    a * b for a, b in zip(candidate.normal_world, box.axes[i])) < -tolerance
+                for i in boundary
+            ):
+                blocked.add(candidate.candidate_id)
+                break
+    return blocked
 
 
 def contact_surface_hash(candidate, observation) -> str:
@@ -266,6 +320,11 @@ class RequestCatalogBuilder:
             )
         ]
         entries = []
+        assignment_feasible: dict[str, bool] = {}
+        # Existing bindings must keep their temporal requests even if a later
+        # collision occurs; execution guards/safety own that response. Admission
+        # checks whether a new contact can be acquired in the current scene.
+        occluded = set() if state.contact_bindings else _occluded_contact_points(context)
         for edge in [None, *transitions]:
             phase_id = state.phase_id if edge is None else edge.dst_id
             if phase_id not in phases:
@@ -306,6 +365,7 @@ class RequestCatalogBuilder:
                     ids = group.candidate_ids
                     if (
                         not ids
+                        or any(cid in occluded for cid in ids)
                         or len(ids) != len(set(ids))
                         or group.group_violation_codes
                         or not math.isfinite(group.group_score)
@@ -329,6 +389,27 @@ class RequestCatalogBuilder:
                     if len({by_id[cid][1].anchor_id for cid in ids}) != len(ids):
                         continue
                     if not self._covers_slots(irg, [by_id[cid][1] for cid in ids]):
+                        continue
+                    # Use the same cheap prerequisites as the downstream planner.
+                    # This checks each proposed group once, without IK, subset
+                    # enumeration, or writing teacher/planner caches.
+                    if group.group_id not in assignment_feasible:
+                        assignments = [
+                            ContactAssignment(
+                                slot_id=by_id[cid][1].slot_id,
+                                anchor_id=by_id[cid][1].anchor_id,
+                                candidate_id=cid,
+                                contact_mode=by_id[cid][1].contact_mode,
+                                schedule_state="maintain",
+                            )
+                            for cid in ids
+                        ]
+                        assignment_feasible[group.group_id] = (
+                            evaluate_selected_assignment_feasibility(
+                                assignments, candidate_set, update_cache=False
+                            ).feasible
+                        )
+                    if not assignment_feasible[group.group_id]:
                         continue
                 entries.append(
                     RequestCatalogEntry(
