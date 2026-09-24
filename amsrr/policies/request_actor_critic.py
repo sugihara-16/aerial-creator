@@ -24,6 +24,7 @@ from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.high_level import HIGH_LEVEL_REQUEST_CONTRACT
 
 ACTOR_CRITIC_VERSION = "causal_event_request_actor_critic_v1"
+MORPHOLOGY_ACTOR_CRITIC_VERSION = "causal_morphology_event_request_actor_critic_v2"
 SAMPLING_ORDER_VERSION = "semantic_request_sampling_order_v1"
 
 
@@ -53,9 +54,14 @@ def sample_request_index(entries, scores, *, generator=None):
 
 
 class RequestActorCritic(nn.Module):
-    def __init__(self, config=None):
+    def __init__(self, config=None, *, morphology_aware=False):
         super().__init__()
         self.ranker = RequestHighLevelPolicy(config or RequestHighLevelPolicyConfig())
+        self.morphology_aware = morphology_aware
+        self.version = MORPHOLOGY_ACTOR_CRITIC_VERSION if morphology_aware else ACTOR_CRITIC_VERSION
+        if morphology_aware:
+            old = self.ranker.contact_member[0]
+            self.ranker.contact_member[0] = nn.Linear(old.in_features + self.ranker.config.d_model, old.out_features)
         if self.ranker.config.selection_scope != "requests":
             raise ValueError("event policy requires full request scope")
         width = len(REQUEST_FEATURE_NAMES) + self.ranker.config.d_model
@@ -100,6 +106,11 @@ class RequestActorCritic(nn.Module):
         )
         if not bool(mask.any()):
             raise ValueError("no eligible request")
+        extra = {}
+        if self.morphology_aware:
+            from amsrr.policies.request_morphology_features import canonical_morphology_batch, candidate_owner_indices
+            graph = canonical_morphology_batch(graph)
+            extra["owners"] = candidate_owner_indices(context, graph)
         return dict(
             features=features.detach().cpu(),
             mask=mask,
@@ -107,13 +118,24 @@ class RequestActorCritic(nn.Module):
             membership=membership,
             initial=torch.tensor(initial),
             graph=graph,
+            **extra,
         )
 
     def forward_encoded(
-        self, features, morphology, mask, *, candidates, membership, initial
+        self, features, morphology, mask, *, candidates, membership, initial, owners=None
     ):
         r = self.ranker
-        member = r.contact_member((candidates - r.contact_mean) / r.contact_scale)
+        graph_encoding = r.morphology_encoder(morphology)
+        local = (candidates - r.contact_mean) / r.contact_scale
+        if self.morphology_aware:
+            if owners is None or owners.shape != candidates.shape[:2]:
+                raise ValueError("morphology-aware requests require candidate owners")
+            nodes = graph_encoding.node_embeddings
+            if bool((owners < 0).any()) or bool((owners >= nodes.shape[1]).any()):
+                raise ValueError("candidate owner outside graph")
+            owned = nodes.gather(1, owners[:, :, None].expand(-1, -1, nodes.shape[-1]))
+            local = torch.cat((local, owned), -1)
+        member = r.contact_member(local)
         weights = membership.to(member.dtype)
         count = weights.sum(-1, keepdim=True)
         group = torch.cat(
@@ -124,8 +146,8 @@ class RequestActorCritic(nn.Module):
             ),
             dim=-1,
         )
+        graph = graph_encoding.graph_embeddings
         contact = r.contact_head(group).squeeze(-1)
-        graph = r.morphology_encoder(morphology).graph_embeddings
         normalized = (features - r.feature_mean) / r.feature_scale
         temporal = r.request_head(
             torch.cat(
@@ -152,6 +174,7 @@ class RequestActorCritic(nn.Module):
             candidates=encoded["candidates"][None].to(device),
             membership=encoded["membership"][None].to(device),
             initial=encoded["initial"].reshape(1).to(device),
+            owners=None if "owners" not in encoded else encoded["owners"][None].to(device),
         )
 
     @torch.no_grad()
@@ -194,7 +217,7 @@ class RequestActorCritic(nn.Module):
 
     def checkpoint(self):
         return dict(
-            version=ACTOR_CRITIC_VERSION,
+            version=self.version,
             contract_version=HIGH_LEVEL_REQUEST_CONTRACT,
             feature_version=REQUEST_FEATURE_VERSION,
             config=self.ranker.config.to_dict(),
@@ -206,12 +229,13 @@ class RequestActorCritic(nn.Module):
     @classmethod
     def from_checkpoint(cls, checkpoint):
         if (
-            checkpoint.get("version") != ACTOR_CRITIC_VERSION
+            checkpoint.get("version") not in {ACTOR_CRITIC_VERSION, MORPHOLOGY_ACTOR_CRITIC_VERSION}
             or checkpoint.get("contract_version") != HIGH_LEVEL_REQUEST_CONTRACT
             or checkpoint.get("feature_version") != REQUEST_FEATURE_VERSION
         ):
             raise SchemaValidationError("incompatible event actor/critic checkpoint")
-        model = cls(RequestHighLevelPolicyConfig.from_dict(checkpoint["config"]))
+        model = cls(RequestHighLevelPolicyConfig.from_dict(checkpoint["config"]),
+                    morphology_aware=checkpoint["version"] == MORPHOLOGY_ACTOR_CRITIC_VERSION)
         model.load_state_dict(checkpoint["state_dict"], strict=True)
         if any(not torch.isfinite(v).all() for v in model.state_dict().values()):
             raise ValueError("nonfinite event checkpoint")
