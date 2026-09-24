@@ -141,17 +141,154 @@ Sections 20.9、22.9、24.5.8と日付付きの過去のR1記録は、各時点�
 
 実行時はπ_Hの要求と、物体姿勢・速度、接触点の幾何、モータ負荷、QP状態に基づくguardで
 段階を進める。正確な接触レンチの推定・追従は仮定せず、π_Lの補正は使用しない。
+接触維持の相対速度は、観測した機体側接触点を物体座標へ変換し、前回観測との差を
+実際の経過時間で割って求める（`observed_contact_point_difference_v1`）。目標姿勢や
+接触力は使わない。初回・reset・接触binding変更直後は速度未確定としてguardを通さない。
+同じ接触点へ移したtwistによる速度も診断用に保存するが、異なる重心間の並進速度差で
+代用しない。接触維持の速度上限50 mm/sと既存のdwell・幾何・負荷条件は維持する。
 入口は`scripts/train_request_imitation.py`の`warmup`／`ppo`と
 `scripts/run_request_policy.py`である。実行条件と成果物は
 `artifacts/p4_full/order9/request_imitation/20260916_ppo_ready/README.md`へ記録する。
 
-このprofileの模倣warmupは2026-09-17に完了した。訓練は初回99/99、継続・遷移が
+2026-09-23のユーザー承認済みPPO比較では、1更新28エピソードを収集し、接触選択と
+継続・遷移の方策損失およびentropy項を分岐ごとに平均して等重みで合成する。各分岐の
+収集時方策からのKLを独立に検査し、どちらかが0.05を超えるoptimizer stepは共有encoder・
+両head・critic・optimizer状態ごと取り消し、直前の合格stepで更新を終了する。
+学習率0.001、entropy係数0.02、報酬、時間discount、advantage正規化、critic損失、
+観測・要求・guard・制御器の契約は維持する。これは既存のPPO入口の明示的な比較設定であり、
+旧記録の学習条件を変更しない。訓練条件で候補を選定後、学習から分離した検証20条件で
+固定モデルを比較する。改善の成否は実行結果で判定する。
+
+2026-09-23の固定検証20条件の改善実験では、明示的な後継profile
+`causal_morphology_event_request_actor_critic_v2`を用いる。候補ごとの既存幾何特徴と
+その接触anchorが属するmoduleのGNN表現を結合し、順序に依存しない集合表現から接触群を
+採点する。GNNは遷移側と共有する。worldのXY原点・yawは機体baseを基準に正規化し、
+module/candidateのIDは対応付けだけに使う。固定の機体ID・物体ID・候補番号を分類する
+出力層や実行時の全候補IK探索は設けない。π_Hの要求出力契約は変更しない。
+
+このprofileのBCは、訓練観測だけから計算するIK残差等の回帰を補助目的に加える。
+補助headとIK計算はactorの実行経路に含めない。初回教師ラベルは有効候補内だけで
+label smoothing 0.05を行う。遷移BCでは接触表現と共有GNNを凍結してrequest headを学習する。
+PPOは`timed_mc_v1`を明示指定し、物理時刻で割り引いたMonte Carlo returnを標準化して
+actor信号とする。価値headはactor/GNNを凍結して独立に80epoch学習する。
+Adam状態をcheckpointとSHAで対応付けて更新間に保存・再開する。actorは両headを更新し、
+前記の学習率・entropy・分岐別KL制限を維持する。
+
+2026-09-23の後続実験では模倣→PPOの順序を固定し、PPO後の模倣再学習を行わない。
+明示profile `timed_value_v1`は初回のみMCのbatch基準を用い、2回目以降は収集時に記録した
+前updateのvalueをreturnから引く。同batchの結果にfitしたvalueをactor信号へ戻さない。
+価値headは従来どおり独立に学習し、収集時valueのMSEと説明分散を記録する。
+学習率1e-4、各分岐KL上限0.05を維持し、新規on-policy経験で更新を継続する。
+独立の固定条件・共通乱数によるcategorical評価を許可するが、各環境のモデル・乱数・初回bindingを
+照合し、`evaluation_only`経験はPPO入口で拒否する。収束は事前固定した評価panelで判定する。
+
+2026-09-24の暫定計画器は、選択済み群のpregrasp中間目標がIK不成立の場合だけ、
+開き距離を既定値・1/2・1/4の最大3候補で探索する。最終接触点、全経路の衝突margin、
+関節・速度・actuation検査、共通計算期限を維持する。別の衝突失敗やprimary成立時には
+追加探索しない。これは安全制約の緩和ではなく、中間目標の選択である。
+
+同条件の独立rolloutが複数ある場合、`timed_value_v1`は初回接触のadvantageだけを
+`condition_loo_v1`へ明示的に切り替えられる。各試行の時刻割引returnから、同じ初期条件の
+他の試行のreturn平均を引く。record・prepared snapshot・実際の初回encoding・異なるseed・
+全試行の保持をmanifestで検証する。遷移判断のvalue baselineは変更しない。
+承認済みの全episode単位のsplit変更がある場合は、`canonical_dataset`のpath/SHAを
+manifestへ明示し、そのsources表のepisode ID・元record SHA・original_split・有効splitを
+照合する。未指定時は元recordのtrain区分のみ許可する。検証用episodeの一括許可や
+case IDを直書きした例外は設けない。収集前にも同じ有効splitを確認する。
+同条件の全試行が同じ結果なら接触の比較信号はゼロとなり、条件間の所要時間差だけで
+成功選択を負評価しない。entropyと共有encoderによる分布変化は別途監視する。
+Adam状態には接触baseline契約を保存し、既存状態からの切替は移行元と完了update数を
+明示して記録する。2026-09-23の固定手順は最初の2 updatesを従来のvalue方式、3 update目
+以降を同条件3試行のLOO方式とする。PPO後のBCや手動の重み補正は行わない。
+正本は`artifacts/p4_full/order9/request_ppo/20260923_strict_ppo/protocol.json`とする。
+
+比較した`timed_case_loo_v1`（初回接触に他の独立試行のreturnを基準値として使用）は、
+固定訓練7条件のgreedy動作・報酬を変えなかったため、その時点では採用しなかった。
+これはstochastic期待報酬の改善を否定する結果ではなく、上記の後続手順では接触baseline部分を再利用する。再現用sourceは
+`20260923_completion/source_grouped_contact/`へ保管し、通常の学習入口から除く。
+計画拒否も含む全試行を使用し、成功例の選別や検証データの勾配利用は禁止する。
+
+要求catalogは`selected_assignment_and_contact_occlusion_v2`として、後段と同じ既存の
+assignment feasibility判定を各提案群に一度適用する。摩擦とgraspの対向法線条件を
+actorの候補と後段で一致させ、IKや全候補部分集合の探索は行わない。
+判定は候補の観測幾何・仕様だけを使い、feasibility cacheへ書き込まない。
+新規接触について、対象以外の既知box solid内に接触点がある場合、または境界上で
+接触面の外向き法線がそのsolid内部へ入る場合は候補から除く。solidの姿勢・scaleと
+現在の物体観測を使い、面の名前や上下方向で一律に禁止しない。これは点のアクセス性の
+必要条件だけであり、未提供のsolid・box以外の形状・把持器全体の衝突・IKは後段で検査する。
+成立済みbindingの継続要求は維持し、実行中の衝突対応はguard/safetyが担う。
+候補maskまたは実行guardを変更した前後のrolloutを同一のon-policy経験として再利用しない。
+
+新収集は`observed_reward_time_v1`として区間内の各報酬発生時刻と区間終端を保存し、
+判断開始時刻への一括帰属を行わない。報酬合計やタスク成功条件は変えない。
+旧profile/旧trajectoryは旧来の意味で再現でき、新profileへの暗黙の読み替えは禁止する。
+仕様・実装が存在することと、検証20/20や将来の多物体・多タスクが実証されたことは区別する。
+本比較の設定・split・source・checkpointの正本は
+`artifacts/p4_full/order9/request_ppo/20260923_completion/training_protocol.json`とする。
+
+`task_state_retimed_temporal_warmup_v1`は、接触選択・共有encoder・value・正規化を固定し、
+遷移headだけを訓練splitの教師要求で再初期化する事前学習段階である。元のcontinue/transition
+ラベルを保持する。経過時間と既知の計画時間を同じ倍率（0.25〜16）で拡縮し、進行率・
+目標誤差・観測feedbackを保持する。教師が実行した接触群以外での特徴依存を抑えるため、
+このwarmupでは段階・時間・目標誤差・feedbackに対応するhead入力だけを使い、他の入力に
+対応する第1層の重みを0にする。これは事前学習時の初期化であり、runtime入力を削除せず、
+後続のPPOでは全列を通常どおり更新できる。別タスクでの汎化をこの初期化だけで保証しない。
+入口は`train_request_imitation.py warmup-temporal`、seed・親model・dataset・設定と結果を保存する。
+
+初回のシミュレーション状態は選択前の記録観測から復元し、選択済み軌道の始点速度で
+上書きしない。初回catalogには選択前のTaskSpecを使い、選択後のplannerによる座標の
+groundingと区別する。`request_isaac_job_v3_fixed_predecision_catalog`は選択前の
+候補catalog・TaskSpec・観測・encoded入力をSHA付きで保存する。候補catalogは
+RequestCatalogBuilderによる観測座標への変換前のものを保存し、二重変換を避ける。
+実行用の初回catalog再構築を保存済みencoded入力と照合してからIsaacを起動する。
+実行時の初回判断には実際の観測を使い、準備時との全入力・要求の一致を照合する。
+Isaacのrootと制御用COMが異なる場合、resetのtwistも基準点を変換する。
+
+旧v1 profileの模倣warmupは2026-09-17に完了した。訓練は初回99/99、継続・遷移が
 各693/693一致。固定6場面（訓練5、BC-validation1）のphase0/full-mesh実行で
 6/6成功し、衝突・落下・fallbackなし。全件の物体目標到達はTaskSpecの150秒以内。
 同一actorの実軌跡56イベントでPPO更新・保存／再読込を通し、更新後も事前指定した
 1場面を全工程成功した。失敗した000074は追加模倣で明示的にtrainへ移し、その再実行を
 未使用場面での汎化成功とは数えない。PPO初期化は同artifact rootの
 `bc_ready/checkpoint.pt`、更新接続の証拠は`ppo_ready.json`を使用する。
+
+2026-09-17のPPO開始時に、旧harnessの最終状態判定だけではTaskSpecの物体目標到達期限が
+反映されないことを修正した。request実行器は保存した物体pose・時刻を、仕様の位置・姿勢
+許容差と期限で照合し、その結果を成功判定およびPPO終端報酬へ反映する。期限内に目標へ
+到達した後の解放・退避は期限後でもよい。本学習では同じ許容差・保存時刻に基づく照合を
+実行中の終端判定にも接続し、未到達のまま期限を超えたepisodeを失敗として終了する。
+期限前に動作を終えて目標許容差を満たさなかった場合は、目標未到達と期限切れを区別する。
+期限内に一度到達しても、解放・退避後の最終poseがTaskSpecの許容差を外れた場合は
+`object_pose_goal_not_maintained`として失敗報酬を与える。旧harnessの2 mmの数値余裕を
+request実行結果の最終目標判定へ流用しない。段階遷移guardの許容差は変更しない。
+これらの照合はactor入力や段階遷移guardへ追加の情報を渡さない。前記warmupの6場面は
+この照合にも合格している。
+
+同日の初回PPO学習では、訓練7場面を各2回、計14エピソード・120意思決定イベントで
+2更新した。訓練は14/14成功、学習から外した固定4場面は更新前後とも2/4成功であり、
+成功率の改善・汎化完成・PPO収束は確認していない。現行の実験結果とcheckpointは
+`artifacts/p4_full/order9/request_ppo/20260917_initial_ppo/deadline_checked/README.md`
+へ記録する。これを自動的なdeployment modelの昇格とはしない。
+
+同日の本学習では、BCで初回接触群の確率がほぼ1に飽和していたため、第2更新後に一度だけ
+接触headの最終線形層の重み・biasを1/8にした。これはPPO更新とは区別する初期化調整であり、
+新しいruntime入力・flagを追加しない。訓練99場面のgreedy選択、継続・遷移のlogitsとvalueは
+保持され、調整後は新checkpointから収集したcategorical rolloutだけでPPOを続ける。
+選ばれた別候補の計画拒否や実行失敗も除外せず学習する。本学習のprotocol・checkpoint・
+評価は`artifacts/p4_full/order9/request_ppo/20260917_main_training/`へ記録する。
+
+この本学習は53の異なる訓練場面・390判断イベントで4更新し、固定した別の7場面の前後評価まで
+完了した。訓練39/53成功（計画拒否8、物理実行の失敗6、うち安全違反1）、評価は前後とも
+3/7成功・安全違反0であり、成功率改善や収束は確認していない。実験は224.14分、ユーザーの
+5時間上限内で終了した。結果・制約は同directoryの`README.md`、最終実験checkpointは
+`update_4/checkpoint.pt`を参照し、deployment modelへの自動昇格は行わない。
+
+同日の固定訓練bucket検証では、2/3/5/8モジュールの同じ4場面を2回収集し、計8episode・
+57判断イベントで2更新した。同条件のgreedy評価は成功2/4→2/4、平均累積報酬
+6.67179→6.67179、安全違反0→0であり、この範囲で改善は確認していない。
+独立Isaacプロセスの2並列は逐次比0.9238倍の処理速度だったため採用しなかった。
+runtime契約は不変で、証拠と限定条件は
+`artifacts/p4_full/order9/request_ppo/20260917_fixed_bucket/README.md`へ記録する。
 
 
 ---
@@ -2951,6 +3088,15 @@ snapshot／seed／設定で候補順を再現できるようにする。観測�
 として区別する。自主的なπ_H要求選択・deployable guard・新C_H全制約の受入とはしない。
 有限時刻の衝突検査はsampled checkと明記し、連続時間の衝突証明と呼ばない。
 
+初回の接触IKが有限反復内で成立しなかった場合に限り、選択済みの同じ接触群について、
+既存の関節限界内branch seedを最大2本、観測されたbase module姿勢から試してよい。
+飛行接近の追加solveは観測baseの傾きを保持し、base回転は世界Z軸のyawに限定する。
+反復上限は通常の4倍とし、接触位置・法線・関節限界・衝突の許容値は変えない。
+rootの傾き保持だけで各moduleの推力成立を保証せず、生成軌道の支持力配分も検査する。
+同じ成立seedを接触IKとconfiguration-space goalに引き継ぎ、全体の計画deadlineを共有する。
+既に成立する初回IKと、その後だけで起きる衝突拒否にはこの再初期化を適用しない。
+使用branch・seed hash・全計画時間をprovenanceへ保存し、選択群の変更や安全判定の回避には使わない。
+
 ### 19.5 Execution state, transitions and recovery
 
 次の三つは別のrecordとauthorityを持つ。
@@ -3191,6 +3337,10 @@ Controllerは position、velocity、rate、effort、torque-bias、finite-value�
 Builderはその時間評価器からabsolute referenceを得る。制約付き計画で得た関節軌道を
 捨てて、実行時に別IKでanchor poseから再生成してはならない。
 
+幾何経路のcache再利用では、同じ観測・選択要求に対するfresh計画と区間時刻・経路が一致すること。
+reviewed経路はその正本の全区間から復元し、generated経路と同じ尾部生成器へ渡して
+区間時間を変更してはならない。いずれも名目preloadと実行軌道の全体検査は再計算する。
+
 ```text
 q_plan, qdot_plan, centroidal_ref = evaluate the accepted plan at execution time
 learned_delta_q, learned_delta_qdot, learned_wrench = 0 in the standard path
@@ -3212,6 +3362,75 @@ equivalent load、接触推定の信頼度を使う。19.4.1の暫定段階で�
 補正量、追従誤差、saturationを記録し、範囲を超える要求は新しいplanと再検証へ戻す。
 安全clampが作動した指令を元planの完全追従と報告してはならない。単一の固定押し込み量や
 module-count別の応急ruleでcontact feedbackを代用してはならない。
+
+`observed_material_slip_bounded_closure_v3`では、取得済みのgrasp bindingについて、
+接触取得時のFK点を物体座標で記録し、現在の同じ点の接線方向変位から滑りを観測する。
+法線変位を除いた滑りが2 mmを超えると、その超過分に比例する追加の閉じ量を要求する。
+要求を時間積分せず、滑りが止まった後は確立した閉じ量を保持する。接触距離とmotor load
+による接触推定が成立している間だけ増加させ、releaseでは滑らかに解除し、binding変更や
+resetで状態を消去する。raw contact forceや教師の将来姿勢は入力にしない。
+
+追加幅は名目閉じ量一回分を上限とし、既存の最大leadと、名目法線荷重・重力支持を含む
+actuator負荷推定の余裕で制限する。選択済みbindingについて一つの追加圧縮姿勢を求め、
+量子化後のIK解をFKで再評価して法線増分が上限以内になるよう縮小する。最大要求幅を
+全て達成できなくても、絶対・追加の接線誤差がともに2 mm以内となる部分方向を採用できる。
+補正幅は要求値ではなく実FKで達成した最大法線増分を記録する。全候補IKは行わない。
+実行する追加qとその差分に対応するqdotには、既存joint/velocity限界と、毎control sampleの
+native全身衝突判定を適用する。新しい増分が不適なら直前の増分を再検査し、それも不適なら
+実行を拒否する。実actuator指令のeffort clampは維持する。負荷推定は正確な接触力の保証では
+なく、sampleごとの衝突検査も連続時間の安全証明ではない。
+
+この処理は決定論的な後段接触補正であり、π_Hの三つの離散出力とπ_Lの学習残差ゼロを
+変更しない。補正予備幅・滑り・追加閉じ量・実適用倍率を保存し、rolloutのruntime契約にも
+束縛する。現在の実装はgrasp用で、他の接触modeには対応する接触制御則が必要である。
+
+`authored_object_pose_goal_guard_v1`では、最終目標に対応するplace/release/settleの
+位置・姿勢完了判定に、追跡対象のTaskSpec object-pose goalの許容値を使う。固定値52 mmで
+50 mm許容の目標への設置を完了扱いしてはならない。lift/transportの中間目標判定は区別し、
+タスクの合否条件・制限時間は変更しない。このguardの意味もrolloutのruntime契約に含める。
+
+`observed_object_orientation_bounded_posture_v3_native_gn`では、名目軌道の終端保持中に、観測物体姿勢と
+現在phaseの物体目標姿勢との差から、両手先への共通回転目標を作る。機体centroidal poseと
+全Dock関節角を同時に補正し、手先目標誤差・手先間相対pose誤差・上限で正規化した名目からの
+変形量を最小二乗で抑える。正確な接触力追従や物体との剛体結合を仮定せず、物体姿勢を再観測する。
+現在の解は局所的な正則化最小二乗であり、大域最小変形や目標の完全実現を保証しない。
+
+計算時間を有界にするため、同じ目的関数に対してGauss–Newton更新を最大2回行う。各回の
+線形化されたbox拘束付き最小二乗はnative C++/EigenのQR active-set法で最大180反復とし、
+有限差分用のFK・CoM再中心化・残差をnative batchで計算する。有限な候補で、元の非線形
+目的関数が増えない場合のみ更新候補とする。線形solverの収束と非線形目標の達成を区別し、
+後述の実FKによる把持形状・速度・全身衝突検査は省略しない。
+
+終端はprogress>=1−1e−6と名目機体twist/関節速度（追加閉じ速度を含む）が丸め許容1e−6以内の
+ゼロで識別する。観測物体速度≤0.05m/s・角速度≤0.1rad/s、既存phase guardの姿勢許容超過、
+把持維持と接触推定成立を起動条件とする。phase内で起動をラッチし、phase/binding/resetで解除する。
+名目への絶対補正として0.50秒一次応答の物体姿勢比例誤差を使い、実機体poseを目標へ取り込まない。
+raw接触力や教師未来姿勢は入力にしない。material-slip閉じ量feedbackは別責務で維持する。
+
+機体補正は位置30mm・回転0.20rad、追加速度20mm/s・0.15rad/s以内とする。実装は各3軸の
+上限を各norm上限/√3とした保守的boxで保証する。関節補正は閉じ量適用後の名目から各0.10rad、
+追加速度0.05rad/s以内、さらに物理可動域と名目＋閉じ量＋姿勢補正の合成速度限界を満たす。
+各cycleの差分だけでなく名目からの累積offsetを制限する。CoM再中心化を含む既存native FKを
+使い、手先間相対poseは名目から位置0.5mm・角度0.005rad以内に保つ。これらは暫定の共通補正
+上限であり、TaskSpecの合否許容値の変更ではない。接触荷重・圧縮の実現を保証する値ではない。
+
+把持が続く移動区間では、成立した補正offsetを保持する。移動中に新たな姿勢feedback補正を起動しない。
+新phaseの終端では既存の整定・姿勢誤差条件に従って再調整する。releaseや接触推定喪失時には、
+実現手先poseの補正を滑らかに0へ戻す目標を同じ拘束付きIKで解く。保持中も新しい名目姿勢との
+合成でjoint範囲・総速度・pair相対pose・全身衝突を再検査し、不適なら停止する。
+関節と機体のoffsetを別々にclipして把持を変形させない。実採用差分から追加twist/qdotを生成し、
+毎sampleのnative全身衝突検査で合成指令を検証する。拒否時は直前補正を再検査し、それも不適なら
+停止する。無効proposalの内部補正stateはcommitしない。既存QP/actuator制限とTaskSpec合否条件を維持する。
+補正量、目標未達誤差、手先間誤差、線形solver収束・反復数、安全受理をtraceに記録する。controller契約をrollout
+identityへ含め、旧経験を新契約のon-policy経験として再利用しない。旧bodyのみ補正や局所姿勢投影は
+標準経路へ重ねず、履歴としてのみ保持する。
+
+名目QPID/QP経路ではGPUの固定反復をCUDA Graphで再実行し、CPUでは同じADMM反復と
+6半空間への射影をnative実装する。反復数・実適用指令の可行性検査・制約は維持する。
+固定形態のCPU剛体モデル計算はTorch compileを使用でき、GPU Graph/CPU compileの初回処理は
+制御開始前に完了させる。現在状態に依存する値を固定cacheへ入れず、形態・参照幾何のみを
+cacheする。PCの計算時間や過去の別kernelのVIM4比率を、実機50Hz保証と同一視しない。
+
 
 Payload feedforwardは現在の荷重分担の推定に基づく。lift/releaseを要求しただけでは
 on/offせず、支持台との荷重移行を観測して変更する。PIDにはQP infeasible、saturation、

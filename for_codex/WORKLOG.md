@@ -13731,3 +13731,1369 @@
 - Scope, changed files, schemas, upstream dependencies, assumptions, commands and artifacts: see the matching Global completion entry above. H owns the shared categorical actor, post-selection planning adapter and observed execution guards; K owns initial-only/causal supervision, split provenance, fitting, rollout serialization and actual PPO update. I/J's existing nominal controller and protected simulator remain unchanged.
 - Implemented and passed: causal first selection, committed continuation/transition learning, stable seeded sampling, checked downstream planning,6/6 real full tasks, nonzero real PPO update, exact reload, successful post-update full task and70 unit tests. Three-ID output schema unchanged; versioned actor/critic checkpoint and event records added.
 - Handoff: use the checkpoint and entry points listed in `ppo_ready.json`; preserve historical failures and the explicit000074 train promotion. Final actor validation and geometric-library coverage are separately reported. No open requirement remains for this declared imitation warmup.
+
+### 2026-09-17 JST — Initial request PPO training (started)
+
+- Active spec / work package: v0.5 Section0.4; H/K. User authorized moving to PPO; default two-hour cumulative budget starts2026-09-16T20:21:12Z, deadline22:21:12Z. Single agent and single Isaac process.
+- Scope / success condition: two fresh categorical on-policy seven-scene batches and two PPO updates, then fixed paired four-scene validation with independent physical audits; report improvements and regressions without claiming convergence. No controller, reward, success threshold or actor-input redesign.
+- Frozen protocol: `artifacts/p4_full/order9/request_ppo/20260917_initial_ppo/protocol.json` (SHA256 `4df79f184c266883c261931efc0e9d69b2578c223d7fa0df13ab4f9fe05a7c69`). Initial checkpoint is completed `bc_ready/checkpoint.pt`, SHA256 `cf4acfe67a9703d80786ee30e3c6d54947fcf4ce30606e823e7f9d1c081a3fb5`.
+- Training episodes chosen before scoring:000000/20/40/60/80/100/120, module counts2..8, categorical seeds42/43. Evaluation:000014/54/94/135, module counts2/4/6/8, greedy before/after; all BC-validation and excluded from these updates.000134 is excluded because earlier integration PPO used it. No held-out test inspection or split migration.
+- Existing production paths: `run_request_policy.py prepare/execute`, `train_request_imitation.py ppo`, unchanged event actor/planner/guard/PPO. Isolated one-run coordinator and exact argv/logs live under the artifact root. Schema/interface changes: None. Upstream: completed causal imitation, reviewed geometric routes after selection, frozen controller/physical checks. Downstream: new experiment checkpoints with fresh-collection lineage.
+- Verification reused: runtime source hashes match prior70-test/Isaac/PPO completion; checkpoint hash checked. Baseline/final runs start phase0/full mesh with pi_L residual zero; successes, failures and ordinary planner rejections are all retained. Incomplete jobs, probability/source mismatches or nonfinite values stop the batch. No automatic retries or seed/threshold search.
+- Budget: observed throughput predicts60–90min; preparation590s and execution900s per process, outer cumulative deadline, two updates maximum. Reserve final-evaluation time and review at30min. Assumptions: bounded grasp/carry profile and known geometry library; BC-validation is development evaluation, not a final generalization certificate.
+
+## Work Package Logs — H/K initial request PPO
+
+### 2026-09-17 JST — H/K: first bounded PPO experiment
+
+- Scope, upstream/downstream contracts, frozen cohorts, commands, assumptions and budget: see the matching Global start entry. Production implementation unchanged; updates use the existing categorical event actor and all complete same-generation outcomes. Final results and handoff will be recorded below after the fixed comparison.
+
+#### 2026-09-17 JST — PPO pre-update deadline correction
+
+- Confirmed first mismatch at the outcome boundary: validation000094 transported the object using a different selected contact group, but first reached the object goal at166.80s (the old independent audit's2mm margin), after the authored150s deadline. The inherited harness and request result still reported task success. No PPO update had occurred. Evaluation coordinator was stopped before training; all original trajectories, decisions and the unfinished000135 preparation are retained.
+- Minimal correction: `request_event_execution.object_pose_goal_deadlines` checks the recorded physical trajectory against exact TaskSpec position/orientation tolerances and first-arrival deadline. `run_request_policy.execute` applies this outcome before the terminal+5/-5 reward and result, preserving legacy harness outcome in metadata. Reaching the goal in time and then releasing/retreating later remains valid. Actor inputs, guard decisions, planner, physics and PPO objective coefficients are unchanged. Added boundary, orientation, invalid-clock and terminal-reward regression tests.
+- Continued experiment: `20260917_initial_ppo/deadline_checked/protocol.json`; unchanged cohort, seeds, BC initialization and original22:21:12Z deadline. Reuse the three complete baseline outcomes by re-adjudicating saved telemetry, since only post-rollout outcome evaluation changed; never feed these greedy records to PPO. Both successful and failed earlier results are retained. All six previous warmup trajectories also pass the new exact deadline check.
+- Commands: related event/PPO tests22 passed; full related request/planner/imitation/PPO suite is logged in `deadline_checked/unit_tests.log`. New artifact metadata adds object-goal deadline outcomes; no actor/checkpoint/action schema change. Remaining rollout commands/source hashes are frozen anew in the corrected protocol; no live source mutation.
+- 30-minute review (~20:51 UTC): fixed baseline2/4 strict successes,1 planning rejection,1 authored-deadline failure,0 safety failures. Exact goal arrival for late000094 is167.199s. Full related suite77 passed in6.70s; all six prior warmup deadlines pass exact re-adjudication. First training batch has begun. About90min remain; preserve final evaluation time, reduce update count only if measured collection cost requires it, and never use the evaluation scenes as training rescue data.
+- Environment incident at20:51:40UTC: train_1/000020 exited139 during Isaac Kit startup (`appState=startup`, uptime0; native getenv/telemetry/crashreporter stack). No actor initialization or trajectory occurred. Preserve `isaac_startup_crash.log` and stopped experiment report; manually retry this exact prepared job once with unchanged source/checkpoint/seed. Artifact coordinator resumes completed baseline and train000000 rather than repeating them. This is an environment restart, not a failed-task resample.
+- First real PPO training update completed (~21:14UTC): all7 categorical training tasks passed,60 events,4 epochs. Old-logprob replay maximum error5.2452e-6; finite losses/gradients; contact-head max change3.9904e-4 and request-head4.0086e-4; saved/reloaded outputs exact. Checkpoint `deadline_checked/update_1/checkpoint.pt`, SHA256 `8504c6edf9b00651661ed8b20ea439d381177cac39c43209df05cafdf69ed424`. New generation2 collection uses this checkpoint and predeclared seed43; no old-generation rollout is reused for update2.
+- Second PPO update completed (~21:37UTC): another7/7 successful categorical tasks,60 fresh events. Replay error1.9073e-6; contact-head/request-head maximum changes3.9943e-4/4.0096e-4; finite updates and exact reload. Checkpoint `deadline_checked/update_2/checkpoint.pt`, SHA256 `9ece9ef30425e71ad4e03fe88fef2483c5fb90392356237f502873af75a43c25`. Total training14 tasks/120 events. Independent `update_audit.json` confirms checkpoint chain, no evaluation scenes in updates, unchanged frozen sources and both heads changing. On collected states, initial argmax changed0 times in both updates; execution argmax changed1 time in update2. Final fixed four-scene evaluation is running; no third update is planned.
+- ~90-minute review: two PPO updates are complete and independently audited; training14/14 successes. Fixed evaluation000014 still succeeds and000054 still rejects planning. Updated000094 follows byte-identical phase trajectories (only planning wall-time evidence differs); its lift exit improves109.56→107.56s and transport exit153.58→150.58s, but it is still outside the150s object-goal deadline. Finish this rollout and000135; no threshold change, cohort substitution, third update or further tuning is planned.
+
+## Global Worklog — Initial request PPO completion
+
+### 2026-09-17 JST — Two PPO updates and paired Isaac evaluation completed
+
+- Active spec / work package: v0.5 Section0.4; H/K with I/J outcome integration. User requested moving from imitation to PPO. Completed at2026-09-16T21:57:34.531445Z,96.38min after start, within the original120min budget. No additional update, seed search or evaluation rescue was performed.
+- Results: two successive current-policy seven-scene batches (2..8 modules),14/14 full tasks successful,120 decision events. Each update used4 epochs at1e-4 with observed-time discount. Both contact and transition heads changed; logits/value reload checks are exact and replay errors are5.2452e-6 /1.9073e-6. Training-return means are unchanged at12.9388857; do not describe these two updates as demonstrated performance improvement.
+- Fixed separate BC-validation evaluation:2/4 before and2/4 after,0 safety failures in both.000014 and000135 succeed,000054 rejects planning,000094 completes motion but misses its150s goal deadline. The latter's exact first arrival improves167.199→163.838s, still a failure. All comparable generated phase trajectories are identical before/after; changes in planning evidence are wall-time fields. Evaluation cases are excluded from PPO updates; final held-out test data remains unused.
+- Corrected outcome handling: a missed authored object-pose deadline is now a failure and receives negative terminal reward. The fresh final000094 rollout confirms legacy success=true, request success=false, deadline163.838>150, final event reward-3.00102 (including phase shaping). Positive and negative outcomes are represented honestly. The six prior imitation-warmup successes all retain success under exact authored tolerances/deadlines.
+- Files changed: `amsrr/simulation/request_event_execution.py`, `scripts/run_request_policy.py`, `tests/unit/policies/test_request_event_execution.py`, current spec, design supplement and WORKLOG. Artifact-only protocol/coordinator/auditors/results are under `artifacts/p4_full/order9/request_ppo/20260917_initial_ppo/`; production actor/planner/PPO optimizer implementations are unchanged. The old baseline, interrupted preparation, native-startup crash and resume preflight log are preserved.
+- Schema/interface changes: actor/action/checkpoint schemas None; result metadata now includes per-goal deadline adjudication and the inherited harness success flag. Upstream: committed causal BC checkpoint, reviewed geometry after contact selection, bounded fresh planner, nominal QPID/QP and protected Isaac harness. Downstream: same request-PPO CLI and fresh on-policy collection rules; no change to protected curriculum or controller.
+- Tests / commands: related suite77 passed in6.70s, deadline boundary/orientation/clock/terminal-reward tests; all completed physical trajectories independently audited; two real updates with full lineage/source checks; exact checkpoint reload; fixed final physical evaluation. Exact argv in `deadline_checked/commands.jsonl`; `audit_updates.py`, `summarize.py`, `git diff --check` and frozen-source/protected-file checks passed. No experiment processes remain.
+- Artifacts: `deadline_checked/README.md`, `comparison.json`, `update_audit.json`, `final_verification.json`. Final experimental checkpoint `deadline_checked/update_2/checkpoint.pt`, SHA256 `9ece9ef30425e71ad4e03fe88fef2483c5fb90392356237f502873af75a43c25`. Initial BC checkpoint remains untouched; final PPO weights are saved as an experiment result, not silently promoted to a deployment default.
+- Assumptions / limitations: seven unique training scenes repeated twice; four BC-validation scenes, no broad generalization or PPO-convergence claim; reviewed geometric-library reuse remains part of the profile; pi_L residual zero. Collection takes24.91min and23.15min per seven-scene batch. High initial selection confidence produces little alternative-contact exploration; simply claiming success-rate improvement from nonzero parameter changes would be incorrect.
+- Blockers / next steps: None for this bounded PPO-start experiment. Further performance training needs a separately bounded decision about training coverage/exploration and collection throughput, informed by the unchanged2/4 validation success rate. Preserve the fixed evaluation split and prior failures. No automatic additional training was started.
+
+## Work Package Logs — H/K initial request PPO completion
+
+### 2026-09-17 JST — H: request execution outcomes; K: two-generation PPO
+
+- Scope/files/interfaces/dependencies/commands/assumptions: see the matching Global completion entry. H owns the post-execution TaskSpec deadline check; K owns the frozen train/evaluation protocol, fresh rollout lineage, two updates and checkpoint evidence. Protected I/J physical execution is unchanged.
+- Passed:77 related tests;14/14 training tasks; exact on-policy/reload/source checks; full fixed paired evaluation and independent physical audits. Known limitation: evaluation stays2/4 and no convergence/generalization claim is made. Contact/transition learned outputs and their causal observations are unchanged in form.
+- Handoff: use the checkpoint/report paths above. Keep fresh collection after every update and include all complete outcomes; reject greedy evaluation data for PPO. The collector is currently single-environment and takes23–25min per seven-scene batch. No active process, unfinished required evaluation or additional automatic tuning remains.
+
+
+## Global Worklog — Main request PPO training
+
+### 2026-09-17 JST — Main training started under explicit five-hour budget
+
+- Active spec / work package: v0.5 Section0.4, H/K. User explicitly requested main PPO training with a five-hour limit. Start2026-09-16T22:35:12Z; hard deadline2026-09-17T03:35:12Z. Single agent, single Isaac process; preserve all six pre-existing uncommitted source/doc/test changes.
+- Deliverable / success condition: broaden actual on-policy training beyond the prior seven-scene pilot, save every finite PPO update, complete paired full-task evaluation of final weights, and report actual performance and limits. Do not equate nonzero gradients with improved task success or claim convergence without evidence. New task families, pi_D and pi_L training are outside this run.
+- Facts / hypothesis: prior seven-scene collection takes23.15min; fourteen pilot executions succeeded but four validation scenes stayed2/4. High-confidence initial contact predictions limit exploration. Broader training scenes may expose physical failures and provide informative task rewards; this is not yet established.
+- Frozen protocol: artifacts/p4_full/order9/request_ppo/20260917_main_training/protocol.json. Initialize from previous update_2 checkpoint9ece9ef3. Eligible pool99 BC-train scenes, deterministic per-count shuffle/interleave2..8 without replacement; up to14 fresh scenes/update, fixed4epochs/lr1e-4, max8updates subject to wall budget. All complete ordinary failures and planning rejections enter PPO. No evaluation-to-training migration, seed search, altered rewards or thresholds.
+- Evaluation: fixed BC-validation000014/34/54/75/94/114/135, greedy; reuse previous final outcomes for14/54/94/135 only after exact checkpoint/runtime/rollout identity checks. Collect the other three baseline scenes and all seven final scenes. Keep held-out21 outside evaluation and tuning;134 is excluded because earlier integration PPO used it.
+- Runtime / stopping: reserve70min for evaluation/documentation, require the maximum1590s prepare/execute/audit cost in addition before starting each training case, flush a final partial complete batch once, and stop. Estimate roughly50–65 training episodes and4–5updates at prior speed; unfamiliar physical failures may reduce this. Stop invalid schema/probability/source/NaN/broken outcomes. Ordinary failed episodes remain data. No automatic expensive retry chain.
+- Files / interfaces: one isolated artifact coordinator delegates to existing run_request_policy.py and train_request_imitation.py ppo. No production model, planner, controller, encoder, action schema or hyperparameter change. Runtime hashes match prior77-test evidence; reuse that valid evidence. Independent artifact motion auditor uses exact TaskSpec position tolerance, replacing its historical extra2mm diagnostic allowance.
+- Minimum verification: protocol split/record/checkpoint/source hashes, coordinator syntax, prior real77-test/runtime evidence; each update checks old-probability replay, finite gradients and exact reload; each executed task receives independent physical audit. Exact commands and outcomes go to commands.jsonl/progress.jsonl/experiment.json.
+- Assumptions / downstream: current grasp/carry profile and post-selection reviewed geometry; zero pi_L residual. Success remains physical completion including authored goal deadline. Preserve checkpoints and every failed result. Complete result/handoff entry will record actual budget use and unresolved limitations.
+
+## Work Package Logs — H/K main request PPO
+
+### 2026-09-17 JST — H: fixed runtime; K: broad on-policy training and evaluation
+
+- Scope, dependencies, changed files, interfaces, expected checks and budgets: see matching Global start entry above. Reuse the previously validated actor, planner, nominal controller, physical evaluator and current PPO entry. No shared schema/interface change and no C3/curriculum modification.
+
+- 22:43 UTC baseline complete:3/7 success,0 safety failures,3 planning rejections(000054/75/114),1 authored-deadline miss(000094). Existing4 results reused with exact current checkpoint provenance; fresh000034 succeeded. Broad train_1 collection has started. Initial99 BC-train observations remain99/99 teacher agreement, mean maximum selection probability0.992263,89/99 above0.99; record this as limited exploration, not task success.
+
+- Approximately30-minute review(23:04 UTC): baseline3/7 fixed; first6 broad training tasks all succeeded,0 safety failures,0 planning rejection;8-module seventh task active. Actual mean completed collection178.3s/scene including prepare/Isaac/audit. Sources and protocol unchanged, no rerun or tuning. Continue the declared distinct-scene collection; first update awaits14 complete tasks.
+
+- 23:10 UTC bounded collection correction: case000131 remained in transport at155s (objectz0.5263m versus goalz0.245m) despite the150s authored deadline. Its learned transition request was already pending; both distance/load passed but the relative-speed gate blocked. The protected legacy reward's phase-success bit suppresses its phase timeout, so an eventual wall timeout could lose a complete failure rollout. Stopped this one unfinished run; no PPO update had occurred. Original job/logs remain in train_1/r1-teacher-000131.
+- Corrected only outcome termination: ObjectPoseGoalDeadlineMonitor tracks on-time arrival using the exact archived post-step clock/pose; after a missed deadline it sets terminal-failure/timeout for normal result and PPO serialization. It runs after actor/guard decisions, adds no actor input and changes no contact threshold, trajectory, policy distribution or reward coefficient. Goal reached on time still permits later release/retreat. All actor/controller/schema contracts and C3/curriculum bytes are unchanged.
+- Verification:21 focused tests;84 related tests in6.72s. Streamed the monitor over all saved samples of16 physical trajectories (six current training, four physical baseline, six previous warmup):15 successes unchanged, the late000094 baseline fails at the deadline. First-arrival timestamps match the completed-trajectory evaluator exactly, including the near-deadline000074 success. Evidence:deadline_monitor_regression.json/log.
+- Amend/restart:protocol_before_deadline_monitor.json and original coordinator/experiment report preserved. Revised protocol keeps the original five-hour deadline, pool/order/seeds/checkpoint/PPO/acceptance criteria. Hash-validated complete baseline and six training episodes are reused because the monitor never changes their execution; three planning rejections are unaffected. Rerun only interrupted000131 in a separate _after_deadline_monitor directory. Comparison of late-failure completion times across termination versions is not an improvement metric. No repeated architecture or tuning loop.
+
+- 23:24 UTC physical termination check passed: unchanged actor/seed/phase trajectories in000131 now stop normally at archived time150.015224s with object_pose_goal_deadline_missed, no safety failure, complete categorical PPO rollout and terminal event reward-5.089960. No contact threshold or trajectory change. Actual run took475.0s. Broad collection resumed; first7 complete tasks6success/1failure. This is the only repeated physical case for the termination fix.
+
+- 60-minute review(23:35 UTC):11 complete distinct training scenes,10success/1deadlinefailure,0safety failures. Initial7-scene evaluation remains3/7. The one stopped/repeated case and termination fix are recorded above; no other runtime/tuning change. First14-case update is pending; subsequent batches use new scenes and freshly reloaded updated weights. Remaining overall budget approximately4h; original deadline retained.
+
+- 23:46 UTC update1 complete:14distinct training scenes,13success/1deadlinefailure,0safety;116events,4epochs; replay error3.81e-06,both actor heads changed,exact reload. Checkpoint905a84c3c6a044c1d42700708f6a81d31733e674dda4ab9dd13b5d73912440f5. Failed131 initial selected probability1.00000000→1.00000000; this does not establish improved success. Fresh train_2 collection uses update1,with the next14 distinct predeclared scenes and seed102.
+
+- 23:52 UTC training-only exploration diagnosis / declared next boundary: update1's failed131 group remains probability1.0 in float32 (top-two logit gap17.926); mean initial maximum probability across99 training scenes0.992308, entropy0.02758nats. Alternative candidates are almost never sampled, so accumulating the same confident choices is a weak PPO experiment. Offline distribution inspection (no extra physical run or validation-based selection) shows a fixed positive1/8 scale on only the contact head's final linear weights/bias gives mean maximum probability0.722 and failed131 probability0.848 while preserving greedy ordering mathematically. This changes no input/action schema and does not require a new production flag or framework.
+- Finish all14 current train_2 episodes and its unchanged PPO update first. Then pause the coordinator once at that checkpoint boundary; preserve all completed data/checkpoints and any just-started preparation. Apply one explicitly recorded contact-head desaturation to a new checkpoint, prove all99 train greedy choices and committed-phase/value outputs are unchanged, and resume fresh categorical collection from the next unused scene. No old-policy rollout is reused after desaturation; no physical thresholds, transitions, reward coefficients or learning-rate search. The5h deadline and evaluation reserve remain unchanged. The final checkpoint will be assessed as PPO plus this declared initialization adjustment, not PPO-only causal attribution.
+
+- 90-minute review(2026-09-17T00:04:42.955444+00:00):20complete scenes,18successes,2failures,0safety violations;one PPO update completed. Failure022 completed the legacy task at79.42s but never met the exact50mm object-goal tolerance(final50.298mm). Its negative outcome/reward are correct; the generic deadline-missed reason/timeout metadata is inaccurate for this early finish. Preserve the original record and correct only this metadata distinction at the scheduled update2 boundary, alongside the declared contact-head exploration initialization. No success threshold or physics tuning.
+
+- Update2 boundary(2026-09-17T00:29:34.299680+00:00):28distinct tasks,26success/2failure,0safety;both14-case updates complete. Update2 checkpoint0f409732be65e0e6f96c05ec90b87ac16f239f90cfcc7c9d4534078572ba93ac. The watcher stopped the next preparation27ms after launch, before any physical execution; its log is retained and the next attempt has an explicit _after_exploration output suffix. No completed episode was lost or discarded.
+- One-time exploration initialization completed: positive1/8 scaling of only ranker.contact_head.3.weight/bias;new checkpoint0bf1308822055cc494dff73fc28f66dde958e0ad2770672d12133192e60ec4ad. All99 train initial greedy choices preserved;1386 temporal logits/values and initial values are exactly equal; saved/reloaded scores exact. Mean initial maximum probability0.992424→0.719485. No teacher labels, validation or held-out scores used for this adjustment. Subsequent source rollouts must match the new checkpoint hash.
+- Outcome annotation corrected at this stopped boundary: early completion outside exact pose tolerance is object_pose_goal_not_reached, not a deadline timeout; retain genuine phase/safety failure causes. No task success flag or reward changed. Focused26 tests and full89 related tests pass; actual022/131 record regression preserves their failed outcomes. Original misleading022 report remains untouched with an additive correction record in outcome_annotation_regression.json.
+- Resume protocol3056d8e0 records the previous protocol/report lineage, frozen new runtime hashes and the explicit non-PPO initialization between update2 and update3. Continue at predeclared scene29,seed103;original deadline03:35:12 UTC and70min evaluation/documentation reserve unchanged.
+
+- Two-hour review(2026-09-17T00:35:51.271824+00:00):32complete distinct training scenes,28successes,2planning rejections,0safety failures;2PPO updates. After the one-time contact-head initialization,028/048 selected different groups with probabilities0.173/0.187 and received normal planning-rejection rollouts;012/070 succeeded. New data are bound to checkpoint0bf13088. Continue remaining declared scenes with no additional scaling, reward/threshold change or source edit;3h overall budget remains, final evaluation reserve intact.
+
+- 150-minute review(2026-09-17T01:06:06.684056+00:00):39complete training scenes,32successes,1safety failure,4planning rejections. Alternate-group125(group2 instead of teacher3,unseeded fresh route) passed planning and lifted93.5mm/carried197.1mm,then terminated with hard_collision at127.691s. It is a complete failed PPO episode, not a success; no physical rerun or controller/threshold fix is attempted. Fresh alternate-group087 is currently in execution. Two PPO updates complete; next update waits for all current-generation successes/failures/rejections. Original absolute budget and fixed7-scene final evaluation remain unchanged.
+
+- Three-hour review(2026-09-17T01:35:22Z):46distinct scenes collected,37successes,1safety failure,5planning rejections. Update3 completed on14episodes/106events with9successes,4planning rejections and1collision; checkpoint45a92aea9c5a0a7f56a1a07e74e24e3a2d82735dfd8aecf88c6378927b8aec0c, replay error3.8147e-6, both actor heads changed, exact reload. Alternate-group087 succeeded with a newly planned route. In train_4, alternate-group062 reached placement but missed the exact150s goal deadline; it remains a complete negative episode. No further source, confidence-scale, reward or physical-threshold change. New training starts cease around01:58:42UTC under the existing reserve rule; flush the last complete batch and run all seven fixed final evaluation scenes.
+
+- Training collection closed(2026-09-17T02:00:46Z):53distinct scenes/390events,39successes,8planning rejections,6physical failures including1hard collision. Final partial batch has11episodes/49events,4successes;069 ends in a genuine lift phase_timeout rather than a deadline override. Update4 checkpoint00464fa0e534f83d28c6f32676a45482f4bf65a79331db65303ab2d51fca8ea6; exact reload, replay error1.4305e-6. The predeclared time reserve stopped collection before scene54. All four updates passed independent lineage/source/split checks in update_audit.json; no evaluation rollouts or stale pre-initialization data were used. Final fixed seven-scene greedy evaluation is running; no further updates or tuning are planned.
+
+## Global Worklog — Main request PPO completion
+
+### 2026-09-17 JST — Five-hour-bounded training and paired evaluation completed
+
+- Active spec / work package: v0.5 Section0.4; H/K with request-outcome integration. User authorized main PPO training under5h. Final evaluation completed2026-09-17T02:19:20.402240Z,224.14min after start; documentation/source/process checks continued within the original03:35:12Z deadline. Exact final handoff time is in `final_verification.json`.
+- Results:53distinct train scenes from the99-scene pool,390decision events,4PPO updates using14/14/14/11scenes and4epochs each. Training39successes,8normal planning rejections,6physical failures including1hard collision. Each completed failure entered its on-policy update. Physical failure categories are3object-goal deadline misses,1early goal-tolerance miss,1phase timeout,1hard collision. Final checkpoint `artifacts/p4_full/order9/request_ppo/20260917_main_training/update_4/checkpoint.pt`, SHA256 `00464fa0e534f83d28c6f32676a45482f4bf65a79331db65303ab2d51fca8ea6`.
+- Fixed BC-validation evaluation:3/7 before and3/7 after;0safety failures both.014/034/135 remain successful;054/075/114 remain planning rejections;094 remains a goal-deadline failure. All seven selected contact groups are unchanged. Successful cases have identical first-arrival timestamps and final position errors.094baseline first reaches at163.838s; final terminates unmet at150.015s under the new deadline monitor. The latter changes termination mechanics, so ending time/final error across those versions is not a performance metric. No success-rate improvement, PPO convergence or broad generalization is established.
+- Changes: live authored-deadline failure termination; correct early goal-not-reached versus true timeout metadata; one explicit contact-head confidence initialization between updates2/3; current spec and design supplement/results. Production files are `amsrr/simulation/request_event_execution.py`, `scripts/run_request_policy.py`, `tests/unit/policies/test_request_event_execution.py`; documents are current spec, design supplement and WORKLOG. These same six paths already had uncommitted pilot changes on entry, which were preserved in `starting_diff.patch` and the current working tree. Experiment-only coordinators/auditors/checkpoints/logs remain in the ignored artifact directory; no new production runner or runtime flag.
+- Schema/interface changes: actor/action/encoding/checkpoint None. Additive result metadata includes exact goal outcomes, inherited physical success and deadline-termination evidence. Upstream: causal actor/BC split, reviewed geometry after selection, bounded fresh planner, nominal QPID/QP and protected Isaac execution. Downstream: same request-PPO CLIs; future collection must match the exact chosen checkpoint hash. pi_L residual remains0;pi_D unused.
+- Validation:89related unit tests passed in6.74s. Command: `OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONPATH=. /home/leus/.local/share/mamba/envs/isaaclab3/bin/python -m pytest -q tests/unit/policies/test_request_event_execution.py tests/unit/policies/test_high_level_requests.py tests/unit/policies/test_naive_contact_planner.py tests/unit/policies/test_request_execution.py tests/unit/training/test_request_imitation.py tests/unit/training/test_request_ppo.py`. Saved-trajectory deadline regression16cases preserves15successful outcomes.022/131annotation regression preserves failed outcomes. Four updates pass independent current-policy probability replay, checkpoint lineage, both-head changes, finite results and exact reload. Every complete physical run has an independent exact-tolerance audit. Frozen runtime/curriculum and protected harness/controller/planner checks pass; `git diff --check` passes; no experiment processes remain.
+- Commands / artifacts: existing `run_request_policy.py prepare/execute` and `train_request_imitation.py ppo`; exact argv and timeouts in `commands.jsonl`. `audit_updates.py` and `summarize.py` completed successfully. Results and constraints: main-training `README.md`, `comparison.json`, `update_audit.json`, `final_verification.json`, original/intermediate protocols and preserved failed/interrupted evidence. Initial checkpoint and final held-out21scenes are untouched. No commit or automatic deployment promotion was requested or performed.
+- Time / attempts: training collection180.26min/53scenes (204.07s/scene). All recorded commands including baseline/final/interrupted work spend170.29min in Isaac,39.40min in prepare,6.17seconds in4PPO updates. Data collection/planning is the measured throughput limit. Only interrupted131 was physically repeated once for the deadline correction; a27ms prepare at the update2 pause was restarted under a separate suffix. No seed retry, success-threshold relaxation, failed-case exclusion or final-evaluation tuning.
+- Assumptions / limitations: declared grasp/carry profile, post-selection reviewed geometric library, single environment, fixed seven-scene development evaluation. Confidence initialization is a separate manual adjustment, not a PPO optimizer update; report combined results without PPO-only causal attribution. Per-batch task distributions differ and cannot form a like-for-like learning curve. Weights changed, but the final selected groups and evaluation success did not improve.
+- Blockers / next steps: None for this bounded training-and-evaluation task. Performance improvement remains unmet. A subsequent experiment should address measured collection throughput and the unchanged planning/transition failures before assuming a longer identical run will solve them. Keep the fixed evaluation split, include negative outcomes and collect fresh on-policy data. No additional automatic run is active.
+
+## Work Package Logs — H/K main request PPO completion
+
+### 2026-09-17 JST — H: complete failure outcomes; K: broad PPO and fixed evaluation
+
+- Scope/files/interfaces/dependencies/commands/assumptions: see the matching Global completion entry. H owns exact deadline termination and outcome annotation, with positive/boundary/negative regressions. K owns the99-scene eligible pool,53-scene on-policy prefix,4updates, explicit one-time confidence initialization, checkpoint lineage and paired7-scene evaluation. Protected I/J controller/physical execution sources remain unchanged.
+- Passed:89unit tests;16saved-trajectory deadline checks;4current-policy update/reload audits; all complete physical outcome audits; frozen/protected source and process checks. Training39/53; fixed evaluation3/7→3/7,0safety failures. The unchanged evaluation is an observed performance limitation, not a completed generalization claim.
+- Handoff: final experimental checkpoint00464fa0 and artifact README above. No unfinished required evaluation, orphaned process, extra tuning or hidden model promotion remains. Retain all failure/interruption evidence; use fresh matching-hash categorical rollouts for any later update.
+
+## Global Worklog — Fixed training bucket PPO diagnostic
+
+### 2026-09-17 JST — Same-bucket repeated learning and parallel collection started
+
+- Active spec/work package:v0.5 Section0.4,H/K. User requests the proposed fixed-training-bucket reward/task-success comparison and parallel learning if effective. New diagnostic starts2026-09-17T09:44:44Z,default2h deadline11:44:44Z. Existing six uncommitted paths are preserved; no commit requested. Parallelism refers to simulator workers, not coding subagents.
+- Scope/success: freeze train scenes000012/000022/000070/000131 (2/3/5/8modules; prior successful and failed episodes), collect fresh on-policy data on those same scenes every update, and compare identical greedy evaluations before learning and every2updates. Success requires a larger success count and mean undiscounted episode reward improvement>0.1, with no extra safety failures. Report lack of improvement honestly. No validation/held-out promotion, reward/termination/control changes or further confidence initialization.
+- Fixed protocol:`artifacts/p4_full/order9/request_ppo/20260917_fixed_bucket/protocol.json`. Initial checkpoint is main-training00464fa0. Maximum6updates,4epochs/lr1e-4/gamma0.99 per observed second; one fresh categorical execution per case per update. Stop if both criteria improve, after2evaluations without improvement, or before the fixed deadline with final-evaluation reserve. Fixed case identity, separate execution directories/seeds, same actor hash across each collection and a barrier before updating.
+- Parallel hypothesis/minimum check: RTX4090 has24GiB,roughly1.5GiB in use at start. Request supervisor itself is single-environment. Reuse the existing prepare/execute CLI in2isolated processes, first measure a short serial case and a two-process identical-case run for throughput and unchanged physical/event outcomes. Use only measured-effective concurrency; do not redesign the actor/harness for vectorization during this task. Own-process timeouts and group cleanup required.
+- Files/interfaces/dependencies: experiment-only orchestration under the artifact root, existing request actor/planner/controller/PPO and prior89-test evidence with matching runtime hashes. No production schema/interface change planned. Final docs will record elapsed time, actual repeat count, learning curve, concurrency evidence and remaining limitations.
+
+## Work Package Logs — H/K fixed-bucket PPO
+
+### 2026-09-17 JST — Fixed train evaluation and bounded parallel rollout collection
+
+- Scope/dependencies/commands/interfaces/expected checks:see matching Global start entry. K owns fixed-bucket fresh-rollout/update/evaluation barriers and checkpoints; H runtime remains frozen. Single coding agent; optional two simulator processes. Preserve failures and all previous evidence.
+
+- Parallel preflight completed09:56UTC: single000012 greedy collection129.859s; two identical isolated processes281.135s total, throughput0.92382times sequential. Both results have exactly identical rewards/event counts/object pose/twist/time/valid tensors to the serial run. GPU memory around6.9GiB was sufficient; concurrency is not faster with this launcher/workload on the singleRTX4090. Automatic predeclared choice is1worker. Probe duplicates are excluded from training and the formal cohort. Current Isaac Lab defaults to headless with no visualizer; harness uses sim.step(render=False), so no rendering-mode change is needed. Remaining fixed-cohort baseline proceeds with the original actor and frozen runtime.
+
+- Approximately30-minute review(10:11UTC): all four fixed-scene greedy baseline episodes complete,2/4successes,mean undiscounted reward6.67179,safety0.012/070success;022goal_not_reached;131goal_deadline_missed with a requested transition blocked by measured guard. Protocol/runtime/checkpoint/criteria unchanged. Train_1 fresh categorical collection has started on the same4cases. Existing89-test evidence remains valid by source identity; no production edits. Each later evaluated checkpoint will use the same four-scene greedy cohort and unchanged deadline termination.
+
+- Approximately60-minute review(10:43UTC): two fixed-bucket PPO updates complete,8fresh episodes/57events. Update1:2/4success,mean reward6.67179,32events,checkpoint1415e768,replay4.77e-6. Update2:1/4success,mean reward2.18148,25events,checkpoint49356812c3572bffbe797b01a631ccbd5b6d3454c9e19ef8fd2817dde7ddd85c,replay2.86e-6. Both exact reload checks pass.070selected alternate group1 in collection2 and received a normal planning rejection;022again missed goal tolerance and131again missed the deadline. This sampled-return decrease includes exploration and is not the fixed greedy comparison. Eval_2 has started on the same four scenes, with unchanged rewards, guards, initial states and termination. Runtime remains frozen; no tuning or retries.
+
+## Global Worklog — Fixed training bucket PPO completion
+
+### 2026-09-17 JST — Matched training-bucket evaluation completed; no improvement in two updates
+
+- Active spec/work package:v0.5 Section0.4,H/K. User requested repeated learning on a fixed training bucket and useful parallelism. Experiment completed10:59:10.575986UTC,74.44min after09:44:44UTCstart,within the declared2hdeadline11:44:44UTC. Documentation/final checks also finish inside that budget; exact handoff time is in final_verification.json.
+- Result: train012/022/070/131 collected twice with fresh current-policy categorical draws,8episodes/57events,2PPO updates. Training3/8successes,1planning rejection,4physical failures,safety0. Same four-scene greedy evaluation before/after gives2/4→2/4success,mean undiscounted reward6.67179→6.67179,safety0→0. Every selected contact group and physical object pose/twist/time/valid tensor is unchanged.022remains an exact goal-tolerance failure;131remains a150sdeadline failure with a pending request blocked by execution guard. This directly measures no task-performance improvement in the tested two updates; it does not establish unlearnability.
+- Parallel measurement: one serial run129.859s,two isolated concurrent runs281.135s,throughput0.9238times sequential. Results/rewards/physical tensors exactly match. Existing singleRTX4090has sufficient memory but this process-level concurrency is slower; choose1worker. Probe duplicates are excluded from training/formal evaluation. No one-process multi-environment implementation, rendering change or concurrency tuning loop was added.
+- Changes/files/interfaces: no production source, actor/action/checkpoint schema, reward, guard, physical threshold or controller change. Preserve the original six uncommitted paths; add current experiment results to spec/design supplement/WORKLOG. Isolated artifacts contain protocol,run_experiment.py,status.py,audit_and_summarize.py,checkpoints and evidence. Upstream: unchanged causal actor,main-training00464fa0,existing planner/controller/request CLI and prior89-test evidence. Downstream: same CLI and fresh matching-checkpoint data rule; final checkpoint is an experimental result, not a deployment promotion.
+- Tests/commands: syntax checks for orchestration/auditor; one serial and two simultaneous physical runs with exact state/reward agreement; independent physical audits for all17Isaac executions; complete categorical/hash/terminal-event checks for all8training episodes; two updates with finite head changes,exact reload,replay errors4.77e-6/2.86e-6,value errors4.77e-7/6.85e-7. Existing89unit tests reused with identical runtime hashes. Production commands are run_request_policy.py prepare/execute and train_request_imitation.py ppo; exact argv/timeouts in commands.jsonl. Final `audit_and_summarize.py`,paired saved-motion comparison,source/config/protected-file checks and `git diff --check` pass; no experiment processes remain.
+- Policy evidence: failed022initial-group probability0.9278→0.8600→0.8959;131probability0.8664→0.8569→0.8642. PPO changed probabilities, but initial argmax did not change on the collected initial states or on the fixed evaluation. Request argmax changes1/0on the two collected-state sets did not alter evaluated object motion. Do not claim every failure probability decreases monotonically or equate weight movement with reward improvement.
+- Stop/assumptions/limitations: next two-update/evaluation cycle plus review estimates55.4min versus45.6minremaining,so the frozen reserve rule ends collection after a fully evaluated checkpoint. There was one post-training evaluation; the two-nonimproving-evaluation rule was not reached. The current conclusion is limited to2updates on4train scenes; no validation/held-out use,no further temperature adjustment,no seed search or discarded ordinary failures. Single-environment collection remains the time constraint.
+- Artifacts/handoff: `artifacts/p4_full/order9/request_ppo/20260917_fixed_bucket/README.md`,comparison.json,paired_motion_comparison.json,parallel_probe.json,final_verification.json. Final update_2/checkpoint.pt SHA25649356812c3572bffbe797b01a631ccbd5b6d3454c9e19ef8fd2817dde7ddd85c. No commit requested/performed. Blockers:None for this bounded verification; reward/success improvement was not achieved. Any later investigation should preserve these fixed comparisons and distinguish insufficient policy change from failures that require a different contact plan or downstream execution improvement; no extra run is active.
+
+## Work Package Logs — H/K fixed-bucket PPO completion
+
+### 2026-09-17 JST — Fixed data collection, matched evaluation and concurrency evidence
+
+- Scope/files/interfaces/dependencies/tests/commands/assumptions:see matching Global completion entry. K owns two same-bucket on-policy updates and fixed greedy comparison; H runtime is unchanged. One coding agent; simulator concurrency tested then rejected by measurement.
+- Passed:probability/value/hash/reload audits,17physical outcome audits,exact parallel-versus-serial probe,matched motion comparisons,frozen/protected sources and cleanup. Observed performance remains2/4and6.67179. All required comparisons are complete; no convergence or generalization claim, pending evaluation, hidden retry or model promotion remains.
+
+## Global Worklog — Initial contact intervention diagnostic
+
+### 2026-09-17 JST — Compare two alternative groups on failed scene 000022
+
+- Active spec/work package:v0.5 Section0.4,H/K. User authorizes the proposed single-scene contact-group comparison. Started11:41:16UTC,default2h deadline13:41:16UTC; no PPO retraining or production changes. Preserve six existing uncommitted paths.
+- Scope/success:freeze final fixed-bucket checkpoint49356812,scene000022,and all downstream planner/controller/reward/guard/task criteria. Compare existing greedy group1 baseline with groups2/3, the two highest-probability alternatives, each once. Measure actual task outcome,reward,motion and planning rejection. No candidate/seed search after outcomes.
+- Hypothesis:an alternative contact group changes physical performance and may improve failure, distinguishing untried actions from downstream limitations. Rejection is current-planner failure, not proof of physical infeasibility. Two alternatives do not exhaust the eight eligible groups.
+- Implementation:isolated artifact adapter invokes existing prepare/execute, replaces only initial selection, checks unchanged subsequent greedy outputs and baseline-equivalent intervention, marks every request archive diagnostic-only/excluded from PPO. Existing baseline evidence reused under matching hashes. No schema/interface change.
+- Budget:two candidates,no retries,each preparation+execution capped20min because existing bounded geometric planning can take up to590s before simulator startup. Existing stage timeouts590s/900s,outer remaining candidate budget enforced with child-process cleanup. Sequential collection follows prior measured throughput.
+- Artifacts/protocol:artifacts/p4_full/order9/request_ppo/20260917_contact_counterfactual/protocol.json. Verify initial intervention,source/config identity,real planner outcome and independent saved-trajectory audit. Stop after two recorded outcomes or first infrastructure/contract error.
+
+## Work Package Logs — H/K initial contact intervention diagnostic
+
+### 2026-09-17 JST — Bounded counterfactual contact selection
+
+- Scope/dependencies/limits:see matching Global entry. Reuse RequestActorCritic,run_request_policy,request planner/controller and independent physical audit; no production implementation or schema change planned. Single coding agent,one Isaac process.
+
+## Global Worklog — Initial contact intervention diagnostic completed
+
+### 2026-09-17 JST — Both fixed alternative groups rejected before Isaac
+
+- Active spec/work package:v0.5 Section0.4,H/K. Completed requested bounded comparison of initial contact alternatives on000022. Cumulative wall time at verification 7.25min from11:41:16UTC; two prepare calls,7.42s combined candidate execution,zero retries,zero new Isaac runs.
+- Results:existing group1 baseline reward2.92058/taskfailure(final position error50.30mm); alternative group2(probability9.2944%) and group3(1.1114%) both rejected duringpregrasp IK,reward-5 each. Original checkpoint/input/subgoal/config/production sources unchanged. No improved executable alternative among tested groups.
+- First failed boundary:order9_articulated_teacher.py:864--878 solves pregrasp targets displaced outward80mm; solver reports infeasible,ordinary planner rejection reaches request terminalreward-5. No physical collision observed,no timeout. New groups use existing unseeded planner;baseline has reviewed geometry. This is the current end-to-end action comparison,not equal-quality trajectory comparison.
+- Files changed:this task only adds WORKLOG entries and isolated diagnostic artifacts under20260917_contact_counterfactual. No production changes,no schema/interface changes,no spec change,no checkpoint updates,no PPO,no commit. Existing six uncommitted paths preserved.
+- Verification:real initial encoding/catalog/model check confirms forcedbaseline exactly equals original and prior evaluation snapshot;two fixed alternatives valid and only contact group changed. Actual archives complete,terminal,diagnostic_only=true,ppo_eligible=false,noncategorical and non-Isaac. All15prior runtime source hashes/config/checkpoint match. Because planning failed,subsequent actor/Isaac intervention path was not exercised;no physical acceptance claimed.
+- Evidence:README.md,protocol.json,preflight.json,experiment.json,comparison.json,commands.jsonl,and bothgroup planning_rejection.json/request_rollout.pt. Expected failure is preserved; no new fallback. Existing baseline physical audit reused under same checkpoint/runtime.
+- Limit/next:remaining5alternative groups not tested;IK solver failure does not prove physical impossibility. Identified downstream planning obstruction should be separated from exploration andlearning-rate hypotheses;next bounded diagnosis would inspect80mm-pregrasp geometry,available joint range andsolver initialization for one rejected group. No job remains active.
+
+## Work Package Logs — H/K contact intervention diagnostic completion
+
+### 2026-09-17 JST — Fixed initial actions and downstream planning outcomes
+
+- Scope/dependencies/commands/results/limits:see matching Global completion entry. Production untouched; minimal artifact-only selection adapter plus bounded coordinator reused existing actualplanner. Both alternative preparations terminate with ordinary rejection beforeIsaac; no task improvement established.
+
+## Global Worklog — Transition exploration diagnostic started
+
+### 2026-09-17 JST — Fixed contact and plan, paired normal/broadened sampling
+
+- Active spec/work package:v0.5 Section0.4,H/K. User authorizes checking whether broadened transition exploration changes actual phase-switch timing. Start12:24UTC,default2h deadline14:24UTC; preserve six uncommitted paths.
+- Scope/success:scene000022,group1,checkpoint49356812,exact existing plan.json/scene.json held fixed. Compare categorical temporal logits attemperature1 versus5 with seeds104729/130363,paired and fixed before outcomes. Four complete Isaac trials,580s inner/600s outer each,no retries or seed search. Measure request times versus actual switches,physical motion,return/outcome. No PPO or learning improvement claim.
+- Fact/hypothesis:stored execution decisions often have transition probability>0.99;T5 spreads probability toward continuation. Requests latch before measured guards,so different decisions may or may not change realized timing. Read-only preflight uses saved genuine actor encodings to check widened entropy without changing support.
+- Implementation:isolated artifact adapter to existing execute; initial action stays originalgreedy,temporal choices use existing semantic categorical sampler with logits/T. Saved archives diagnostic-only and rejected by production PPO. Clone exact fixed plan/scene rather than regenerate geometry; unchanged model/controller/guard/reward/taskthresholds. Each native outcome is independently audited from physical telemetry.
+- Files/interfaces/dependencies:WORKLOG plus artifacts/p4_full/order9/request_ppo/20260917_transition_exploration/. No production/schema/interface change. Reuse prior source/config checks,existing simulator and independent audit. No coding subagents;sequential simulation follows measured throughput.
+
+## Work Package Logs — H/K transition exploration
+
+### 2026-09-17 JST — Controlled exploration comparison
+
+- Scope/dependencies/budget/verification:see matching Global startentry. Requested deliverable is actual-switch/physical-outcome comparison for fixed contact group,not another optimization run.
+
+## Global Worklog — Transition exploration diagnostic completed
+
+### 2026-09-17 JST — Broader sampling changes actual switches; no success improvement
+
+- Active spec/work package:v0.5 Section0.4,H/K. Completed four preregistered Isaac trials on000022/group1/frozen plan and checkpoint49356812. Temperature1/5 paired atseeds104729/130363. Cumulativewall time 20.92min from12:24UTC;four physicalrollouts,four independentaudits,no retries,no learning.
+- Results:T1both reward2.92058,finalerror50.298mm;T5seed104729 reward2.92008,error50.298mm;T5seed130363 reward2.91994,error50.412mm. All4goal_not_reached,safety0. Fixedplan/scene andpairedinitialobjectpose/twist,modulepose,joints exact.
+- Causal observation:seed130363 T1transport request68.08→actualswitch68.92s;T5continues at68.08/68.58,requestsandswitches69.08s. Actualdelay0.16s,common-clockobjectpositiondiverges after68.9404s,max28.971mm(includes temporal lag,not improved geometry). seed104729 delaysretreat→settle0.5s only;common-time objectpose/twist exact. Lift→transport stays65.06s inall4trials despitechanged request timing,showingguard/latch absorption.
+- Verification:actualphase changes independently matched native telemetry using metadata actor_phase_index_by_runtime (archivevocabulary includesapply_wrench) andtrace switchtimes againststep*dtwithin1e-6s. Actualsamplingprobability replay max8.35e-7;initialactiongreedy andsamegroup throughout,mask/model unchanged. Sources/config/checkpoint/plan/scene identities verified. Each saved request archive diagnostic-only,ppo_eligible=false,nonproduction samplinglabel.
+- Files/schema:WORKLOG plus isolatedartifact adapter,coordinator,readoffcomparator,protocol/logs/reports. No production orschema/interfacechanges;preservepreexisting six-pathdiff. Existing unrelatedtests not rerun;changed diagnostic path exercised inrealIsaac. No commit.
+- Evidence:artifacts/p4_full/order9/request_ppo/20260917_transition_exploration/README.md,comparison.json,preflight.json,experiment.json,commands.jsonl,andfour saved fullrollouts. No activejob.
+- Conclusion/limits:requested effect confirmed—temporalexploration canchange actualswitchingandmotion—but onlyone scene/twopairedseeds,no task-success improvement orPPO-learning evidence. Earlylatched requests canstilllose timingvariation untilguardopens. Any future PPOtemperaturechange mustuse thesame samplingdistribution/log-probabilities incollection andupdate;this diagnostic isexcludedfromPPO.
+
+## Work Package Logs — H/K transition exploration completion
+
+### 2026-09-17 JST — Paired fixed-plan physical verification
+
+- Scope/files/dependencies/verification/results/limits:see matching Global completion entry. Isolatedtemperature sampling producedactualtimingandmotiondifferences withunchanged physicalexecutioncontract;four failuresretained,no performancepromotion.
+
+## Global Worklog — 000131 contact velocity diagnosis started
+
+### 2026-09-18 JST — Compare measured guard speed with contact-point velocity
+
+- Spec/work package: v0.5 Section 0.4, H/K runtime diagnosis. User's `00013` interpreted as the immediately preceding `000131`, announced before work. Start 2026-09-17 16:07:16 UTC; default 2h deadline 18:07:16 UTC.
+- Scope/success: determine whether the transport guard's speed failure is caused by its velocity definition or actual contact motion; preserve all six existing dirty paths. No PPO, threshold tuning, production controller change or task-success claim.
+- Static findings: guard uses selected link COM linear velocity minus object COM linear velocity, omitting point offsets. Separate feedback helper adds rotational terms but combines link-origin pose with COM velocity. Saved contact feedback slots are all zero in this execution profile, so they cannot establish actual relative contact speed.
+- Minimal check: one unchanged-policy/plan/scene/seed Isaac replay, capped at 90 simulated seconds (transport starts near 57s); capture raw guard speed, COM-consistent point velocity and independent link-origin velocity reconstruction. Compare saved physical prefix with the existing 150s rollout to detect instrumentation effects. No simulation restart from artificial contact states. Existing assets reused. Inner/outer timeouts 580/600s, no automatic retry. Prior full replay took 470s; shorter replay expected about 5min.
+- Files/dependencies: WORKLOG and isolated `artifacts/p4_full/order9/request_ppo/20260918_contact_velocity/`; reuse existing execute and bounded process helper. All prior job source/checkpoint identities verified. Diagnostic artifacts marked non-PPO and non-acceptance; capped request archive explicitly incomplete. No schema/interface change.
+
+## Work Package Logs — H/K 000131 contact velocity diagnosis
+
+### 2026-09-18 JST — Scope and bounded telemetry
+
+- Scope, evidence, budget, dependencies and checks: see matching Global start entry. Read-only supervisor instrumentation; all actual decisions and guards retain the original implementation.
+- Diagnostic implementation correction at 16:20 UTC: first 90s replay finished in 308.68 wall seconds and matches original physical telemetry exactly, but storing extra telemetry in an outer `finally` failed because Isaac SimulationApp.close uses fast process exit. Normal rollout/result archives were preserved; extra in-memory velocity rows were lost. This is a diagnostic-code error, not a physical outcome. Announced one additional shortened 65s replay after moving persistence to periodic steps and before native result writing/close. Controller/guard/checkpoint unchanged, original failed diagnostic retained as `replay/` with `measure_attempt1.py`; repaired attempt is `replay65/`. No further automatic repetition.
+
+## Global Worklog — 000131 contact velocity diagnosis completed
+
+### 2026-09-18 JST — Incorrect reference points falsely block transport exit
+
+- Spec/work package: v0.5 Section0.4, H/K. Requested investigation completed at about16:25UTC,18min after start;2Isaac executions totalling523.11s (one telemetry-persistence correction), no further simulation or learning. No active child job.
+- Finding: at60.08s actor has requested transport→place and all non-speed predicates pass. Original COM-linear-difference speeds30.826/56.313mm/s fail the50mm/s limit; consistent velocities evaluated at the common contact points are33.536/25.019mm/s, both passing. Across60.08–65.00s all247eligible samples fail the original speed guard and pass the corrected calculation offline. Position error38.809mm≤52mm atfirst eligible state; signed distances2.918/0.790mm, motor load8.156/7.847Nm, orientation/QP/endpoint/pendingrequest pass.
+- Boundary: protected harness line3334 computes a COM-to-COM velocity difference, omitting rotation to a common point. The separate contact feedback helper also combines robot link-origin pose and COM velocity; direct reuse without resolving that mismatch is incorrect. Object state already uses consistent COM pose/velocity. Diagnostic COM-based point velocity agrees with independent Isaac link-origin reconstruction at every sample within1e-5m/s. Corrected speed is still a simulator velocity signal; pose-based relative-contact motion is much smaller (63–65s per-axis variation≤0.0063mm), whose solver-level cause is not diagnosed here.
+- Changes/files/interfaces: this task changes only WORKLOG plus isolated diagnostic artifacts under`artifacts/p4_full/order9/request_ppo/20260918_contact_velocity/`. No production, schema/interface, guard threshold, controller, policy or protected C3 change; six preexisting dirty paths preserved. No commit. Archives marked diagnostic-only/non-PPO/non-acceptance/incomplete because they end at a diagnostic time cap.
+- Verification/commands: existing execute via read-only supervisor telemetry hook and bounded subprocess helper; exact argv/timeouts/outcomes incommands.jsonl. `analyze.py` compares physical prefix and offline guard inputs. All6compared physical tensors and native supervisor trace exactly match baseline. All telemetry finite; original runtime/config/checkpoint/protected-harness hashes unchanged. Syntax checks and`git diff --check`pass. Unchanged production tests not repeated; real simulator exercises diagnostic instrumentation. Upstream: same checkpoint49356812,group3,plan,scene,seed17 and existing prepared assets.
+- Evidence/downstream: README.md,comparison.json,verification.json,protocol.json,replay65/contact_velocity.pt and native archives. This establishes a downstream guard-input blocker with the actor already requesting advancement. It does not establish task success after changing actual transition timing. Next minimal work: correct speed input at the request-runtime boundary, keep50mm/s threshold/protected harness unchanged, check rigid-rotation reference-point behavior and run000131through the complete task. No claim that π_H exploration or learning-rate tuning fixes this defect.
+
+## Work Package Logs — H/K 000131 contact velocity diagnosis completion
+
+### 2026-09-18 JST — False speed rejection reproduced and isolated
+
+- Scope, findings, files, dependencies, commands, checks, limitations and next step: see matching Global completion entry. One diagnostic adapter only; original policy/physical path remains unchanged. First failed persistence attempt retained for transparency; corrected capture provides the measured velocity comparison.
+
+## Global Worklog — Contact velocity correction and 000022 solvability started
+
+### 2026-09-18 JST — Correct common request runtime, then test allowed transition choices
+
+- Active spec/work package: v0.5 Section0.4, H/K. User requests fixing velocity calculation and judging whether learning can solve000022. Start17:04:45UTC, default2h deadline19:04:45UTC. Preserve six preexisting dirty paths. No commit requested.
+- Implementation: adapt the pinned harness in the existing request runner so both pre/post contact-feedback paths use link-origin twist with link-origin pose; derive guard speed from the resulting relative contact-point linear velocity. Protected historical C3 file unchanged. Add relative speed to sparse supervisor trace and versioned result metadata. Actor/action schemas, controller, rewards and50mm/s threshold unchanged. Document the physical contract in spec and design supplement.
+- Success/verification: analytic rigid-rotation/no-slip and real-slip boundary checks through actual adapted harness math and supervisor; malformed harness boundary rejection.39relevant tests pass. Full unchanged-checkpoint/plan/scene greedy executions on131,022and known-good012, each580s inner/600s outer timeout, original generated assets reused. Plan/checkpoint/source provenance archived; compare native outcomes with independent physical audits.
+- Solvability hypothesis:022may improve by keeping contact during place until observed object pose reaches the authored goal. If corrected baseline still fails, test at most2predeclared policy-level interventions using only valid continuation/transition requests and deployable observations, preserving contact group/plan/guard/controller. A successful allowed-action sequence proves a solution exists in current action space, not that PPO has converged. Failed finite probes cannot prove every policy impossible. Prior temperature-only exploration did not test a sustained place hold; do not repeat that experiment.
+- Files/upstream: scripts/run_request_policy.py, amsrr/simulation/request_event_execution.py, nearby unit tests, spec/design/WORKLOG, isolated artifacts/p4_full/order9/request_ppo/20260918_velocity_fix/. Reuse fixed-bucket checkpoint49356812 and existing bounded execution/audit helpers. No code subagents. New runtime is frozen before simulation; no physical tuning during jobs. Stop intervention search when a successful witness or bounded limitation is established.
+
+## Work Package Logs — H/K contact velocity correction and 000022 solvability
+
+### 2026-09-18 JST — Implementation and experiment boundaries
+
+- Scope, files, dependencies, budgets, unit checks and acceptance limits: see matching Global start entry. Fix the velocity interpretation and evaluate attainable behavior before considering PPO hyperparameters.
+
+## Global Worklog — Contact velocity correction and 000022 solvability completed
+
+### 2026-09-18 JST — Runtime fix verified; valid place-continuation requests solve000022
+
+- Spec/work package:v0.5 Section0.4,H/K. User-requested velocity correction and solvability assessment completed within about21min of17:04:45UTCstart; default deadline19:04:45UTC. Four Isaac executions, no retries or PPO updates; recorded command time766.45s including four independent motion audits. No active job. Second diagnostic intervention budget unused because the first supplies a successful witness.
+- Production changes:existing request runner adapts pinned harness pre/post contact input to link-origin velocity and derives speed from same-point relative linear twist. No duplicate point-velocity implementation. Protected C3 disk source unchanged. Add sparse relative_speed_mps telemetry and versioned episode metadata. Tests/spec/design supplement updated; preserve all prior uncommitted work. No actor/action/checkpoint schema changes, controller/planner edits, threshold or reward changes, or commit.
+- Unit verification:39tests pass in1.40s using `python -m pytest tests/unit/policies/test_request_event_execution.py -q` inisaaclab3. New tests exercise actual adapted harness math/input paths and actual supervisor: zero-slip common rigid rotation,49/51mm/s actual slip, origin/frame invariance and malformed source rejection. Syntax and`git diff --check`pass. Production sources frozen before physical runs and unchanged afterward.
+- Physical correction evidence:000131uses same actor/group/plan/initial conditions and now succeeds,goal reach62.181s,full episode70.140s,final7.353mm,collision0. All compared physical fields match original until60.08s,when corrected33.536/25.019mm/s allows the already-requested transport→place transition.000012remains successful at21.403mm with exactly identical physical trajectory.000022baseline remains failure50.298mm; its physical fields also exactly match original, so the velocity bug did not cause this baseline's outcome.
+- 000022controlled witness:only existing actor encoded current-place flag,target displacement,tolerance and original valid mask select continue when error exceeds50mm,then successor. Continue at71.94s(error53.336mm) and72.44s(51.468mm);advance72.94s(47.857mm). Original actual place exit72.38s becomes72.94s(+0.56s). Goal reach72.640s,full success79.979s,final48.104mm,orientation0.06152rad,final speed1.477mm/s,collision0,π_L0. Return2.92058→12.92002 under unchanged rewards. Samecheckpoint/plan/scene; physical prefix identical through original place exit; every changed action is a valid place continuation. No future/teacher/simulator-force input added.
+- Assessment:there is a successful causal action sequence and improving reward within the current π_Hinput/action space for000022. The downstream controller can finish this condition without modification. This is not a trained-network/PPO convergence or generalization claim. Original probabilities for the two waits4.694%and5.170%,conditional product0.2427%,help explain why a small ordinary sample rarely explores this sequence; do not call this whole-episode success probability or the only learning failure cause.
+- Artifacts/commands:`artifacts/p4_full/order9/request_ppo/20260918_velocity_fix/README.md`,protocol.json,run_baselines.py,hold_place.py,summarize.py,comparison.json,verification.json,commands.jsonl,frozen source and four full native/audited outcomes. Existing bounded helper and independent physical auditor reused. Probe rule stays isolated; archives diagnostic-only/non-PPO/non-acceptance. No persistent special-case policy or fallback added.
+- Downstream/next:collect fresh data using corrected runtime; checkpoints remain compatible. Future PPO work should expose successful continuation choices in exploration while preserving exact sampling/log-probability consistency. No further experiment is needed to answer the current request; saved evidence distinguishes physics feasibility from optimizer convergence.
+
+## Work Package Logs — H/K velocity correction and 000022 solvability completion
+
+### 2026-09-18 JST — Corrected execution and positive action-space witness
+
+- Files/dependencies/interfaces/commands/tests/results/limits:see matching Global completion entry and artifact README. Three corrected-runtime baseline evaluations plus one causal valid-action probe; preserve source identities and all failures. Task complete without another tuning cycle.
+
+## Global Worklog — Learned transition improvement started
+
+### 2026-09-18 JST — Four-hour autonomous training and paired evaluation
+
+- Spec/work package: v0.5 Section0.4,H/K. Explicit user budget4h,17:42:38–21:42:38UTC. Improve learned execution to solve000022, demonstrate fixed training-bucket performance improvement, revise unsuccessful learning, then evaluate validation. Preserve all preexisting edits; no commit requested.
+- Hypothesis/change: successful000022requires two rare continuations; broaden actual temporal categorical distribution by scaling its checkpoint output layer once, then collect fresh on-policy episodes. Add optional temporal-only PPO optimization, independent actor/value gradient clipping and exact categorical KL stopping. Contact selector and shared representation frozen in this stage. Defaults remain existing all-actor PPO; no action/input schemas, reward, guard, controller or protected harness changes.
+- Frozen experiment: artifacts/p4_full/order9/request_ppo/20260918_learning_improvement/protocol.json. Ten training scenes chosen before new outcomes; seven existing validation scenes remain excluded until train improvement. Reuse three complete corrected-runtime baselines with identical inference/physical contract, evaluate remaining seven. Training batch/seeds fixed; all failures retained. Existing parallel probe showed separate Isaac workers slower, so one simulator worker. Each call≤600s; reserve50min for paired validation; no validation-based model selection.
+- Files: amsrr/training/request_ppo.py, scripts/train_request_imitation.py, tests/unit/training/test_request_ppo.py, this log and design supplement; isolated coordinator/source snapshots. No schema/interface changes. Upstream: checkpoint49356812, corrected contact velocity runtime, native causal observations and actual Isaac reward, existing audit/collection helpers.
+- Verification so far:48tests pass (request PPO plus request event execution,2.33s). New test verifies exact contact/encoder preservation, actual temporal/value updates, KL bound stopping and checkpoint reload. Next: collect baseline, broaden exploration, PPO, greedy physical verification; revise only from measured evidence. No current convergence claim.
+
+## Work Package Logs — H/K learned transition improvement
+
+### 2026-09-18 JST — Scope, budget and frozen comparison
+
+- Scope, files, upstream dependencies, verification, limits and next steps: see matching Global start entry. Diagnostic forced-action witness remains excluded from on-policy PPO and acceptance.
+
+### 2026-09-18 JST — Training audit caught transient-success reward inconsistency
+
+- At18:29UTC, the fourth categorical000022episode passed the native request result but failed the independent saved-physics audit: on-time transient goal arrival followed by final50.068mm error, outside authored50mm. The existing deadline correction retained the legacy harness's52mm final tolerance. Automatic collection stopped before any PPO update, so the erroneous positive terminal reward was not trained.
+- Corrected terminal adjudication to require both authored on-time arrival and authored final pose tolerance; preserve deadline-monitor/phase-guard behavior. Add final pose/error metadata and `object_pose_goal_not_maintained` failure reason. No protected harness/control/actor input changes. Two regression cases cover49.9/50.1mm final error after on-time arrival and the actual±5terminal reward.50related tests pass in2.32s.
+- Original four episodes are retained. Re-evaluate their saved physics into `cycle1/corrected_train`, preserving every observation/action/log probability and raw physical hash; only episode03terminal reward changes by−10. All ten baseline outcomes remain identical. The four corrected episodes remain valid on-policy data under the same categorical checkpoint; this is documented outcome recomputation, not resampling or removal of a failure. Original protocol/sources archived before the outcome fix; new sources frozen before resuming remaining four planned trials at18:33UTC. No extra simulator repetition for this repair.
+- Files: request_event_execution.py, run_request_policy.py, nearby tests, spec clarification, design supplement and artifact correction/resume code. No action/observation/checkpoint schema changes. Evidence: `terminal_outcome_correction.json`, `protocol_before_terminal_fix.json`, native failed `audit.log`, corrected independent audits. Earlier third000022success49.970mm remains valid; not a trained-policy result yet.
+
+### 2026-09-18 JST — First PPO update and bounded optimizer extension
+
+- Corrected-runtime baseline: fixed10training scenes8successes, mean return10.941866, no safety failures; failures00002250.298mm and00002650.170mm. Prior corrected baselines reused with source/physics and outcome checks.
+- Fresh exploration batch:8episodes,71events,63eligible temporal events,2successes including one000022witha0.5splace continuation;2initial planning rejections retained. No forced/teacher actions. Checkpoint temporal output weights scaled1/8 before collection, initial contact logits/greedy decisions unchanged. PPO replay maximum log-probability error7.15e−7; only temporal/value heads change and save/reload is exact.
+-20epochs atlr0.001 produceKL0.01862and place continuation probability0.4070→0.4993. Full000022greedy execution still fails at50.298mm: extra lift decisions happen before the same guard release, so physical motion/reward are unchanged. This is explicitly not accepted as improvement.
+- At18:45UTC extend this same optimization to60epochs from the ORIGINAL collection checkpoint and same8episodes, with unchangedKLtarget0.05; do not use stale data as if collected from the updated actor.60epochs end atKL0.03999, place probabilities at the three saved witness states0.5305/0.5226/0.5048. This diagnostic witness is queried only for prediction inspection, never included in the optimizer. Begin real greedy000022and000026checks on the extended checkpoint. No other hyperparameter sweep or simulator/controller change.
+
+### 2026-09-18 JST — Training improvement verified; model frozen for validation
+
+- At19:16:39UTC, all10fixedtraining evaluations complete:8/10→10/10success, mean request return10.941866→12.941400, safety failures0→0, no success-to-failure regressions.000022final50.298→48.876mm, return2.92058→12.91952;00002650.170→48.706mm, return2.92092→12.91986.00002049.677→48.225mm. Individual errors000069and000131increase21.809→24.276mm and7.353→9.988mm while remaining successful; all individual results retained.
+- The000022physical position/orientation/twist prefix is bit-identical through the original place exit; actual exit changes72.38→73.44s through learned continuation requests. Its initial group/plan and controller are unchanged. Other cases span2,3,5,8modules. Contact selector and all shared encoder/normalization state are bit-identical to the starting checkpoint; only request and value heads change.
+- Selected checkpoint: `cycle1_extended/update/checkpoint.pt`, SHA256`5dca36ff6d379cf85655b215ab8ff33165983e8ef015abe3d11c21bf079f544b`. Selection uses training results only. `selected_for_validation.json` freezes this identity before any new validation; the seven original validation record IDs/hashes/splits are checked and disjoint from training. Start paired old/new evaluations on all7cases, retaining planning and physical failures. No further optimizer update or validation-based selection is planned. Evidence: comparison.json, parameter_preservation.json,000022_physical_prefix_comparison.json and full native/independent audits. This is fixed-bucket improvement, not a claim of all99training cases or validation generalization yet.
+
+
+## Global Worklog — PPO learning improvement and validation completed
+
+### 2026-09-18 JST — Learned behavior improves fixed training cohort; validation success unchanged
+
+- Active spec/work package: v0.5 Section 0.4, H/K. User-authorized 4h run started 17:42:38 UTC; all Isaac comparisons completed 19:53:59 UTC, final evidence verification passed 19:58:55 UTC. Completion record: 2026-09-17T20:03:39.233040+00:00, elapsed 141.0 minutes. No job remains active; no commit performed.
+- Result: fixed training 10 scenes 8/10→10/10 success, mean request return 10.941866→12.941400, safety 0→0; 000022 and 000026 recover. Greedy learned actor changes actual 000022 place exit 72.38→73.44s with identical physical prefix and contact/plan/controller. Final errors 48.876/48.706mm under unchanged 50mm threshold; success margins are small, not a robustness guarantee. 000069/000131 errors increase while successful.
+- Paired validation 7: 3/7→3/7 success, mean 3.242880→3.242880, safety 0→0. 000054/000075/000114 reject selected-group trajectory preparation before Isaac; 000094 misses 150s deadline though final error 87.686→57.717mm. 000014/000034/000135 remain successful. All failures retained. Checkpoint 5dca36ff was selected from training only at 19:16:39 UTC; no optimizer or model selection used validation. Generalization improvement is not established.
+- Implementation: optional temporal-only PPO freezes contact/shared encoder, separates actor/value gradient clipping, exposes epochs/lr/entropy/KL stopping; one-time 1/8 temporal output scaling widens categorical exploration. Eight fresh training episodes/71 events/63 eligible actor events, lr 0.001, entropy 0.02; 20-epoch failure retained then bounded 60-epoch update from original collection checkpoint, final KL 0.0399887. No additional imitation objective, forced actor action or diagnostic rollout used in optimizer.
+- Outcome correction: independent physical audit caught transient-goal false success before PPO. Require authored on-time arrival AND final authored pose tolerance. Original data retained; one terminal reward corrected +5→−5 in canonical copied training archive; state/action/log-probabilities unchanged. Prior 10 baseline outcomes remain unchanged. Reuse baseline 012/022/131 is supported by source/inference identity and recomputed outcome check; other baselines freshly executed.
+- Files changed this task: amsrr/training/request_ppo.py; scripts/train_request_imitation.py; final-pose adjudication additions in amsrr/simulation/request_event_execution.py and scripts/run_request_policy.py; tests/unit/training/test_request_ppo.py and final-pose tests in tests/unit/policies/test_request_event_execution.py; spec v0.5, AMSRR_design_modification_by_codex.md, WORKLOG. Preserve preexisting six dirty paths and protected harness. Artifacts under request_ppo/20260918_learning_improvement include README, source snapshots, protocol/commands, original and corrected rollouts, checkpoints, comparisons and verification receipt.
+- Schema/interface changes: action/observation/checkpoint schema, network shapes and control contracts None; additive optional PPO parameters/CLI flags and outcome metadata/failure reason. Upstream dependencies: corrected same-point velocity runtime, existing event actor/planner, authored TaskSpec deadlines/tolerances, formal_collection_v19 identity-v2 train/validation records. Downstream: continue from checkpoint 5dca36ff with fresh on-policy collection; original F12 archives are reproduction-only for F12 updates.
+- Tests/commands: isaaclab3 Python, OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 PYTHONPATH=.; python -m pytest tests/unit/policies/test_request_event_execution.py tests/unit/training/test_request_ppo.py -q: 50 passed in 2.32s on unchanged production sources. Actual prepare/execute/audit/ppo commands are in commands.jsonl; PPO uses --actor-scope temporal --epochs 60 --learning-rate 0.001 --entropy-coefficient 0.02 --target-kl 0.05. verify_results.py verifies 15 source hashes/config/17 records/model identity, 34 evaluations including 28 physical audits, 8 categorical training archives, replay error 7.15e−7 and exact model reload. git diff --check passes.
+- Assumptions/limits: fixed 10 train/7 validation, greedy seed 17; not all 99 training records or repeated robustness trials. Two training planning rejections retained among 8 episodes. Unchanged contact selector explains why this temporal-only update does not resolve validation preparation failures; solver rejection does not prove physical impossibility. No fundamental architectural impossibility demonstrated.
+- Handoff/next steps: use the saved learned checkpoint and exact runtime; retain validation as evaluation-only. Broader training should address initial-contact/planner failures using training records and measure safety/margin across seeds. Do not reinterpret this completion as R1/P8 acceptance or validation success-rate improvement. Full results and reproduction guidance: artifacts/p4_full/order9/request_ppo/20260918_learning_improvement/README.md.
+
+## Work Package Logs — H/K PPO learning improvement completion
+
+### 2026-09-18 JST — Fixed training criterion passed, paired validation evaluated
+
+- Scope/files/dependencies/commands/verification/limits: see matching Global completion entry. Delivered learned 000022 success plus 000026 recovery, fixed 10 training improvement, and all 7 held-out comparisons. Temporal/value-head learning and terminal-result correction covered by 50 related tests; no active jobs or unreported validation failure. Final checkpoint SHA256: 5dca36ff6d379cf85655b215ab8ff33165983e8ef015abe3d11c21bf079f544b.
+
+
+## Global Worklog — Contact and transition PPO with per-update validation started
+
+### 2026-09-18 JST — Full training pool and fixed twenty-condition validation
+
+- Spec/work package: v0.5 Section0.4, H/K. User requests contact-inclusive learning until a best update is determined, preserving exploration and learning rate; validate reward/task success after every update. Start12:46:45UTC. Default cumulative2h deadline14:46:45UTC while explicit larger-budget question is pending; do not exceed it without response. Previous unrelated completed task budget is not silently reset or extended.
+- Scope/success: parent5dca36ff, existing PPO actor_scope=all enables contact member/head, temporal head, morphology encoder and value head. Keep lr0.001, entropy0.02, max60epochs, KLstop0.05 and existing categorical checkpoint distribution; no further temperature scaling. Select among fully evaluated checkpoints including update0 by fewer safety failures, then more successes, then mean return improvement>0.0001. Stop after2consecutive updates without a new best; time-budget stop is not convergence or proof of global optimality.
+- Pool/coverage: current corrected BC dataset has99train/20validation/21heldout. Whole-episode000074split override was authorized previously and is preserved. Seeded shuffle within2–8module strata yields6batches of14and1of15, no repeat until all99covered. Actual coverage depends on the stopping condition and will be reported; do not claim99trained merely because all99are eligible. All20validation conditions run after every update; no heldout inference/execution or validation gradients. Retain planning/physical failures.
+- Time estimate: prior7validation rows1119s, about50min for20; train rows average181s. Existing independent2-worker probe was slower, so use1Isaac worker. Request a concrete total budget before launching work that cannot fit the default2h. Baseline-only work fits existing budget; reuse7completed exact same-model/runtime validations, execute other13. Minimum complete new cycle reserved before collection to avoid an unevaluated checkpoint at timeout.
+- Preflight: source hashes15pluscurriculum match prior final audited profile; records and corrected split manifest verified; all model parameters load trainable. No teacher labels used for optimization or case scheduling. Existing50related unit tests apply unchanged. Protected harness retained byte-identical. Warmup profile retains after-selection reviewed-geometry reuse; alternative groups use current bounded planner, so this is not a completed generic geometry planner claim.
+- Files/schema/interfaces: WORKLOG plus isolated artifacts/p4_full/order9/request_ppo/20260918_joint_policy_training/{setup.py,run.py,protocol.json,source/,dataset_audit.json,preflight.json}. Reuse existing bounded collector, production CLI and independent physical audit. No production/model/schema/interface changes; preserve nine existing dirty files. No subagents or commit.
+- Commands/next: setup/preflight through isaaclab3 with single-thread BLAS; baseline then fresh categorical collection → existing PPO CLI → exact probability replay/reload/contact-and-temporal weight-delta/branch KL checks → full20validation. Every command/result/hash retained; own processes bounded580/600s and cumulatively bounded.
+
+## Work Package Logs — H/K joint policy learning
+
+### 2026-09-18 JST — Contact learning unfrozen with explicit per-update model selection
+
+- Scope/dependencies/budget/files/verification/handoff: see matching Global start entry. No new physical-control intervention or success-threshold change; outcome evaluation uses current exact final-pose and deadline contract.
+
+### 2026-09-18 JST — Budget interpretation corrected before learning
+
+- Carry forward the explicit user four-hour training budget for the requested continued contact-inclusive learning; the local two-hour default does not override session authorization. Current run start remains12:46:45UTC, deadline16:46:45UTC; no elapsed work is discarded or budget clock reset. Six-hour extension remains unapproved unless the pending question receives an explicit answer. Baseline process retains its earlier, stricter14:46:45deadline and will complete within that bound; training loads the corrected protocol before launch. Original protocol retained as protocol_before_budget_correction.json.
+
+### 2026-09-18 JST — Full validation baseline complete; joint PPO collection launched
+
+- At 2026-09-18T13:34:40.861088+00:00, update0 validates9/20success, mean return3.652296000, safety0. Seven identical prior evaluations reused and thirteen freshly executed; effective full-suite measured cost58.86min. Initial teacher-contact matches9/20; all nine matching cases succeed, eight alternatives reject planning and three alternatives miss the deadline. Start fresh batch1of14 from all seven module-count strata. No PPO parameter update had been performed before baseline completion. Current run bound remains16:46:45UTC, preserving the four-hour user budget; larger extension has not been approved.
+
+### 2026-09-18 JST — Joint PPO KL underflow detected and repaired before validation
+
+- First batch14completed with12successes/2planning rejections,125events. At14:12UTC PPO serialization rejected an infinite KL. Model loss/gradients and action masks were finite/unchanged; one valid new log-probability was−104.88227, which float32 softmax rounded to zero. Installed categorical-KL implementation treated this numerical zero as support loss. Direct log-domain float64 calculation gives finite meanKL0.03034218. No validation or checkpoint selection used the interrupted update.
+- Correct only KL calculation in amsrr/training/request_ppo.py: normalize logits in float64, sum p*(log p−log q) on identical valid support, reject changed/invalid support. Add analytic binary underflow/padding and malformed-support regressions;53related tests pass in2.35s. No loss, gradients, optimizer settings, probabilities, masks, runtime, rewards or success-criteria change. Preserve failed output/checkpoint, original source/protocol and evidence in rejected_kl_underflow_update/,protocol_before_kl_fix.json,kl_fix.json.
+- Resume existing coordinator from the complete original on-policy batch and initial checkpoint; never warm-start from the partially reported update or repeat Isaac collection. Source snapshot refreshed for the PPO-only numerical repair. Four-hour original deadline remains16:46:45UTC.
+
+### 2026-09-19 JST — Update1 evaluated; remaining-time batching adjustment
+
+- Full20validation after update1:9/20success,mean3.697638,safety0 versus update0:9/20,3.652296,0.000035recovers from planning rejection to success;000015regresses from success to deadline failure. Small aggregate reward gain selects update1; no success-rate increase or plateau claim. PPO22epochs,125events,KL0.05082344;contact KL0.220448/1changed greedy training-observation action,temporal KL0.029429/3changed greedy actions;exact reload and replay error7.15e−7.
+- Original14-case next cycle cannot fit remaining86.92min. At the completed-update boundary, reduce subsequent batches to6,retain all99eligible cases and original within-module shuffle order,round-robin across module counts without repetition. Use measured train/validation costs plus fixed5min reporting reserve instead of adding15%to both estimates; cumulative hard deadline unchanged16:46:45UTC. Archive original protocol/report and record schedule_revision.json. No outcome-based case exclusion, optimizer/exploration changes, stale-rollout reuse, or validation-size reduction. Resume from update1 with fresh on-policy data.
+
+### 2026-09-19 JST — Partial validation interrupted by an undersized execution wall limit
+
+- Update2completed10PPOepochs on6new trajectories/55events,5successes and1planning rejection;KL0.05207656,exact reload,replay error9.54e−7. Contact branch KL0.39899 versus temporal0.00960. Full validation had11complete rows when000094reached release/retreat atsim196.54s and the580s wall alarm fired. Simulation shutdown returned0but no full rollout/result was saved; independent audit caught the missing artifact. This is censored execution, not a measured task failure or accepted success. Original incomplete events/trace/logs preserved under wall_timeout_attempt/.
+- Keep physical20000-step horizon,authored150sfirst-goal deadline,terminal tolerances,model and prepared plan unchanged; raise execution wall allowance to900s(default existing CLI),outer920s,still capped by original16:46:45UTC cumulative budget. This affects only available computation time; prior completed evaluations were not cut off by580s. Resume existing update2without another PPO call,retain completed11validation rows,rerun only incomplete094using its hash-checked prepared job. Use existing --geometry capability for095/096,which validates identical observation/request after actor inference and recomputes/checks full trajectory. No production code or physical contract changes. Archive original protocol/report/error. Coordinator now explicitly rejects missing execution artifacts even if simulator shutdown returns0.
+
+## Global Worklog — Joint contact/transition PPO bounded results
+
+### 2026-09-19 JST — Two optimizer updates; second full validation remains incomplete
+
+- Spec/work package: v0.5 Section0.4, H/K. User requested contact-inclusive training and full20 validation after each update until best selection. Original task start12:46:45UTC, authorized4h deadline16:46:45UTC. Stopped execution16:41:42UTC when remaining7validation conditions could not fit; saved/audited results before deadline. Pending6h(initial) and5h(recovery) extension questions received no approval. Do not claim convergence, completed full comparison, or curriculum acceptance.
+- Fully evaluated baseline/update1:9/20success and0safety failures for both; mean reward3.652296→3.697638. Therefore update1,d5338b89b2cdde99b1a2f04f509433dd89ecd744e91e691efe60731a83853c1c,is the best among fully evaluated checkpoints. It recovers000035 and regresses000015. Success-rate improvement is not established for this selected model.
+- Update2,e90684de7ff2539791e8616b67b577a9f0e4410c337d865e93330797cab8acc6,is optimized but excluded from selection until full validation.13/20conditions evaluated,8successes. On these same13conditions,baseline/update1 each have6successes; mean rewards3.872742/3.942498/6.014902.000015recovers;000035returns to planning rejection;000094and000095become successful despite selecting a different group from their teacher.094first goal148.975s(final13.061mm);095first goal147.735s(final8.077mm),both within150sgoal deadline.094full episode227.572s; do not confuse first-goal deadline with total motion duration. No safety failures in completed comparisons.
+- Training coverage: all99conditions remain eligible;20unique new on-policy training conditions actually collected,14then6,with17sampled successes and3planning rejections. These sampled returns are not a fixed-training-set improvement comparison. PPO1:125events/22epochs/KL0.05082344;PPO2:55events/10epochs/KL0.05207656. All-actor learning includes contact and temporal heads;lr0.001,entropy0.02,max60epochs,KLstop0.05,original categorical exploration retained. Exact checkpoint reload and replay errors7.15e−7/9.54e−7. No imitation loss, validation gradients, held-out21 inference/execution, or discarded negative training episodes.
+- Numerical fix: categorical KL falsely became infinite when a finite logit produced float32 softmax zero. Compute KL from normalized float64 log probabilities on identical action support; reject actual support changes.53related unit tests pass in2.35s. Existing loss, optimizer, physical runtime, reward, input/action schemas and safety checks preserved. Original failed PPO output/checkpoint and protocol/source snapshots retained; corrected PPO restarts from original collection checkpoint/data, not from the interrupted optimizer result.
+- Execution-management failure:580swall cap truncated094after it had reached the pose goal and progressed through release. Full raw trajectory was absent; independent audit stopped the job. This undersized cap was an orchestration error, not a measured policy task failure. Extend execution allowance to900s/outer920s within the unchanged global user budget, preserve partial artifacts and rerun identical prepared job. A brief restart also hit exclusive creation of existing execution_task.json; archive remaining partial execution files before reexecution. No physics repeated for that preflight rejection. Resume already-trained update2 and11complete validations without new PPO or resampling. Native shutdown returned0despite missing results; coordinator now requires complete output artifacts explicitly.
+- Recovery identity:094rerun sparse45progress rows exactly match the interrupted prefix; only computation allowance changes. Existing --geometry reuse for095/096 preserves identical observation/request and all generated phases. Compiled physical phase_trajectories for094/095/096 are byte-value-identical across updates1/2. Rewards,150sfirst-goal deadline,final50mm/0.2rad tolerances,controller,physical horizon and protected harness are unchanged. Full raw physics independently audited for successful rerun094and095.
+- Remaining:000096,000114,000115,000116,000134,000135,000136.096was stopped with the owned CLI's SIGALRM to preserve incomplete events/trace,not counted as failure andnotusedforPPO/selection. Its unchanged prepared job is ready to rerun. Partial outputs moved to budget_interrupted_attempt/. Reuse overrides are scoped to validation_2 paths so later updates do not inherit a stale prepared job. Merge the unexecuted one-case schedule tail into the preceding batch;all99unique cases remain scheduled without repetition. No production API change.
+- Files changed this task:amsrr/training/request_ppo.py,tests/unit/training/test_request_ppo.py,for_codex/AMSRR_design_modification_by_codex.md,WORKLOG.md; isolated experiment artifacts under request_ppo/20260918_joint_policy_training. Preserve the other preexisting dirty paths. Schemas/interfaces:None. Upstream:checkpoint5dca36ff,canonical99/20/21split,existing CLI/controller/guard/independent physics audit. Downstream:best.json points only to fully evaluated update1;partial update2 is saved separately and must finish remaining7evaluations before selection.
+- Verification/commands:isaaclab3 Python with single-thread BLAS;existing prepare/execute/ppo/audit commands recorded in commands.jsonl;run.py baseline/train/resume plus finalize_results.py/verify_results.py.53unit tests and git diff --check pass. Final receipt verifies15production-source hashes,curriculum/119train-validation records,disjoint99/20/21pools,20causal categorical training archives,two PPO models,50independent physical audits,all completed full/partial validation rows,and no active jobs. Partial validation is explicitly ineligible for best selection. No commit or environment/dependency changes.
+- Open questions/next steps:best update is not yet established across update2;two-nonimproving-update stop criterion not reached. With an approved further budget, update deadline and use run.py resume; do not repeat training or completed13validation cases. PPO2contact KL0.39899 is much larger than temporal0.00960. Successful024had initial value7.861versusdiscountedreturn6.385;itsnegativeadvantage accompanied probability0.9864→0.2857. This is observed update behavior,not proof of a sole cause or justification for changing the algorithm during this frozen comparison. Current reviewed-geometry profile and limited validation conditions do not demonstrate arbitrary-object/multitask/P8 capability.
+
+## Work Package Logs — H/K joint policy bounded handoff
+
+### 2026-09-19 JST — Evidence retained; remaining full validation requires further budget
+
+- Scope/files/dependencies/commands/tests/results/limits:see matching Global bounded-results entry and artifact README.md. Complete outputs and failed/partial attempts are preserved. Status is budget_stopped,not completed learning/convergence. Validated best:update1;partially validated candidate:update2. No active simulator/training job. Handoff lists seven remaining condition IDs and the prepared096job.
+
+### 2026-09-20 JST — Approved continuation of update2 full validation
+
+- User approved continuing the pending evaluation. Resume active-work window starts2026-09-19T17:04:13UTC,deadline18:04:13UTC:at most60additional minutes after the prior approximately238-minute window; idle calendar time between turns is excluded. Preserve all trial history/checkpoints and completed13validation conditions. Scope:H/K,v0.5Section0.4; finish000096/114/115/116/134/135/136 and select among full20-condition evaluations. Existing run.py resume reuses completedtrain2/update2 and the hash-checked096preparedjob. Fifteen production sources,curriculum,manifest,checkpoint/scene/plan hashes match; no implementation/interface change. No new optimizer step is needed. Retain prior protocol/report snapshots and record approved_resume_20260920.json. Expected remaining simulation/evaluation25–35min; finish with physical/provenance audit and result documentation.
+
+## Global Worklog — Joint PPO update2 full validation completed
+
+### 2026-09-20 JST — Remaining seven conditions evaluated; update2 selected
+
+- Spec/work package: v0.5 Section0.4, H/K. User approved continuing the saved experiment. Reused the complete train2/update2 artifacts and13completed validation rows; evaluated only remaining000096/114/115/116/134/135/136. Existing run.py resume completed normally; no new optimizer step or training recollection. Active resume work approximately22min, cumulative approximately260min including the previous approximately238min; idle time between turns excluded, approved additional60min bound respected.
+- Outcome: all20validation conditions completed for baseline/update1/update2. Successes9/20,9/20,11/20; mean rewards3.652296,3.697638,5.044700; safety failures0for all three. Update2 preserves all nine baseline successes and newly succeeds000094/095. Versus update1,000015/094/095 recover and000035 regresses. Select update2/checkpoint.pt, SHA256 e90684de7ff2539791e8616b67b577a9f0e4410c337d865e93330797cab8acc6. best.json,experiment.json,handoff.json andREADME now reflect fully evaluated update2; no partial validation remains.
+- Remaining evaluation facts:000096 fails the authored150sfirst-goal deadline with86.468mmposition error versus50mm tolerance. Its complete rerun matches all18saved pre-interruption progress rows; full raw trajectory/native result and independent physical audit agree on failure.000114/115/116 reject planning for the selected groups.000134/135/136 succeed. Across all20, eight failures are planning rejection and one is goal-deadline failure. Do not interpret bounded planner rejection as mathematical infeasibility.
+- Learning scope: all-actor PPO remains contact-inclusive. Training pool99,validation20,held-out21 stay disjoint; only20unique on-policy training conditions have actually been collected (14+6). Validation does not supply optimizer gradients and held-out21 remains unexecuted. No fixed-training-set improvement comparison added. Validation initial argmax contact groups are identical between baseline andupdate2 across20conditions despite changed contact weights. The new successes094/095 use the same nonteacher groups as before; compiled physical target trajectories match update1/update2. This supports improved execution through learned transition behavior on these cases, not improved validation contact choices.
+- Stopping/limitations: update2 is the best observed among three completely evaluated models on fixed20conditions. Two consecutive nonimproving updates have not occurred; no convergence/global-best/curriculum/P8 claim. Existing measured-cost guard finds that a fresh collection+PPO+full20validation cycle cannot fit the remaining approved active-work budget, so update3 was not started. Current Section0.4 reviewed-geometry profile remains the evaluation scope. No fresh000022regression result is claimed for update2.
+- Files changed this continuation: WORKLOG.md and existing isolated experiment artifacts under artifacts/p4_full/order9/request_ppo/20260918_joint_policy_training: protocol approved deadline/budget note; coordinator-generated validation2/report/best; approved_resume_20260920.json; full_validation_comparison.json; handoff.json; README.md; verification.json; retained pre-resume snapshots and096retry-prefix diagnostic. Production code/config/model weights unchanged. All preexisting uncommitted changes preserved. Schema/interface changes:None. No environment or dependency changes; no commit.
+- Upstream dependencies: frozen fifteen production-source hashes,existing reviewed run.py/CLI/controller/guard/auditor,canonical99/20/21manifest and records,saved update2 model and096preparedjob. Downstream impact: consumers of best.json now receive fully validated update2; complete result and failure breakdown are available for subsequent learning work.
+- Verification/commands: isaaclab3 Python with OPENBLAS_NUM_THREADS=1,OMP_NUM_THREADS=1,MKL_NUM_THREADS=1,PYTHONPATH=.; run.py resume,existing prepare/execute/audit commands in commands.jsonl,verify_results.py,and git diff --check. Final evidence audit passed:15source hashes,curriculum/manifest/119train-validation record identities,99/20/21split,20causal categorical training archives,2optimized checkpoints with replay/reload checks,54independent physical audits,all3x20validation records,and no active experiment jobs. Prior53related unit tests after the KL fix reused because their production sources/config are unchanged; no redundant full test rerun.
+- Assumptions/open questions/next steps: approval interpreted as completing the saved seven-condition evaluation within at most60additional active-work minutes; exact start/deadline/finish in approved_resume_20260920.json. Best observed model is established; further learning and a plateau comparison need another complete cycle budget. Preserve fixed validation and unopened held-out split. No unresolved implementation or evaluation-integrity blocker.
+
+## Work Package Logs — H/K complete update2 comparison
+
+### 2026-09-20 JST — Full20-condition selection now complete
+
+- Scope/files/upstream/commands/tests/assumptions: see matching Global completed-update2 entry and artifact README.md. Implemented: resume seven pending evaluations, complete physical/provenance checks, select update2, update current handoff/results while preserving interrupted attempts. Not implemented: additional PPO cycle or convergence proof. Schemas/interfaces:None. Downstream: best.json selects e90684de/update2 with11/20success,5.044700mean reward,safety0; no pending evaluation or active job. Tests added:None; prior53tests reused, final evidence audit and diff check pass. Handoff limitation: best among evaluated0/1/2,not a confirmed plateau.
+
+## Global Worklog — Periodic validation and final neighboring-update search
+
+### 2026-09-20 JST — User removed total time limit; evaluation cadence changed
+
+- Spec/work package:v0.5 Section0.4,H/K. User explicitly authorizes autonomous training until empirical plateau and best saved-update selection, with validation every3updates and nearby-update evaluation after plateau. This supersedes prior cumulative4h/5h bounds and the local default2h; preserve history and individual hung-job watchdogs. Start from selected update2,all-actor PPO,unchanged learning rate/exploration/reward/controller/safety criteria and canonical99/20/21split. No new goal API or additional approval required.
+- Fixed stopping procedure: full20-condition greedy validation at updates5/8/11/...; after all99train conditions have been sampled at least once, two consecutive scheduled validations with no new best trigger refinement. Compare fewer safety failures,more task successes,then higher mean reward with existing0.0001minimum delta. Evaluate missing saved checkpoints within +/-2of the best,repeat around any newly better checkpoint,finish when the selected checkpoint's available two-neighbor range is evaluated. Preserve every intermediate model and never use validation trajectories for optimization. This is an empirical early-stopping criterion,not proof of global optimality.
+- Implementation scope:modify existing isolated run.py and verify_results.py to support unevaluated intermediate checkpoints,resumable per-case collection,and selection/refinement bookkeeping. Archive prior runner/protocol/report/evidence under before_periodic_validation_20260920. No production schema/interface/config/model modifications planned. Add bounded scheduler/resume regression tests before launching real collection; reuse verified production/physics tests and hash identities.
+- Throughput:recent6-case collection16min,full20validation58–63min,PPOapproximately2s. Every3updates amortizes validation to approximately35–40min/update,excluding final nearby evaluations and case-dependent cost. All99coverage plus periodic plateau checks may take many hours; no cumulative time cap is imposed. One Isaac worker retained because prior measured two-worker concurrency was slower. Normal task/planning failures count; numerical/schema/provenance/evaluation corruption stops the affected run for local diagnosis. No unrelated tuning loop.
+
+### 2026-09-20 JST — First new physical safety failure retained during scheduled collection
+
+- Train5/000129selectedgroup3 plans successfully but terminates qp_infeasible_terminal; native safety_failure=true. Keep its negative reward and complete archive in PPO. This is a normal measured policy/execution failure,not simulator corruption. The final evidence verifier still equates all safety failures with prohibited collisions; QP infeasibility is also a safety cause,so that assertion must be corrected to compare native safety labels and independently check prohibited collision before the final audit. No change to runtime safety,selection,training or frozen in-progress runner. Revisit the audit-only assertion at a stopped-run boundary and preserve source-hash history.
+
+### 2026-09-20 JST — First three-update block completed; scheduled validation5 started
+
+- Existing adapted evidence audit passed on the preserved0/1/2results before launch;12scheduler/resume tests passed. Newupdates3/4/5optimized successfully with exact reload and replay checks. Fresh6-case collection success counts6/6,3/6,5/6respectively;train5includes000129QP-infeasibility safety termination,all failures retained. Cumulative distinct training conditions38/99. Intermediate3/4checkpoints saved withvalidation=None;best remains evaluatedupdate2until20validation5conditionsfinish. No optimizer access to validation archives;no production source/config changes.
+
+### 2026-09-20 JST — Validation5 complete; planned audit/watchdog maintenance
+
+- Scheduled validation5completed20/20:5successes,meanreward0.482113,safety0,collection4621.45s(77.02min). Best remains update2:11/20,5.044700,safety0. Compared with update2,014/015/016/076/094/095regress to deadline failures;034/036/134/135/136succeed. Nonimproving periodic count1;coverage38/99,so continue training with checkpoint5and next validation8. Results from3/4remain saved but not yet validated.
+- Pause at the completed validation5 boundary to correct two operational issues. Owned coordinator SIGTERM after result persistence; next train6/072preparation had started for0.94s,with an empty output directory and no physical rollout. Archive this unfinished preparation and all pre-maintenance runner/protocol/report/test identities under before_watchdog_and_safety_audit_20260920. No completed case,optimizer step or validation repeated; no negative case removed.
+- Audit-only correction: row safety labels come from native episode safety_failure,which includes QP infeasibility as well as collision. Compare aggregate labels to native episodes,and independently require a raw prohibited collision to be classified unsafe. The prior final verifier equated all safety failures to prohibited collision;train5/129exposed this overly narrow assertion. Runtime/selection/reward already retained the QP safety failure correctly. No weakening of runtime safety or task acceptance.
+- Watchdog correction before later potentially long trajectories: unchanged maximum20000steps at measured15.8–17.2steps/s requires approximately1163–1266wall seconds,so prior900sinner/920souter could censor normal full-horizon execution. Use1800sinner/1860souter. Coordinator explicitly applies this execution timeout rather than retaining the older helper's920scap;prepare remains590sinner/610souter. Cumulative deadline staysNone per user. Physical horizon400s,first-goal deadline150s,tolerances,policy/controller/rewards/source hashes unchanged. No watchdog failure occurred in validation5.
+- Nineteen scheduling/resume/watchdog/safety-label regressions pass in0.64s;git diff --check passes. Adapted saved-evidence audit passes through update5,including15production source hashes,canonical splits,all completed native/independent physical records,and optimized parent-to-child chain. Resume from latest checkpoint5 with newtrain6;retain selected best2and all previous comparison evidence. This is an execution/audit maintenance revision,not another learning-hyperparameter hypothesis.
+
+### 2026-09-20 JST — Second three-update block complete; validation8 started
+
+- Updates6/7/8complete with fresh6-case collection success counts6/6,6/6,5/6;the sole failed case in train8is000066planning rejection and remains included. All three optimizer checkpoints pass exact reload/replay/parent identity checks;contact and temporal parameters update. Training coverage56/99;no repeated train conditions yet. Intermediate6/7saved for possible neighbor evaluation. Scheduled fixed20validation8started;best remains update2and periodic nonimprovement count remains1until the full new evaluation completes. No further code/config/hyperparameter changes or repeated completed physics since the prior maintenance boundary.
+
+### 2026-09-20 JST — Stopping coverage edge case identified before full coverage
+
+- While validation8is running(only56/99train conditions used),review of next_action found that its coverage gate can become true immediately aftertrain15while the latest scheduled validation14still represents only92conditions. Earlier nonimproving checks could then stop before evaluating any model trained on the last seven conditions. To make the stated one-pass gate meaningful,require the latest scheduled validated model to cover all99training conditions,not just the newest optimizer output. Under the current schedule this normally requires validation17before stopping. This does not alter rewards,model selection ranking,data order,optimizer settings or user budget. Freeze in-progress sources; planned pause after complete validation8will apply and test this boundary correction before later outcomes are known. Preserve all completed work and skip no negative case.
+
+### 2026-09-20 JST — Validation8 complete; one-pass stopping gate tied to evaluated model
+
+- Scheduled validation8:5/20success,meanreward0.833033,safety1,collection4699.48s(78.32min). Best remains update2:11/20,5.044700,safety0;nonimproving scheduled count2. Training coverage56/99,so no final stop.000116newly succeeds after group1→teacher-group3selection;114/115also selectteacher-group3and execute but fail phase_timeout.076changes togroup3and now rejects planning;135regresses to object_dropped(safety failure). All outcomes/negative rewards retained. Cases034/036/116/134/136succeed.
+- At completed-validation8 boundary,owned coordinator paused; only a newly opened train9/006preparation log existed,with no completed case or physics rollout. Archive prior runner/protocol/report/tests plus unstarted preparation under before_validated_coverage_gate_20260920. No optimizer or full validation repeated.
+- Correct the previously recorded stopping edge case: require the latest scheduled evaluated checkpoint's training-prefix union to contain all99conditions. A hypotheticaltrain15with99conditions and latestvalidation14with92must continue through updates16/17and validation17. Test this explicitly,plus the transition from full-coverage scheduled evaluation to neighbor refinement. Keep two-nonimproving-check criterion,original best-model ranking,neighbors+/-2,data order,optimizer/exploration,reward/physics and unlimited cumulative budget unchanged. This prevents the final newly trained batch being skipped by the stopping decision;it does not tune the model against validation outcomes.
+- Twenty-one isolated cadence/resume/coverage/watchdog/safety tests pass in0.64s;git diff --check passes. Saved-evidence audit passes through update8with intermediate3/4/6/7not yet selected or validated,canonical99/20/21splits,all native/independent safety outcomes and source/checkpoint/parent identities. No production code/config/schema change. Resume freshtrain9from checkpoint8;selected best2remains protected. Next scheduled validation11;usual earliest full-coverage scheduled check17.
+
+
+### 2026-09-20 JST — Scheduled validation11 complete; continue fixed coverage schedule
+
+- H/K continuation, no code/protocol changes: updates9/10/11 collected fresh6-case batches with successes6/4/6 respectively. Update10 includes one native safety failure; all negative cases remain in optimization. Unique training coverage74/99. Both contact and temporal branches continue learning; these sampled training results are not a fixed-set before/after performance comparison.
+- Full fixed20-condition validation11:7successes,meanreward2.572461,safety0,collection5357.94s(89.30min). Compared withvalidation8,035selects group1 instead of3 and improves from planning rejection to success;076selects group0 instead of3 and reaches execution but misses the150sgoal deadline;135keeps group2 and improves from object drop to success. Successful cases034/035/036/116/134/135/136. All remaining failures are retained in full20denominator.
+- Best remainsupdate2(11/20,5.044700,safety0);scheduled nonimproving count3. No early termination before a scheduled evaluated model covers all99train conditions. Continueupdate12fromlatestcheckpoint11,then scheduledvalidation14/17 as frozen. Full-source/protocol hashes unchanged; no optimizer/physics repetitions or new hyperparameter changes. Current runner session82433 remains active.
+
+
+### 2026-09-21 JST — Global / H,K: recovery after reported PC crash
+
+- Spec v0.5 Section0.4; user asks to restore the interrupted autonomous periodic PPO run. Unlimited total budget, every3updates full20validation, all99training coverage in an evaluated checkpoint and saved +/-2best-neighbor refinement remain authorized. No surviving experiment process; RTX4090 CUDA tensor operation passes.
+- Saved state:14 optimizer updates,92/99training conditions, scheduled validations5/8/11complete, validation14has000014complete and000015interrupted at105simseconds. Native source15files and all14checkpoint/training archive identities verified. Prior best remainsupdate2(11/20,5.044700,safety0). Updates12/13/14fresh sampled training successes5/5/4 of6each; update14has one safety failure. These are not fixed-training-set comparisons.
+- Archive stale process/status metadata and only incompletevalidation14/000015 plus its preparation log under before_power_loss_recovery_20260921. Preserve all complete checkpoints/receipts; restart only incompletecase15from the same initial condition/checkpoint/seed, then continue existing run.py resume. No repeated optimizer or completed validation case. PC downtime is not active training time.
+- Recovery audit found an overly strong equality in isolated verify_results.py:train14/000108drops during placement but lands within the goal tolerance. Native result/negative PPO reward correctly record failure. Independent goal/motion evidence alone cannot override a safety termination or incomplete task. Correct isolated outcome audit to require native completion and independent evidence for success; goal-true/runtime-false requires a native failure. No acceptance or reward reclassification. Add six success/failure boundary tests;27 isolated tests pass in0.59s and saved full audit passes163physical receipts. Production code, schema/interfaces, optimizer, controller and task criteria unchanged. Refresh only auditor/test hashes and stale human-readable validation cadence in paused protocol.
+- Files:isolated verify_results.py/test_schedule.py/protocol.json plus recovery metadata, this worklog and design supplement. Commands:isaaclab3pytest test_schedule.py;verify_results.py;existingrun.py resume. Upstream:unchanged frozen source/config/manifest and saved parent-checkpoint chain. Downstream:restore evaluation14 before anyupdate15; final best selection/audit still pending. No blockers after recovery audit; continue monitoring.
+
+
+### 2026-09-21 JST — Validation14 complete after PC recovery
+
+- H/K,v0.5 Section0.4. Full20validation14:6successes,meanreward1.655429,safety0,collection6192.45s(103.21min,completed-case sum excluding PC downtime and abandoned partial000015). Successful034/036/116/134/135/136. Best remainsupdate2(11/20,5.044700,safety0);scheduled nonimprovement count4.
+- 000076selects group1 and reaches the object target but stays in place until400s/evaluation_horizon_timeout. At310s,goal position error4.73mm,guard=true,requested_transition=false,advance=false:at that observation the actor withholds the transition despite guard permission. Preserve failed terminal outcome; no forced transition or timeout reduction added. This is measured current-policy behavior,not a stalled simulator.
+- Resume reused completed000014; only PC-interrupted000015was reexecuted. Train15now collects the remaining7cases,leading to99/99coverage. Continue frozen schedule through the first scheduled validation that includes all99conditions(normally17),then nearby-checkpoint refinement. No source/protocol change during resumed run;session12594active.
+
+
+### 2026-09-21 JST — Full training coverage reached; scheduled validation17 starts
+
+- H/K,v0.5 Section0.4. Updates15/16/17fresh collection:6/7,13/14,5/6successes; each batch contains one native safety failure retained in optimization. Collection1342.27/2561.64/1081.87s. All99training conditions have now been used(first full pass ends15);17optimizer checkpoints preserved. Both contact/temporal branches still updated and categorical replay/reload assertions pass. For17,on collected observations contactKL0.16013(argmax1change),temporalKL0.04025(argmax10changes).
+- Begin scheduled full20validation17 fromcheckpoint17. This is the first scheduled validation whose preceding training covers all99conditions. Best remainsupdate2and prior schedulednonimprovementcount4. If17does not improve best,existing scheduler moves directly to unevaluated savedneighbors3/4rather than training18. If a neighbor improves best,continue its available+/-2range as predeclared. No new algorithm/tuning/stopping changes;heldout21unused.
+
+
+### 2026-09-21 JST — Global: user-directed pause after current process
+
+- Spec:v0.5 Section0.4;H/K work packages. Latest user instruction supersedes autonomous continuation:finish currentIsaacworker then pause. Atvalidation17/000015,freeze the owned coordinator while its worker finishes; after complete result/rollout/request-rollout files exist,terminate only that coordinator. Next000016preparation never starts. No worker/controller/model source mutation,forced transition or episode truncation.
+- Currentworker000015finishes normally as object_pose_goal_deadline_missed(150.015s),safety0. Preserve its rawoutput; use the existing collect_one routine with verified savedprepare/execute receipts to run only the existing independent audit and complete collection.json/summary.json. No rerun of that episode or optimizer. Update17validation now2/20complete:000014success,000015failure. Remaining18startwith000016. Partial17is not eligible for best selection.
+- Seventeen optimizer checkpoints saved;all99train conditions used. Fully evaluatedupdates0/1/2/5/8/11/14;current best2=11/20,meanreward5.044700,safety0. Stopping/refinement objective remains unfinished due explicit userpause,not convergence or budget exhaustion. No automatic resume until user asks.
+- Saved-evidence audit passes:15production source hashes,99/20/21disjointsplit,17optimizer chains,205physical audits,allcompletearchives;noactive experimentjobs. Currentcadence/resume/outcome suite27passed earlier this recovery;production53-test evidence reused under unchanged identities. gitdiff--check passes. Existingdirtyproductionchanges preserved. Approximate activewalltime across the originalrun andPCrecovery:11.74h,excluding PCdowntime(estimated from pre-crash lastlogtimestamp and currentturnstart);fulltiming/commands retained.
+- Files:existingisolated README.md/handoff.json/experiment.json/best.json/verification.json and user_pause_20260921.json;history archived under before_user_pause_20260921. No additionalproduction/schema/interfacechange. README now accurately statespaused/incompletefinalselection,in place of olderupdate2-only taskcompletion wording. Next:resumeexistingrun.py atvalidation17/000016,reusingcases014/015;then frozenbest-neighborselectionprocedure.
+
+#### H/K work-package handoff — 2026-09-21 user pause
+
+- Scope:restore PC-interrupted all-actor PPO,then honor explicitpauseafter currentprocess. Upstream:frozenv0.5warmup source/config/manifest,savedparentcheckpoints;downstream:latestcheckpoint17pluspartialfullvalidation,selectedbest2retained.
+- Implemented:recovery,isolatedoutcome-audit correction with6boundarytests,exactper-casepause/resumestate. Not completed:remaining18validation17cases and finalsaved-neighborselection. No schema/interfacechanges. Files/commands/tests andactivewalltime:Globalentries above. No liveownedjobs or unresolvedrecoveryblocker. Await usercontinuation before furtherIsaacwork.
+
+
+### 2026-09-21 JST — Global / H,K: optimize Isaac execution before savedupdate3/4selection
+
+- User requests all practical speed improvements without wasting time,then evaluate savedupdates3/4to determine best. Existingtraining remains paused;no newPPO or remainingvalidation17is required by this redirected comparison. Preserve17models andallpriorresults.
+- Baseline:fullvalidation2 has285spreparation/3170sexecution;validation14has827s/5352s. Startup only~7spercase;rollout~20–22steps/s dominates. Rendering alreadydisabled;prior2-processprobe0.924xthroughput,so do not repeat blind concurrency. Profile a512-step unchangedrealIsaacprefix,then optimize measuredhotpath while preservingphysics,dt,controlleriterations,policy/guard/reward/acceptance. Compare commands/physicalprefix andactualwalltime before formalmodelcomparison.
+- Scope:existingrequestruntime/controller hotpath only if profiling supports it;protected C3source remains byte-identical. Use existingCLIs and isolatedartifacts/20260921_runtime_speed for evidence;no duplicateproductionrunner or schema migration. Preserve currentdirtychanges withsource_before snapshots. Optimization budget120min,reviewat30min,samehypothesis≤3expensivechecks,eachdiagnostic≤10min. Existingauthorizedformalcheckpoint evaluation mayrun longer separately;no unbounded implementationloop. Source/config/plan/checkpoint provenance must distinguish prior and optimizedruntime rather than rewriting old evidence.
+
+#### 2026-09-21 JST — Global / H,K: fixed-physics execution speed implementation
+- Active spec: v0.5 Section 0.4. Work packages H/K (execution/experiment verification).
+- Observed: 512-step profile contains >200k tensor constructions; repeated rigid-body kinematics/model
+  builds are a major host-launch cost. Existing rendering is off; earlier 2-process concurrency was slower.
+- Implemented: nominal request controller opts into a CUDA Graph of the existing rigid-body builder.
+  Immutable constants are retained per device/dtype; current input values are copied each call; validation
+  stays outside capture; cloned outputs survive later replays; gradient-requiring inputs remain eager.
+  Request provenance now hashes the builder and unchanged QP implementation as well.
+- Files: amsrr/controllers/batched_rigid_body_model.py, amsrr/simulation/teacher_contact_execution.py,
+  scripts/run_request_policy.py, tests/unit/controllers/test_batched_rigid_body_model.py, design supplement.
+  Existing unrelated uncommitted PPO/deadline edits preserved. Schema/interface changes: None.
+- Diagnostic evidence: isolated model 9.213 ms -> 1.828 ms; exact equality with changed inputs. Full case014
+  (update2) 2159 steps: all73 telemetry tensor fields and acceptance identical; process execution
+  108.746 -> 88.032s, loop101.818 ->81.200s. This initial version accelerated controller-side builds only.
+- Follow-up: post-step builder ran with grad mode enabled but no differentiable input, so it still used eager.
+  Corrected eligibility to inspect requires_grad. Stopped the owned, unfinished case096 diagnostic with
+  SIGTERM before changing source; cancellation is recorded, not counted as a failed/successful evaluation.
+  Final case096 equivalence run checks the final path. No source mutated under a live worker.
+- Rejected: alternate whole-QP graph variants changed numerical results; no production QP edits or reduced
+  iterations. No precision/fidelity reduction, actor/guard/reward changes, or new PPO optimizer steps.
+- Tests: 84 related/controller/runtime/scheduling tests passed in2.68s, including float32/float64, grad modes,
+  dynamic inputs, shape replacement, prior-output lifetime, nonfinite rejection, and saved-update-only scope.
+- Commands: existing run_request_policy.py execute --rollout-steps20000 --timeout-s580, isolated cProfile,
+  saved-telemetry comparison; exact command logs/provenance under20260921_runtime_speed.
+- Upcoming formal scope: only saved updates3/4 on the existing20 validation conditions. Existing coordinator
+  gets a validate-saved entry, with a versioned runtime and immutable old source snapshot; pending17 and
+  further PPO are excluded. Old source hashes/physical evidence remain archived and individually identified.
+- Final speed evidence: case096/update2/6modules completed7501 steps with all73 telemetry fields and
+  acceptance identical. Execution445.949 ->285.158s (1.564x;36.1%less wall time), physics loop435.223
+  ->275.011s (1.583x). This is the final runtime with both controller and post-step model builds captured.
+  Investigation/implementation/diagnostics took about24min. No additional speed experiments planned.
+- Formal validation3/4 started2026-09-21T11:40UTC using17 frozen source hashes. Original15 source hashes
+  remain under protocol.source_hashes, backed by before_runtime_speed_20260921/source; new identity is
+  protocol.saved_validation_runtime. Existing geometry for095/096 is reused only after exact current
+  actor request AND observation-snapshot match (both saved policies match), with all trajectory checks
+  rerun. Saved models, original success thresholds and20-case split remain unchanged.
+- User requested immediate pause during saved validation3. Sent SIGTERM to owned coordinator164547;
+  its handler terminated the active preparation worker. active.json is empty; no related worker remains.
+  case000014/update3 completed and was independently audited: success, reward12.89682, safety0. It is
+  retained as1/20 and not eligible as a complete-model comparison. case000015 was interrupted during
+  preparation (only decision/geometry produced); moved its incomplete directory/log into
+  before_saved_validation_pause_20260921 so explicit future resume can prepare it cleanly. update4 not
+  started; no optimizer work occurred; best fully evaluated remainsupdate2. Updated handoff/status to
+  paused. Earlier partial validation17 remains untouched. Resume requires user continuation.
+
+### 2026-09-21 JST — Global / H,K: one-process multi-environment speed benchmark
+- Spec: v0.5 Section0.4; user authorizes parallel-environment implementation and speed report BEFORE any
+  update2/3/4 comparison. All existing evaluation/training stays paused. Budget120min, review30min,
+  <=10min per diagnostic and <=3 costly trials per hypothesis; protected C3 source stays byte-identical.
+- First bounded deliverable: homogeneous replicas of one checked request in one Isaac process, batched
+  physics/QPID, independent per-environment actor state, origins, deadlines, terminal masking and archives.
+  Initial1-vs4 benchmark holds checkpoint/task/physics/controller constants fixed. This does not yet claim
+  heterogeneous initial poses/plans: those additionally need per-environment support/reference installation.
+- Reuse existing run_request_policy.py execute and existing batched C3 harness through checked in-memory
+  adaptations. No copied simulator runner. Touch request runtime/controller bridge and related tests only.
+  CLI batch-count/seed extension is within the user-approved parallelization; policy/schema semantics stay.
+- Evidence plan: unit tests for environment isolation/origins/deadline/terminal handling; short real-path
+  preflight as needed, then full-task paired throughput and outcome comparison. Do not infer homogeneous
+  speedups transfer unchanged to mixed morphology/tasks. Artifacts20260921_vectorized_request_benchmark.
+
+#### Global result — 2026-09-21 JST: parallel speed measured; model comparison remains paused
+- Same saved update2/000014 checked plan, greedy policy, dt0.02 and full physical task. Current optimized
+  single environment:71.730s; one Isaac process with4environments:82.520s total,20.630s amortized/episode.
+  Episode throughput3.477x; amortized execution time71.24%lower. The4*71.730=286.921s serial total is
+  an extrapolation from one measured single run, not four separately measured executions. Timings include
+  Isaac initialization/execution/archive and exclude checked-plan preparation/process shutdown.
+- Physical loops65.094s versus75.654s; useful valid environment-step throughput3.441x. Success1/1and4/4,
+  safety failures0. All actors select the same8requests. Three replicas execute2159steps; one2157steps
+  after contact acquisition advances0.04s earlier. Maximum simultaneous object-position deviation from
+  serial is7.246mm; final target errors24.199mm serial and24.221–24.274mm parallel. Do not claim batch-size
+  bitwise equivalence. The new1environment execution matches all73saved physical telemetry fields exactly.
+- Real retirement check: the early-finishing row has exactly2157valid records, no reset or extra actor
+  events/rewards, and its remaining clock stays frozen. Unit tests cover distinct guard outcomes, inactive
+  event isolation, authored-frame observations, per-environment deadlines, and rejecting changed harness
+  adaptation boundaries.63related tests passed in3.39s; git diff --check passed.
+- Scope/limits: same condition replicated, not four distinct bucket conditions; heterogeneous support,
+  initial poses and plans are not installed by this entry. No change to existing training/evaluation
+  coordinator. No training or saved update2/3/4 comparison started. Existing checkpoints remain untouched.
+  Measured speed warrants batched execution; it is not a measured full-validation speedup or convergence
+  result. No additional trials needed for this first throughput question.
+- Commands/evidence: commands.json,protocol.json,source_before/,source_after/,smoke_4/,serial_1/,batch_4/,
+  serial_equivalence.json,speed_result.json under20260921_vectorized_request_benchmark. Three simulator
+  launches:200-step real-path smoke then1and4full runs. Copies of the already checked014plan are explicitly
+  marked diagnostic and re-bound to current source hashes with immutable original-job provenance. Neither
+  original job nor checkpoint was rewritten. Benchmark events are excluded from PPO/formal acceptance.
+
+#### Work Package H/K — 2026-09-21 JST: batched request supervisor and execution entry
+- Spec: v0.5Section0.4. Files:amsrr/simulation/request_event_execution.py,scripts/run_request_policy.py,
+  tests/unit/policies/test_request_event_execution.py; WORKLOG and design supplement updated.
+- Upstream:existing checked request plan,RequestActorCritic,TeacherContactController,batch-capable physics/
+  QPID and existing origin-aware reference. Shared actor weights; independent supervisors/RNG/history.
+- Interface:optional execute CLI --num-envs(default1),--environment-seeds,--benchmark; batch results retain
+  per-environment episodes/motion/deadlines/origins. Single-environment motion/deadline shapes preserved.
+  No learned input/output/checkpoint schema change. Protected harness remains byte-identical SHA256
+  e813f950dde32818b7375949bfb58baa983dde760e58da22cfbb79cc33b764c2.
+- Downstream: same-scene replicas can now use one actual Isaac physics/controller batch; multi-condition
+  collection/evaluation remains unmodified. Physics/controller/guard/tolerance fidelity unchanged.
+- Tests/commands:isaaclab3 python -m pytest -q tests/unit/policies/test_request_event_execution.py
+  tests/unit/controllers/test_batched_rigid_body_model.py tests/unit/training/test_request_ppo.py:63passed.
+  Existing execute entry with --benchmark --num-envs1/4; full commands/timeout/env recorded in artifact.
+- Assumptions/open questions: no heterogeneous-plan speed claim; grouping distinct prepared cases and
+  re-evaluating all candidate checkpoints under identical batch placement would be needed before applying
+  this to model selection. No retraining is intrinsically required. Stop here for the requested speed report.
+
+### 2026-09-21 JST — Global / H,K: saved update2/3/4 comparison using batched Isaac
+- User now authorizes actual comparison with the new implementation. Scope:the existing20validation
+  conditions, saved updates2/3/4, identical reward/safety/task criteria; no optimizer or validation17.
+- Initial read-only actor audit shows all3models choose exactly the same initial contact group in every
+  condition. Prepare/check the common physical plan once per condition after confirming full request and
+  observation identity; each saved actor then controls its own independent live transition sequence.
+- Small authorized CLI extension: --evaluation-checkpoints binds one actor to each environment; greedy
+  multi-model archives are evaluation_only/diagnostic_only and cannot enter PPO. --env-spacing0 explicitly
+  uses IsaacLab's existing collision groups to remove world-offset rounding as a model-selection confound.
+  Existing3m spacing and single-actor defaults remain. Same-actor full-task preflight must pass before formal
+  comparison. Protected harness disk bytes remain fixed; adaptations remain checked in memory.
+- Success criterion:complete20/20outcomes for each of3models, independent physical audit, checkpoint/source
+  identities, then rank by fewer safety failures, more successes, mean return with existingdelta0.0001.
+  Preserve old protocol/results, including partialvalidation3and17. New evidence lives under existing
+  experiment/saved_comparison_234; reuse existing run.py coordinator and command/signal handling.
+- Budget:formal saved comparison uses the already user-removed time limit; implementation/diagnostics
+  retain120min/review30min/at most3costly attempts and10min per diagnostic. Expected formal work roughly
+  one physical batch per executable condition plus brief planning rejections; estimate after preflight.
+- Implementation/preflight:64runtime/controller/PPOtests and29coordinator/audit tests pass. Initial actor
+  audit verifies identical full requests across3models on all20conditions. Zero-origin3-environment
+  same-actor execution succeeds3/3in80.540s,2159steps each;72/73raw fields identical across environments,
+  with only diagnostic contact-frame wrench differing by<=1.91e-6. Actual states/commands/rewards/clocks/
+  termination are identical. Compared with scalar execution, common position difference is37um. The
+  initial standalone numerical report's arbitrary10um flag is preserved as false; this is not a task
+  tolerance and is not used as an acceptance criterion. No task/guard/physics threshold was relaxed.
+- Checkpoint-to-row replay audit on saved events reproduces log probabilities within4.77e-7andvalues
+  within9.54e-7. Formal collector repeats per-actor replay plus per-row physical/terminal-mask audit.
+  Formal comparison started12:27:39UTC with frozen sources, case list, checkpoint hashes and protocol;
+  existing run.py compare-batched entry uses existing bounded child-process/signal handling. No source
+  edits are allowed while this job runs. Model comparison output will be recorded at completion.
+- Before completing the first case, exact plan comparison exposed an orchestration mistake:applying the
+  generic cached-prefix reconstruction to a reviewed complete route replaces its measured initial object
+  pose with authored pose (3.513mm height difference on014). Terminated owned coordinator169569/child169593
+  before edits; the interrupted job/logs/protocol are preserved underinterrupted_cached_reviewed_prefix.
+  No comparison outcome from it is used. The reviewed cases now retain ordinary reviewed-route preparation;
+  non-teacher-selected groups retain the already authorized cached geometric prefix path. Every newly
+  prepared physical phase trajectory must exactly equal its prior update2 counterpart before Isaac starts.
+  This gate prevents silently comparing a different initial state/route; no runtime/control change was
+  needed. Coordinator source snapshot/hash updated only after all its workers stopped, then resumed.
+
+- 30min review at12:46UTC:preflight/implementation complete,3/20conditions compared, successes2:3,3:2,4:0, safety0. Model/physical/plan equivalence audits pass on allcompletedcases. Formal comparison continues within the existing user-unlimited evaluation authorization; no new features or optimizer changes. Remaining17conditions include known planning-rejection cases; currentcase000034.
+
+- At000094 the pre-Isaac plan gate rejected JSON float64 reconstruction differences confined to release/retreat/settle, max1.554e-15. No simulator was started for that rejection. Actual reference construction in protected harness line1907 uses float32; changed only the isolated audit to require exact bitwise equality at that execution precision plus exact schema/IDs/shapes, without a numerical tolerance. Regression verifies that the archived3.513mm initial-state change remains rejected;30coordinator tests pass. Existing11completedconditions are preserved/resumed and094uses its already prepared/rechecked plan. Controller/policy/physics sources unchanged; previous protocol/log andnumeric audit saved underplan_precision_boundary.
+
+- After094physics completed, a new audit assertion incorrectly compared the source-record subgoal phase ID with the generated execution-task IRG ID. All3live initial requests exactly match prior verified094runtime (contact group3; generated phase hash18f0...), whereas the prepared source request usesphase hash8cbc.... Corrected isolated audit to compare full live request against prior same-generated-scene runtime and contact group against preparation. No policy/controller/physics changes or repeated simulator execution. Original logs/protocol retained under runtime_irg_identity_audit; completed physics collected on resume.
+
+### 2026-09-22 JST — Global: PC復旧と保存済みupdate2/3/4比較完了
+- Spec: v0.5 Section 0.4。Work package: H/K。ユーザーの再開指示に従い、既存の20条件・3候補比較を完了。
+- PC停止時に18条件まで完了していた。全モデル・固定source・保存済み物理ログのSHA256を確認し、
+  完了済み18条件を再実行せず保持。000135のjob.jsonは全NULL、execution_task.jsonは空だったため、
+  中断一式と旧状態をsaved_comparison_234/power_loss_recovery_20260922へ退避。当該条件を再準備し、
+  000135・136を同じfrozen runnerで実行。新しい学習やproduction source変更なし。
+- 最終結果（各20条件）: update2=10成功、安全違反0、平均累積報酬4.348505;
+  update3=7成功、安全違反1、報酬2.093927; update4=5成功、安全違反1、報酬0.535970。
+  既定の安全違反数→成功数→報酬の順でupdate2を選定。この3候補・検証20条件に限定した結論。
+- 3候補の初回接触群は全条件で同じ。共通の計画拒否8条件も失敗として母数に保持。
+  物理実行は12 batch、36 episode。update3/4の000135は目標付近に到達したがobject_droppedで
+  終了したため安全失敗。物理的な目標到達だけをtask成功に読み替えていない。
+- 旧単一環境update2の11/20から今回は10/20。000094/095が成功→期限切れ、000096が失敗→成功。
+  000094のlift完了は約8.9秒遅れた。並列化後の成否一致は保証できず、差の根本原因は未切分け。
+  今回の順位は全候補を同一batch条件で評価して決め、旧得点を混在させない。
+- 再開coordinatorは332.2秒（約5.5分）。12正式batchの実行時間合計は2821.0秒であり、準備・診断・
+  PC停止時間を含む全作業時間ではない。aggregateのcollection_seconds=0は未設定で計測値ではない。
+- Files: 既存experiment内saved_comparison_234/{README.md,comparison.json,best.json,verification.json,
+  cases/,power_loss_recovery_20260922/}、親experiment.json/handoff.json、WORKLOG、設計補足。
+  親best.jsonの旧単一環境履歴は保持し、今回の選定正本はsaved_comparison_234/best.jsonと明記。
+- Commands: isaaclab3 python -u artifacts/p4_full/order9/request_ppo/20260918_joint_policy_training/run.py
+  compare-batched（OPENBLAS/OMP/MKL各1 thread、PYTHONPATH=.）。残り2条件のprepare/executeのみ新規実行。
+- Tests: test_schedule.pyを復旧時に再実行し30 passed（0.59s）。前段の関連runtime/controller/PPO
+  64件合格を再利用。全60結果、環境別checkpoint再計算、保存eventからの報酬、単一終端、独立物理監査、
+  source/config/record/checkpoint/物理ログhashを再照合。git diff --check合格。保護harness hash不変。
+- Schema/interface changes: None during recovery。Assumptions: 凍結済み評価条件と選定基準を継続。
+  Blockers: 依頼された比較にはなし。Next steps: 比較完了、全worker停止。追加PPO・評価は自動実行しない。
+
+#### Work Package H/K — 2026-09-22: 比較成果物の確定・引継ぎ
+- Scope/files/tests/results: 上記Global entryおよびsaved_comparison_234/README.md参照。
+- Upstream: 保存済みRequestActorCritic update2/3/4、検証20条件、検査済みrequest plan、独立supervisor、
+  既存Isaac batched physics/QPIDと物理監査。実行・学習の契約や成功閾値は変更していない。
+- Implemented: frozen条件での3モデル比較完了、破損した未完了caseの隔離復旧、選定・独立照合・
+  handoff確定。H/Kの責務記録であり、複数AI agentを起動した意味ではない。
+- Downstream: 使用候補はupdate_2/checkpoint.pt（SHA256 e90684de7ff2539791e8616b67b577a9f0e4410c337d865e93330797cab8acc6）。
+  新batch条件では10/20成功。単一環境旧得点11/20と区別する。自動deployment・commitなし。
+- Open questions: 単一環境とbatchの成否差の原因、計画拒否8条件、他条件への汎化は今回の比較で未解決。
+  歴史的なpartial validation3/17は保存済みで、今回完了した比較の残作業ではない。
+
+## Global / H,K — 2026-09-22 Host crash investigation
+
+- User explicitly requests autonomous thorough cause investigation. Spec v0.5; no policy/control/schema changes. Default120min investigation budget,30min review. Preserve active separately resumed comparison and existing uncommitted work.
+- Known evidence:pstore kernel panics September20/21,older archive also present. Compare crash signatures and kernel disassembly,platform CPU/RAM/BIOS/microcode,driver versions and official known issues. Success is evidence-backed cause ranking and concrete remaining isolation steps; no unsupported claim of hardware failure.
+- Artifacts:artifacts/diagnostics/20260922_host_crash. Read-only OS queries and isolated offline analysis first; no host reboot,global package installation,firmware writes or intrusive stress alongside activeIsaac. Capture evidence and hashes.
+
+### Global / H,K — 2026-09-22 host crash investigation result
+- Spec v0.5; work packages H/K diagnostic only. No schema/interface changes; no production code, BIOS, driver, package or OS configuration changes. Existing dirty work and separately resumed evaluation preserved.
+- Evidence: September20/21 pstore proves kernel panics on logicalCPU8/9 (same physicalcore16). August28 earlier kernelOops is onCPU8 under6.8.0-136/NVIDIA580.173.02; it was NOT a confirmed whole-host crash. Current panics use6.8.0-138/580.178.04. Disassembly corroborates anomalous execution positions; root cause remains unproven.
+- User reports no CPU replacement/OC and freezes only duringIsaac. CPU/core instability is leading hypothesis; kernel/driver memory corruption and RAM/platform faults remain possible. Current14900KF microcode0x133,BIOS22.02,DDR5-4800,PL1/PL2=253W. HistoricalSep7Xid43 exists but noXid recorded immediately before recentpanics; noOOM evidence. No fullvmcore available.
+- Commands/checks: journalctl perboot,pstore copies,dmidecode,lscpu,read-onlyMSRs/powercap,nvidia-smi,dpkg-V,extract-vmlinux/objdump,officialIntel/NVIDIA source review. Isolated core_check.py: CPU10/8/11/9 each60seconds,610/612/617/610iterations,allpass,peak73C; boundedtest does NOT exclude intermittentfailure. gitdiff--check passes. NoIsaac orGPU workload started by this investigation.
+- Files: artifacts/diagnostics/20260922_host_crash/REPORT.md and raw evidence/self-check/hash manifest; thisWORKLOG. Upstream:installedhost kernels,pstore,journals. Downstream:no policy/checkpoint changes. Approximately10min walltime,one boundedCPUdiagnostic; no repeatedstress loop.
+- Handoff/openquestions: BIOSIntelDefaultSettings/voltage profile,offlineRAM test and known-goodCPU comparison needed for causalattribution; softwarepath requires controlledsupportedkernel/driver comparison,notlongertraining. CPU8/9taskset alone would not isolateinterrupts or provefix. Report contains evidence,alternativehypotheses and concreteisolationsteps.
+
+### 2026-09-23 JST — Global / H,K: larger on-policy batches and independent branch update limits
+- Spec: v0.5 Section0.4. User authorizes increasing episodes per update and separating contact/temporal loss
+  weights and update limits, then testing actual learning improvement. Start2026-09-22T14:57UTC; implementation/
+  diagnostic budget120min, review30min; formal scope fixed at two28episode updates plus paired train/validation
+  evaluation under prior user-unlimited cumulative formal budget. No open-ended parameter search/convergence run.
+- Hypothesis: six initial choices per update and event-count-averaged loss/KL cause noisy or excessive contact
+  changes while temporal events dominate. Test both approved changes together; this comparison cannot attribute
+  effects to batch size versus weighting separately. Preserve task rewards, actor inputs/output, runtime/controller,
+  learning rate0.001 and entropy0.02. No teacher targets or validation gradients added.
+- Implementation: optional branch-weighted actor/entropy mean (contact0.5,temporal0.5), each KL<=0.05 from the
+  collection policy. Reject the entire violating optimizer step, restore encoder/heads/critic/optimizer and stop
+  that update. Keep legacy advantage normalization, critic MSE and gradient clipping. Defaults retain old PPO.
+- Files: amsrr/training/request_ppo.py, scripts/train_request_imitation.py, tests/unit/training/test_request_ppo.py,
+  existing experiment run.py entry balanced-branches, spec, design supplement and this log. Previous dirty
+  changes preserved; before/source snapshots and protocol under existing experiment/branch_balance_20260922.
+- Experiment: start saved best update2; two disjoint28-condition batches (four per module count2..8) drawn from
+  the previously frozen training shuffle, retaining all99 eligible training conditions. Fixed14training panel
+  (two per module) is chosen before new outcomes. Compare baseline/new1/new2 there, freeze selected new model,
+  then compare it against baseline on all20validation conditions. Heldout21 excluded. No outcome-based omission.
+- Reuse existing prepare/execute/PPO/independent audit and coordinator/process handlers. Training conditions
+  have distinct plans and use existing single-environment execution; prior two-process probe was slower.
+  Greedy model comparisons use existing zero-origin B=3 with collision isolation, independent actors and
+  constant batch size. Different initial requests are planned separately; padding replicas are audited and
+  excluded from case counts. No new simulator runner or heterogeneous-plan runtime introduced.
+- Tests: branch frequency-invariant loss and gradients, missing/configured branches, full-state rollback for
+  either exceeded branch, existing PPO compatibility;15passed2.19s. Real saved on-policy train3 preflight uses
+  exact parent update2 for diagnostic only:57events/6episodes, one accepted epoch (KLcontact0.036645,
+  temporal0.000663). Second proposed epoch contactKL0.079747 versus global0.009965 is correctly rejected,
+  checkpoint restores accepted state exactly. This six-episode preflight model is not a formal candidate.
+- Upstream: canonical99/20/21 split, RequestActorCritic, deterministic nominal planner/guards, Isaac batch
+  implementation and independent motion audit. Schema/interface: no actor/checkpoint schema changes; three
+  optional PPO CLI optimization settings within the user's approved change. Protected harness unmodified.
+- Success/stop: report paired reward/success/safety and contact-choice changes, including negative result if
+  warranted. All normal planning/physics failures retained. Abort invalid source/schema/probability/physical
+  evidence; no repeats of completed episodes. Formal outcomes and final handoff will be appended here.
+- 約30分レビュー（2026-09-22T15:26UTC）: 実装と診断は完了、PPO/運用テスト45件合格。
+  固定sourceでtrain_1を収集中、8/28成功・安全違反0。まだPPO更新前の収集結果であり改善証拠ではない。
+  約18分で8件を準備・実行・物理監査済み。残りは宣言済み2更新とtrain14/validation20比較の正式実行。
+  新規仮説・追加機能・パラメータ探索へ拡張しない。残りdisk425GB、GPU容量の不足なし。
+- 2026-09-22T16:08UTC: first formal28episode batch completed (24success,3planning rejections,1object drop,
+  mean sampled return10.448035),232events=28contact+204temporal. New update1 accepts5epochs; branch KL
+  contact0.04649933/temporal0.01333743. Proposed epoch6 has contact0.05800739 while globalKL0.01897658;
+  it is rolled back as intended. Independent saved-model replay reproduces both branch KLs and finds
+  changed greedy actions on2/28contact states and23/204temporal states. This establishes actual policy
+  change and bounded updates, not task improvement. Fresh train_2 collection now uses that new checkpoint.
+- 2026-09-22T17:05UTC: second28episode batch completed (23success,2planning rejections,2safety failures,
+  1pose-goal failure; mean sampled return10.34223),255events=28contact+227temporal. New update2 accepts13epochs;
+  contactKL0.04449822/temporal0.01656111. Proposed epoch14 contactKL0.05050498 exceeds0.05 and is restored,
+  while globalKL0.02032909 would have passed the old aggregate check. Independent saved-model replay agrees
+  and finds1/28contact and7/227temporal greedy changes on collected states. These batches use different
+  conditions, so their raw success rates are not a before/after comparison. Fixed14condition paired evaluation
+  has started; frozen candidate selection will precede the20condition validation comparison.
+- 2026-09-22T18:03UTC: paired B=3 training14 comparison completed. Baseline13/14,mean11.94592286;
+  new1 10/14,mean8.62238857; new2 7/14,mean5.39340143. Each has one common object-drop failure000065.
+  All14initial greedy contact groups remain the same across models, despite active contact training and
+  measurable changes on other collected states. New1 loses000013/000031/000027 to transport-phase deadline;
+  new2 additionally loses000041/000010/000046. No new successes. Select new1 using training only and freeze
+  SHA256 de5bbcbdfe49d4bd00f5dd2172d1a28c878685dfc67409d317580b4235ad286c before all20validation comparison.
+  Read-only saved-data diagnostic: first update transport transitions24events all belong to successful
+  episodes, but22have negative normalized advantages (mean-0.518868);6continuation events have mean+0.311296.
+  At000013 final transport decision, new1 continuation probability0.531596 and new2 0.673877 yield repeated
+  greedy waiting. transport_advantage_diagnostic.json records actual returns/value estimates and limits:
+  this is observational evidence, not an ablation attributing all regression to a unique cause.
+
+### 2026-09-23 JST — Global: larger-batch/branch-balanced PPOの実装・検証完了
+- Spec: v0.5 Section0.4。Work packages: H/K。承認された28episode/updateと分岐損失/KL分離を実装し、
+  固定2更新、同一訓練14条件の3モデル比較、検証20条件の2モデル比較を完了。正式終了18:58:17UTC。
+- Result: 訓練成功baseline13/14、新1 10/14、新2 7/14。平均報酬11.945923/8.622389/5.393401、
+  安全失敗各1。訓練結果だけで新1を固定し検証した結果、baseline10/20対新1 5/20、
+  平均報酬4.348505対0.584595、安全失敗0対1。改善なし、新しいモデルの採用は見送る。
+- 接触も更新したが、比較対象の初回最大確率選択は全件同じ。計画拒否8条件は共通。
+  新1が失った検証成功は000014/000015/000016/000096（目標到達期限切れ）、000135（物体落下）。
+  新たな成功0。baselineの今回得点は前回B=3比較と一致し、単一環境11/20とは区別する。
+- Changes/files: amsrr/training/request_ppo.py、scripts/train_request_imitation.py、
+  tests/unit/training/test_request_ppo.py、既存experiment/run.pyのbalanced-branches入口、v0.5仕様、
+  設計補足、本WORKLOG。既存の未commit変更は保持。成果物はbranch_balance_20260922配下の
+  protocol/source/before、train_1/2、update_1/2、train_comparison、validation、README.md、
+  verification.json、verify_results.py、transport_advantage_diagnostic.json。親handoff.jsonも確定。
+- Schema/interface: actor/checkpoint schema変更なし。承認範囲の任意PPO設定3個を追加。
+  接触/遷移のactor・entropy平均とKL制限を分離。critic MSE、advantage正規化、既存clipは維持。
+- Tests/verification: PPO15件、scheduleを含め45件合格。保存model reload、収集時log probability再生、
+  各分岐KLの独立再計算を合格。18source/設定/保護harness/119recordのhash、99/20/21分割、
+  56新規訓練episodeの親checkpoint/seed/報酬/単一終端、全82モデル別比較結果と物理ログhash、
+  環境別checkpoint/B=3/padding除外を最終監査。77物理groups、複製を含め129環境episode。
+- Commands: isaaclab3 Pythonでrun.py balanced-branches、train_request_imitation.py ppo、既存の
+  run_request_policy.py prepare/execute。OPENBLAS/OMP/MKL各1、PYTHONPATH=.。
+  pytest tests/unit/training/test_request_ppo.pyと既存test_schedule.py。最終独立照合は保存した
+  verify_results.pyと同一内容を実行。git diff --check合格。追加packageなし。
+- Time: 正式実行15:08:11〜18:58:17UTC、約230.10分。着手14:57から正式終了まで241.29分。
+  実装・診断は開始約11分で完了し、残りは宣言済みの正式収集・比較。設定変更による試行ループなし。
+- Assumptions/limits: 2変更群を同時に試しており個別効果は未分離。2更新の比較であり収束最良、
+  訓練99全条件の性能、held-out21の性能を主張しない。負の結果を成功と読み替えない。
+- Blockers: 依頼された実装・比較にはなし。Next steps: 全worker終了、coordinator exit0、active.json空。
+  推奨checkpointは旧update2（e90684de7ff2539791e8616b67b577a9f0e4410c337d865e93330797cab8acc6）。
+  追加学習・held-out評価・commit・自動置換は行わない。次の調査候補は遷移側の価値予測/advantage。
+
+#### Work Package H/K — 2026-09-23: 分岐学習の検証と引継ぎ
+- Scope/files/tests/results: 上記Global entry、branch_balance_20260922/README.mdとverification.json参照。
+- Upstream: RequestActorCritic、99/20/21固定分割、既存nominal plannerとguard、Isaac/QPID、独立物理監査。
+- Implemented: 分岐ごとのactor/entropy重み、共有encoderを含むKL制限と復元、28episodeの新規収集、
+  固定条件比較と凍結source/モデル/結果照合。H/Kは責務ラベルであり、複数AI agentは起動していない。
+- Downstream: 改善を確認できず、新checkpointは研究結果として保持。親handoffはpaused/no_active_jobs、
+  resume_command=None。旧baselineの採用推奨を維持し、過去のpartial validationは再開しない。
+- Open questions: 搬送遷移に不利な学習信号、確率的収集と最大確率実行の差、共有表現/critic勾配の寄与。
+  観測的な負のadvantage集計のみで唯一の根本原因を断定しない。次の作業はこれらを切り分ける範囲で
+  別途定義し、同じ長時間学習を追加して改善を期待する運用を避ける。
+
+### 2026-09-23 JST — Global / H,K: branch-balanced PPO悪化の原因調査
+- User request: 原因を探求し改善策を提示。Spec v0.5 Section0.4。開始2026-09-22T20:41UTC、
+  診断上限120分、30分レビュー。成果物は因果切分けの証拠と優先順位付き改善案。
+- Known: 新1は訓練13→10/14、検証10→5/20。比較対象の接触選択は同一で、遷移停止/遅延が増加。
+  成功した搬送遷移でも負advantage多数。ただしこれだけではcritic誤差が主因とは断定できない。
+- Scope: 凍結済み28episode batchと親/新1 checkpointを再利用。報酬の帰属・時刻、価値予測、
+  actor/critic/entropyの勾配寄与、最大確率行動への影響を、隔離したoptimizer-only ablationで調べる。
+  本番source/config/checkpoint/長時間学習は変更せず、診断は既存experiment配下へ保存。
+- Hypotheses/tests: full5stepを再現後、critic勾配除去、criticだけ、共有encoderへのcritic勾配切断、
+  advantage中心化除去を各1比較。代表訓練失敗000013と正常000064の同じ保存入力で判断確率を測定。
+  結果で支持された仮説に限り追加の最小切分けを行う。Isaacが必要なら固定条件の最大2batch、
+  1起動10分以内。再学習の規模や試行数を増やして改善待ちする手順にはしない。
+- Existing changes: 前依頼の未commit変更を保持。Output: branch_balance_20260922/cause_analysis_20260923。
+  Schema/interface changes: None。Upstream: RequestActorCritic、保存event/physical logs、既存PPO loss。
+  H/Kは責務ラベル。複数AI agentなし。結果と引用する一次資料、実測時間は調査完了時に追記する。
+
+### 2026-09-23 JST — Global: PPO悪化の原因調査完了・改善提案
+- Spec/work packages: v0.5 Section0.4、H/K。上記20:41UTC開始の調査。約25分で原因切分け、
+  固定2条件のIsaac比較、物理・方策再生監査、提案の整理を完了。上限120分を使い切る追加試行なし。
+- Evidence: 同じ28episode/232events/Adam5stepで元の悪化update1をparameter最大差0.0で再現。
+  000013搬送の進む確率は更新前56.28%、元更新39.55%、criticのみ56.23%、接触actorのみ56.68%、
+  遷移actorのみ38.36%。actor用advantageからVを外す診断は65.16%。共有critic勾配の干渉や
+  接触学習の干渉が当回帰の主因という説明を棄却し、遷移側の学習信号とgreedy実行の差へ絞った。
+- Value/return: Vの当batch MSE10.869、EV−0.383。成功episodeの搬送advance24件中22件が負advantage。
+  これだけをバグとはしない。critic勾配遮断、平均中心化除去、episode分割したV校正だけでは
+  判断が戻らない反証も保存。別途、判断区間内の報酬発生時刻を割引に反映しない不整合を確認。
+  時刻修正だけの診断は39.25%で回帰が残るため、主因と混同せず独立した修正提案とした。
+- Isaac: 事前固定した000013/000064、baseline/元新1/returns-onlyのB=3比較、計2batch/6環境episode。
+  000013は成功/期限切れ/成功、request reward12.95536/−2.15002/12.95536。
+  000064は全model成功・報酬12.95686。安全失敗0、接触群一致、teacher phase supervisionなし。
+  独立物理監査で持上げ/移送/最終pose/速度/衝突/期限を照合、方策の保存log probability/value再生合格。
+  実行部277.56秒/92.71秒、準備込み各10分未満。両process正常終了、正式再学習・追加Isaacなし。
+- Files changed: 今回は本WORKLOG、設計補足への未実装提案、既存experiment配下の
+  cause_analysis_20260923/{REPORT.md,analyze_updates.py,analyze_signals.py,optimizer_ablation.json,
+  signal_ablation.json,phase_gradient_projection.json,case013_signal.json,isaac_protocol.json,
+  audit_isaac.py,isaac_comparison.json,isaac_000013/,isaac_000064/}と診断checkpointのみ。
+  本番source/config/modelと既存未commit変更は保持。Schema/interface changes: None。
+- Commands/tests: isaaclab3 Pythonで隔離CPU診断、既存run_request_policy.py prepare/execute、
+  --num-envs 3 --env-spacing 0 --evaluation-checkpoints、timeout設定。
+  audit_isaac.py 000013 000064で全6結果と凍結source18項目/モデル/record/保護harnessを照合。
+  git diff --check。production変更なしにつき同sourceの既存45unit testsの証拠を再利用。
+- Assumptions/limits: 2例の因果診断は検証20例・接触計画拒否8例の改善や、従来成功率50%の
+  原因全ての説明ではない。負advantage一般を不正としない。一次資料PPO/GAE原論文をREPORTに引用。
+- Proposals/next steps: 暫定的な累積報酬基準、actorと独立したcritic校正、実行方式を揃えた回帰確認、
+  区間内報酬時刻の整合を提案。本番採用は別作業。旧update2を維持し、追加学習・commitは行わない。
+
+#### Work Package H/K — 2026-09-23: 遷移学習信号の原因切分け
+- Scope/files/tests/results: 直上Global entryとcause_analysis_20260923/REPORT.md参照。
+- Upstream: 凍結した第1batch、RequestActorCritic、既存nominal planner/guard/Isaac、独立物理監査。
+- Implemented: 隔離した診断と未実装提案のみ。Schema/interface changes: None。本番実装追加なし。
+- Downstream: 不正確なVを含むadvantageと最大確率実行の組合せを、次の改善比較の優先対象とする。
+  reward clockは別修正として扱う。新しい診断modelは正式採用checkpointではない。
+- Open questions: 固定訓練panel/検証bucket全体の改善、critic校正方法、接触計画拒否の改善。
+  原因調査の完了を全課題解決へ読み替えず、自動で高コスト再学習を始めない。
+
+### 2026-09-23 — Global / H,K: fixed validation20 completion run
+- User authorization: Two agents (root execution, monitor oversight), autonomous implementation/training/evaluation;
+  five hours, 2026-09-23T09:19UTC to14:19UTC. Objective actual20/20 under unchanged tasks/premises/safety/thresholds.
+- Frozen identity: artifacts/p4_full/order9/request_ppo/20260923_completion/protocol.json records99train/20validation/
+  21held-out, source/config/model before work. Existing uncommitted changes preserved; no commit authorized.
+- Known failures: baseline10/20;8contact-plan rejections,2execution deadlines. PPO temporal regression and
+  interval-reward clock issue established. Contact generalization and learning-core correctness remain to fix.
+- Plan: cheap saved-data/known-answer learning checks; causal train-only contact warmup and corrected reproducible
+  PPO updates; bounded representative Isaac checks; frozen candidate full20 real verification. Retain evidence
+  for all failures, no case-specific overrides, teacher forcing, split changes, acceptance relaxation, or lucky retries.
+- Budget: initial review30min; reserve final90min for full20, each diagnostic<=10min and controlled hypothesis.
+  Reuse existing preparation/execution/audit entrypoints. Monitor machine and resource health throughout.
+- Schema/interface: identify and version interval reward timestamp semantics before use; policy/task contract fixed.
+  Any staged BC/PPO method must save sequence/settings/data identities for clean reproduction.
+
+#### 2026-09-23 10:42UTC — H/K bounded contact generalization checks
+- Current initializer: owner_bc/checkpoint.pt, train initial99/99, temporal693/693 per branch; validation teacher
+  agreement13/20 is not physical acceptance. Shared runtime/dataset encoding parity checked on21states.
+- Train-only structure gate (71train/28internalcheck): final owner v2 matched baseline17/28. Adding14previously
+  generated, split-disjoint unlabeled train structures with mechanics regression gives10/28; adding direct
+  IK-found-set preference also10/28. Both rejected; no weight/seed/cohort sweep or online IK mask adopted.
+  IK-found means a solution found by that solver, not collision-free execution or task success. These diagnostic
+  checkpoints lack temporal warmup and must not be executed as completed actors.
+- Artifacts: augmentation_gate/result.json, feasibility_preference_gate/result.json,
+  supplemental_morphology_identity.json under20260923_completion. Supplemental preprocessing needed590.6s
+  to complete13/14 plus one explicitly bounded60s completion command (28.0s) for the remaining fixed item.
+  Diagnostic fits19.9s and13.4s. No completed IK work repeated and no partial cohort silently substituted.
+- Actual fresh on-policy collection: first18episodes selected the modal contact every time. BCprobability~0.959
+  implies only~1.15 alternative contacts expected per28episodes. Next exploration decision will be based on
+  completedbatch counts and resulting updated probabilities, preserving greedy order and temporal behavior
+  if a positive final-contact-layer rescaling is used. Fresh rollout identity is mandatory after rescaling.
+- Monitor confirmed current actor initial head is local2-hop morphology-aware, not task-conditioned universal
+  selection; single-rigid-object R1 input limits retained explicitly. No claim of already validated multi-task use.
+
+#### 2026-09-23 11:10UTC — H/K actual batch and bounded optimizer correction
+- Initial categorical collection completed28episodes,27success/1object_drop, meanrawreward12.44282; all28initial
+  contact draws were modal. First PPO attempt accepted0steps because contactKL0.89588 exceeded0.05 onstep1.
+- Added bounded first-step backtracking only to timed_mc_v1. At0.0005 contactKL0.12058 still exceeded;0.00025
+  accepted with contactKL0.01876/temporalKL0.000677. Step2 rolled back under unchangedlimits. Value fit80epochs
+  MSE79.8586→1.7649, replay error4.77e-7. The28rollouts remained unchanged/onpolicy; no simulator rerun.
+- New20-test PPO suite passes(3.41s), including actor/Adam equality versusone directly smaller step after failed
+  largersteps. Earlier source/protocol and failed log retained; current source hashes updated at a stoppedjob boundary.
+- update_1_backtracked train initial99/99 andtemporal1386/1386greedychoices unchanged; meanmaxcontactp0.95922→0.91541.
+  Explicitcontactcalibration coefficient0.58692363 makesmeanp0.65, preservingalltrainchoices/temporal/valueexactly.
+  Fresh checkpoint545e44254a828a3377ac5427523ff4c5b97ce8b60bac8483b718b5837130dbb9 startsnextoptimizerstage.
+- Commands/artifacts: backtracking_tests.log,update_1_backtracked_command.json,update_1_backtracked/{result,audit}.json,
+  contact_exploration_start/calibration.json,collect_grouped_training.py/exploration_train.log. Monitor reviewed
+  groupcollector and optimizerrollback. Fixed42episodecollection willrecordallplannedseeds/requestsbeforeexecution;
+  collectiondeadline12:49UTCreservesfinal20evaluation. ThisentrydoesnotclaimphysicalimprovementafterPPO.
+
+#### 2026-09-23 11:40UTC — H/K fixed predecision simulation boundary
+- Spec: v0.5 current request contract. Nonmodal000041g0 exposed initialcatalog/physics mismatch: robot vz differed
+  by0.005926m/s and target dz by0.003924m between prepare and execution; rawinputcomparison identifiedboth.
+- Reset formerly came from selectedtrajectory. Now savepredecisionRuntimeObservation/TaskSpec, restoremeasured
+  robot/object pose/twist/q/qd independentofchosenplan, anduseoriginalTaskSpec forinitialcatalog. Actorstillsees
+  actualIsaacobservation. Firstcontrolvalidateseveryencodedinput andrequest. COM→root twistshift included.
+- Files: naive_contact_planner.py, request_event_execution.py, run_request_policy.py andnearbytests.
+  Internaljobarchivev2 explicitlyversioned; publicπ_H requestschema unchanged. Fixed99/20/21split/goals/guards
+  andtaskacceptanceunchanged. Oldsource snapshots andprecommitteddraws retained.
+- Unitchecks81passed4.21s: resetdoesnotreadselectedtrajectory, rotatingreferencepoint, inputmismatch,
+  existingeventexecution/PPO. Reuseauditinspectedbothencodedfeatures andphysicalresetfields.
+  Old013/031physicalreset objecttwist differed0.1962/0.0012873m/s despite encodedparity; all4episodes rerun.
+  Only2deterministicplanningrejects reusable. Old000041successretaineddiagnostic, identicalseedrerun.
+- Artifacts: initial_boundary_reuse_audit.json, source_reset_fix/, training_protocol_before_reset_fix.json,
+  exploration_train/{protocol,resume_protocol,draw_plan}.json. Collectorresumed11:40UTC, same42draws/27groups.
+  Earlier28/PPOremainexplicitoldruntimeinitializationstage, nevernewruntimephysicalevidence.
+- Monitoragreedrecordedpredecisionstateisfrozeninputboundary andrequiredphysicalequivalenceinadditiontoinputparity.
+  Open: full42collection/newPPO/full20acceptance stillpending; reserve12:49–14:19UTC forfull20/audit.
+
+#### 2026-09-23 11:59UTC — H/K original candidate catalog audit
+- 000041g0 completedphysicaltask underfixedreset, butpreparelogprob differed0.002623. Offlineauditfoundrobotgraph
+  maxdifference1.2e-7 butcandidate/requestfeatures3.924mm difference. InitialTaskSpechadbeenrestoredwhile
+  candidatesstillcamefrompostselectiongroundedgeometry. Bothsidesofruntime-onlyauditwerewrongtogether.
+- v3storespre-groundinginitialcandidates fromepisode.initial_scene (notalreadygroundedcontext.scene),
+  exactpreparedencodedinputs+allrequests+SHA. ReconstructandauditbeforeIsaacstartup; thenauditactualinitialstate.
+  Nonmodal041offlineallinputs/requests/action/logprob EXACT; modal013/031fourphysicalepisodes validforreuse.
+- Addedregression: modifyingselectedplancandidatecoordinates4mm cannotalterinitialactorinputs. Eventtests50pass.
+  No tolerancewasrelaxed. 041secondresultretaineddiagnostic; thirdphysicalrunusesidenticalfixedseed andcached
+  geometrywithfullplanchecks, avoidinganother114sIK. Ifboundaryfailsagain,noautomaticfourthphysicsrun.
+- Artifacts: source_catalog_fix/, initial_catalog_prelaunch_audit.json/log, originalsourceprotocolsnapshots,
+  collect_grouped_training_before_catalog_fix.py (SHA reconstructedandmatched), resume_protocol.json.
+  Currentreuse6episodes=4correctedphysical+2deterministicrejects; 42drawsremainunchanged.
+
+#### 2026-09-23 12:30 UTC — H/K 最終学習比較と評価開始
+
+- Spec: v0.5。事前固定の収集期限で12条件×3seed、計36episodeを確定。27成功・9失敗。
+  不完全な次条件は全体を除外し、結果による抽出はしない。実際のcohortをSHA付きで保存。
+- 同一親・同一データの`timed_mc_v1`と`timed_case_loo_v1`を比較。後者は初回接触だけ
+  他の独立試行のreturnを基準にする。runtimeコード・タスク・合否判定は比較中固定。
+- Files: request_ppo.py、train_request_imitation.py、近傍の単体試験、仕様・変更記録。
+  公開要求interface変更なし。グループmanifestは明示的な学習入力として追加。
+- Tests: 既存を含むPPO22件合格3.43秒、グループ独立性/訓練境界/入力一致の6件合格0.84秒。
+  両updateの確率再現誤差1.91e-6、各1epoch受理、実効LR0.00025。
+- Upstream: 固定record、因果的owner BC、時刻付きon-policy収集、初回catalog v3。
+  Downstream: π_H両headを更新。訓練7条件で候補を選定してから固定検証20条件を実行。
+- Commands: post_collection.py。成果物は20260923_completion、source_grouped_contactに記録。
+  monitorが漏洩・seed・cohort・機械状態を独立監査し、現時点で阻害事項なし。
+- Open: 最終成功数は実行中。模倣一致率や単体試験を20/20の代替にはしない。
+
+#### 2026-09-23 — H/K 独立監督による中断・境界修正・最終判定
+
+- Spec: v0.5、担当H/K。ユーザーの追加指示に従い、monitorがコード・実データを独立監査。
+  固定訓練7条件で親と2PPO候補は全て7/7・全動作同一。検証015失敗後に全件実行を中断。
+- 修正: 実接触点の物体座標での時刻付き速度観測、後段とcatalogの必要条件共有、
+  PPO経験のadmission/velocity contract照合。未採用LOO比較分岐はarchiveへ隔離。
+- Files: high_level_requests.py、request_event_execution.py、request_ppo.py、
+  run_request_policy.py、train_request_imitation.py、近傍試験・仕様・変更記録。
+  公開要求schema/interface変更なし。rollout metadataに実行契約の識別を追加。
+- Upstream: 記録したモータ/物体姿勢、既存assignment feasibility、候補所有module表現。
+  Downstream: 後段不成立候補を既存必要条件で除外し、古い経験の新契約での誤用を拒否。
+- Tests: 関連114件合格6.32秒、git diff --check。BC/runtime初回入力は013/075/094で全項目一致。
+  015は25.64秒まで旧実行と完全同一、接触保持の不要待機解消後に成功。035も全工程成功。
+  075はg4の通常IK拒否。合法supportでの同一71/28訓練内gateは17/28→10/28で棄却。
+- Commands: run_request_policy.py prepare/execute、既存augmentation_gate.fitの固定mask比較、
+  pytest -q（request PPO/catalog/geometry/observer/event/naive planner/batched rigid body近傍）。
+  詳細のcommand/source/split/checkpointは20260923_completionのREADMEと各jobを参照。
+- Assumptions/open: 015のqdotとq変化の不一致を生むsim内部原因は未特定。
+  075の失敗は現行選択と有限plannerの結果であり、タスク自体が不可能とは断定しない。
+  20/20未達、PPOによる動作改善未確認。失敗が確定した全件実行や改善のない再学習を停止。
+  次の研究課題は新しい訓練構造での接触選択の実現可能性・汎化であり、今回の完了とはしない。
+
+#### 2026-09-23 13:52– — H/K 再開、後段修正と訓練内temporal warmup
+
+- Spec v0.5。ユーザーの再開指示で18:52 UTCまで継続、root実行＋monitor独立監督。
+  固定99/20/21 split、初期状態、成功条件、期限、安全閾値は保持。
+- 075でtable内の接触候補と、把持後の接線滑りを別々に確認。既知solidに遮蔽される新規bindingを
+  catalogで除外し、観測FK点の物体座標での滑りに応じる有界追加closureを実装。
+  名目荷重と重力支持のeffort余裕、選択binding一個の追加IK、FK再検査、毎sampleのnative衝突検査を使用。
+  v2は量子化IKの追加幅超過も抑える。075は旧actorで期限150s内139.533sにgoal到達、全工程成功。
+- 094ではguard成立後もactorがliftを約19.5s保持。qdot修正の反実仮想では選択が変わらず、
+  訓練内71/28でretiming・context shuffleを比較して物理反復へ進めず棄却。
+  採用候補は元教師ラベルを保持し、temporal headの初期依存をphase/time/error/feedbackに限定したwarmup。
+  99 trainのみで1386/1386一致、時間倍率1/4/10でも一致。接触head・encoder・valueは親と完全同一。
+  PPO時には全入力列が学習可能。CLIから同じ全tensorを再生成済み。094物理改善はこの時点で未確定。
+- 022の旧/新actor双方でplaceの52mm guardが50mm task goalより緩く、最終50.263mmで失敗。
+  place/release/settleはTaskSpecの許容値を用いるよう修正。関連95 tests合格。
+- 再試験中cacheがreviewedの3s tailをgeneric30sへ変える不一致を発見し、その試行を中止。
+  cacheを元planner branchから復元するよう修正。実022/075でfreshとの全phase完全一致、関連15 tests合格。
+- Files: high_level_requests.py、grasp_slip_compensation.py、naive_contact_planner.py、request_event_execution.py、
+  request_ppo.py、request_temporal_warmup.py、run_request_policy.py、train_request_imitation.pyと近傍tests。
+  公開π_H要求schemaは変更なし。runtime metadataにslip/goal contractを追加、古い経験の混用を拒否。
+- Upstream: actualFK/物体姿勢・motor feedback、既存collision/effort/IK、元trainラベル。
+  Downstream: 三つの離散要求と学習残差ゼロを維持。汎用多タスク性能は今回のR1検証とは別途評価が必要。
+- Commands/evidence: 20260923_completion/{cache_equivalence.json,temporal_state_reproduced/exact_reproduction.json,
+  temporal_cache_guard_physics.log,training_protocol.json}、train_request_imitation.py warmup-temporal、pytest。
+  Monitorはコード・実データ・PC状態を独立確認。最終固定20例の結果は完了時に同entryへ記載する。
+
+- 16:45 UTC追記: 同じtemporal候補で094/095/096/075/035は成功したが、054は53.46sで接触喪失。
+  reserve=0は駆動余裕不足ではなく、高端点の接線誤差による早期rejectだった。
+  v3はその方向の有効な部分をFKで求め、追加/絶対接線誤差とも2mm以内、法線増分と元joint trust regionを維持。
+  実達成幅をspanに用いる。054は1.437mmの部分補正、native command60/60検査、関連31 tests合格。
+  同じcheckpoint/初期条件のIsaac再検証で054成功（goal57.641s、最終18.844mm/.04735rad）。
+  final20はvalidation_slip_v3_finalとして同一v3に揃えて再開。旧v2の5成功を無条件に合算しない。
+
+- 18:01 UTC最終結果: 元の固定検証20/20が同一checkpoint・同一v3 runtimeで全工程成功。
+  再開13:52から約4時間9分、承認5時間以内。安全違反/fallback=0、平均生報酬12.906672。
+  最大最終誤差45.956616mm/.120131rad、全件150s内にgoal到達、最小期限余裕2.385289s。
+  同時実行の全60環境も成功だが、条件数には指定20環境だけを数える。
+- Independent audit: monitor/final_validation_audit.json。原本TaskSpec/record SHA、初期入力、22 source、
+  4契約、checkpoint/seed、raw物理結果、採用環境の全greedy判断/logpを独立照合して合格。
+  最大logp差3.58e-6、blocking issueなし。既存reviewed幾何再利用の因果性も確認。
+- 再現性: training_protocol.json#current_recipeの段階列を正本とし、最終temporal warmupは99 trainのみ。
+  CLIで全tensor/checkpoint SHA完全再現。モデルはtemporal_state/checkpoint.pt、SHA fc02a3cd295f2ebc1d8681d83c418c3964ad09922c842fa401a7fde731cd456c。
+  最終v3関連31 tests、cache15 tests、先行関連95 tests合格。最終git diff --check合格。
+- Final commands: finish_validation.py（exit0）、独立監査、finalize_result.py（監査SHA照合後complete）。
+  final_outcome.json、validation_slip_v3_final/{summary,manifest}.json、READMEを確定。
+  公開要求schema変更なし。今回のv3契約を用いた新規経験からPPOを再開できる。旧契約経験の混用は禁止。
+- Scope/open: 本結果は診断にも使用した現行R1固定20条件の達成。未使用21件・新物体/新タスクへの
+  汎化やPPO単独の改善は主張しない。既存reviewed経路ライブラリの使用を維持。
+  raw metadataのphase_supervision_sourceに旧表示が残るが、実権限は観測guard＋actor要求であることを監査。
+  015のIsaac内qdot不一致の内部原因は未特定。case別例外や全候補IKなし。
+  20/20達成により追加の学習・物理実行は終了。次段階には上記checkpointと現行実行契約を引き継ぐ。
+- Cleanup: 18:02 UTCに自身のhealth samplerを正常停止。active.jsonは空、今回の実行process残存なし。
+  空きRAM56.4GiB/disk406.7GiB、swap0、CPU64℃/GPU42℃、監視警報なし。
+
+#### 2026-09-23 18:46 UTC — H/K 模倣→PPOの固定手順・報酬収束・固定20成功
+
+- Spec v0.5。ユーザーは6時間（翌00:46 UTCまで）を承認。root実行、monitor独立監督。
+  目的はPPOによる報酬の上昇傾向・収束と最終固定20成功。前回の20成功だけを流用して完了にしない。
+- 初期化: PPO履歴のないowner_bcを再利用し、99 trainのみのtemporal warmupと既定0.65の探索較正を
+  すべてPPO開始前に実施。較正前のモデルも保存し、greedy選択不変を確認。以後BC・手動重み編集禁止。
+- 最小修正: timed_value_v1は初回MC、以後は収集時の前update valueをbaselineにする。
+  LR1e-4、各branch KL0.05、8epochs/value80/entropy.02。評価経験を明示拒否。
+  categoricalの異モデル比較は各envの独立checkpoint/seedを使い、同bindingの範囲だけ並列化。
+- Files: request_ppo.py、train_request_imitation.py、run_request_policy.py、PPO unit tests、仕様・変更記録。
+  公開要求schema/interface変更なし。CLIに明示profileとcategorical評価の利用を追加。
+- Upstream: 固定99/20/21 split、現行v3制御・観測契約、純粋owner BC。タスク/報酬/初期状態を固定。
+  Downstream: 現行ネットワーク・MorphologyGraphを維持し、PPOの両headを更新する。
+- 検証: 14 train×3独立seed/update。別のtrain7条件×3共通乱数でBC/u2/u4/u5/u6を比較。
+  初期からの報酬差>0.5、条件bootstrap95%下限>0、Spearman≥.8、末尾3点range≤.25、成功数range≤1。
+  これは固定panelでの収束判定であり全タスクの汎化証明ではない。最終モデルは元の20条件で確認。
+- Tests: 関連34件合格4.16秒（既知報酬問題の複数PPO更新・Adam再開を新profileでも確認）。
+  Commands: train_request_imitation.py warmup-temporal、既定探索較正、pytest、strict_ppo/run.py train。
+  18:55 UTCに新規on-policy収集を開始。プロトコル・seed・SHAは20260923_strict_ppo/protocol.json。
+- Assumptions/open: 1epoch停止はKL違反のrollbackであり、epoch増加だけでは解決しない。
+  改善・収束・20成功は実測待ち。最終評価の約80分を確保し、実測throughputで残予算を監督する。
+
+- 19:07 UTC、初回PPO更新前の予算修正: 実測と28binding/42draw見積もりに基づき、固定14条件をmodule2〜8各1条件の先頭7/後半7に分け、21draw/updateを交互に6update行う。全14条件は各3回、全drawを保持し、seedには元のglobal case indexを使う。成功・失敗による条件選別なし。monitor7の固定比較・最終20・合否条件は不変。完了7drawは再利用し、2.2秒で中断したprepareだけ記録を保存して再開。新batch開始には40分と評価125分の予算余裕を要求する。収集報酬はpartition別に表示し、主要改善判定は固定monitor panelで行う。
+
+- 20:21 UTC、H/K: update1/2の独立監査で失敗選択の確率は全件低下した一方、成功092の確率が.7147→.5126→.3706へ低下。初回return6.32034×3が全event基準7.83217より低く、全件負advになっていた。criticは追加fitでEV.796まで改善するが092を除くと過大予測となり、条件差の安定した基準としては不足。
+  同一条件の他2drawのreturnを基準とするLOOを、3 update目以降の初回接触だけに適用。temporal/value fit/LR/報酬/安全/タスクを維持。旧LOO棄却はgreedy不変のtieによるもので、確率改善の否定ではなかった。
+  21draw完了後、更新3のimport開始10msで停止し、モデル更新前にsourceを切替。旧source/protocolはbaseline_revision_after_update2へ保存。最初の2 updates→LOO以後の固定scheduleと明示Adam契約移行をCLI/run.pyに実装。BC再実行・手動重み補正なし。
+  Files: request_ppo.py、train_request_imitation.py、同unit tests、仕様、既存artifact run/analyze。公開π_H schema変更なし。CLI manifest/移行元引数を追加。上流は現在の同policyによる完全なtrain経験のみ。
+  19:40のIsaac native loader abortは物理開始前。完了drawを保持して同seed/sourceの未実行groupだけ1回再開し、正常終了。PC資源異常なし。
+  評価結果を見る前に収束式を訂正: Spearman≥.8は[0,1,1,1,1]を誤って落とすため参考値に限定。必須は隣接mean低下≤既定.25、paired改善>.5/95%下限>0、末尾3点の既定plateau。反例テスト3件合格。固定有限panelでの観測傾向であり期待値の単調性の証明ではない。
+  Commands: 保存経験のactor固定critic診断、提案source独立レビュー、pytest。学習更新再現と関連試験結果は続記する。
+
+- 上記修正の関連37 tests合格4.75秒。修正後コードから最初の2 PPO updatesを再計算し、checkpoint SHAが双方とも完全一致（initial_updates_exact_reproduction.json）。同じコードと固定stage scheduleで既存成果から再現できることを確認。
+
+- 20:50 UTC、monitor結果の観測前に定義を確定。ユーザー承認の再現可能なA→B方式に対応し、上昇傾向は修正方式の開始点u2→u4→u5→u6で判定し、BC→最終の独立paired改善/CIも必須とする。BC/u2/u4/u5/u6全系列は省略せず報告。u2を初期BCへ読み替えない。u4直後にBC/u2/u4を最大9envで先行評価し、残2updates後にu5/u6を最大6envで同じ7条件・3seed評価する。選定・タスク・報酬は不変。
+
+- 21:43 UTC: 事前固定したearly panel全63 drawsが完了。BC 18/21・平均10.415777、u2 20/21・12.080658、u4 21/21・12.933925。planning rejectも全件含む。これはPPO未使用のtrain7条件であり、固定validation20の結果ではない。
+  完了済みearly評価を残予算から除き、次batch35分・残評価115分へ予算のみ修正。独立監査の実測では旧fixed20が77.78分、残late panel見積29〜34分。期限・学習手順・合否基準は維持。u5/u6を同一recipeで再開。
+
+- 22:06 UTC、H/K: 評価拒否archive2群でevaluation_only保存漏れを監督が検出。学習はtrain_*明示一覧49archiveのみで混入なし。メモリ上の正しい評価結果を再保存し、129は各modelの2episodeを保存。PPO入口で双方拒否を実測。旧新SHAはevaluation_storage_repair.json。runnerの保存2行修正は学習終了後に適用する。
+  最終評価の未cache3群を先行prepareし、035は生成成功、054/056のg3は初回IK不成立。診断では同じ群・制約のまま60→240反復でcontact誤差1.4e-6mへ改善するが、全経路では地面衝突。単純な反復数増加案は不採用。
+  既存joint-limit branch seed2本と観測base姿勢を使う5分の診断では、両例seed0で衝突回避approach経路が進むが、各128秒でtrajectory生成の予算終了。完全生成成功とは扱わない。一般的なselected-group初期姿勢retry案をstageし監督レビュー。rootはbase_module_idで解決、成立seedをcontact/configuration両方へ引継ぎ、制約・接触群・全体deadlineを維持。primary成立/後段衝突には適用しない。最小4 tests合格。正式sourceでの全prepare/Isaac成功は引き続き必要。
+  train6更新までは元のplannerで揃え、後段修正による効果をPPO学習の改善と混同しない。early panel全群はprimary成立済みかcacheで、この分岐への非到達を監督が独立確認。旧trainでは3拒否群の意味が変わり得るため旧runtime/sourceを保持する。
+
+- 22:23 UTC: 全6 PPO updates終了。更新5用20/21・平均12.088704、更新6用21/21・12.947580（異なるpartitionなので直接の収束判定には使わない）。PPO後のBC・手動重み補正なし。
+  学習終了後に監督レビュー済み初回IK再初期化と評価拒否archive保存修正を適用。旧runtime/source/protocolはruntime_boundary_after_update6へ保存し、学習時と評価時を明示区別。primary成功・後段のみ拒否の非変更、同群/同制約/seed伝搬/最大2branchの最小試験を追加。関連37 tests合格4.74秒。
+  Commands: strict_ppo/run.py panel --checkpoint update_5/checkpoint.pt update_6/checkpoint.pt --label monitoring_late。正式sourceで054/056の選択済みgeometryを並行prepareし、diagnostic生成物は流用しない。最終20実行時は選定modelとsnapshot/request一致だけを再利用。
+
+- 22:43 UTC: 固定monitor7条件×3seed×5 checkpoints完了。平均報酬BC10.415777→u2 12.080658→u4 12.933925→u5/u6 12.941746、成功18→20→21→21→21。paired改善+2.525969、条件bootstrap95%[.817256,4.948168]、tail3点range.007821・成功数差0で既定全基準合格。reward_curve.png/pdfとtrend.jsonをmonitoringへ保存し、既定tie規則でu6を選定。
+  新plannerの正式054/056生成は双方rc0、全軌道検査accepted。branch0・同g3・観測base・同TaskSpec/制約を独立監査。原20集合/全初期条件/seed17を保持して054/056を先頭にする順序のみ変更し、選定u6のIsaac最終20を開始。学習後のBCや手動重み修正はない。
+
+- 22:53 UTC、最終評価1回目の054/056は双方qp_infeasible_terminalで失敗（約16〜17秒、接触前）。両結果をfinal_validationへ保持し、20件を漫然と続けず2件完了で停止。rawで指令rollが約−102度、要求支持力がbody横方向へ移り実配分不能になることを確認。独立静的検査でも旧054の後半全phaseで支持不能、最大module傾斜174度。IK/衝突成立を飛行成立と誤って扱っていた。
+  姿勢再初期化を積み重ねず置換: ArticulatedIKConfig.preserve_base_tilt（既定False）を追加し、追加solveだけ観測base傾斜を保持して世界yaw回転のみを解く。既存2branch/反復240/許容誤差/関節/衝突/タスク/モデル重みは維持。初回primary成立経路は不変。旧free-tilt retryの幾何cacheをproduction restoreとrunner双方で拒否し、core IK sourceもjob provenanceに追加。旧sourceはruntime_boundary_uprightへ保存。
+  120秒以内の診断で54/56とも同じg3のupright解（1.4e-6m誤差）を確認。関連44tests合格4.80秒、cache3tests合格。正式sourceで両例の全prepareをCPU2並行実行。監督の全knot静的mg/payload allocation検査を物理前に行う。root水平だけで各moduleの推力成立を保証するとは扱わない。035/g1も全594knotの静的支持検査合格。
+
+- 23:23 UTC、最終upright評価は9条件で5成功・4失敗。015/g2、035/g3、055/g3は接触前姿勢のIK/衝突解が得られず、056/g3はplaceで物体姿勢が約.207radとなり規定.2radを超えてtimeout。056はactor要求済みでguardが正しく拒否し、lift中から転がりが生じていた。054は同g3のupright生成で124.591秒にgoal到達し成功。全失敗を保持し、同モデルの残11評価を打切り、075の未完了prepareも保存。
+  015の既存2branch/upright最小CPU診断は共に初回contactIK不成立。単なるplanner retry拡大は不採用。056の独立raw診断では摩擦利用率29〜68%で単純な摩擦円錐飽和ではなく、片側接触モーメント増大と転がりが見られた。押込量・成功角度・phase timeoutは変更しない。
+  追加PPOは未使用train78条件のみからu6初回entropyを計算し、module2〜8各上位2条件を固定選定（training_expansion_selection.json）。既PPO14・固定monitor7・validation20・heldout21とは非重複。学習方法はcondition_loo_v1のまま、BCや重み補正なし、Adam継続。まず009/024/050/074/088/108/133×3の1batchのみ開始し、追加2本目は改善と残予算で判断する。
+  protocol/run.pyの拡張前はtraining_expansion_after_update6へ保存。production runtime/sourceはupright時から変更なし。残約80分で追加学習＋再monitor＋全20の保守的見積もりは収まらないとユーザーへ即時報告し、期限内で改善を追う。新modelへ旧modelの物理receiptを読み替えない。
+
+- 23:42 UTC、u7作成・評価前に拡張評価規則を確認。固定monitor7×3のu7を既存BC/u2/u4/u5/u6に追加し、元の数値閾値・tail3点（u5/u6/u7）・best tail規則で判定する。u6のplateauを未評価u7へ継承しない。先に既知planning拒否の同binding残存をCPUで確認し、反復価値を判断する。
+
+- 2026-09-24 00:12 UTC、H/K: 追加PPO入口で074を拒否した原因は、新LOO検査が元record splitだけを参照し、以前承認された074の全episode train昇格を扱わなかったこと。WORKLOG13703/14108と20260916_ppo_ready/imitation_correction_protocol.jsonが正本の99/20/21変更を記録している。rootと監督が一時的に未承認混入と判断したのは誤りで、ユーザーへの説明と監査JSONを訂正。BCやPPO6updatesに固定validation20の混入はない。
+  最小修正: contact group manifestにoptional canonical_dataset path/SHAを追加。dataset sourcesのepisode ID・元record SHA・original_split・effective split=trainを検証する。未指定時は従来の原record trainのみ許可し、case固有例外なし。収集前にも同じ検査を行う。承認074の完了3drawを戻し、不要になった070途中prepareは保存して停止。今回、元record/actor入力/ラベル/学習率/報酬/成功条件は変更していない。
+  関連PPO34tests合格4.74秒（承認済み昇格、manifest未指定、dataset改変、別record、validation拒否の5件を追加）。変更はrequest_ppo.py、同test、artifact run/protocol、仕様・既存ログ。公開π_H要求schemaは変更なし。旧source/誤診履歴/拒否logはsplit_correction_before_update7、canonical_split_before_update7へ保存。拒否時点にu7 checkpointはなく、重み更新は未実行。全21drawを再実行せず同u6の新規on-policy経験から更新を再開。
+
+- 00:15 UTC: u7は追加21draw（11成功10失敗）から5epochs受理、6epoch目の接触KL超過をrollback。Adam6→7継続、接触KL.048531/遷移.000780、全head/encoder更新。024/074で成功群の確率が上昇し失敗群低下。108/133は成功drawがなく、planning拒否より高い途中失敗returnを強化したに留まる。独立監査monitor/update_7_probability_audit.json。
+  fixed20初回選択のCPU診断では015 g2→g1、055 g3→g1、他18不変。これは既知planning拒否から別群へ変わった事実で、物理成功の確認ではない。035/g3の同条件planning拒否が残り、056/g3も保存6観測上の判断全一致。u7全20の反復は行わない。
+  選定済みB条件005/032/052/070/080/110/123×3を同方式で収集しu8へ進む。追加継続は確率方向の改善と2例の選択変化に基づく。PPO後BC、手動重み編集、controller/成功条件変更なし。deadline00:46:41 UTC、各子processは180秒の整理余裕を差し引く共通deadlineで停止する。残約30分で全評価完了を主張しない。
+
+- 2026-09-24 00:45 UTC 最終結果（H/K、spec v0.5）: **要求未達、固定検証20/20は達成していない。**
+  完了PPOは7 updates。update8用収集は20/21draw・18成功で停止し、部分batchから更新していない。
+  最後の123のg3×2は完了したが、残るg2は終了までの時間が残らないため監督と判断して中断し、完了経験・途中logを保存。
+  u6までの固定monitor7×3では平均生報酬10.415777→12.080658→12.933925→12.941746→12.941746、
+  成功18→20→21→21→21で事前改善・plateau基準に合格。ただし最終20とは別のPPO未使用train条件で、BCには使用した。
+  正式u6/upright評価は9完了=5成功4失敗、11未完。015/035/055は選択群の衝突回避pregrasp生成不能、
+  056は物体姿勢約.207radが規定.2radを超過。モデル間・runtime間の成功合算はしない。
+  追加u7の015/g1を既存geometry・同seed17・同TaskSpecで1件のみ診断。旧g2のplanning拒否から
+  把持・持上げ・搬送（31.68sim秒）まで進んだが、00:45:11の絶対期限で未完了停止し、タスク成功とは扱わない。
+  整理余裕を180→90秒へ短縮した理由・実ユーザーdeadlineはfocused_update_7_protocol.jsonに記録。
+  u7の固定monitor収束や全20性能は未成立。u6の収束結果を新modelへ引き継いでいない。
+- 最終成果物: 20260923_strict_ppo/{final_outcome.json,README.md,monitoring/trend.json,reward_curve.pngはmonitoring配下}。
+  同ディレクトリのprotocol/run.py、source境界snapshot、全checkpoint・collection・独立監査を保持。
+  Files changedは当H/K entryの各修正節を参照。公開π_H schema変更なし。承認済みcanonical99/20/21を維持。
+  BC→PPO順序を厳守し、PPO開始後BC/手動重み編集なし。case固有controller例外や成功・安全閾値緩和なし。
+  関連PPO34tests、upright関連44tests、cache3tests合格。最終git diff --check合格。
+  残課題: 接触群の実現性と把持中の物体姿勢。次の最小検証は追加checkpointの固定monitor評価、
+  その選定後に同一modelで元の全20を実測すること。多様物体/タスク/π_Dの汎用性能を主張しない。
+  全実行childの停止・active.json空を確認、今回health samplerも停止。予算は18:46:41〜翌00:46:41 UTC。
+
+#### 2026-09-24 07:11 UTC — H/K、v0.5、追加4時間
+
+- 07:11:12〜11:11:12 UTC。root実行/monitor独立監督、元20条件・模倣→PPO・成功/安全条件維持。既存u8用20drawを再利用して残1drawのみ実行。u8は21draw18成功、7epochs受理、8thKL超過rollback、Adam7→8継続。
+- 旧BC dataset maskの比較を現行decision_contextへ訂正。035はBCg1→u6/u7g3→u8g1、056はBC以後g3、旧20成功は両方g0。旧PPO1のg0化は成功g0経験からではなく、成功群の負advantageによる副次的変化と監督が確認。旧model複製狙いresetは不採用。
+- 035/g3の80mm pregrasp IK失敗に対し、40mm・衝突margin5mmで最初の経路が3.8秒で成立。request_contact_plannerに既定/半分/1/4の最大3候補を当該IK失敗時だけ追加。group・全身衝突・関節/速度・actuation・共有deadlineを維持。全経路/物理は未検証なので続けて確認する。
+- Files:request_contact_planner.py、test_request_contact_goal_retry.py、仕様/変更ログ/WORKLOG、既存artifact protocol。公開π_H schema変更なし。既存geometry/checkerを使用。関連14tests合格0.83秒。u8完了後だけsource変更、旧source保存。初回source identity更新でtest差分も検出したため正式実行前に修正。
+- 監督指摘:この修正はmonitor012のBC planning拒否にも影響し得る。旧monitorを新runtimeへ無条件流用しない。
+- 高速化:完了draw/同binding geometry再利用、同bindingの独立env並列、CPU準備とGPU実行の重畳。物理dt・精度・安全判定を維持。残:新planner検証、u8選択改善の実物理、056姿勢の共通原因対処、同runtime/modelでの固定monitorと全20。
+
+- 07:40 UTC、H/K: u8の015/035/055は旧controllerの実Isaacで3/3成功。056の転がりに対し、既存grasp controllerへ現在phaseの物体目標と観測相対姿勢によるbounded pose servoを追加。0.20rad/30mm/.15rad/s/.02m/s、native衝突/QP/actuator制限維持。接触力・教師未来姿勢・case分岐なし。監督レビューでmoving pivotの絶対幅逸脱とrelease停止を実行前に検出修正。63関連tests合格4.83秒。旧source/protocolをbefore_pose_servoに保存、新runtime契約をrolloutへ束縛し旧経験は新PPOへ再利用しない。変更:grasp_slip_compensation/request_ppo/近傍tests/仕様。公開π_H schema不変。次は056物理・正常例、同runtimeのmonitor再測定と固定20。
+
+- 07:50 UTC、H/K: relative inverse姿勢案は056で75.4秒に落下。raw独立比較でQP可行・rotor飽和なし、支持台上の物体に対して機体実姿勢を目標へ取り込む自己追従を確認。案を積み増さず、物体目標−観測姿勢の有界P補正へ置換。0.50秒一次応答、既存の補正幅/速度/native制約を保持。剛体離散例の2周期を避け、dt=.01/.02/.05で期待残差1/2へ収束する試験を追加。65関連tests合格5.19秒。旧案/source/失敗証跡はrelative_servo_rejected/resume_pose056に保持。current contract=observed_object_orientation_servo_v1。2回目の056実Isaacを開始。
+
+- 08:00 UTC: P版056成功、8.7mm/.02362rad、最大lift70.9mm/transport200.8mm、120.27秒で規定150秒以内にgoal到達。最終202.15秒、落下/衝突/learnedπ_L residualなし。同runtimeを固定し、事前宣言BC/u2/u6/u7/u8×固定7条件×3seedの105draw再比較へ進む。旧curve流用なし。
+
+- 08:09 UTC: 評価のみ最大9→15env。productionは任意正env数対応、独立RNG/supervisor/contact state/collision isolationを監督確認、既B9 VRAM4.07GiBで余裕あり。012BC別群は単独成功完了後にorchestrator停止、未実行group1 prepareだけ保存。完了singletonは同一model/seed/sourceで保持、残14を一括。全105draw/物理条件/学習手順不変、各env logp/動作監査を維持。旧run/protocolはbefore_15env保存。
+
+- 09:04 UTC、H/K: 新runtimeで固定monitor105draw完了。BC/u2/u6/u7/u8の平均11.262829→12.080927→12.942014→12.942014→12.942014、成功19→20→21→21→21。paired差+1.679186、条件bootstrap95%[.0156067,3.436979]、tail range0、既定基準全合格。監督が105draw対応・評価専用・生報酬・source/runtime・独立bootstrapを確認。固定7条件の観測結果であり全球的収束や未知条件一般化を意味しない。全modelを同じ修正済みcontrollerで比較し、controller変更前のcurveは流用していない。
+  既定tie規則でu8を選定し、元validation20の全条件を同u8/current source/seed17で実行。既完了056は同一source/runtime/checkpoint/config/seed/envを照合したreceiptのみ再利用、他model/source成功と合算しない。最終評価のCPU準備とmonitor末尾CPU判定を重畳し待ち時間を削減。selection_status/receipt_reuseと独立監査はstrict_ppo内へ保存。
+
+- 09:23 UTC、H/K: final015で27.70sにno safe continuous grasp pose correction。054/056/014の3成功を保持して後続停止。短い同条件再現で失敗入力を保存。proposal/previousの非選択gimbal-object clearanceは.513/.483mmで既定有効margin.8mmに不足し、名目へ縮小すると悪化。詳細mesh検査も不成立で不採用。
+  旧実装が必ずraiseした双方不適枝だけを補完: 前回補正中心の並進速度球(.4mm/sample)でbody-local26軸/斜め方向、元proposalまたは前回rotationを調べ、30mm/.20rad/既定速度/native全身検査を満たす候補だけ採用。該当保存入力で安全解を確認。近傍20tests合格1.18秒。codeはgrasp_slip_compensation.py、test_grasp_pose_compensation.py、仕様/変更記録。公開schema不変、runtime contractはv2_safe_projectionへ更新。
+  完走済みmonitorの通常経路は不変となるため、旧sourceを保持したコード同値性を監督が独立監査する。全20最終評価は新sourceへ統一して最初から実行し、旧3成功は合算しない。015gateが成功した場合だけ同じrunnerで全20へ進む。旧失敗資料は削除しない。
+
+- 09:30 UTC: 並進投影だけでは015が27.72sで再停止。保存状態で並進＋回転軸6方向の最大clearance.797963mmが既定有効margin.8mmに不足。回転もbody-local26斜め方向へ拡張して同じ上限内の安全解を確認。最大28×28候補、通常受理経路不変、全unsafeは停止。失敗時に入力をtrace保存。関連21tests合格1.30秒。final_safe_poseの同015をgateとし、成功時のみ全20へ進む。監督提案に従い、以前完走054/056/014は同一u8/条件/通常経路の厳密同値監査が成立する場合のみ再利用し、source差と証明を明示する。再実行したとは扱わない。
+
+- 09:37 UTC: 6DoF局所投影でも015が27.76s停止し、境界から数cycle延ばすだけだったため反復を終了、投影実装を標準経路から撤去しrejected_pose_projectionへ保存。根本仮説は高速liftの一過性物体回転へ追加loopが反応して名目軌道と干渉すること。
+  endpoint版へ置換: progress>=1−1e−6と名目body twist/qdのゼロ(1e−6丸め)で終端保持を識別し、その間だけ物体姿勢P補正を行う。移動中/解除時は既存一次filterと上限で0へ戻す。slip/native/TaskSpec/π_H重みは不変。統合を含む近傍21tests合格1.16秒。
+  sourceを固定しfinal_endpointを015→056の順で開始、監督が最初の物理結果を独立確認。旧runtimeの物理receiptは非同値のため混ぜない。高速化は2CPUworkerで最終20＋monitor105drawのprepareを先行し、GPU実行と重畳。既存run.execute_panelへ同じcurrent-source準備物を渡すだけでphysics/サンプル条件は変えない。旧source/失敗は保存。公開schema変更なし、runtime contractをendpoint版へ更新。
+
+- 09:43 UTC: nominal endpoint版は指令停止後の物体過渡で015に不適補正を開始した。旧raw独立診断でlift終端の姿勢.18386radは既存.2rad以内だが角速度.22806rad/s。補正開始を観測並進≤.05m/s・角速度≤.1rad/s、かつ既存phase姿勢許容超過に限定し、同phaseでラッチ。phase/binding/resetで解除、filter連続性/native制約を保持。全体姿勢補正・局所投影を積み重ねず、不要過渡への応答を責務上除去する。23近傍tests合格1.19秒（動く指令・動く物体・phaseラッチ/解除を含む）。
+  final_settled_endpoint015は成功: 41.7408sim秒、goal33.9206秒、45.8885mm/.120177rad。056を続行。旧056の起動条件は141.0733sに成立しtimeout146.074まで約5秒あることを監督が確認。
+- 09:48 UTC: 処理時間短縮のため評価専用monitor_shared_physics.pyをartifactへ追加。初回requestが同じdrawについて、代表の全保存観測上で各model/seedの抽選を初回から再現。1つでもaction/request不一致なら当該drawは別物理実行。全一致だけ同一決定論的軌道を共有し、別モデルのlogp/valueは再計算する。旧105drawの自己再生検査は全一致、最大logp差3.8147e−6、不一致は拒否する負例も合格。これは旧データでの実装試験であり、新runtimeの共有可否は新軌道ごとに再判定する。105独立物理実行とは称さない。既存run/productionを複製せず、prepare/execute/独立motion監査を利用する。
+
+- 10:01 UTC、H/K: final_settled_endpointの015/056は同u8・元条件で成功。056の独立比較では旧u6失敗と接触群・全要求時刻・名目軌道が一致し、姿勢補正traceも全標本0。接触前の微小数値差（zero補正経路のquaternion正規化によるULP差と整合）から物理状態が分岐しているため、056の改善をPPO timingや姿勢servoの効果とは断定しない。単一実測成功と頑健性を区別する。比較はmonitor/056_u6_u8_timing_comparison.json等へ保存。
+  最終20と固定monitorを2つのIsaac processで並列化し、実測総throughput利得は初回約5〜7%。VRAM約6.7GiB、空きRAM約47GiB、CPU89°C、GPU42°Cで監視継続。全31bindingのCPU先行prepare完了。
+  共有monitorの最初012成功後、prepare/live snapshot完全hash比較が停止。実encoding差は最大2.384e−7、全request一致、既存production validate_initial_encoding合格。正本の同入力検査へ置換し、decision snapshotはprepareとの照合に限定。完了した同source/checkpoint/seed物理を再実行せず再開、旧evaluator/契約を隔離保存。production source・タスク・評価閾値は変更なし。時間で中断したplanning rejectionは共有せず、最小検査/完成receipt監査も維持する。
+
+- 10:33 UTC: final_settled_endpointは10/10成功、監督の独立raw/action/source/TaskSpec監査も10件合格（partial_validation_audit.json）。075は139.39296sにgoal到達、既存150s期限内。全20完了とは扱わない。
+  共有monitorの同binding・異なるtemporal判断の比較では、prepare生成6ファイルだけを再利用し、既存production evaluation-checkpoints/environment-seeds overrideで各必要drawの新しいIsaacを実行する方式へ変更。元jobのcheckpoint/seedは変更せず、実actorはenvironment_checkpoint_sha256/seedで照合。監督が既存B15と同じ契約であることを確認。012の実行完了を待って親orchestratorだけを再起動し、物理の重複実行なし。監査器も同契約を使用。旧source/evaluation contractを隔離保存。
+  022は新runtimeで4物理代表を必要とし、全15model/seedの比較が完了。旧runtimeの群数を合否へ流用しない。残る実測見積は元deadlineを10〜20分超えるため、最大20分の予算延長だけをユーザーへasync確認。返答前は11:11:12 UTCの上限を維持し、承認待ちで既存の許可済み実行を止めない。MPSはheadless Isaacのgraphics/CUDA interop互換性が未確認のため不採用。CPUは別P-core、約5.7GHzで動作しており、配置による明確な損失なし。
+
+
+- 2026-09-24 11:11 UTC、H/K、spec v0.5: 追加4時間の最終集計。objective_achieved=False。単一u8/current runtimeのoriginal20は13完了・13成功・0失敗・7未完。未完了を失敗や成功へ読み替えない。独立監査済み13件。PPOはBC/temporal warmup後の8更新・168 on-policy episodes、PPO後BC/手動重み修正なし。
+  現行固定monitorのcomplete=True、trend_passed=True。全105policy-seed評価の物理共有は全初回/途中action列の独立RNG再生が一致する場合だけ。105独立物理試行とは扱わない。固定7条件のみの安定であり全タスク収束ではない。
+  評価の停止/再開で完了jobを再実行せず、current source/runtime/checkpoint/scene/plan/initial encoding/seed/terminal結果を照合。整理余裕だけ180→60秒へ短縮し、ユーザー期限2026-09-24T11:11:12+00:00を越えない。end-point runnerとmonitor evaluatorの旧版・契約差分を保存。実装・モデル・TaskSpec・成功/安全閾値は最終評価中に変更していない。
+  Files changed: 前記production/近傍testsの修正に加え、既存artifact内endpoint_execution.py/monitor_shared_physics.py、protocol/評価契約、README/final_outcome、当WORKLOG。公開schema/interface変更None。既存prepare/executeと決定論的衝突/actuation checkerを再利用。
+  Tests/commands: current pose関連23合格1.19s、変更のないplanner/cache14合格0.83s、git diff --check合格。endpoint_execution.py、monitor_shared_physics.py evaluate、完了時analyze.pyと独立監査。全チェックポイント・raw・失敗証拠は保持。
+  Downstream/limitations: controller/planner修正はu8学習後であり、全PPOを最終controllerで学習したとは扱わない。056はPPO要求列が旧失敗と同じで補正trace標本0、微小数値差による分岐が残るため因果的修復/頑健性を断定しない。新物体/新タスク/π_Dの性能は未証明。未完了条件と再開に必要な凍結source/checkpoint/入口はfinal_outcome.json/README.mdに記録。次の実行には残る予算の承認が必要。
+
+- 最終補足: 固定monitor105/105完了、現行BC/u2/u6/u7/u8平均10.024951→10.843080→11.085374→同値→同値、成功17→18→18→18→18。129はQP infeasible/計画拒否が残り全updateで失敗。最後の1物理実行だけ整理余裕を17秒まで使い、ユーザー期限を延長せず完了。最終20は13成功・7未完、要求未達。所有Isaac/評価orchestratorの残存なしを確認。
+
+
+#### 2026-09-24 11:41 UTC — H/K、v0.5、残り7例の正式評価再開
+
+- ユーザー明示指示により、同u8・seed17・現行runtime・元TaskSpecの残り096/114/115/116/134/135/136を完了する。既定2時間上限13:41:59 UTC、実測見積20〜30分。新規学習/制御変更/評価条件変更なし。
+- source/config/checkpoint SHA、完成13例のraw SHA・成功・seedを照合。準備済み7jobのplan/scene/initial encoding/checkpoint/seedも一致。096途中成果物はresume_remaining_20260924_1141/interrupted_096へ保持し、初期状態から同seedで再実行する。完了13例・前回報酬比較105件の物理再実行なし。
+- Files changed: artifact protocolの期限と再開記録、集計README/final_outcome、当WORKLOGのみ。schema/interface変更None。既存endpoint_execution.py/prepare/execute入口と独立monitorのfinal_validation_audit.pyを再利用。監督は既存1名のみ継続。
+- 長時間実行前の確認: source同一のためunit再実行は不要。最終合否をnative terminal/raw goal motion/安全/actor replayで監査。メモリ57GiB空き・VRAM1.1/24GiB・disk392GiB空き。終了時に全20の実績を報告する。
+
+- 2026-09-24 12:02 UTC、H/K、spec v0.5: 残7例を同u8/seed17/current source/runtimeで評価完了し4/7成功、元20は17成功・3失敗。結果の全20独立監査PASS。前回13完了分の証拠再利用と今回7新規実行を区別し、096旧途中ログは保存。今回所要20.96分。学習/モデル/制御/TaskSpec/成功/安全条件の変更None。schema/interface変更None。
+  Files: artifact protocol再開記録・final_outcome/README・final_settled_endpoint・独立監査・当WORKLOG。upstreamは既存source-bound準備31件とu8 checkpoint、downstreamは現行固定20の成功証拠。commands:endpoint_execution.py、monitor/final_validation_audit.py、git diff --check。source同一のunit再実行なし。前回固定monitor105行は報酬改善/plateau基準合格済みで再実行なし。
+  限界: 別monitor129の制御/計画失敗、056の因果的修復/頑健性、未知物体/タスク/π_Dは未証明。今回の依頼である残7例の実行は完了し、失敗結果を隠さず保持。追加の学習・制御修正は今回の評価へ混ぜない。
+
+- 終了確認: monitor/resume_remaining7_stop_audit.jsonに所有監視sampler停止・実行process残存なし・両active空を記録。元20は17成功3失敗であり20/20成功とは報告しない。115は搬送終端姿勢guard、116/135は配置中落下判定。後者の検出妥当性は今回未確定のまま記録する。
+
+
+#### 2026-09-24 12:21 UTC — H/K、spec v0.5、失敗原因と追加学習判断
+
+- Scope: 元20評価の失敗115/116/135を保存raw/source/旧成功traceから分析。学習・Isaac再実行・production変更なし。既存root/monitorで独立切分け。
+- 3例とも旧validation_slip_v3_finalの成功時とscene・全phase名目計画・失敗までのπ_H request辞書/決定時刻が完全一致。旧B3/現B1およびcontroller sourceは異なり、最初の機体差はt=0の微小差から成長。旧成功を現行合格や有効なBC→PPOモデルとして使わない。
+- 115: transport37.60sから切替要求済みだが姿勢guardが一度も成立せず。補正は動作しているが、lever0.86584mと位置上限30mmにより回転補正が0.0346486radへ飽和し、物体誤差約0.2773radが残る。slip reserveはno_estimated_effort_reserve=0（近傍成功例も同じなので単独原因と断定しない）。上限緩和が安全/十分とは証明していない。
+- 116/135: PLACEも両側把持接触維持の落下判定に含まれ、片側0.5N未満が3step=0.06sでterminal。下向き速度/高さ条件は非該当。支持台接地と荷重抜けが同時期、135は減速。実物体は名目より34.7/30.9mm低く、支持反力と以後release/settleは未保存・未完なので正常配置成功とは再分類しない。contact forceは評価用privileged信号でactor入力ではない。
+- 判断: 追加PPOを今すぐ増やす根拠は弱い。先に支持台への荷重移行と空中把持喪失の分類、および固定π_H指令で配置追従/姿勢補正/実行環境差を最小比較する。別接触群や早いphaseの待機選択による改善可能性は否定しない。修正後のruntime・報酬を固定し、新規on-policy経験で学習前後を比較する入口を整える。今回は分析のみ。
+- Files: monitor/failure_learning_triage.json、failure_115_guard_audit.json、final_validation_audit.jsonの診断追記、当WORKLOG。schema/interface変更None。既存全20合否17/20は維持。Checks: raw/source SHA、old/current全request prefix・時刻・計画照合、guard数値・補正cap・落下3述語・支持台箱幾何の独立計算。source hash全件一致。Next: 上記の最小実行側切分け。
+
+
+#### 2026-09-24 12:29 UTC — H/K、v0.5、後段修正の固定モデル比較
+
+- User scope: 後段修正で失敗115/116/135を解決できるか実Isaacで検証。u8重み・seed17・B1・TaskSpec・成功/安全閾値固定、追加学習なし。終了条件は同条件比較と未解決の原因報告。2時間上限14:29:01 UTC。
+- First hypothesis: PLACEの支持台への荷重移行を把持喪失と誤分類。評価器だけで既存object contact sensorのnet−全robot接触力、許可support有限幾何、authored goal姿勢を照合する。支持証拠がある間のみcontact-break由来dropを抑え、空中落下・下向き速度・高さ・衝突/QP・release/settle条件は維持。力をactor/controllerへ渡さない。
+- Files: order9_tensor_reward（内部optional evidence、旧caller不変）、request runtime adapter/contract/source binding、有限support幾何helper、近傍tests。既存prepare/execute_panel入口/資産/名目経路を再利用。旧証拠・変更前sourceはdownstream_repair_20260924へ保持。public policy schema変更None。
+- Plan: 局所正/負例→116/135/正常136の比較（各10分以内）→115の姿勢補正を独立切分け。各仮説高価診断最大3回、改善なし2回で中止。成功閾値緩和やcase固有分岐は使わない。監督がコード/生データ/PCを独立確認。
+
+- 2026-09-24T12:51:17.163031+00:00、H/K、v0.5: 後段修正の検証完了。累積22.3分、実Isaac4回。u8/seed17/B1/TaskSpec/名目経路を固定。116/135の早期落下判定は有限support接触＋支持力＋authored goal姿勢による荷重移行分類で解消し全工程成功。最終10.172mm/.006155rad、8.999mm/.015099rad。正常136も11.163mm/.012969radで成功。旧失敗まで/正常全stepの指令・物理stateはbit一致、監督独立監査済み。
+- 115では姿勢補正のみ全case無効化する1回の診断を実行。補正開始37.800674s前はbit一致、joint指令/phaseは全step一致。補正あり/なし双方、transport終端後の最小姿勢誤差.2078596rad、最終.277427→.268997radで0.2radを満たさずtimeout。P補正が唯一原因との仮説は棄却。無効化sourceを診断artifactに保持し、productionはタスク前へ完全復元。根拠のないgain/cap拡大や追加PPOへ進まず比較を終了。
+- Files retained: amsrr/training/order9_tensor_reward.py、amsrr/simulation/placement_support.py、scripts/run_request_policy.py、amsrr/training/request_ppo.py、近傍2test、AMSRR_design_modification_by_codex.md、当WORKLOG、downstream_repair_20260924記録。upstream: 既存object sensor、TaskSpec geometry/goals、OBB clearance、既存reward閾値。公開policy schema変更None、内部optional supported_placement追加（旧caller動作不変）。downstream: privileged報酬/終了分類runtime identity更新、actor/controller入力不変。
+- Tests: PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 isaaclab3 python -m pytest -q [order9_tensor_reward, placement_support, request_ppo, grasp_pose_compensation] 69 passed/5.50s、git diff --check。初回pytestは環境のROS plugin autoloadによるlark未導入で起動失敗したため既存慣例のautoload無効を使用、package変更なし。evaluate.pyは既存execute_panelとbase command helperを再利用。最初の3jobは旧wrapperにtimeout1800s上書きがあったが監督10分監視、実際各約2分以内。以後basehelper直呼び560s/親590sに修正。
+- Final source補足: 物理比較後のtrace追加/enum参照/multiobject保守拒否は現単一物体に非機能変更。3実行の全453PLACE標本を現分類器で再生しmask一致、final_source_receiptへ保存。115未解決、全20の新source成功や追加PPOの効果を主張しない。次の判断には把持中の回転保持の改善または別contact choiceの物理証拠が必要。
+
+
+## Global / Work Package H,K — 2026-09-24 14:14 UTC 有界姿勢・関節補正
+
+- Spec: v0.5。ユーザー依頼: body poseとjoint両方の変形に上限を置き、変形を抑えつつ物体姿勢を補正、固定000115全工程をIsaac検証。公開policy schema変更なし。既存未commit変更は保持。
+- Budget: 16:14 UTCまで2h、同仮説実Isaac初回＋最大2修正。u8/seed17/B1/TaskSpec/成功安全閾値固定。追加PPOなし。
+- Implementation: grasp_slip_compensationのbody-onlyをnative FK＋局所有界最小二乗へ置換。名目基準のbody30mm/.2rad、joint各.1rad、追加速度.02m/s/.15rad/s/.05rad/s、物理joint総速度/範囲とnative全身衝突を検査。pair相対pose誤差.5mm/.005rad以内を追加拘束として使う。仕様/設計補足も同期。
+- 最小検査: 実115保存状態100stepで全proposal安全受理、補正body27.3mm/.0408rad・最大joint.0999rad、pair誤差3.9μm/.000288rad。Python独立FKとnative再中心化FKが1e−10以内一致。近傍121tests合格6.53s。
+- 監督が解除時の実形態チェックを要求し、独立clipによる把持変形をIsaac前に検出。解除も手先pose spaceで減衰目標を作り同じIKを解くよう修正、再試験中。余分な文書/学習frameworkを増やさず既存runner/geometryを再利用。
+- Files: grasp_slip_compensation.py、近傍pose/slip tests、spec/design補足、当WORKLOG、20260924_bounded_posture。上流native FK/collision・既存観測物体pose、下流QPID/joint指令・runtime contract。monitorが独立コード/データ・PC確認。
+
+- 14:24 UTC trial1: 実Isaac92.98秒。新補正でtransport→place38.12秒、元は64.58秒まで待ってtimeout。補正開始37.800674秒以前のcommand/physical stateがbit一致。phase切替で補正が解除され、配置中に姿勢誤差が.1992→.2408radへ増加、支持接触時.202373radで既存.2rad許容外のためcontact-break drop。支持反力4.49Nはあるが合否/支持判定は変更しない。
+- 監督の因果確認後、単一仮説修正としてv2_hold採用: 把持継続の移動中は確立offsetを保持し、release/contact lossで協調解除。旧成功115のPLACE/RELEASEの名目q/body/速度上でtrial1終了offsetを再生し302/302安全。局所姿勢17tests合格2.32s、近傍その他105testsは同変更前合格。trial2を同actor/scene/seed/B1、source固定で開始。旧trial1を保存。
+
+- 最終v2_hold結果: 000115全工程成功、48.18sim秒/112.02wall秒、最終位置9.317mm・姿勢.022890rad。最大追加body位置6.398mm・姿勢.012371rad、joint.016rad、全step QP成立、飽和・禁止衝突なし。trial1との初差は38.120682秒のPLACE開始（保持対解除）で、接近・把持・lift・transportのprefixはbit一致。監督の独立raw/limits/source/task/model監査合格。
+- 正常114も同sourceで全工程成功（47.66sim秒）。初回115失敗→保持修正115成功→正常114確認の実Isaac計3回、追加学習なし。既存モデル/scene/task/合否条件を固定し、case分岐を追加していない。
+- Tests: PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 isaaclab3 python -m pytest -q [test_grasp_pose_compensation,test_grasp_slip_compensation,test_request_event_execution,test_request_ppo]、122 passed/6.88s。実形態Python/native FK照合1e−10以内、補正＋解除500step全安全、実PLACE/RELEASE nominal302step全安全。git diff --check合格。
+- Retained files: grasp_slip_compensation.py（旧body-only経路置換）、pose/slip近傍tests、spec/design補足、当WORKLOG。成果物20260924_bounded_posture/report.json、source snapshots、independent_audit.json、固定評価raw。公開policy schema変更None、内部servo APIとruntime contract更新。既存未commit変更を保持。
+- Limits/handoff: 局所正則化IKであり大域最小変形・正確なレンチ制御・連続時間安全の証明ではない。今回の000115固定条件と正常114の検証範囲。新controller identityのため旧rolloutを新runtimeのon-policy経験として混ぜない。全20/多seed評価は今回の依頼範囲外。
+
+- 最終監督確認: 正常114は旧成功の全2383stepで指令・物理state・phaseがbit一致。115/114で同一source、最終workspaceのsource hashも評価receiptと一致。全実行終了、常駐監視/Isaac残存なし。独立監査の最終receiptをreportへ反映。
+
+### 2026-09-24 — H/K read-only speed-path audit
+- Spec v0.5; user requests verification that prior VIM4/native optimization remains used. Traced current request execute→TeacherContactController and CheckedGraspSlipController, posture resolver/native loader, preparation IK and September21 profiles. No production/schema/config/process changes; only this log updated.
+- Native C++/Eigen/FCL remains required in the collision-aware resolver and slip controller; missing native binary raises, not silent Python fallback. Rigid-body builder CUDA Graph opt-in remains enabled on TeacherContactController with CUDA/no-grad eligibility.
+- Additional path: every control call runs slip apply, pulls multiple tensors to CPU/NumPy and loops environments. Active posture regulation/decay uses scipy.optimize.least_squares(max_nfev=12) with Python residual/finite-difference Jacobian and C++ batched FK; nonzero corrections invoke native collision checks per scene. Inactive/hold branches skip optimization. This new optimizer is outside the old VIM4 complete-IK benchmark.
+- Preparation also uses ArticulatedContactIKSolver Python-loop initial contact/pregrasp IK, alongside native collision-aware resolution. Preparation cost must not be attributed to per-step physics.
+- Evidence: scripts/run_request_policy.py:540; grasp_slip_compensation.py:128,376,432; teacher_contact_execution.py:29; batched_rigid_body_model.py:126; request_contact_planner.py:277. Static path verification only, no new simulator/profiling runs or tests. Historical profile predates new feedback loops; their current wall-time share and onboard deadline compliance remain unmeasured. Prior blanket claim that whole-body control is the current dominant cost is not established by this audit. Next diagnostic, if pursued: timed current per-stage profile, preserving runtime behavior, before optimizing or claiming bottleneck percentages.
+
+### 2026-09-24 — H/K current-loop timing diagnostic
+- Spec v0.5; scope: identify current Isaac/control bottleneck and distinguish PC timing from onboard feasibility. Production/schema/interface changes: None. Existing successful 000115 update8/seed17/B1 input copied to isolated `artifacts/p4_full/order9/request_ppo/20260924_bounded_posture/timing_run`; no acceptance artifact overwritten.
+- Command: PYTHONPATH=/home/leus/amsrr OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 isaaclab3 python -u artifacts/p4_full/order9/request_ppo/20260924_bounded_posture/profile_current.py. Diagnostic in-memory harness wrappers; benchmark=true, 560s timeout, one run. Sources/checkpoint unchanged. Files added: isolated diagnostic script and timing/result artifacts; this worklog. Dependencies: existing request executor, native collision/FK, CUDA QPID and SciPy posture optimizer.
+- Actual 2409 steps (48.18 simulated seconds): loop102.454s, mean42.530ms, median38.277ms, p95 54.376ms. Previous uninstrumented loop103.670s. Disjoint mean breakdown: nominal control13.307ms (31.29%; includes allocation QP9.101ms), Isaac step11.161ms (26.24%), posture application3.125ms (7.35%), remaining14.937ms (35.12%; observations, reward, estimation, supervision, logging and uninstrumented glue). No claim that all remaining time is logging.
+- Posture mean is dominated by inactive1991/2409 calls. Regulate16 calls: median21.234ms, max1166.350ms; decay251 calls: mean15.341ms, p95 20.538ms; hold151 calls: mean7.572ms. Nonzero correction safety419 calls: mean6.977ms (nested inside posture apply, not additive again). Nominal controller median12.566ms, p95 13.119ms, max1623.028ms. Large maxima are observed, not yet attributed by sub-initialization profiling.
+- Checks: exit0; task outcome, all episode metrics, authored-goal metrics and controller-call count match successful trial2 exactly. This is diagnostic evidence, not a new acceptance receipt. No unit tests needed for unchanged production. Host perf_counter includes asynchronous GPU waiting where it occurs; not a CUDA-kernel profile. Nested inclusive/self timing avoids double counting; mode groups overlap posture.apply.
+- Conclusion/downstream impact: current synchronous loop misses20ms, and active posture correction alone can consume/exceed that budget; simulator-only explanation is false. No current VIM4 full-controller/IO deadline evidence; older posture resolver benchmark cannot establish feasibility. Next engineering work would isolate the fast servo from slower checked correction/planning, profile/optimize the QP execution path, move initialization before control and measure end-to-end latency on target. No additional runs or optimization undertaken for this diagnostic question.
+
+
+## Global / Work Package H,K — 2026-09-24 14:58 UTC 制御計算の高速化（上限1時間）
+
+- Spec v0.5。Scope: VIM4を今は実測できない前提で制御計算とIsaac経路を高速化。開始14:58:53 UTC、期限15:58:53。rootが実装、既存monitorがコード・raw・PCを独立確認。既存未commit変更/旧成果物を保持し、追加学習・タスク/合否/安全閾値・gain変更なし。
+- 実装: QP固定64 ADMM反復をGPU CUDA Graph化、CPUは同じ6半空間射影をC++/Eigen化。nominal zero-action decoder専用経路、QPID既定profile cache/検証同期の集約、CPU rigid-body Torch compile、初回compile/captureを制御開始前へ移動。native FK/残差を配列直結、形態/anchor参照cache、衝突queryのframe/AABB共有と診断pair sort削減。
+- 姿勢補正solverはSciPy TRFから最大2回の有界Gauss–Newton＋native QR active-set（各180反復上限）へ置換。目的関数・gain・補正幅/速度・把持形状・native全身衝突・解除/保持規則は維持。非線形目的が増えない有限候補だけ採用。線形収束と目標達成を区別。runtime contractはobserved_object_orientation_bounded_posture_v3_native_gn、公開policy schema変更None、内部native API追加。旧runtime経験を新on-policy経験へ読み替えない。
+- Files: amsrr/controllers/{batched_qpid_controller,batched_rigid_body_model,batched_virtual_thrust_qp,grasp_slip_compensation}.py、feasibility/{order9_native_posture_ik,order9_posture_collision}.py、feasibility/native/order9_posture_native.cpp、policies/order9_tensor_command_decoder.py、simulation/teacher_contact_execution.py、scripts/run_request_policy.py（source依存束縛）、4近傍tests、仕様/設計補足/当WORKLOG。上流は既存PhysicalModel/native loader/接触観測/固定u8、下流はQPID/QP/姿勢補正とIsaac throughput。
+- 15:30 UTCにproduction sourceを固定し正式prepare/execute。000115/114が双方success、benchmark=false/physical_acceptance_eligible=true、fallback0・安全違反なし。115最終8.087mm/.021219rad、body補正6.400mm/.012624rad・joint .016002radで上限内。正常114の全73 tensors/2383stepは旧成功とbit一致。監督がTaskSpec/scene/checkpoint/source25files/raw/上限を独立照合。全20成功や未知形態の保証ではない。
+- 時間: 同115の正式loop103.670→79.489秒（23.3%短縮）、wrapper全体112.016→89.302秒（20.3%短縮）。最終診断host中央値は姿勢regulate21.234→2.697ms、解除14.318→2.556ms、QP8.397→.944ms。Isaac step平均11.007ms、frame平均33.122ms。入れ子の時間は加算せず、GPU待機がhost呼出へ計上される点を記録。QPID host最大140.552ms/frame最大174.464msは残り、全spike解消とは扱わない。
+- CPU代表計算: i9-14900KF/1thread/28rotor・28jointでモデル更新＋decode＋QPID/QPのp95 1.576ms、補正/安全込み3.747ms。固定観測/QPID固定state/servo12回reset/最初12回除外の計算ベンチで、I/O・推定・π_H・計画・初回compile・OS deadlineは含まない。旧別native処理のPC/VIM4比7.700で参考換算12.13/28.85ms。実機補正込み50Hzは保証不可、依頼の実機運用保証という完了条件は未達。CPU初回compile26.69秒を隠さず起動費用として扱う。
+- Commands: PYTHONPATH=. OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 isaaclab3 python [20260924_runtime_speed/evaluate.py --label acceptance --cases 000115 000114; bench_cpu_loop.py; profile_final.py]。計測はbenchmark=trueの隔離診断。最後のprofile初回はexecution_task.jsonのcopy重複で物理前拒否、参照名へ退避して同条件再実行。正式合格receiptを上書きしていない。
+- Tests: PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PYTHONPATH=. OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 isaaclab3 python -m pytest -q [test_batched_virtual_thrust_qp,test_batched_qpid_controller,test_batched_rigid_body_model,test_grasp_pose_compensation,test_grasp_slip_compensation,test_order9_tensor_command_decoder,test_order9_posture_collision_gate,test_request_event_execution,test_request_ppo] → 164 passed/32.81s（TorchScript非推奨14 warnings）。GPU graph input/output寿命bit同値、native CPU QP float32/64・1/14/28rotor・mask/縮退角度参照比較、90 native BVLS vs SciPy objective/bounds、40連続native残差vsNumPy（offset差2.794e−7）、CPU compile動的入力/出力寿命も確認。git diff --check合格。
+- 証拠: artifacts/p4_full/order9/request_ppo/20260924_runtime_speed/{README.md,report.json,independent_audit.json,acceptance,final_timing,cpu_loop_timing.json,unit_complete.log,source_before}。仕様19節と設計補足を同期。既存実機bridge・学習head・reward・Isaac physics sourceは今回変更しない。
+- Limits/next: VIM4で現native/InductorとI/Oを含む実測なし、上記7.7倍は今回処理の保証係数ではない。補正/計画をfast QPIDと別周期にするには観測age・有界補間・reset/binding/異常停止の検証が必要。未検証の非同期制御を残り時間へ押し込まず、現在の検証済み高速化と未達条件を区別して引き継ぐ。
+
+- 終了監査: 監督が最終164tests/profile/正式2receipt/current source一致と所有process残存なしを確認。disk空き390.3GiB、利用可能RAM57.2GiB、GPU43°C/使用率0%で正常。最終source hash再照合・git diff --check合格。成果のcommitは依頼されていないため実施していない。
+
+
+## Global / Work Package J,K — 2026-09-24 16:25 UTC シミュレーション周辺処理の高速化
+
+- Spec v0.5。ユーザー依頼: 制御を固定し、残ったIsaac stepと観測・推定・報酬・受渡し等を可能な限り高速化。上限1h、開始16:25:18 UTC/期限17:25:18。既存root/monitorで実装と独立監督。
+- 固定: controller/native姿勢補正、u8 checkpoint、TaskSpec、物理dt/solver/contact/friction、成功/安全閾値、元115/114。公開schema変更は予定しない。既存dirty変更・保護C3 harnessを維持。artifactは20260924_simulation_speed。
+- 仮説: 非制御のPython/GPU同期・状態変換・反復検査/重複計算が無視できない。まず既存隔離profileへloop限定cProfileを追加し、最も重い実経路を特定。局所参照同値試験→少数Isaac診断→正式同条件115/114比較。単診断10分以内、同仮説最大3回・改善なし2回で中止。物理精度・観測/報酬/安全検査の間引きによる高速化はしない。
+
+### 2026-09-24 17:12 UTC — J/K 完了記録（シミュレーション周辺高速化）
+
+- Spec v0.5。controller/native姿勢補正・保護C3 harness・モデル・TaskSpec・物理/成功/安全条件を固定。公開schema/interface変更: None。既存未commit成果を維持しcommitは行わない。
+- 実装: eager sensor container再利用（更新/再生成検査付き）、固定index cacheとjoint reshape、報酬/法線力推定/legacy gateの同一演算CUDA Graph化、有限性/接触range検査の集約、無衝突時の詳細診断取得省略。毎stepの物理・観測・安全/成功判定は維持。graphは全入力state更新＋出力cloneで再帰/保持値を保護。CPU/autogradはeager。
+- Files changed in this request: `amsrr/simulation/order9_tensor_isaac_io.py`; `amsrr/training/order9_{tensor_reward,deployable_phase_gate,anchor_normal_force_estimator}.py`; new `amsrr/utils/tensor_dataclass_graph.py`; `scripts/run_request_policy.py`; related tests in simulation/policies/controllers/training; this log and `AMSRR_design_modification_by_codex.md`。追加依存4fileをsource hashに束縛。controller production sourceは不変。
+- Upstream dependencies: 既存isaaclab3/PhysX/PyTorch、固定u8、checked request plan、更新前source snapshot。Downstream: 既存request PPO/評価入口で直接適用し、task/actor契約は維持。複数環境で既存QP graphのMAGMA capture不対応を検出し、runner実行中だけcuSOLVER指定・finallyで旧backend復帰を追加。同じQP/制約/反復でも数値backendの変更として記録。B1は同値、B3旧MAGMAとの差はartifactに明示。
+- Formal Isaac: final/000115 execute89.302→81.707秒（8.51%短縮）、loop79.489→72.156秒。000114 execute87.967→81.478秒（7.38%短縮）、loop78.104→71.854秒。両例成功。監督が全73tensor・全step（2409/2383）、条件/actor/sourceを独立照合。前後各1回であり統計的保証はしない。
+- B3 compatibility diagnostic: final_parallel_cusolver、同一scene/plan/u8の3replicaで3/3成功、execute95.449/loop85.359秒。benchmark=true、正式acceptanceから分離。B1対B3を今回の実装改善率に算入しない。
+- Tests/commands: `PYTHONPATH=. PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 isaaclab3 python -m pytest -q` plus unit controller QP/request_event/contact_point_velocity/Isaac IO/reward/gate/estimator/graph/request_ppo suites: **167 passed**（unit_final.log）。新規tests: sensor鮮度/再初期化、衝突detailの同値と不要read禁止、joint order/dtype、raw patch空/NaN/range、graph再帰/出力寿命/grad fallback、cuSOLVER B3。`evaluate.py --label final --cases 000115 000114`; `profile_final_parallel_cusolver.py`; 実28rotor backend/capture小試験; git diff --check。
+- Rejected/diagnostic notes: PhysX1workerは初期化停止で早期中止。APIが永続設定も変えるため当該numThreadsを元の8へ復旧・独立確認済み。初回B3 MAGMAはnative exit0でもresult無しのため未完走として扱った。cProfileの異常なcaller集計は定量根拠に使わず、保存済みwall profilerを使用。
+- Remaining cost/limits: 単一環境のPhysX fetch_results約26.5秒が最大の固定費。render=False、physics fidelityを下げず維持。VIM4測定や学習/全20再評価はこの依頼で実施しない。形態/タスクを絞った特別な成功条件は追加しない。
+- Artifacts/reproduction: `artifacts/p4_full/order9/request_ppo/20260924_simulation_speed/{README.md,report.json,implementation.diff,independent_final_audit.json}`。Source before/after・無効診断・正式成果を分離保存。Next handoff: 通常の学習/評価は現行runnerで続行でき、graph/backendの変更後も当該source hashesを束縛する。追加の物理設定試行は費用対効果を考慮して行わない。
+
+- 最終独立監査: `independent_final_audit.json`（17:13:49 UTC）でB1両例の全73tensor/全step bit一致、29sourceのcurrent/snapshot一致、8controller/protected file不変、actor/TaskSpec/scene/seed一致を確認。B3全3環境も物理goal・動作・安全・policy replay合格、B1と数値軌道が同一とは扱わない。全実行終了・資源正常、numThreads=8復旧済み。17:14 UTC頃、1時間の期限内で作業を終了。
+
+
+## Global / Work Package J,K — 2026-09-24 17:17 UTC 最新モデル/制御による検証20例
+
+- Spec v0.5。依頼: 現状最良モデルと制御で従来の検証bucket全20例を評価。固定u8 SHA f5db8cc4…、最新v3_native_gn＋Isaac高速化＋cuSOLVER、元の20 TaskSpec、greedy/seed17/B1、各例fresh1回。学習/制御/合否条件変更なし、既存dirty成果を維持。
+- 既存strict execute_panel入口を薄いartifact evaluatorから再利用。canonical validation split/20 unique/trainとの非重複/record・checkpoint・source・config SHAを実行前検査。167testsと直前の正式115/114・B3診断の根拠を再利用し、今回は20全件の実動作を保存する。
+- 開始17:17:58 UTC、既定上限120min/19:17:58 UTC。実測約100秒/例＋前処理から35〜45min想定、30minで進捗確認。prepare610s、execute内部560s/親590s、全体deadline＋所有process group停止を既存runnerで管理。通常のタスク失敗は数えて継続、source逸脱/NaN/記録破損は停止。失敗例を調整/再試行して成功に置換しない。
+- Evidence: artifacts/p4_full/order9/request_ppo/20260924_validation20_current。公開schema/interface変更なし、production変更なし。監督はu8根拠/20件分割と最終motion/条件/sourceを独立確認、資源監視は主要節目のみ。
+
+### 2026-09-24 18:18 UTC — J/K 固定検証20例 完了
+
+- Spec v0.5。結果: **20/20成功、安全失敗0、fallback 0**。平均episode報酬12.901904。全例u8/greedy/seed17、最新制御・高速化を固定し、新規に各1回実行。学習、条件変更、再試行、過去の成功receipt合算は行わない。
+- 時間: 評価17:19:23–18:17:06 UTC、57分43秒。prepare20回計556.120秒、execute20回計2893.858秒、全98,096 steps。短い代表例に基づいた初期35–45分見積もりを、長軌道実測から55–70分へ訂正。30分時点10/20成功・残予算十分を確認。既定120分以内で全件完了。
+- 独立監査: 全rawの持上げ/搬送/最終pose・速度/元goal期限/衝突/π_L残差ゼロを再計算し、全motion receiptに一致。20件のcanonical validation split、元TaskSpec/record、u8 hash、seed17、29sourceの現物・snapshot一致、全actor判断と初期encodingを照合。元goal期限の最小余裕9.527秒。監督証跡 `final_validation_audit.json` 合格。
+- Files changed: 本WORKLOGと隔離artifactのevaluator/監査/README/report/全20実行記録のみ。production/schema/interface変更: None。上流: 既存strict execute_panel、選定済みu8、現行request runner/制御、元20record、既存幾何cache。後段計画のreviewed教師幾何再利用14例・生成6例、物理結果再利用0。下流: 最新制御との組合せに対する固定20条件の正式成功証跡として利用可能。
+- Tests/commands: 直前167unit testsはsource不変のため再利用。`PYTHONPATH=. OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /home/leus/.local/share/mamba/envs/isaaclab3/bin/python -u artifacts/p4_full/order9/request_ppo/20260924_validation20_current/evaluate.py --label validation`、独立全20監査。prepare/execute全40command exit0、親exit0、active空・Isaac残存なし。
+- Assumptions/limits: 保存済みu8はmonitor上u6/u7/u8同点時の最新優先選定。今回全checkpointの再比較はせず、PPO追加学習・未知形態/タスク・複数seedの評価は対象外。固定20の成功を一般化保証へ読み替えない。
+- Resources/end: GPU39°C/idle、available RAM約56.6GiB、disk388.4GiB、numThreads=8。成果 `artifacts/p4_full/order9/request_ppo/20260924_validation20_current/{README.md,report.json,validation/summary.json,final_validation_audit.json}`。未達・blockerなし。追加実験は行わず、commitは未依頼のため実施しない。
+
+### 2026-09-25 JST — Global / J,K 成果のcommit分割
+
+- Spec v0.5。ユーザー依頼に従い、未commitの47ファイルを依存順に6件へ分割: 剛体/運動学計算高速化、接触計画/把持補正、tensor入出力/報酬処理、形態特徴、実行と模倣/PPOの統合、仕様/作業記録。既存の検証済production内容は変更しない。公開schema/interface変更なし。
+- 監督がコード依存を独立確認。CUDA QPのgraph化はcuSOLVER設定と同じ統合commitに配置し、中間commitでの既知MAGMA capture失敗を避ける。runtime契約関数、supervisor、runner、学習入口も同commitにまとめる。
+- 検証: 今回変更した全unit testファイルをisaaclab3環境で一括実行し、**266 passed（13.82秒）**。14件は既存TorchScript APIの非推奨警告。`git diff --check`、全対象の重複/取りこぼし、stagedファイル集合、検証済ソースhash一致を確認。Isaac20/20の実動作証拠は直上の記録を利用し、再実行しない。
+- Commands: `PYTHONPATH=. PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 /home/leus/.local/share/mamba/envs/isaaclab3/bin/python -m pytest -q` に今回変更した18個のtestファイルを指定、明示pathで`git add`/`git commit`。test logは `artifacts/p4_full/order9/request_ppo/20260924_validation20_current/commit_tests.log`。
+- Upstream: 直前の全20評価と47ファイルの確定差分。Downstream: 6件の依存順commitとしてレビュー可能にする。モデルcheckpoint・巨大な実験ログは既存gitignoreを維持し強制追加しない。pushは依頼されていないため行わない。未達/blockerなし。
