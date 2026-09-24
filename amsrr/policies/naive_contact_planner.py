@@ -39,7 +39,7 @@ from amsrr.training.order9_virtual_contact_compression import (
 )
 from amsrr.utils.hashing import stable_hash
 
-NAIVE_CONTACT_PLAN_VERSION = "naive_quasistatic_teacher_contact_plan_v1"
+NAIVE_CONTACT_PLAN_VERSION = "naive_quasistatic_contact_plan_v2_bounded_slip_reserve"
 NAIVE_CONTACT_INTERPOLATION = "linear_centroidal_cubic_hermite_joint_v1"
 
 
@@ -85,9 +85,40 @@ class NaiveContactPlanReference(Order9C3NominalTensorReference):
 
     runtime_version = NAIVE_CONTACT_INTERPOLATION
 
-    def __init__(self, **kwargs):
+    def __init__(self, *, initial_observation=None, physical_model=None, **kwargs):
         super().__init__(**kwargs)
         self.provenance["control_sampling_semantics"] = NAIVE_CONTACT_INTERPOLATION
+        self.initial_observation = initial_observation
+        self.physical_model = physical_model
+
+    def phase_start_reference(self, phase=None):
+        from amsrr.simulation.order9_object_task_runtime import Order9ObjectTaskPhase
+        from amsrr.training.order9_c3_nominal_runtime import Order9C3PhaseStartReference
+        from amsrr.controllers.rigid_body_model import RigidBodyControlModelBuilder
+
+        phase = Order9ObjectTaskPhase.APPROACH if phase is None else phase
+        if self.initial_observation is None or phase != Order9ObjectTaskPhase.APPROACH:
+            return super().phase_start_reference(phase)
+        # Reset belongs to the state before choosing a plan. In particular,
+        # the selected path's first target velocity must never become state.
+        obs = self.initial_observation
+        measured = RigidBodyControlModelBuilder().build(
+            obs.morphology_graph, self.physical_model, obs
+        )
+        modules = {m.module_id: m for m in obs.module_states}
+        tensor = lambda value: torch.tensor(value, device=self.device, dtype=self.dtype)
+        result = Order9C3PhaseStartReference(
+            body_pose_local=tensor(measured.body_pose_world),
+            body_twist=tensor(measured.body_twist_world),
+            joint_positions_rad=tensor([[modules[mid].joint_positions[jid]
+                for jid in self.joint_ids] for mid in self.module_ids]),
+            joint_velocities_radps=tensor([[modules[mid].joint_velocities[jid]
+                for jid in self.joint_ids] for mid in self.module_ids]),
+            object_pose_local=tensor(obs.object_states[0].pose_world),
+            object_twist=tensor(obs.object_states[0].twist_world),
+        )
+        result.validate()
+        return result
 
     def _sample(self, reference, elapsed_s):
         values = list(super()._sample(reference, elapsed_s))
@@ -303,6 +334,12 @@ def plan_teacher_contact_trajectory(
         {k: v.to_dict() for k, v in bundle.phase_trajectories.items()}
     ):
         raise RuntimeError("contact planner changed its teacher seed")
+    from amsrr.controllers.grasp_slip_compensation import build_slip_reserve
+    slip_reserve = build_slip_reserve(
+        morphology=bundle.morphology, physical_model=physical_model,
+        contact_knot=contact, candidates=bundle.contact_candidate_set,
+        compression=compression, preload=preload, preload_config=preload_config,
+    )
     return NaiveContactPlan(
         phases,
         {
@@ -313,6 +350,7 @@ def plan_teacher_contact_trajectory(
             "force_model": "quasistatic_vertical_frictional_support",
             "exact_wrench_tracking_required": False,
             "preload": preload.to_dict(),
+            "slip_reserve": slip_reserve,
             "joint_delta_rad": dict(compression.joint_delta_rad),
             "achieved_inward_displacement_m": dict(
                 compression.achieved_inward_displacement_m

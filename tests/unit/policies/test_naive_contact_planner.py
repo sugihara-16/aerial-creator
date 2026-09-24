@@ -8,6 +8,43 @@ from amsrr.policies.naive_contact_planner import (
     preload_weight,
     bounded_joint_curve,
 )
+from tests.unit.policies.test_high_level_requests import request_scene
+
+
+def test_reset_uses_predecision_observation_not_selected_plan(request_scene):
+    from amsrr.controllers.rigid_body_model import RigidBodyControlModelBuilder
+    scene, _, physical, _ = request_scene
+    obs = scene.runtime_observation
+    for module in obs.module_states:
+        module.twist_world = [0.01, 0.02, 0.03, 0., 0., 0.]
+        module.joint_velocities = {j.joint_id: 0.04 for j in physical.joints}
+    reference = object.__new__(NaiveContactPlanReference)
+    reference.device, reference.dtype = torch.device('cpu'), torch.float64
+    reference.module_ids = tuple(m.module_id for m in obs.module_states)
+    reference.joint_ids = tuple(j.joint_id for j in physical.joints)
+    reference.initial_observation, reference.physical_model = obs, physical
+    # No trajectory exists: a selected plan cannot contribute to the reset.
+    reference._references = {}
+    reset = reference.phase_start_reference()
+    measured = RigidBodyControlModelBuilder().build(obs.morphology_graph, physical, obs)
+    torch.testing.assert_close(reset.body_twist, torch.tensor(measured.body_twist_world, dtype=torch.float64))
+    torch.testing.assert_close(reset.body_pose_local, torch.tensor(measured.body_pose_world, dtype=torch.float64))
+    assert torch.all(reset.joint_velocities_radps == 0.04)
+    obs.module_states[0].twist_world[2] += 0.1
+    assert not torch.equal(reference.phase_start_reference().body_twist, reset.body_twist)
+
+
+def test_observed_reset_velocity_is_shifted_from_com_to_root():
+    import ast
+    from scripts.run_request_policy import _with_reset_twist_reference_point, PROTECTED_HARNESS
+    tree = ast.parse(_with_reset_twist_reference_point(PROTECTED_HARNESS.read_text()))
+    reset = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == '_restore_c3_formal_phase_zero')
+    nodes = [n for n in reset.body if isinstance(n, (ast.Assign, ast.AugAssign)) and
+             any(isinstance(x, ast.Name) and x.id == 'root_twist' for x in ast.walk(n))]
+    ns = dict(torch=torch, body_twist=torch.tensor([[0., 1., 0., 0., 0., 1.]]),
+              desired_body_world=torch.tensor([[1., 0., 0.]]), root_pose_world=torch.tensor([[0., 0., 0.]]))
+    exec(compile(ast.Module(body=nodes, type_ignores=[]), '<reset twist>', 'exec'), ns)
+    torch.testing.assert_close(ns['root_twist'], torch.tensor([[0., 0., 0., 0., 0., 1.]]))
 
 
 def test_planned_joint_curve_stays_bounded_between_knots():

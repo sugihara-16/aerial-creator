@@ -20,6 +20,8 @@ import torch
 _SMALL_BATCH_COMPILE_LIMIT = 8
 _compiled_small_batch_projection = None
 _small_batch_compilation_disabled = False
+_admm_cuda_cache = None
+_native_cpu_admm = None
 
 
 @dataclass(frozen=True)
@@ -227,24 +229,12 @@ def solve_batched_virtual_thrust_qp(
         if device.type == "cuda" and batch_size <= _SMALL_BATCH_COMPILE_LIMIT
         else _project_virtual_channels
     )
-    z_value = projection(
-        previous_virtual, **projection_kwargs
-    ).reshape(batch_size, rotor_count * 2)
-    x_value = z_value.clone()
-    dual = torch.zeros_like(x_value)
-    previous_z = z_value
-    for _ in range(resolved.max_iterations):
-        solve_rhs = rhs + resolved.admm_penalty * (z_value - dual)
-        x_value = torch.cholesky_solve(
-            solve_rhs.unsqueeze(-1), factored
-        ).squeeze(-1)
-        previous_z = z_value
-        projected = projection(
-            (x_value + dual).reshape(batch_size, rotor_count, 2),
-            **projection_kwargs,
-        )
-        z_value = projected.reshape(batch_size, rotor_count * 2)
-        dual = dual + x_value - z_value
+    admm = _admm_cuda if (device.type == "cuda" and batch_size <= _SMALL_BATCH_COMPILE_LIMIT
+                         and not torch.is_grad_enabled()) else _admm_iterations
+    x_value, z_value, previous_z = admm(
+        factored, rhs, previous_virtual, projection_kwargs,
+        resolved.admm_penalty, resolved.max_iterations, projection,
+    )
 
     # The primal/dual stopping test is intentionally diagnostic-only.  For this
     # ill-conditioned wrench allocator, small iterate deltas do not imply that
@@ -329,6 +319,86 @@ def solve_batched_virtual_thrust_qp(
         dual_residual_norm=dual_norm,
         objective=objective,
     )
+
+
+def _admm_iterations(factored, rhs, previous_virtual, projection_kwargs, penalty, iterations, projection):
+    if factored.device.type == 'cpu' and factored.dtype in (torch.float32, torch.float64) and not torch.is_grad_enabled():
+        native = _admm_native_cpu(factored, rhs, previous_virtual, projection_kwargs, penalty, iterations)
+        if native is not None:
+            return native
+    batch, rotors, _ = previous_virtual.shape
+    z = projection(previous_virtual, **projection_kwargs).reshape(batch, rotors * 2)
+    x = z.clone()
+    dual = torch.zeros_like(x)
+    previous_z = z
+    for _ in range(iterations):
+        x = torch.cholesky_solve((rhs + penalty * (z - dual)).unsqueeze(-1), factored).squeeze(-1)
+        previous_z = z
+        z = projection((x + dual).reshape(batch, rotors, 2), **projection_kwargs).reshape(batch, rotors * 2)
+        dual = dual + x - z
+    return x, z, previous_z
+
+
+def _admm_native_cpu(factored, rhs, previous_virtual, projection_kwargs, penalty, iterations):
+    """Portable Eigen core; the outer torch path still validates and checks commands.
+
+    The optional compiled backend is built with the existing native build script.
+    An unavailable native build uses the exact torch reference, never a relaxed
+    solve. Genuine solver errors propagate. Autograd stays on the torch path.
+    """
+    global _native_cpu_admm
+    if _native_cpu_admm is None:
+        from amsrr.feasibility.order9_native_loader import load_order9_posture_native, Order9NativePostureIKUnavailable
+        try:
+            _native_cpu_admm = load_order9_posture_native()
+        except Order9NativePostureIKUnavailable:
+            _native_cpu_admm = False
+    if _native_cpu_admm is False:
+        return None
+    name = 'virtual_thrust_admm_float32' if factored.dtype == torch.float32 else 'virtual_thrust_admm_float64'
+    solver = getattr(_native_cpu_admm, name, None)
+    if solver is None:
+        return None
+    bounds = torch.stack([projection_kwargs[k] for k in
+                          ('minimum_virtual_z', 'maximum_virtual_z', 'maximum_virtual_x', 'angle_lower', 'angle_upper')], dim=-1)
+    result = torch.from_numpy(solver(factored.contiguous().numpy(), rhs.contiguous().numpy(),
+                                    previous_virtual.contiguous().numpy(), bounds.numpy(), penalty, iterations))
+    return tuple(result.unbind(0))
+
+
+def _admm_cuda(factored, rhs, previous_virtual, projection_kwargs, penalty, iterations, projection):
+    """Replay the identical fixed-iteration solve, without Python kernel launches.
+
+    Inputs/outputs own their storage. One cache bounds graph memory; changing
+    topology/dtype/config rebuilds it. Validation and factorization remain outside
+    capture, including Cholesky's error check. No stopping tolerance is changed.
+    """
+    global _admm_cuda_cache
+    names = tuple(k for k, v in projection_kwargs.items() if isinstance(v, torch.Tensor))
+    inputs = (factored, rhs, previous_virtual, *(projection_kwargs[k] for k in names))
+    key = (tuple((tuple(x.shape), x.dtype, x.device) for x in inputs), penalty, iterations,
+           projection_kwargs['iterations'], projection)
+    cached = _admm_cuda_cache
+    if cached is None or cached[0] != key:
+        static = tuple(x.clone() for x in inputs)
+        kwargs = dict(projection_kwargs)
+        kwargs.update(zip(names, static[3:]))
+        stream = torch.cuda.Stream(device=factored.device)
+        stream.wait_stream(torch.cuda.current_stream(factored.device))
+        with torch.cuda.stream(stream):
+            for _ in range(3):
+                _admm_iterations(*static[:3], kwargs, penalty, iterations, projection)
+        torch.cuda.current_stream(factored.device).wait_stream(stream)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph, stream=stream):
+            result = _admm_iterations(*static[:3], kwargs, penalty, iterations, projection)
+        cached = (key, static, graph, result)
+        _admm_cuda_cache = cached
+    _, static, graph, result = cached
+    for destination, source in zip(static, inputs, strict=True):
+        destination.copy_(source)
+    graph.replay()
+    return tuple(value.clone() for value in result)
 
 
 def _project_virtual_channels(
@@ -485,7 +555,7 @@ def _project_virtual_channels_compiled_small_batch(
                 _project_virtual_channels,
                 fullgraph=True,
                 dynamic=False,
-                mode="reduce-overhead",
+                options={"triton.cudagraphs": False},
             )
         except Exception:
             _small_batch_compilation_disabled = True
@@ -545,8 +615,6 @@ def _validate_inputs(**values: torch.Tensor | None) -> None:
         }
         and value is not None
     )
-    if any(not bool(torch.isfinite(value).all()) for value in finite_values):
-        raise ValueError("batched QP inputs must be finite")
     thrust_min = values["thrust_min_n"]
     thrust_max = values["thrust_max_n"]
     angle_lower = values["vectoring_lower_rad"]
@@ -554,9 +622,15 @@ def _validate_inputs(**values: torch.Tensor | None) -> None:
     velocity = values["vectoring_velocity_limit_radps"]
     assert thrust_min is not None and thrust_max is not None
     assert angle_lower is not None and angle_upper is not None and velocity is not None
-    if bool((thrust_min < 0.0).any()) or bool((thrust_max < thrust_min).any()):
+    # Collect all device flags before one host read, preserving every check.
+    flags = torch.stack([*(~torch.isfinite(value).all().to(device=desired.device) for value in finite_values),
+                         ((thrust_min < 0.0).any() | (thrust_max < thrust_min).any()).to(device=desired.device),
+                         ((angle_upper < angle_lower).any() | (velocity < 0.0).any()).to(device=desired.device)]).tolist()
+    if any(flags[:-2]):
+        raise ValueError("batched QP inputs must be finite")
+    if flags[-2]:
         raise ValueError("batched QP thrust bounds are invalid")
-    if bool((angle_upper < angle_lower).any()) or bool((velocity < 0.0).any()):
+    if flags[-1]:
         raise ValueError("batched QP vectoring limits are invalid")
 
 

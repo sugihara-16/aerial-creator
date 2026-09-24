@@ -1,5 +1,6 @@
 from dataclasses import replace
 from copy import deepcopy
+import math
 import torch
 import pytest
 from tests.unit.policies.test_high_level_requests import request_scene, decision
@@ -10,8 +11,52 @@ from amsrr.training.request_ppo import (
     evaluate_batch,
     ppo_update,
     discounted_event_returns,
+    categorical_kl_from_logits,
+    branch_weighted_mean,
+    request_runtime_contracts,
 )
 from amsrr.utils.hashing import hash_file
+
+
+@pytest.mark.parametrize("fault", [None, "missing_manifest", "changed_dataset", "wrong_record", "validation"])
+def test_contact_groups_respect_hash_bound_canonical_split(tmp_path, fault):
+    """An approved whole-episode reassignment stays explicit and identity-bound."""
+    import json
+    from amsrr.training.request_ppo import grouped_contact_baseline
+    from amsrr.utils.hashing import stable_hash
+    record = tmp_path / "record.json"
+    record.write_text(json.dumps(dict(episode_id="case", dataset_split="validation")))
+    event = dict(encoding={"initial": torch.tensor(True)})
+    rollout = tmp_path / "rollout.pt"
+    torch.save(dict(environment_seeds=[10, 11], episodes=[[event], [event]]), rollout)
+    source = dict(episode_id="case", binding=dict(sha256=hash_file(record)),
+                  original_split="validation", split="train")
+    if fault == "wrong_record":
+        source["binding"]["sha256"] = "wrong"
+    if fault == "validation":
+        source["split"] = "validation"
+    dataset = tmp_path / "dataset.pt"
+    torch.save(dict(sources=[source]), dataset)
+    identity = dict(record_sha256=hash_file(record), snapshot_hash="same_initial_state")
+    data = dict(version="same_initial_condition_rollout_groups_v1", group_size=2,
+                rollouts=[dict(path=str(rollout), sha256=hash_file(rollout),
+                               record_path=str(record), **identity,
+                               condition_hash=stable_hash(identity))])
+    if fault != "missing_manifest":
+        data["canonical_dataset"] = dict(path=str(dataset), sha256=hash_file(dataset))
+    if fault == "changed_dataset":
+        torch.save(dict(sources=[]), dataset)
+    manifest = tmp_path / "groups.json"
+    manifest.write_text(json.dumps(data))
+    args = ([event, event], torch.tensor([1., -1.]), [rollout], manifest)
+    if fault is not None:
+        with pytest.raises(ValueError):
+            grouped_contact_baseline(*args)
+    else:
+        indices, advantages, audit = grouped_contact_baseline(*args)
+        assert indices == [0, 1]
+        torch.testing.assert_close(advantages, torch.tensor([2., -2.]))
+        assert audit["canonical_dataset"] == data["canonical_dataset"]
 
 
 def test_initial_actor_excludes_transitions_and_train_replay_is_identical(
@@ -61,7 +106,7 @@ def test_ppo_rejects_teacher_and_greedy_and_updates_actor_from_sampled_events(
         checkpoint_sha256=hash_file(checkpoint),
         sampling="categorical",
         teacher_phase_supervision=False,
-        complete=True,
+        complete=True, runtime_contracts=request_runtime_contracts(),
         episodes=[events],
     )
     path = tmp_path / "rollout.pt"
@@ -73,6 +118,7 @@ def test_ppo_rejects_teacher_and_greedy_and_updates_actor_from_sampled_events(
         ("sampling", "greedy"),
         ("teacher_phase_supervision", True),
         ("diagnostic_only", True),
+        ("evaluation_only", True),
     ]:
         bad = {**rollout, key: value}
         torch.save(bad, path)
@@ -91,12 +137,239 @@ def test_initial_input_geometry_changes_logits_but_label_has_no_channel(request_
     assert not torch.allclose(first, second)
 
 
+@pytest.mark.parametrize("changed", [None, "admission", "contact_velocity", "grasp_slip", "goal_completion"])
+def test_ppo_rejects_old_runtime_despite_matching_checkpoint(tmp_path, changed):
+    checkpoint = tmp_path / "model.pt"
+    torch.save(RequestActorCritic().checkpoint(), checkpoint)
+    rollout = dict(
+        checkpoint_sha256=hash_file(checkpoint), sampling="categorical",
+        teacher_phase_supervision=False, complete=True, episodes=[],
+    )
+    if changed is not None:
+        rollout["runtime_contracts"] = request_runtime_contracts()
+        rollout["runtime_contracts"][changed] = "obsolete"
+    path = tmp_path / "rollout.pt"
+    torch.save(rollout, path)
+    with pytest.raises(ValueError, match="on-policy runtime contracts"):
+        ppo_update(checkpoint, [path], tmp_path / "update")
+
+
+def test_morphology_actor_replay_and_candidate_permutation(request_scene):
+    torch.manual_seed(19)
+    model = RequestActorCritic(morphology_aware=True).eval()
+    encoded = model.encode(decision(request_scene))
+    before = model.evaluate_encoding(encoded)
+    perm = torch.arange(len(encoded["candidates"]) - 1, -1, -1)
+    changed = deepcopy(encoded)
+    changed["candidates"] = encoded["candidates"][perm]
+    changed["owners"] = encoded["owners"][perm]
+    changed["membership"] = encoded["membership"][:, perm]
+    after = model.evaluate_encoding(changed)
+    torch.testing.assert_close(before[0], after[0])
+    replay = collate_transitions([{"encoding": serialize_encoding(encoded)}])
+    restored = RequestActorCritic.from_checkpoint(model.checkpoint()).eval()
+    scores, _ = evaluate_batch(restored, replay, torch.tensor([0]), "cpu")
+    torch.testing.assert_close(before[0], scores)
+    with pytest.raises(ValueError, match="owners"):
+        restored.evaluate_encoding({k: v for k, v in encoded.items() if k != "owners"})
+
+
+def test_morphology_actor_node_permutation(request_scene):
+    model = RequestActorCritic(morphology_aware=True).eval()
+    encoded = model.encode(decision(request_scene))
+    graph = encoded["graph"]
+    perm = torch.arange(graph.node_features.shape[1] - 1, -1, -1)
+    inverse = perm.argsort()
+    edges = graph.edge_index.clone()
+    present = edges >= 0
+    edges[present] = inverse[edges[present]]
+    changed = deepcopy(encoded)
+    changed["graph"] = replace(graph, node_features=graph.node_features[:, perm],
+                               node_mask=graph.node_mask[:, perm], module_ids=graph.module_ids[:, perm], edge_index=edges)
+    changed["owners"] = inverse[encoded["owners"]]
+    torch.testing.assert_close(model.evaluate_encoding(encoded)[0], model.evaluate_encoding(changed)[0])
+
+
 def test_event_discount_depends_on_elapsed_time_not_number_of_decisions():
     direct = [{"time_s": 0.0, "reward": 0.0}, {"time_s": 10.0, "reward": 1.0}]
     segmented = [direct[0], {"time_s": 4.0, "reward": 0.0}, direct[1]]
     assert discounted_event_returns(direct, 0.9)[0] == pytest.approx(0.9**10)
     assert discounted_event_returns(segmented, 0.9)[0] == pytest.approx(0.9**10)
     assert discounted_event_returns([{"reward": -5.0}], 0.9) == [-5.0]
+
+
+def test_categorical_kl_uses_log_probabilities_when_float32_softmax_underflows():
+    # Uniform binary p and q proportional to (1, exp(-110)):
+    # KL(p || q) = 55 - log(2) + log(1 + exp(-110)). Padding has no mass.
+    reference = torch.tensor([[0.0, 0.0, -torch.inf]])
+    updated = torch.tensor([[0.0, -110.0, -torch.inf]])
+    assert updated.softmax(-1)[0, 1] == 0
+    actual = categorical_kl_from_logits(reference, updated)
+    assert float(actual[0]) == pytest.approx(55 - math.log(2), abs=1e-12)
+    assert float(categorical_kl_from_logits(reference, reference)[0]) == 0
+
+
+def test_branch_weighting_is_independent_of_other_branch_frequency():
+    # One contact loss of 4 and two temporal losses of 0,2 have means 4,1.
+    values = torch.tensor([4., 0., 2.], requires_grad=True)
+    mask = torch.tensor([True, False, False])
+    loss = branch_weighted_mean(values, mask, .5)
+    assert float(loss.detach()) == pytest.approx(2.5)
+    loss.backward()
+    torch.testing.assert_close(values.grad, torch.tensor([.5, .25, .25]))
+    repeated = torch.tensor([4., 0., 2., 0., 2., 0., 2.])
+    assert float(branch_weighted_mean(repeated, torch.tensor([True] + [False] * 6), .5)) == 2.5
+    with pytest.raises(ValueError, match="contact and temporal"):
+        branch_weighted_mean(values, torch.ones(3, dtype=torch.bool), .5)
+
+
+def test_balanced_ppo_restores_entire_model_when_either_branch_exceeds_limit(request_scene, tmp_path):
+    torch.manual_seed(31)
+    model = RequestActorCritic()
+    checkpoint = tmp_path / "start.pt"
+    torch.save(model.checkpoint(), checkpoint)
+    context = decision(request_scene)
+    episodes = []
+    for i in range(6):
+        trajectory = []
+        for step in range(3):
+            encoded = model.encode(context)
+            encoded["initial"] = torch.tensor(step == 0)
+            with torch.no_grad():
+                logits, value = model.evaluate_encoding(encoded)
+                dist = torch.distributions.Categorical(logits=logits[0])
+                action = dist.sample()
+            trajectory.append(dict(encoding=serialize_encoding(encoded), action=int(action),
+                                   log_prob=float(dist.log_prob(action)), value=float(value[0]),
+                                   time_s=float(step), reward=float((i + step) % 3 - 1), done=step == 2))
+        episodes.append(trajectory)
+    rollout = tmp_path / "rollout.pt"
+    torch.save(dict(checkpoint_sha256=hash_file(checkpoint), sampling="categorical",
+                    teacher_phase_supervision=False, complete=True, runtime_contracts=request_runtime_contracts(), episodes=episodes), rollout)
+    settings = dict(learning_rate=.001, entropy_coefficient=.02, contact_loss_weight=.5,
+                    contact_target_kl=100., temporal_target_kl=100.)
+    wide = ppo_update(checkpoint, [rollout], tmp_path / "wide", epochs=3, **settings)
+    first = ppo_update(checkpoint, [rollout], tmp_path / "first", epochs=1, **settings)
+    # Use the measured first two unconstrained optimizer steps to put the
+    # strict bound between them; the rejected second step must leave exactly
+    # the first step's shared encoder, both heads, and critic parameters.
+    for branch in ("contact", "temporal"):
+        a, b = [row["branch_kl"][branch] for row in wide["updates"][:2]]
+        assert b > a
+        limited = {**settings, f"{branch}_target_kl": (a + b) / 2}
+        report = ppo_update(checkpoint, [rollout], tmp_path / branch, epochs=3, **limited)
+        assert report["optimization"]["completed_epochs"] == 1
+        assert report["optimization"]["rejected_step"]["epoch"] == 2
+        assert report["updates"][-1]["branch_kl"][branch] <= limited[f"{branch}_target_kl"]
+        assert report["checkpoint_sha256"] == first["checkpoint_sha256"]
+        actual = RequestActorCritic.load(tmp_path / branch / "checkpoint.pt")
+        expected = RequestActorCritic.load(tmp_path / "first/checkpoint.pt")
+        for key, tensor in expected.state_dict().items():
+            torch.testing.assert_close(actual.state_dict()[key], tensor, rtol=0, atol=0)
+
+
+def test_branch_limits_require_explicit_balanced_all_actor_configuration(tmp_path):
+    for args in (dict(contact_target_kl=.05),
+                 dict(contact_loss_weight=.5),
+                 dict(contact_loss_weight=.5, contact_target_kl=.05, temporal_target_kl=.05,
+                      actor_scope="temporal")):
+        with pytest.raises(ValueError, match="balanced PPO|branch KL"):
+            ppo_update(tmp_path / "unused.pt", [], tmp_path / "unused", **args)
+
+
+def test_timed_first_step_backtracking_restores_adam_before_retry(request_scene, tmp_path):
+    torch.manual_seed(31)
+    model = RequestActorCritic().eval()
+    checkpoint = tmp_path / "initial.pt"
+    torch.save(model.checkpoint(), checkpoint)
+    episodes = []
+    for i in range(8):
+        episode = []
+        for step in range(2):
+            encoded = model.encode(decision(request_scene))
+            encoded["initial"] = torch.tensor(step == 0)
+            with torch.no_grad():
+                logits, value = model.evaluate_encoding(encoded)
+                distribution = torch.distributions.Categorical(logits=logits[0])
+                action = distribution.sample()
+            reward = float((i + step) % 3 - 1)
+            episode.append(dict(encoding=serialize_encoding(encoded), action=int(action),
+                log_prob=float(distribution.log_prob(action)), value=float(value[0]),
+                time_s=float(step), end_time_s=float(step + 1), reward=reward, done=step == 1,
+                reward_timing="observed_reward_time_v1", reward_events=[(float(step + 1), reward)]))
+        episodes.append(episode)
+    path = tmp_path / "rollout.pt"
+    torch.save(dict(checkpoint_sha256=hash_file(checkpoint), sampling="categorical",
+        teacher_phase_supervision=False, complete=True, runtime_contracts=request_runtime_contracts(), episodes=episodes), path)
+    settings = dict(training_profile="timed_mc_v1", epochs=1, value_epochs=2,
+                    learning_rate=.02, entropy_coefficient=.02, contact_loss_weight=.5,
+                    contact_target_kl=100., temporal_target_kl=100.)
+    wide = ppo_update(checkpoint, [path], tmp_path / "wide", **settings)
+    limit = max(wide["updates"][0]["branch_kl"].values()) / 16
+    report = ppo_update(checkpoint, [path], tmp_path / "bounded",
+        **{**settings, "contact_target_kl": limit, "temporal_target_kl": limit})
+    assert report["optimization"]["initial_step_backtracks"]
+    assert report["optimization"]["completed_epochs"] == 1
+    assert max(report["updates"][0]["branch_kl"].values()) <= limit
+    rate = report["optimization"]["effective_actor_learning_rates"][0]
+    assert 0 < rate < settings["learning_rate"]
+    # Compare actor parameters/moments against the same pre-step state taking
+    # exactly one smaller Adam step. Rejected attempts must not accumulate.
+    direct = ppo_update(checkpoint, [path], tmp_path / "direct",
+                       **{**settings, "learning_rate": rate})
+    bounded_state = torch.load(tmp_path / "bounded/training_state.pt", weights_only=True)
+    direct_state = torch.load(tmp_path / "direct/training_state.pt", weights_only=True)
+    for key, state in bounded_state["actor_optimizer"]["state"].items():
+        assert int(state["step"]) == 1
+        for name, tensor in state.items():
+            torch.testing.assert_close(tensor, direct_state["actor_optimizer"]["state"][key][name], rtol=0, atol=0)
+    a = RequestActorCritic.load(tmp_path / "bounded/checkpoint.pt")
+    b = RequestActorCritic.load(tmp_path / "direct/checkpoint.pt")
+    for key, tensor in a.ranker.state_dict().items():
+        torch.testing.assert_close(tensor, b.ranker.state_dict()[key], rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("updated", [[0.0, -torch.inf], [0.0, float("nan")]])
+def test_categorical_kl_rejects_changed_support_or_nonfinite_valid_logits(updated):
+    with pytest.raises(ValueError, match="valid action support"):
+        categorical_kl_from_logits(torch.tensor([[0.0, -1.0]]), torch.tensor([updated]))
+
+
+def test_temporal_ppo_preserves_contact_and_encoder_and_bounds_update(request_scene, tmp_path):
+    torch.manual_seed(31)
+    model = RequestActorCritic()
+    checkpoint = tmp_path / "start.pt"
+    torch.save(model.checkpoint(), checkpoint)
+    context = decision(request_scene)
+    events = []
+    for i in range(8):
+        encoded = model.encode(context)
+        # Synthetic decision batches exercise both independent output branches;
+        # physical catalog/phase behavior is covered by execution tests.
+        encoded["initial"] = torch.tensor(i < 2)
+        with torch.no_grad():
+            logits, value = model.evaluate_encoding(encoded)
+            dist = torch.distributions.Categorical(logits=logits[0])
+            action = dist.sample()
+        events.append(dict(encoding=serialize_encoding(encoded), action=int(action),
+                           log_prob=float(dist.log_prob(action)), value=float(value[0]),
+                           time_s=float(i), reward=5.0 if i % 2 else -5.0, done=i == 7))
+    path = tmp_path / "rollout.pt"
+    torch.save(dict(checkpoint_sha256=hash_file(checkpoint), sampling="categorical",
+                    teacher_phase_supervision=False, complete=True, runtime_contracts=request_runtime_contracts(), episodes=[events]), path)
+    report = ppo_update(checkpoint, [path], tmp_path / "fit", actor_scope="temporal",
+                        epochs=20, learning_rate=.001, entropy_coefficient=.02, target_kl=1e-8)
+    assert report["eligible_actor_events"] == 6
+    assert report["optimization"]["completed_epochs"] == 1
+    assert report["optimization"]["separate_actor_critic_gradient_clipping"]
+    assert report["reload_exact"]
+    delta = report["parameter_max_changes"]
+    assert max(v for k, v in delta.items() if k.startswith("ranker.request_head.")) > 0
+    assert all(v == 0 for k, v in delta.items()
+               if not k.startswith(("ranker.request_head.", "value_head.")))
+    restored = RequestActorCritic.load(tmp_path / "fit/checkpoint.pt")
+    torch.testing.assert_close(model.decide(context, deterministic=True)["logits"],
+                               restored.decide(context, deterministic=True)["logits"], rtol=0, atol=0)
 
 
 @pytest.mark.parametrize("second", [-1.0, float("nan"), float("inf")])
@@ -130,3 +403,123 @@ def test_seeded_sampling_is_invariant_to_catalog_order_and_subgoal_hash(request_
             == reordered[second].request.contact_group_id
         )
         assert entries[first].phase_id == reordered[second].phase_id
+
+
+def test_physical_reward_discount_is_invariant_to_empty_intermediate_decisions():
+    def event(start, end, occurrences):
+        return dict(time_s=start, end_time_s=end, reward=sum(r for _, r in occurrences),
+                    reward_timing='observed_reward_time_v1', reward_events=occurrences)
+    direct = [event(0, 10, [(10, 5.)])]
+    segmented = [event(0, 5, []), event(5, 10, [(10, 5.)])]
+    expected = 5 * .99**10
+    assert discounted_event_returns(direct, .99)[0] == pytest.approx(expected)
+    assert discounted_event_returns(segmented, .99)[0] == pytest.approx(expected)
+    assert discounted_event_returns([event(0, 0, [(0, -5.)])], .99) == [-5.]
+    bad = event(0, 5, [(6, 1.)])
+    with pytest.raises(ValueError, match='outside causal interval'):
+        discounted_event_returns([bad], .99)
+    bad = event(0, 5, [(4, 1.)]); bad['reward'] = 2.
+    with pytest.raises(ValueError, match='raw sum'):
+        discounted_event_returns([bad], .99)
+    with pytest.raises(ValueError, match='mixed reward timing'):
+        discounted_event_returns([event(0, 5, []), dict(time_s=5., reward=1.)], .99)
+
+
+@pytest.mark.parametrize("profile", ["timed_mc_v1", "timed_value_v1", "timed_value_grouped"])
+def test_timed_ppo_learns_known_reward_and_resumes_adam(request_scene, tmp_path, profile):
+    """Fresh on-policy bandit episodes have a known optimum, independent of code loss."""
+    active_profile = "timed_value_v1" if profile == "timed_value_grouped" else profile
+    torch.manual_seed(432)
+    model = RequestActorCritic().eval()
+    torch.nn.init.zeros_(model.ranker.contact_head[3].weight)
+    torch.nn.init.zeros_(model.ranker.contact_head[3].bias)
+    context = decision(request_scene)
+    encoded = model.encode(context)
+    support = torch.nonzero(encoded['mask']).flatten()
+    assert len(support) >= 2
+    desired = int(support[0])
+    initial_probability = 1. / len(support)
+    initial_path = tmp_path/'initial.pt'
+    torch.save(model.checkpoint(), initial_path)
+    path = initial_path
+    final_report = None
+    for update in range(4):
+        model = RequestActorCritic.load(path).eval()
+        with torch.no_grad():
+            scores, value = model.evaluate_encoding(encoded)
+            distribution = torch.distributions.Categorical(logits=scores[0])
+        episodes = []
+        for action in distribution.sample((96,)):
+            reward = 1. if int(action) == desired else -1.
+            episodes.append([dict(encoding=serialize_encoding(encoded), action=int(action),
+                                  value=float(value[0]), log_prob=float(distribution.log_prob(action)),
+                                  time_s=0., end_time_s=1., reward=reward, done=True,
+                                  reward_timing='observed_reward_time_v1', reward_events=[(1., reward)])])
+        rollout_path = tmp_path/f'rollout_{update}.pt'
+        torch.save(dict(checkpoint_sha256=hash_file(path), sampling='categorical',
+                        teacher_phase_supervision=False, complete=True, runtime_contracts=request_runtime_contracts(), episodes=episodes), rollout_path)
+        out = tmp_path/f'update_{update}'
+        extra = {}
+        if profile == 'timed_value_grouped' and update >= 2:
+            import json
+            from amsrr.utils.hashing import stable_hash
+            archive = torch.load(rollout_path, weights_only=True)
+            archive['environment_seeds'] = list(range(96))
+            torch.save(archive, rollout_path)
+            record = tmp_path/'training_record.json'
+            record.write_text(json.dumps(dict(dataset_split='train')))
+            identity = dict(record_sha256=hash_file(record), snapshot_hash='synthetic_initial')
+            manifest = tmp_path/f'groups_{update}.json'
+            manifest.write_text(json.dumps(dict(version='same_initial_condition_rollout_groups_v1',
+                group_size=96, rollouts=[dict(path=str(rollout_path), sha256=hash_file(rollout_path),
+                record_path=str(record), **identity, condition_hash=stable_hash(identity))])))
+            extra['contact_group_manifest'] = manifest
+            if update == 2:
+                with pytest.raises(ValueError, match='explicit previous contract'):
+                    ppo_update(path, [rollout_path], tmp_path/'undeclared_change', training_profile=active_profile,
+                               learning_rate=.003, **extra)
+                extra['contact_baseline_transition_from'] = 'value_v1'
+        final_report = ppo_update(path, [rollout_path], out, training_profile=active_profile, **extra,
+                                  epochs=8, value_epochs=5, learning_rate=.003,
+                                  entropy_coefficient=.001)
+        assert final_report['optimization']['optimizer_updates_resumed'] == update
+        if extra:
+            assert final_report['contact_baseline_kind'] == 'condition_loo_v1'
+            assert final_report['contact_baseline']['condition_count'] == 1
+            assert (final_report['contact_baseline_transition'] is not None) == (update == 2)
+        expected_baseline = 'collected_value' if active_profile == 'timed_value_v1' and update > 0 else 'batch_constant'
+        assert final_report['value_diagnostics']['baseline'] == expected_baseline
+        assert math.isfinite(final_report['value_diagnostics']['collected_value_mse'])
+        path = out/'checkpoint.pt'
+    state = torch.load(path.parent/'training_state.pt', weights_only=True)
+    assert state['completed_updates'] == 4
+    actor_steps = [int(v['step']) for v in state['actor_optimizer']['state'].values()]
+    assert max(actor_steps) == 32  # eight steps in each of four updates, not reset
+    assert {int(v['step']) for v in state['value_optimizer']['state'].values()} == {20}
+    with torch.no_grad():
+        logits, _ = RequestActorCritic.load(path).evaluate_encoding(encoded)
+    assert int(logits[0].argmax()) == desired
+    assert float(logits[0].softmax(-1)[desired]) > initial_probability + .2
+
+
+def test_contact_baseline_is_independent_of_own_reward_and_case_offset():
+    from amsrr.training.request_ppo import leave_one_out_contact_returns
+    values=torch.tensor([8.,8.,-5.,3.,4.,5.])
+    groups=['a']*3+['b']*3
+    raw,base=leave_one_out_contact_returns(values,groups)
+    torch.testing.assert_close(raw,torch.tensor([6.5,6.5,-13.,-1.5,0.,1.5]))
+    shifted=values+torch.tensor([100.]*3+[-200.]*3)
+    torch.testing.assert_close(leave_one_out_contact_returns(shifted,groups)[0],raw)
+    changed=values.clone();changed[0]=500.
+    assert leave_one_out_contact_returns(changed,groups)[1][0] == base[0]
+    perm=torch.tensor([5,2,0,4,1,3])
+    reordered,_=leave_one_out_contact_returns(values[perm],[groups[i] for i in perm])
+    torch.testing.assert_close(reordered,raw[perm])
+    with pytest.raises(ValueError,match='other independent'):
+        leave_one_out_contact_returns(values[:1],['alone'])
+
+
+def test_equal_outcomes_give_zero_contact_signal():
+    from amsrr.training.request_ppo import leave_one_out_contact_returns
+    raw,_=leave_one_out_contact_returns(torch.tensor([9.,9.,9.,-5.,-5.,-5.]),['a']*3+['b']*3)
+    assert torch.equal(raw,torch.zeros_like(raw))

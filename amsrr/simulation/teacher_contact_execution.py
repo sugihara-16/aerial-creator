@@ -8,7 +8,6 @@ import time
 import torch
 
 from amsrr.training.order9_tensor_pi_l_runtime import (
-    ORDER9_GLOBAL_ACTION_SIZE,
     Order9TensorNominalQPIDStep,
     Order9TensorPiLRuntime,
 )
@@ -23,6 +22,29 @@ class TeacherContactController(Order9TensorPiLRuntime):
     """
 
     execution_calls = 0
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.builder._use_cuda_graph = True
+        self.builder._use_cpu_compile = True
+        self._warm_control_kernels()
+
+    @torch.no_grad()
+    def _warm_control_kernels(self):
+        """Compile/capture before control starts, without advancing PID state."""
+        poses = torch.zeros((self.batch_size, self.builder.module_count, 7), device=self.device, dtype=self.dtype)
+        poses[..., 6] = 1.
+        twists = torch.zeros((*poses.shape[:2], 6), device=self.device, dtype=self.dtype)
+        joints = torch.zeros((*poses.shape[:2], self.builder.local_joint_count), device=self.device, dtype=self.dtype)
+        model = self.builder.build(module_pose_world=poses, module_twist_world=twists, local_joint_positions_rad=joints)
+        self.controller.compute(control_model=model, desired_body_pose_world=model.body_pose_world,
+            desired_body_twist=model.body_twist_world, residual_wrench_body=torch.zeros_like(model.body_twist_world),
+            state=self.controller_state, payload_active=torch.zeros(self.batch_size, device=self.device, dtype=torch.bool),
+            payload_mass_kg=torch.zeros(self.batch_size, device=self.device, dtype=self.dtype),
+            payload_inertia_body=torch.zeros((self.batch_size, 6), device=self.device, dtype=self.dtype),
+            payload_com_offset_body=torch.zeros((self.batch_size, 3), device=self.device, dtype=self.dtype))
+        if self.device.type == 'cuda':
+            torch.cuda.synchronize(self.device)
 
     @torch.no_grad()
     def compute_nominal_qpid_hold(
@@ -48,29 +70,11 @@ class TeacherContactController(Order9TensorPiLRuntime):
             module_twist_world=state.module_twist_world,
             local_joint_positions_rad=state.local_joint_positions_rad,
         )
-        command = self.decoder.decode(
+        command = self.decoder.decode_nominal(
             reference_body_pose_world=task_target.desired_robot_root_pose_world,
             reference_body_twist=task_target.desired_robot_root_twist_world,
-            normalized_global_action=torch.zeros(
-                (self.batch_size, ORDER9_GLOBAL_ACTION_SIZE),
-                device=self.device,
-                dtype=self.dtype,
-            ),
-            normalized_joint_action=torch.zeros(
-                (
-                    self.batch_size,
-                    self.builder.module_count,
-                    3 * self.config.max_local_joint_slots,
-                ),
-                device=self.device,
-                dtype=self.dtype,
-            ),
-            policy_module_ids=self._decoder_module_ids,
             reference_local_joint_positions_rad=task_target.nominal_joint_positions_rad,
             reference_local_joint_velocities_radps=task_target.nominal_joint_velocities_radps,
-            reference_local_joint_mask=torch.ones_like(
-                task_target.nominal_joint_positions_rad, dtype=torch.bool
-            ),
             total_mass_kg=model.total_mass_kg,
         )
         offset = self._payload_offset_body(

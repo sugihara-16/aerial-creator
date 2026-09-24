@@ -55,6 +55,15 @@ def main():
     warmup.add_argument("--output", type=Path, required=True)
     warmup.add_argument("--epochs", type=int, default=1200)
     warmup.add_argument("--timeout-s", type=int, default=580)
+    warmup.add_argument("--morphology-aware", action="store_true")
+    temporal = sub.add_parser("warmup-temporal", help="Refit temporal warmup while preserving contact selection")
+    temporal.add_argument("--checkpoint", type=Path, required=True)
+    temporal.add_argument("--dataset", type=Path, required=True)
+    temporal.add_argument("--output", type=Path, required=True)
+    temporal.add_argument("--epochs", type=int, default=400)
+    temporal.add_argument("--seed", type=int, default=17)
+    temporal.add_argument("--device", default="cuda")
+    temporal.add_argument("--timeout-s", type=int, default=240)
     ppo = sub.add_parser(
         "ppo", help="Update the same actor from categorical Isaac events"
     )
@@ -62,6 +71,20 @@ def main():
     ppo.add_argument("--rollouts", type=Path, nargs="+", required=True)
     ppo.add_argument("--output", type=Path, required=True)
     ppo.add_argument("--timeout-s", type=int, default=580)
+    ppo.add_argument("--epochs", type=int, default=4)
+    ppo.add_argument("--learning-rate", type=float, default=1e-4)
+    ppo.add_argument("--actor-scope", choices=("all", "temporal"), default="all")
+    ppo.add_argument("--entropy-coefficient", type=float, default=0.001)
+    ppo.add_argument("--target-kl", type=float)
+    ppo.add_argument("--contact-loss-weight", type=float,
+                     help="Weight of mean contact actor/entropy loss; requires both branch KL limits")
+    ppo.add_argument("--contact-target-kl", type=float)
+    ppo.add_argument("--temporal-target-kl", type=float)
+    ppo.add_argument("--contact-group-manifest")
+    ppo.add_argument("--contact-baseline-transition-from", choices=("value_v1", "condition_loo_v1"))
+    ppo.add_argument("--training-profile", choices=("legacy_event_v1", "timed_mc_v1", "timed_value_v1"),
+                     default="legacy_event_v1")
+    ppo.add_argument("--value-epochs", type=int, default=80)
     args = parser.parse_args()
     if args.timeout_s <= 0:
         parser.error("timeout must be positive")
@@ -93,11 +116,26 @@ def main():
             args.output,
             epochs=args.epochs,
             timeout_s=args.timeout_s,
+            morphology_aware=args.morphology_aware,
         )
+    elif args.action == "warmup-temporal":
+        from amsrr.training.request_temporal_warmup import warmup_temporal
+        result = warmup_temporal(args.checkpoint, args.dataset, args.output,
+            epochs=args.epochs, seed=args.seed, device=args.device, timeout_s=args.timeout_s)
     elif args.action == "ppo":
         from amsrr.training.request_ppo import ppo_update
 
-        result = ppo_update(args.checkpoint, args.rollouts, args.output)
+        result = ppo_update(args.checkpoint, args.rollouts, args.output,
+                            epochs=args.epochs, learning_rate=args.learning_rate,
+                            actor_scope=args.actor_scope,
+                            entropy_coefficient=args.entropy_coefficient,
+                            target_kl=args.target_kl,
+                            contact_loss_weight=args.contact_loss_weight,
+                            contact_target_kl=args.contact_target_kl,
+                            temporal_target_kl=args.temporal_target_kl,
+                            training_profile=args.training_profile, value_epochs=args.value_epochs,
+                            contact_group_manifest=args.contact_group_manifest,
+                            contact_baseline_transition_from=args.contact_baseline_transition_from)
     else:
         if (
             min(args.epochs, args.patience, args.batch_size) < 1

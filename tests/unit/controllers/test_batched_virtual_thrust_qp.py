@@ -21,6 +21,80 @@ from amsrr.controllers.rigid_body_model import (
 )
 
 
+@pytest.mark.parametrize('dtype', [torch.float32, torch.float64])
+def test_native_cpu_admm_preserves_applied_commands_and_diagnostics(dtype, monkeypatch):
+    from amsrr.feasibility.order9_native_loader import load_order9_posture_native, Order9NativePostureIKUnavailable
+    try:
+        native = load_order9_posture_native()
+    except Order9NativePostureIKUnavailable as error:
+        pytest.skip(str(error))
+    torch.manual_seed(71)
+    batch, rotors = 4, 14
+    zero = torch.zeros(batch, rotors, dtype=dtype)
+    inputs = dict(desired_wrench_body=torch.randn(batch, 6, dtype=dtype) * 5,
+        virtual_x_wrench_columns=torch.randn(batch, rotors, 6, dtype=dtype),
+        virtual_z_wrench_columns=torch.randn(batch, rotors, 6, dtype=dtype),
+        current_vectoring_angles_rad=zero, previous_rotor_thrusts_n=zero+1,
+        previous_vectoring_targets_rad=zero, thrust_min_n=zero, thrust_max_n=zero+10,
+        vectoring_lower_rad=zero-1, vectoring_upper_rad=zero+1,
+        vectoring_velocity_limit_radps=zero+2, control_dt_s=.02,
+        unsupported_wrench_tolerance=2., rotor_mask=torch.ones(batch, rotors, dtype=torch.bool))
+    inputs['rotor_mask'][0] = False
+    inputs['rotor_mask'][1, ::2] = False
+    inputs['vectoring_lower_rad'][2] = 0
+    inputs['vectoring_upper_rad'][2] = 0
+    with torch.no_grad():
+        monkeypatch.setattr(batched_qp_module, '_native_cpu_admm', False)
+        reference = solve_batched_virtual_thrust_qp(**inputs)
+        monkeypatch.setattr(batched_qp_module, '_native_cpu_admm', native)
+        actual = solve_batched_virtual_thrust_qp(**inputs)
+    for name in reference.__dataclass_fields__:
+        a, b = getattr(reference, name), getattr(actual, name)
+        if a.dtype == torch.bool:
+            assert torch.equal(a, b), name
+        else:
+            tolerance = 2e-4 if dtype == torch.float32 else 2e-11
+            torch.testing.assert_close(a, b, rtol=tolerance, atol=tolerance)
+
+
+@pytest.fixture
+def cusolver_backend():
+    previous = torch.backends.cuda.preferred_linalg_library()
+    torch.backends.cuda.preferred_linalg_library("cusolver")
+    try:
+        yield
+    finally:
+        torch.backends.cuda.preferred_linalg_library(previous)
+        batched_qp_module._admm_cuda_cache = None
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA graph needs CUDA')
+@pytest.mark.parametrize('batch', [1, 3])
+def test_cuda_admm_replay_uses_new_inputs_and_owns_outputs(monkeypatch, cusolver_backend, batch):
+    # Compare the same production solve with Python launch vs captured launches.
+    desired = torch.tensor([[2., 0., 5., 0., 0., 0.]], device='cuda').repeat(batch, 1)
+    x, z = (v.float().cuda() for v in _columns(batch))
+    zero = torch.zeros(batch, 1, device='cuda')
+    inputs = dict(desired_wrench_body=desired, virtual_x_wrench_columns=x,
+        virtual_z_wrench_columns=z, current_vectoring_angles_rad=zero,
+        previous_rotor_thrusts_n=zero, previous_vectoring_targets_rad=zero,
+        thrust_min_n=zero, thrust_max_n=zero+10, vectoring_lower_rad=zero-1,
+        vectoring_upper_rad=zero+1, vectoring_velocity_limit_radps=zero+100,
+        control_dt_s=.02, unsupported_wrench_tolerance=2.)
+    captured = batched_qp_module._admm_cuda
+    with torch.no_grad():
+        first = solve_batched_virtual_thrust_qp(**inputs)
+        saved = first.rotor_thrusts_n.clone()
+        inputs['desired_wrench_body'] = desired * .8
+        second = solve_batched_virtual_thrust_qp(**inputs)
+        torch.testing.assert_close(first.rotor_thrusts_n, saved, atol=0, rtol=0)
+        monkeypatch.setattr(batched_qp_module, '_admm_cuda', batched_qp_module._admm_iterations)
+        reference = solve_batched_virtual_thrust_qp(**inputs)
+        for name in reference.__dataclass_fields__:
+            torch.testing.assert_close(getattr(second, name), getattr(reference, name), atol=0, rtol=0)
+        monkeypatch.setattr(batched_qp_module, '_admm_cuda', captured)
+
+
 def _columns(batch_size: int = 1) -> tuple[torch.Tensor, torch.Tensor]:
     x_column = torch.tensor(
         [[[1.0, 0.0, 0.0, 0.0, 0.0, 0.0]]], dtype=torch.float64
