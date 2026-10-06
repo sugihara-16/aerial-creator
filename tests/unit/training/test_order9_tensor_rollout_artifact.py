@@ -745,3 +745,102 @@ def test_production_benchmark_is_derived_from_raw_artifact_timing(
     assert report.selected_environment_count == 1
     assert report.samples[0].aggregate_env_steps_per_s == pytest.approx(200.0)
     assert report.samples[0].metadata["production_collector"] is True
+
+
+@pytest.mark.parametrize("storage", ["ram", "file"])
+def test_chunked_rollout_owns_samples_across_block_boundary(tmp_path, storage):
+    artifact=_artifact()
+    buffer=Order9TensorRolloutBuffer(artifact.metadata)
+    if storage == "file":
+        buffer._cpu_storage_directory = tmp_path
+    # Small blocks exercise the same boundary as a long simulator run.
+    buffer._block_steps=1
+    first={name:value[0].clone() for name,value in artifact.tensors.items()}
+    second={name:value[1].clone() for name,value in artifact.tensors.items()}
+    buffer.append(first)
+    for value in first.values():value.zero_()
+    buffer.append(second)
+    result=buffer.finalize()
+    for name,value in artifact.tensors.items():
+        torch.testing.assert_close(result.tensors[name],value,rtol=0,atol=0)
+    for value in second.values():value.zero_()
+    repeated=buffer.finalize()
+    for name,value in artifact.tensors.items():
+        torch.testing.assert_close(repeated.tensors[name],value,rtol=0,atol=0)
+
+
+@pytest.mark.parametrize("storage", ["ram", "file"])
+def test_single_use_buffer_releases_samples_without_changing_archive(tmp_path, storage):
+    artifact = _artifact()
+    buffer = Order9TensorRolloutBuffer(artifact.metadata)
+    if storage == "file":
+        buffer._cpu_storage_directory = tmp_path
+    buffer._block_steps = 1
+    buffer._release_samples_on_finalize = True
+    for index in range(artifact.step_count):
+        buffer.append({name: value[index] for name, value in artifact.tensors.items()})
+    result = buffer.finalize()
+    assert not buffer._blocks
+    for name, value in artifact.tensors.items():
+        torch.testing.assert_close(result.tensors[name], value, rtol=0, atol=0)
+    with pytest.raises(ValueError, match='consumed'):
+        buffer.finalize()
+    with pytest.raises(ValueError, match='consumed'):
+        buffer.append({name: value[0] for name, value in artifact.tensors.items()})
+    assert not list(tmp_path.iterdir())
+    destination = tmp_path / 'roundtrip.pt'
+    write_order9_tensor_rollout_artifact(destination, result)
+    restored = load_order9_tensor_rollout_artifact(destination)
+    for name, value in artifact.tensors.items():
+        assert torch.equal(restored.tensors[name].view(torch.uint8), value.view(torch.uint8))
+
+
+@pytest.mark.parametrize("storage", ["ram", "file"])
+def test_constant_samples_expand_late_changes_and_preserve_signed_zero(tmp_path, storage):
+    artifact = _artifact()
+    buffer = Order9TensorRolloutBuffer(artifact.metadata)
+    if storage == "file":
+        buffer._cpu_storage_directory = tmp_path
+    buffer._block_steps = 2
+    first = {name: value[0].clone() for name, value in artifact.tensors.items()}
+    # Test the storage boundary independently of timestamp/episode validation.
+    field = next(name for name, value in first.items()
+                 if value.dtype == torch.float32 and value.numel() > 0)
+    first[field].zero_()
+    history = []
+    for index in range(7):
+        sample = {name: value.clone() for name, value in first.items()}
+        if index == 5:
+            sample[field].fill_(-0.0)
+        if index == 6:
+            sample[field].fill_(1.0)
+        history.append({name: value.clone() for name, value in sample.items()})
+        buffer.append(sample)
+        for value in sample.values():
+            value.zero_()
+    from unittest.mock import patch
+    with patch.object(Order9TensorRolloutArtifact, 'validate'):
+        result = buffer.finalize()
+        repeated = buffer.finalize()
+    for name in first:
+        expected = torch.stack([sample[name] for sample in history])
+        assert torch.equal(result.tensors[name].view(torch.uint8), expected.view(torch.uint8))
+        assert torch.equal(repeated.tensors[name].view(torch.uint8), expected.view(torch.uint8))
+    constant = next(name for name in first if name != field and first[name].numel() > 0)
+    before = result.tensors[constant][1].clone()
+    result.tensors[constant][0].zero_()
+    assert torch.equal(result.tensors[constant][1], before)
+    assert torch.equal(repeated.tensors[constant][0], first[constant])
+    assert not list(tmp_path.iterdir())
+
+
+def test_file_storage_allocation_failure_removes_scratch_file(tmp_path, monkeypatch):
+    from amsrr.training.order9_tensor_rollout_artifact import _owned_file_tensor
+
+    def failed_mapping(*args, **kwargs):
+        raise OSError('allocation failed')
+
+    monkeypatch.setattr(torch, 'from_file', failed_mapping)
+    with pytest.raises(OSError, match='allocation failed'):
+        _owned_file_tensor((2, 3), dtype=torch.float32, directory=tmp_path)
+    assert not list(tmp_path.iterdir())

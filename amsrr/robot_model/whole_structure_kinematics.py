@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
@@ -95,6 +96,7 @@ class WholeStructureKinematics:
         self._cached_model_context: _ModelContext | None = None
         self._cached_graph_source: MorphologyGraph | None = None
         self._cached_graph_context: _GraphContext | None = None
+        self._module_link_pose_cache = OrderedDict()
 
     def compute(
         self,
@@ -120,9 +122,7 @@ class WholeStructureKinematics:
         )
         _validate_pose(base_pose_world, "base_pose_world")
 
-        module_link_pose_cache: dict[
-            tuple[int, tuple[float, ...]], dict[str, Pose7D]
-        ] = {}
+        module_link_pose_cache = self._module_link_pose_cache
         nominal = self._forward(
             graph,
             model,
@@ -242,9 +242,11 @@ class WholeStructureKinematics:
         anchor_refs: Sequence[MeshBackedAnchorReference],
         *,
         module_link_pose_cache: (
-            dict[tuple[int, tuple[float, ...]], dict[str, Pose7D]] | None
+            dict | None
         ) = None,
     ) -> _ForwardSnapshot:
+        if module_link_pose_cache is None:
+            module_link_pose_cache = self._module_link_pose_cache
         module_link_poses: dict[int, dict[str, Pose7D]] = {}
         port_local_poses: dict[int, dict[int, Pose7D]] = {}
         for module_id in graph.modules:
@@ -252,17 +254,19 @@ class WholeStructureKinematics:
                 float(q[_global_dock_joint_id(module_id, local_joint_id)])
                 for local_joint_id in model.dock_joint_ids
             )
-            cache_key = (module_id, local_positions)
-            link_poses = (
-                None
-                if module_link_pose_cache is None
-                else module_link_pose_cache.get(cache_key)
-            )
+            # All modules use this model. Identical local joints have identical
+            # local FK, including across Jacobian samples and planning windows.
+            # hex keeps signed zeros distinct; do not quantize joint values.
+            cache_key = tuple(value.hex() for value in local_positions)
+            link_poses = module_link_pose_cache.get(cache_key)
             if link_poses is None:
                 local_q = dict(zip(model.dock_joint_ids, local_positions, strict=True))
                 link_poses = _module_link_poses(model, local_q)
-                if module_link_pose_cache is not None:
-                    module_link_pose_cache[cache_key] = link_poses
+                module_link_pose_cache[cache_key] = link_poses
+                while len(module_link_pose_cache) > 256:
+                    module_link_pose_cache.pop(next(iter(module_link_pose_cache)))
+            if isinstance(module_link_pose_cache, OrderedDict):
+                module_link_pose_cache.move_to_end(cache_key)
             module_link_poses[module_id] = link_poses
             port_local_poses[module_id] = {
                 port_global_id: link_poses[
@@ -337,6 +341,7 @@ class WholeStructureKinematics:
         physical_model: PhysicalModel,
     ) -> tuple[_ModelContext, _GraphContext]:
         if self._cached_model_source is not physical_model:
+            self._module_link_pose_cache.clear()
             self._cached_model_context = _build_model_context(
                 physical_model,
                 self.config,

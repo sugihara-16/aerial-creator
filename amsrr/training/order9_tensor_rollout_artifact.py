@@ -808,6 +808,28 @@ class Order9TensorRolloutArtifact:
                     )
 
 
+def _owned_file_tensor(shape, *, dtype, directory):
+    """Dense CPU storage backed by an unlinked, private scratch file.
+
+    Each allocation owns a distinct mapping. The OS can reclaim written pages
+    without discarding samples; closing the last tensor releases the scratch
+    inode, including on process termination. No scratch pathname is reusable.
+    """
+    import math
+    import os
+    import tempfile
+
+    count = math.prod(shape)
+    if count == 0:
+        return torch.empty(shape, dtype=dtype)
+    descriptor, name = tempfile.mkstemp(prefix=".rollout-storage-", dir=directory)
+    try:
+        os.close(descriptor)
+        return torch.from_file(name, shared=True, size=count, dtype=dtype).reshape(shape)
+    finally:
+        os.unlink(name)
+
+
 class Order9TensorRolloutBuffer:
     """Append same-layout GPU step tensors and finalize once on CPU."""
 
@@ -855,31 +877,104 @@ class Order9TensorRolloutBuffer:
                 )
             ))
         )
-        self._steps: list[dict[str, torch.Tensor]] = []
+        self._blocks: list[dict[str, torch.Tensor]] = []
+        self._length = 0
+        self._block_steps = 256
+        self._layout = None
+        self._release_samples_on_finalize = False
+        self._released = False
+        self._constant_samples: dict[str, torch.Tensor] = {}
+        self._cpu_storage_directory = None
+
+    def _allocate(self, shape, value):
+        if self._cpu_storage_directory is not None and value.device.type == "cpu":
+            return _owned_file_tensor(shape, dtype=value.dtype,
+                                      directory=self._cpu_storage_directory)
+        return torch.empty(shape, device=value.device, dtype=value.dtype)
 
     def append(self, values: Mapping[str, torch.Tensor]) -> None:
+        if self._released:
+            raise ValueError("Order9 rollout buffer has been consumed")
         if set(values) != self._required_tensors:
             raise ValueError("Order9 rollout buffer step fields differ")
         widths = {int(value.shape[0]) for value in values.values()}
         if len(widths) != 1:
             raise ValueError("Order9 rollout buffer environment widths differ")
-        self._steps.append(
-            {name: value.detach().clone() for name, value in values.items()}
-        )
+        layout = {name:(tuple(value.shape),value.dtype,value.device) for name,value in values.items()}
+        if self._layout is not None and layout != self._layout:
+            raise ValueError("Order9 rollout buffer tensor layout changed")
+        self._layout = layout
+        offset = self._length % self._block_steps
+        if self._length == 0 and all(value.device.type == "cpu" for value in values.values()):
+            # The inactive policy fields are often constant, but no field is
+            # assumed to be constant. Retain an owned first sample and compare
+            # every later sample exactly. GPU append avoids per-field syncs.
+            self._constant_samples = {name: value.detach().clone()
+                                      for name, value in values.items()}
+            self._blocks.append({})
+            self._length = 1
+            return
+        if offset == 0:
+            self._blocks.append({name:self._allocate((self._block_steps,*value.shape), value)
+                for name,value in values.items()
+                if name not in self._constant_samples})
+        # Copy every sample; observations/controller buffers may be overwritten
+        # next tick. Blocks avoid hundreds of thousands of tiny Tensor objects.
+        with torch.no_grad():
+            for name,value in values.items():
+                first = self._constant_samples.get(name)
+                if first is not None:
+                    if torch.equal(value.contiguous().view(torch.uint8),
+                                   first.contiguous().view(torch.uint8)):
+                        continue
+                    # A late change must expand the complete earlier history,
+                    # including blocks written before this field first varied.
+                    for index, block in enumerate(self._blocks):
+                        block[name] = self._allocate((self._block_steps, *value.shape), value)
+                        count = min(self._block_steps, self._length-index*self._block_steps)
+                        if count > 0:
+                            block[name][:count].copy_(first)
+                    del self._constant_samples[name]
+                self._blocks[-1][name][offset].copy_(value)
+        self._length += 1
 
     def finalize(self) -> Order9TensorRolloutArtifact:
-        if not self._steps:
+        if self._released:
+            raise ValueError("Order9 rollout buffer has been consumed")
+        if not self._length:
             raise ValueError("Order9 rollout buffer is empty")
+        tensors = {}
+        for name in sorted(self._required_tensors):
+            if name in self._constant_samples:
+                first = self._constant_samples[name]
+                # Materialize an ordinary owned tensor at the archive boundary:
+                # callers may mutate one timestamp without changing another.
+                if self._cpu_storage_directory is not None and first.device.type == "cpu":
+                    tensors[name] = self._allocate((self._length, *first.shape), first)
+                    tensors[name].copy_(first)
+                else:
+                    tensors[name] = first.expand(self._length, *first.shape).clone()
+                if self._release_samples_on_finalize:
+                    del self._constant_samples[name]
+                continue
+            pieces = [block[name][:min(self._block_steps,self._length-index*self._block_steps)]
+                      for index,block in enumerate(self._blocks)]
+            if self._cpu_storage_directory is not None and pieces[0].device.type == "cpu":
+                tensors[name] = self._allocate((self._length, *pieces[0].shape[1:]), pieces[0])
+                torch.cat(pieces, dim=0, out=tensors[name])
+            else:
+                tensors[name] = torch.cat(pieces,dim=0).to(device="cpu")
+            if self._release_samples_on_finalize:
+                # Release each original field as its owned final tensor is
+                # created, avoiding two complete raw archives in RAM at once.
+                for block in self._blocks:
+                    del block[name]
+                del pieces
+        if self._release_samples_on_finalize:
+            self._blocks.clear()
+            self._released = True
         artifact = Order9TensorRolloutArtifact(
-            artifact_version=self.artifact_version,
-            metadata=dict(self.metadata),
-            tensors={
-                name: torch.stack(
-                    [step[name] for step in self._steps], dim=0
-                ).to(device="cpu")
-                for name in sorted(self._required_tensors)
-            },
-        )
+            artifact_version=self.artifact_version, metadata=dict(self.metadata), tensors=tensors)
         artifact.validate()
         return artifact
 

@@ -69,7 +69,7 @@ def cusolver_backend():
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA graph needs CUDA')
-@pytest.mark.parametrize('batch', [1, 3])
+@pytest.mark.parametrize('batch', [1, 3, 9, 16])
 def test_cuda_admm_replay_uses_new_inputs_and_owns_outputs(monkeypatch, cusolver_backend, batch):
     # Compare the same production solve with Python launch vs captured launches.
     desired = torch.tensor([[2., 0., 5., 0., 0., 0.]], device='cuda').repeat(batch, 1)
@@ -469,3 +469,110 @@ def _dykstra_projection_reference(
         lower_correction = candidate - lower
         value = lower
     return value
+
+
+@pytest.mark.parametrize('device', ['cpu', 'cuda'])
+def test_internal_joint_load_redistributes_same_wrench_and_refreshes_bias(device):
+    if device == 'cuda' and not torch.cuda.is_available():
+        pytest.skip('requires CUDA')
+    zero = torch.zeros((1, 2), device=device, dtype=torch.float64)
+    x = torch.zeros(1, 2, 6, device=device, dtype=torch.float64)
+    z = x.clone(); z[..., 2] = 1.
+    c = torch.tensor([[[0., 1., 0., -1.]]], device=device, dtype=torch.float64)
+    inputs = dict(desired_wrench_body=torch.tensor([[0., 0., 10., 0., 0., 0.]], device=device, dtype=torch.float64),
+        virtual_x_wrench_columns=x, virtual_z_wrench_columns=z,
+        current_vectoring_angles_rad=zero, previous_rotor_thrusts_n=zero+5., previous_vectoring_targets_rad=zero,
+        thrust_min_n=zero, thrust_max_n=zero+10., vectoring_lower_rad=zero, vectoring_upper_rad=zero,
+        vectoring_velocity_limit_radps=zero, control_dt_s=.02, unsupported_wrench_tolerance=.01,
+        joint_load_matrix=c, joint_load_limit_nm=zero[:, :1]+3.5)
+    with torch.no_grad():
+        for bias in [8., -8.]:
+            inputs['joint_load_bias_nm'] = zero[:, :1]+bias
+            result = solve_batched_virtual_thrust_qp(**inputs)
+            assert result.feasible.item()
+            assert result.residual_norm.item() < .01
+            applied = (result.rotor_thrusts_n * torch.cos(result.vectoring_joint_targets_rad))
+            load = applied[0, 0] - applied[0, 1] + bias
+            assert abs(float(load)) <= 3.501
+            assert float((applied[0, 1]-applied[0, 0])*bias) > 0.
+
+
+def test_internal_joint_load_rejects_infeasible_applied_command():
+    x, z = _columns()
+    zero = torch.zeros(1, 1, dtype=torch.float64)
+    with torch.no_grad():
+        result = solve_batched_virtual_thrust_qp(desired_wrench_body=torch.zeros(1, 6, dtype=torch.float64),
+            virtual_x_wrench_columns=x, virtual_z_wrench_columns=z,
+            current_vectoring_angles_rad=zero, previous_rotor_thrusts_n=zero, previous_vectoring_targets_rad=zero,
+            thrust_min_n=zero, thrust_max_n=zero+1., vectoring_lower_rad=zero, vectoring_upper_rad=zero,
+            vectoring_velocity_limit_radps=zero, control_dt_s=.02, unsupported_wrench_tolerance=100.,
+            joint_load_matrix=torch.tensor([[[0., 1.]]], dtype=torch.float64),
+            joint_load_bias_nm=zero-10., joint_load_limit_nm=zero+1.)
+    assert not result.feasible.item()
+
+
+@pytest.mark.parametrize('device', ['cpu', 'cuda'])
+def test_opening_constraint_blocks_opening_preserves_closure_and_primary_wrench(device):
+    from amsrr.controllers.articulated_joint_load import append_grasp_opening_constraints
+    if device == 'cuda' and not torch.cuda.is_available():
+        pytest.skip('requires CUDA')
+    zero = torch.zeros((1, 2), device=device, dtype=torch.float64)
+    x = torch.zeros(1, 2, 6, device=device, dtype=torch.float64)
+    z = x.clone(); z[..., 2] = 1.
+    c = torch.tensor([[[0., 1., 0., -1.]]], device=device, dtype=torch.float64)
+    with torch.no_grad():
+        for extra_bias in [3., -3.]:
+            for enabled in [False, True]:
+                # 2 Nm nominal contact compression is excluded from additional
+                # opening; the same primary wrench is retained in every case.
+                bias = zero[:, :1] + extra_bias + 2.
+                cc, bb, ll = append_grasp_opening_constraints(c, bias,
+                    zero[:, :1]+20., zero[:, :1]+2.,
+                    (zero[:, :1, None]+.01) * enabled, zero+10.)
+                result = solve_batched_virtual_thrust_qp(
+                    desired_wrench_body=torch.tensor([[0., 0., 10., 0., 0., 0.]], device=device, dtype=torch.float64),
+                    virtual_x_wrench_columns=x, virtual_z_wrench_columns=z,
+                    current_vectoring_angles_rad=zero, previous_rotor_thrusts_n=zero+5., previous_vectoring_targets_rad=zero,
+                    thrust_min_n=zero, thrust_max_n=zero+10., vectoring_lower_rad=zero, vectoring_upper_rad=zero,
+                    vectoring_velocity_limit_radps=zero, control_dt_s=.02, unsupported_wrench_tolerance=.01,
+                    joint_load_matrix=cc, joint_load_bias_nm=bb, joint_load_limit_nm=ll)
+                assert result.feasible.item() and result.residual_norm.item() < .01
+                force = result.rotor_thrusts_n
+                opening_m = .01 * (force[0, 0] - force[0, 1] + extra_bias)
+                if enabled:
+                    assert opening_m <= 1.e-5
+                if not enabled or extra_bias < 0:
+                    torch.testing.assert_close(force, zero+5., atol=1.e-5, rtol=0)
+
+
+@pytest.mark.parametrize('batch', [9, 16])
+def test_small_cuda_batch_native_joint_constraints_keep_each_environment_independent(batch, monkeypatch):
+    if not torch.cuda.is_available():
+        pytest.skip('requires CUDA')
+    import amsrr.controllers.batched_virtual_thrust_qp as module
+    calls = []
+    original = module._admm_cuda
+    def tracked(*args, **kwargs):
+        calls.append(args[0].shape[0])
+        return original(*args, **kwargs)
+    monkeypatch.setattr(module, '_admm_cuda', tracked)
+    zero = torch.zeros(batch, 2, device='cuda', dtype=torch.float64)
+    x = torch.zeros(batch, 2, 6, device='cuda', dtype=torch.float64)
+    z = x.clone(); z[..., 2] = 1.
+    matrix = torch.tensor([[[0., 1., 0., -1.]]], device='cuda', dtype=torch.float64).expand(batch, -1, -1)
+    bias = torch.tensor([8. if i % 2 else -8. for i in range(batch)], device='cuda', dtype=torch.float64)
+    with torch.no_grad():
+        result = solve_batched_virtual_thrust_qp(
+            desired_wrench_body=torch.tensor([[0., 0., 10., 0., 0., 0.]], device='cuda', dtype=torch.float64).expand(batch, -1),
+            virtual_x_wrench_columns=x, virtual_z_wrench_columns=z,
+            current_vectoring_angles_rad=zero, previous_rotor_thrusts_n=zero + 5., previous_vectoring_targets_rad=zero,
+            thrust_min_n=zero, thrust_max_n=zero + 10., vectoring_lower_rad=zero, vectoring_upper_rad=zero,
+            vectoring_velocity_limit_radps=zero, control_dt_s=.02, unsupported_wrench_tolerance=.01,
+            joint_load_matrix=matrix, joint_load_bias_nm=bias[:, None], joint_load_limit_nm=zero[:, :1] + 3.5)
+    assert result.feasible.all()
+    assert (result.residual_norm < .01).all()
+    applied = result.rotor_thrusts_n * torch.cos(result.vectoring_joint_targets_rad)
+    assert ((applied[:, 0] - applied[:, 1] + bias).abs() <= 3.501).all()
+    assert (((applied[:, 1] - applied[:, 0]) * bias) > 0.).all()
+
+    assert calls == [batch], '9/16 environments must reach the accelerated ADMM path'

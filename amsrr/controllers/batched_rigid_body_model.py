@@ -15,6 +15,7 @@ import torch
 
 from amsrr.schemas.morphology import MorphologyGraph
 from amsrr.schemas.physical_model import JointModel, PhysicalModel
+from amsrr.controllers.rigid_body_model import _joint_limits
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,20 @@ class BatchedRigidBodyControlModel:
     rotor_module_ids: tuple[int, ...]
     rotor_local_ids: tuple[str, ...]
     vectoring_global_joint_ids: tuple[str, ...]
+    joint_load_matrix: torch.Tensor | None = None
+    joint_gravity_load_nm: torch.Tensor | None = None
+    joint_mass_jacobian: torch.Tensor | None = None
+    joint_contact_jacobian: torch.Tensor | None = None
+    joint_angular_mass_matrix: torch.Tensor | None = None
+    joint_centrifugal_load_nm: torch.Tensor | None = None
+
+
+@dataclass(frozen=True)
+class BatchedCentroidalKinematics:
+    """Post-physics observation fields; no allocation or joint-load matrices."""
+    body_pose_world: torch.Tensor
+    body_twist_world: torch.Tensor
+    current_vectoring_angles_rad: torch.Tensor
 
 
 @dataclass(frozen=True)
@@ -59,9 +74,16 @@ class BatchedRigidBodyControlModelBuilder:
         # retain the eager path, including autograd and arbitrary batch sizes.
         self._use_cuda_graph = False
         self._use_cpu_compile = False
+        self._use_cpu_native = False
+        self._cpu_native_model = None
+        self._reuse_post_step_model = False
+        self._post_step_cache = None
         self._cpu_compiled_build = None
+        self._cpu_compiled_kinematics = None
         self._cuda_graph_cache = None
+        self._kinematics_graph_cache = None
         self._constant_cache = {}
+        self._internal_load_model = None
         self.module_ids = tuple(
             sorted(module.module_id for module in morphology_graph.modules)
         )
@@ -90,6 +112,24 @@ class BatchedRigidBodyControlModelBuilder:
         if not self._roots:
             raise ValueError("batched rigid-body physical model has no root link")
         self._base_link = _module_base_link(physical_model, set(self.link_ids))
+        parent_joint = {j.child_link: j for j in physical_model.joints}
+        def ancestors(link):
+            result = set()
+            while link in parent_joint:
+                joint = parent_joint[link]
+                result.add(joint.joint_id)
+                link = joint.parent_link
+            return result
+        base_ancestors = ancestors(self._base_link)
+        link_ancestors = {link: ancestors(link) for link in self.link_ids}
+        # Relative module-frame COM Jacobian. A joint upstream of the module
+        # frame moves that frame too, hence the signed ancestor difference.
+        self._joint_com_mass_weights = {
+            j.joint_id: [self._links_by_id[link].mass_kg *
+                (int(j.joint_id in link_ancestors[link]) - int(j.joint_id in base_ancestors))
+                for link in self.link_ids]
+            for j in physical_model.joints if j.joint_type != "fixed"
+        }
         self._rotor_specs = tuple(
             (module_id, rotor)
             for module_id in self.module_ids
@@ -119,13 +159,21 @@ class BatchedRigidBodyControlModelBuilder:
         module_pose_world: torch.Tensor,
         module_twist_world: torch.Tensor,
         local_joint_positions_rad: torch.Tensor,
+        local_joint_velocities_rad: torch.Tensor | None = None,
     ) -> BatchedRigidBodyControlModel:
-        self._validate_inputs(
-            module_pose_world, module_twist_world, local_joint_positions_rad
-        )
-        inputs = (module_pose_world, module_twist_world, local_joint_positions_rad)
-        if self._use_cpu_compile and module_pose_world.device.type == 'cpu' and not torch.is_grad_enabled():
-            return self._build_compiled_cpu(inputs)
+        inputs = self._validated_inputs(module_pose_world, module_twist_world,
+            local_joint_positions_rad, local_joint_velocities_rad)
+        cached = self._post_step_cache if self._reuse_post_step_model else None
+        if (cached is not None and cached[2] is self._internal_load_model
+                and (not torch.is_grad_enabled() or not any(x.requires_grad for x in inputs))
+                and len(inputs) == len(cached[0])
+                and all(value is previous and value._version == version
+                        for value, (previous, version) in zip(inputs, cached[0]))):
+            return cached[1]
+        if (self._use_cpu_compile and module_pose_world.device.type == 'cpu'
+                and (not torch.is_grad_enabled() or not any(x.requires_grad for x in inputs))):
+            with torch.no_grad():
+                return self._build_compiled_cpu(inputs)
         if (
             self._use_cuda_graph
             and module_pose_world.is_cuda
@@ -135,27 +183,85 @@ class BatchedRigidBodyControlModelBuilder:
                 return self._build_cuda_graph(inputs)
         return self._build(*inputs)
 
-    def _build_compiled_cpu(self, inputs):
+    def _validated_inputs(self, module_pose_world, module_twist_world,
+                          local_joint_positions_rad, local_joint_velocities_rad):
+        self._validate_inputs(
+            module_pose_world, module_twist_world, local_joint_positions_rad
+        )
+        inputs = (module_pose_world, module_twist_world, local_joint_positions_rad)
+        if local_joint_velocities_rad is not None:
+            if (local_joint_velocities_rad.shape != local_joint_positions_rad.shape
+                    or local_joint_velocities_rad.device != module_pose_world.device
+                    or local_joint_velocities_rad.dtype != module_pose_world.dtype
+                    or not bool(torch.isfinite(local_joint_velocities_rad).all())):
+                raise ValueError("joint velocities must match finite position tensor")
+            inputs = (*inputs, local_joint_velocities_rad)
+        return inputs
+
+    def build_kinematics(self, *, module_pose_world, module_twist_world,
+                         local_joint_positions_rad, local_joint_velocities_rad=None):
+        """Use identical COM/velocity math, without unused post-step dynamics."""
+        inputs = self._validated_inputs(module_pose_world, module_twist_world,
+            local_joint_positions_rad, local_joint_velocities_rad)
+        if self._reuse_post_step_model and not any(value.requires_grad or value.is_inference() for value in inputs):
+            # The next control call consumes these very same owned post-physics
+            # observation tensors. Compute dynamics once, and retain only this
+            # sample; any new tensor or in-place update invalidates the cache.
+            model = self.build(module_pose_world=module_pose_world,
+                module_twist_world=module_twist_world,
+                local_joint_positions_rad=local_joint_positions_rad,
+                local_joint_velocities_rad=local_joint_velocities_rad)
+            self._post_step_cache = (tuple((value, value._version) for value in inputs), model, self._internal_load_model)
+            return BatchedCentroidalKinematics(model.body_pose_world, model.body_twist_world,
+                model.current_vectoring_angles_rad)
+        if (self._use_cpu_compile and module_pose_world.device.type == 'cpu'
+                and (not torch.is_grad_enabled() or not any(x.requires_grad for x in inputs))):
+            with torch.no_grad():
+                return self._build_compiled_cpu(inputs, kinematics_only=True)
+        if (self._use_cuda_graph and module_pose_world.is_cuda
+                and (not torch.is_grad_enabled() or not any(x.requires_grad for x in inputs))):
+            with torch.no_grad():
+                return self._build_cuda_graph(inputs, kinematics_only=True)
+        return self._build(*inputs, kinematics_only=True)
+
+    def _build_compiled_cpu(self, inputs, *, kinematics_only=False):
         """Compile the fixed topology for CPU, retaining fresh state every tick.
 
         Opt-in deployment path: compilation errors propagate; there is no
         silent fallback to a slower backend that could miss control deadlines.
         The nominal executor warms it before starting control.
         """
-        key = tuple((tuple(x.shape), x.dtype, x.device) for x in inputs)
-        cached = self._cpu_compiled_build
+        if (self._use_cpu_native and self._internal_load_model is not None
+                and len(inputs) == 4 and inputs[0].dtype in (torch.float32, torch.float64)):
+            from amsrr.controllers.native_cpu_dynamics import NativeCpuControlModel
+            key = (tuple((tuple(x.shape), x.dtype) for x in inputs), self._internal_load_model)
+            if self._cpu_native_model is None or self._cpu_native_model[0] != key:
+                self._cpu_native_model = (key, NativeCpuControlModel(self, inputs))
+            result = self._cpu_native_model[1](*inputs)
+            if kinematics_only:
+                return BatchedCentroidalKinematics(result.body_pose_world,
+                    result.body_twist_world, result.current_vectoring_angles_rad)
+            return result
+        key = (tuple((tuple(x.shape), x.dtype, x.device) for x in inputs), self._internal_load_model)
+        cache_name = '_cpu_compiled_kinematics' if kinematics_only else '_cpu_compiled_build'
+        cached = getattr(self, cache_name)
         if cached is None or cached[0] != key:
-            reference = self._build(*inputs)
+            reference = self._build(*inputs, kinematics_only=kinematics_only)
+            result_type = type(reference)
             names = tuple(f.name for f in fields(reference) if isinstance(getattr(reference, f.name), torch.Tensor))
             metadata = {f.name: getattr(reference, f.name) for f in fields(reference) if f.name not in names}
             def compute(*args):
-                result = self._build(*args)
+                result = self._build(*args, kinematics_only=kinematics_only)
                 return tuple(getattr(result, name) for name in names)
-            compiled = torch.compile(compute, fullgraph=True, dynamic=False)
-            cached = (key, compiled, names, metadata)
-            self._cpu_compiled_build = cached
-        _, compiled, names, metadata = cached
-        return BatchedRigidBodyControlModel(**dict(zip(names, compiled(*inputs))), **metadata)
+            # CPU Inductor spends minutes compiling this unrolled link tree.
+            # A static trace keeps cold-job setup bounded. Input validation
+            # stays outside, shape/topology is in the key, and every pose/rate
+            # remains a runtime tensor input.
+            compiled = torch.jit.trace(compute, inputs, check_trace=False)
+            cached = (key, compiled, names, metadata, result_type)
+            setattr(self, cache_name, cached)
+        _, compiled, names, metadata, result_type = cached
+        return result_type(**dict(zip(names, compiled(*inputs))), **metadata)
 
     def _constant(self, values, *, device, dtype):
         if not self._use_cuda_graph:
@@ -171,9 +277,10 @@ class BatchedRigidBodyControlModelBuilder:
             self._constant_cache[key] = torch.tensor(values, device=device, dtype=dtype)
         return self._constant_cache[key]
 
-    def _build_cuda_graph(self, inputs):
-        key = tuple((x.shape, x.device, x.dtype) for x in inputs)
-        cached = self._cuda_graph_cache
+    def _build_cuda_graph(self, inputs, *, kinematics_only=False):
+        key = (tuple((x.shape, x.device, x.dtype) for x in inputs), self._internal_load_model)
+        cache_name = "_kinematics_graph_cache" if kinematics_only else "_cuda_graph_cache"
+        cached = getattr(self, cache_name)
         if cached is None or cached[0] != key:
             # One graph per builder bounds memory when a caller changes shape.
             static = tuple(x.clone() for x in inputs)
@@ -181,25 +288,26 @@ class BatchedRigidBodyControlModelBuilder:
             stream.wait_stream(torch.cuda.current_stream(inputs[0].device))
             with torch.cuda.stream(stream):
                 for _ in range(3):
-                    self._build(*static)
+                    self._build(*static, kinematics_only=kinematics_only)
             torch.cuda.current_stream(inputs[0].device).wait_stream(stream)
             graph = torch.cuda.CUDAGraph()
             with torch.cuda.graph(graph, stream=stream):
-                result = self._build(*static)
+                result = self._build(*static, kinematics_only=kinematics_only)
             cached = (key, static, graph, result)
-            self._cuda_graph_cache = cached
+            setattr(self, cache_name, cached)
         _, static, graph, result = cached
         for destination, source in zip(static, inputs, strict=True):
             destination.copy_(source)
         graph.replay()
         # A post-step build must not overwrite the preceding controller result.
-        return BatchedRigidBodyControlModel(**{
+        return type(result)(**{
             field.name: value.clone() if isinstance(value, torch.Tensor) else value
             for field in fields(result)
             for value in (getattr(result, field.name),)
         })
 
-    def _build(self, module_pose_world, module_twist_world, local_joint_positions_rad):
+    def _build(self, module_pose_world, module_twist_world, local_joint_positions_rad,
+               local_joint_velocities_rad=None, *, kinematics_only=False):
         batch_size = module_pose_world.shape[0]
         device = module_pose_world.device
         dtype = module_pose_world.dtype
@@ -225,22 +333,21 @@ class BatchedRigidBodyControlModelBuilder:
                 link.local_com, device=device, dtype=dtype
             ).reshape(1, 1, 3, 1)
             com = translation + (rotation @ local_com).squeeze(-1)
-            inertia_local = self._constant(
-                _inertia6_to_matrix(link.inertia_kgm2),
-                device=device,
-                dtype=dtype,
-            ).reshape(1, 1, 3, 3)
-            inertia_world = rotation @ inertia_local @ rotation.transpose(-1, -2)
+            if not kinematics_only:
+                inertia_local = self._constant(
+                    _inertia6_to_matrix(link.inertia_kgm2),
+                    device=device,
+                    dtype=dtype,
+                ).reshape(1, 1, 3, 3)
+                inertia_world = rotation @ inertia_local @ rotation.transpose(-1, -2)
             link_com_world.append(com)
-            link_inertia_world.append(inertia_world)
+            if not kinematics_only:
+                link_inertia_world.append(inertia_world)
             link_masses.append(float(link.mass_kg))
 
         masses = self._constant(link_masses, device=device, dtype=dtype)
         # [link, batch, module, xyz] -> [batch, module, link, xyz]
         com_by_link = torch.stack(link_com_world, dim=0).permute(1, 2, 0, 3)
-        inertia_by_link = torch.stack(link_inertia_world, dim=0).permute(
-            1, 2, 0, 3, 4
-        )
         total_mass_scalar = masses.sum() * float(self.module_count)
         if self._use_cuda_graph:
             # Preserve the device/dtype reduction, without a host .item() that
@@ -256,24 +363,28 @@ class BatchedRigidBodyControlModelBuilder:
         ).sum(dim=(1, 2)) / total_mass.unsqueeze(-1)
         base_rotation_world = module_rotation_world[:, self.base_module_index]
         world_to_body = base_rotation_world.transpose(-1, -2)
-        relative_com_world = com_by_link - com_world[:, None, None, :]
-        relative_com_body = (
-            world_to_body[:, None, None]
-            @ relative_com_world.unsqueeze(-1)
-        ).squeeze(-1)
-        inertia_at_link_body = (
-            world_to_body[:, None, None]
-            @ inertia_by_link
-            @ base_rotation_world[:, None, None]
-        )
-        squared_norm = relative_com_body.square().sum(dim=-1)
-        identity = torch.eye(3, device=device, dtype=dtype).reshape(1, 1, 1, 3, 3)
-        parallel_axis = masses.reshape(1, 1, -1, 1, 1) * (
-            squared_norm[..., None, None] * identity
-            - relative_com_body.unsqueeze(-1)
-            * relative_com_body.unsqueeze(-2)
-        )
-        inertia_body_matrix = (inertia_at_link_body + parallel_axis).sum(dim=(1, 2))
+        if not kinematics_only:
+            inertia_by_link = torch.stack(link_inertia_world, dim=0).permute(
+                1, 2, 0, 3, 4
+            )
+            relative_com_world = com_by_link - com_world[:, None, None, :]
+            relative_com_body = (
+                world_to_body[:, None, None]
+                @ relative_com_world.unsqueeze(-1)
+            ).squeeze(-1)
+            inertia_at_link_body = (
+                world_to_body[:, None, None]
+                @ inertia_by_link
+                @ base_rotation_world[:, None, None]
+            )
+            squared_norm = relative_com_body.square().sum(dim=-1)
+            identity = torch.eye(3, device=device, dtype=dtype).reshape(1, 1, 1, 3, 3)
+            parallel_axis = masses.reshape(1, 1, -1, 1, 1) * (
+                squared_norm[..., None, None] * identity
+                - relative_com_body.unsqueeze(-1)
+                * relative_com_body.unsqueeze(-2)
+            )
+            inertia_body_matrix = (inertia_at_link_body + parallel_axis).sum(dim=(1, 2))
 
         base_pose = module_pose_world[:, self.base_module_index]
         body_pose = torch.cat((com_world, base_pose[:, 3:7]), dim=-1)
@@ -282,90 +393,175 @@ class BatchedRigidBodyControlModelBuilder:
         com_velocity = base_twist[:, :3] + torch.cross(
             base_twist[:, 3:6], com_world - base_origin, dim=-1
         )
+        if local_joint_velocities_rad is not None:
+            # Each module is observed independently. Dock articulation can move
+            # the other modules substantially relative to the base module.
+            velocity_by_link = module_twist_world[:, :, None, :3] + torch.cross(
+                module_twist_world[:, :, None, 3:].expand_as(com_by_link),
+                com_by_link - module_translation_world[:, :, None, :], dim=-1)
+            momentum = (velocity_by_link * masses[None, None, :, None]).sum(dim=(1, 2))
+            for joint_id, weights in self._joint_com_mass_weights.items():
+                joint = self._joints_by_id[joint_id]
+                signed_mass = self._constant(weights, device=device, dtype=dtype)
+                axis = (module_rotation_world @ joint_axis_module[joint_id].unsqueeze(-1)).squeeze(-1)
+                if joint.joint_type in {"revolute", "continuous"}:
+                    parent = world_link[joint.parent_link]
+                    origin = parent.translation + (parent.rotation @ self._constant(
+                        joint.origin_xyz, device=device, dtype=dtype).reshape(1, 1, 3, 1)).squeeze(-1)
+                    lever = ((com_by_link - origin[:, :, None, :]) * signed_mass[None, None, :, None]).sum(dim=2)
+                    derivative = torch.cross(axis, lever, dim=-1)
+                elif joint.joint_type == "prismatic":
+                    derivative = axis * signed_mass.sum()
+                else:
+                    continue
+                momentum = momentum + (derivative * local_joint_velocities_rad[:, :, self._joint_index[joint_id], None]).sum(dim=1)
+            com_velocity = momentum / total_mass[:, None]
         body_twist = torch.cat((com_velocity, base_twist[:, 3:6]), dim=-1)
 
-        x_columns: list[torch.Tensor] = []
-        z_columns: list[torch.Tensor] = []
-        current_angles: list[torch.Tensor] = []
-        thrust_min: list[float] = []
-        thrust_max: list[float] = []
-        angle_lower: list[float] = []
-        angle_upper: list[float] = []
-        angle_velocity: list[float] = []
-        rotor_module_ids: list[int] = []
-        rotor_local_ids: list[str] = []
-        vectoring_global_joint_ids: list[str] = []
-        module_index_by_id = {
-            module_id: index for index, module_id in enumerate(self.module_ids)
-        }
-        for module_id, rotor in self._rotor_specs:
-            module_index = module_index_by_id[module_id]
-            thrust_transform = world_link[rotor.thrust_frame_link]
-            thrust_origin_world = thrust_transform.translation[:, module_index]
-            origin_body = (
-                world_to_body
-                @ (thrust_origin_world - com_world).unsqueeze(-1)
-            ).squeeze(-1)
-            joint_id = rotor.vectoring_joint_ids[0]
-            joint = self._joints_by_id[joint_id]
-            arm_rotation_world = world_link[joint.parent_link].rotation[:, module_index]
-            z_sign = (
-                1.0
-                if sum(
-                    float(left) * float(right)
-                    for left, right in zip(rotor.thrust_axis_local, (0.0, 0.0, 1.0))
+        if kinematics_only:
+            angles = torch.stack([
+                local_joint_positions_rad[:, self.module_ids.index(module_id),
+                    self._joint_index[rotor.vectoring_joint_ids[0]]]
+                for module_id, rotor in self._rotor_specs], dim=1)
+            return BatchedCentroidalKinematics(body_pose, body_twist, angles)
+
+        if device.type == 'cpu':
+            # All rotor columns use the same algebra. Evaluate across the rotor
+            # dimension instead of launching the same tiny operations per rotor.
+            rotor_modules = [self.module_ids.index(m) for m, _ in self._rotor_specs]
+            rotor_joints = [self._joints_by_id[r.vectoring_joint_ids[0]] for _, r in self._rotor_specs]
+            rotor_positions = torch.stack([
+                world_link[r.thrust_frame_link].translation[:, mi]
+                for mi, (_, r) in zip(rotor_modules, self._rotor_specs)], dim=1)
+            origin_body = (world_to_body[:, None] @
+                (rotor_positions - com_world[:, None]).unsqueeze(-1)).squeeze(-1)
+            arm_rotation = torch.stack([world_link[j.parent_link].rotation[:, mi]
+                for mi, j in zip(rotor_modules, rotor_joints)], dim=1)
+            local_z = self._constant([(0., 0., 1. if r.thrust_axis_local[2] >= 0. else -1.)
+                for _, r in self._rotor_specs], device=device, dtype=dtype)
+            z_world = (arm_rotation @ local_z[None, :, :, None]).squeeze(-1)
+            z_axis_body = _normalize((world_to_body[:, None] @ z_world.unsqueeze(-1)).squeeze(-1))
+            module_axes = torch.stack([joint_axis_module[j.joint_id][:, mi]
+                for mi, j in zip(rotor_modules, rotor_joints)], dim=1)
+            rotor_module_rotation = torch.stack([module_rotation_world[:, mi]
+                for mi in rotor_modules], dim=1)
+            axes_world = (rotor_module_rotation @ module_axes.unsqueeze(-1)).squeeze(-1)
+            vectoring_axis_body = _normalize((world_to_body[:, None] @ axes_world.unsqueeze(-1)).squeeze(-1))
+            x_axis_body = _normalize(torch.cross(vectoring_axis_body, z_axis_body, dim=-1))
+            reactions = self._constant([float(r.reaction_torque_coeff_nm_per_n)
+                for _, r in self._rotor_specs], device=device, dtype=dtype)[None, :, None]
+            x_columns = _wrench_column(origin_body, x_axis_body, reactions)
+            z_columns = _wrench_column(origin_body, z_axis_body, reactions)
+            current_angles = torch.stack([local_joint_positions_rad[:, mi, self._joint_index[j.joint_id]]
+                for mi, j in zip(rotor_modules, rotor_joints)], dim=1)
+            thrust_min = [float(r.thrust_min_n) for _, r in self._rotor_specs]
+            thrust_max = [float(r.thrust_max_n) for _, r in self._rotor_specs]
+            angle_lower = [float(j.limit_lower or 0.) for j in rotor_joints]
+            angle_upper = [float(j.limit_upper or 0.) for j in rotor_joints]
+            angle_velocity = [float(_joint_limits(j, self.physical_model)["velocity"] or 0.) for j in rotor_joints]
+            rotor_module_ids = [m for m, _ in self._rotor_specs]
+            rotor_local_ids = [r.rotor_id for _, r in self._rotor_specs]
+            vectoring_global_joint_ids = [f"module_{m}:{j.joint_id}" for (m, _), j in zip(self._rotor_specs, rotor_joints)]
+
+            # Preserve the common result assembly and its owned tensor outputs.
+            x_columns, z_columns = list(x_columns.unbind(1)), list(z_columns.unbind(1))
+            current_angles = list(current_angles.unbind(1))
+        else:
+            x_columns: list[torch.Tensor] = []
+            z_columns: list[torch.Tensor] = []
+            current_angles: list[torch.Tensor] = []
+            thrust_min: list[float] = []
+            thrust_max: list[float] = []
+            angle_lower: list[float] = []
+            angle_upper: list[float] = []
+            angle_velocity: list[float] = []
+            rotor_module_ids: list[int] = []
+            rotor_local_ids: list[str] = []
+            vectoring_global_joint_ids: list[str] = []
+            module_index_by_id = {
+                module_id: index for index, module_id in enumerate(self.module_ids)
+            }
+            for module_id, rotor in self._rotor_specs:
+                module_index = module_index_by_id[module_id]
+                thrust_transform = world_link[rotor.thrust_frame_link]
+                thrust_origin_world = thrust_transform.translation[:, module_index]
+                origin_body = (
+                    world_to_body
+                    @ (thrust_origin_world - com_world).unsqueeze(-1)
+                ).squeeze(-1)
+                joint_id = rotor.vectoring_joint_ids[0]
+                joint = self._joints_by_id[joint_id]
+                arm_rotation_world = world_link[joint.parent_link].rotation[:, module_index]
+                z_sign = (
+                    1.0
+                    if sum(
+                        float(left) * float(right)
+                        for left, right in zip(rotor.thrust_axis_local, (0.0, 0.0, 1.0))
+                    )
+                    >= 0.0
+                    else -1.0
                 )
-                >= 0.0
-                else -1.0
-            )
-            local_z = self._constant(
-                (0.0, 0.0, z_sign), device=device, dtype=dtype
-            ).reshape(1, 3, 1)
-            z_axis_world = (arm_rotation_world @ local_z).squeeze(-1)
-            z_axis_body = _normalize(
-                (world_to_body @ z_axis_world.unsqueeze(-1)).squeeze(-1)
-            )
-            axis_module = joint_axis_module[joint_id][:, module_index]
-            axis_world = (
-                module_rotation_world[:, module_index]
-                @ axis_module.unsqueeze(-1)
-            ).squeeze(-1)
-            vectoring_axis_body = _normalize(
-                (world_to_body @ axis_world.unsqueeze(-1)).squeeze(-1)
-            )
-            x_axis_body = _normalize(
-                torch.cross(vectoring_axis_body, z_axis_body, dim=-1)
-            )
-            x_columns.append(
-                _wrench_column(
-                    origin_body,
-                    x_axis_body,
-                    float(rotor.reaction_torque_coeff_nm_per_n),
+                local_z = self._constant(
+                    (0.0, 0.0, z_sign), device=device, dtype=dtype
+                ).reshape(1, 3, 1)
+                z_axis_world = (arm_rotation_world @ local_z).squeeze(-1)
+                z_axis_body = _normalize(
+                    (world_to_body @ z_axis_world.unsqueeze(-1)).squeeze(-1)
                 )
-            )
-            z_columns.append(
-                _wrench_column(
-                    origin_body,
-                    z_axis_body,
-                    float(rotor.reaction_torque_coeff_nm_per_n),
+                axis_module = joint_axis_module[joint_id][:, module_index]
+                axis_world = (
+                    module_rotation_world[:, module_index]
+                    @ axis_module.unsqueeze(-1)
+                ).squeeze(-1)
+                vectoring_axis_body = _normalize(
+                    (world_to_body @ axis_world.unsqueeze(-1)).squeeze(-1)
                 )
-            )
-            current_angles.append(
-                local_joint_positions_rad[
-                    :, module_index, self._joint_index[joint_id]
-                ]
-            )
-            thrust_min.append(float(rotor.thrust_min_n))
-            thrust_max.append(float(rotor.thrust_max_n))
-            angle_lower.append(float(joint.limit_lower or 0.0))
-            angle_upper.append(float(joint.limit_upper or 0.0))
-            angle_velocity.append(float(joint.velocity_limit or 0.0))
-            rotor_module_ids.append(module_id)
-            rotor_local_ids.append(rotor.rotor_id)
-            vectoring_global_joint_ids.append(f"module_{module_id}:{joint_id}")
+                x_axis_body = _normalize(
+                    torch.cross(vectoring_axis_body, z_axis_body, dim=-1)
+                )
+                x_columns.append(
+                    _wrench_column(
+                        origin_body,
+                        x_axis_body,
+                        float(rotor.reaction_torque_coeff_nm_per_n),
+                    )
+                )
+                z_columns.append(
+                    _wrench_column(
+                        origin_body,
+                        z_axis_body,
+                        float(rotor.reaction_torque_coeff_nm_per_n),
+                    )
+                )
+                current_angles.append(
+                    local_joint_positions_rad[
+                        :, module_index, self._joint_index[joint_id]
+                    ]
+                )
+                thrust_min.append(float(rotor.thrust_min_n))
+                thrust_max.append(float(rotor.thrust_max_n))
+                angle_lower.append(float(joint.limit_lower or 0.0))
+                angle_upper.append(float(joint.limit_upper or 0.0))
+                angle_velocity.append(float(_joint_limits(joint, self.physical_model)["velocity"] or 0.0))
+                rotor_module_ids.append(module_id)
+                rotor_local_ids.append(rotor.rotor_id)
+                vectoring_global_joint_ids.append(f"module_{module_id}:{joint_id}")
 
         rotor_shape = (1, self.rotor_count)
+        internal_loads = (None, None, None, None, None, None)
+        if self._internal_load_model is not None:
+            rotor_positions = torch.stack([world_link[r.thrust_frame_link].translation[:, self.module_ids.index(m)]
+                for m, r in self._rotor_specs], dim=1)
+            rotor_x = (base_rotation_world[:, None] @ torch.stack(x_columns, dim=1)[..., :3, None]).squeeze(-1)
+            rotor_z = (base_rotation_world[:, None] @ torch.stack(z_columns, dim=1)[..., :3, None]).squeeze(-1)
+            internal_loads = self._internal_load_model.evaluate(world_link=world_link,
+                module_rotation_world=module_rotation_world, joint_axis_module=joint_axis_module,
+                rotor_positions_world=rotor_positions, rotor_x_axes_world=rotor_x, rotor_z_axes_world=rotor_z,
+                angular_velocity_world=body_twist[:, 3:])
         return BatchedRigidBodyControlModel(
+            joint_load_matrix=internal_loads[0], joint_gravity_load_nm=internal_loads[1],
+            joint_mass_jacobian=internal_loads[2], joint_contact_jacobian=internal_loads[3],
+            joint_angular_mass_matrix=internal_loads[4], joint_centrifugal_load_nm=internal_loads[5],
             body_pose_world=body_pose,
             body_twist_world=body_twist,
             total_mass_kg=total_mass,
@@ -583,7 +779,7 @@ def _normalize(value: torch.Tensor) -> torch.Tensor:
 
 
 def _wrench_column(
-    origin_body: torch.Tensor, axis_body: torch.Tensor, reaction_coeff: float
+    origin_body: torch.Tensor, axis_body: torch.Tensor, reaction_coeff: float | torch.Tensor
 ) -> torch.Tensor:
     axis = _normalize(axis_body)
     torque = torch.cross(origin_body, axis, dim=-1) + reaction_coeff * axis

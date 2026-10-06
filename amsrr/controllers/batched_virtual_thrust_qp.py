@@ -86,6 +86,9 @@ def solve_batched_virtual_thrust_qp(
     unsupported_wrench_tolerance: float,
     rotor_mask: torch.Tensor | None = None,
     config: BatchedVirtualThrustQPConfig | None = None,
+    joint_load_matrix: torch.Tensor | None = None,
+    joint_load_bias_nm: torch.Tensor | None = None,
+    joint_load_limit_nm: torch.Tensor | None = None,
 ) -> BatchedVirtualThrustQPResult:
     """Solve one virtual-x/z allocation QP for each batch row.
 
@@ -202,9 +205,23 @@ def solve_batched_virtual_thrust_qp(
         @ desired_wrench_body.unsqueeze(-1)
     ).squeeze(-1)
     rhs = rhs + resolved.previous_command_weight * previous_flat
-    factored = torch.linalg.cholesky(
-        hessian + resolved.admm_penalty * identity
-    )
+    load_constraints = {}
+    if joint_load_matrix is not None:
+        if joint_load_bias_nm is None or joint_load_limit_nm is None:
+            raise ValueError("joint load constraints must be provided together")
+        c = joint_load_matrix.to(device=device, dtype=dtype)
+        bias = joint_load_bias_nm.to(device=device, dtype=dtype)
+        limit = joint_load_limit_nm.to(device=device, dtype=dtype)
+        if (c.ndim != 3 or c.shape[0] != batch_size or c.shape[2] != rotor_count * 2
+                or bias.shape != c.shape[:2] or limit.shape != bias.shape
+                or not bool(torch.isfinite(c).all() & torch.isfinite(bias).all()
+                            & torch.isfinite(limit).all() & (limit > 0).all())):
+            raise ValueError("invalid internal joint load constraints")
+        load_constraints = dict(joint_matrix=c, joint_lower=-limit-bias, joint_upper=limit-bias)
+        identity = identity + c.transpose(1, 2) @ c
+    elif joint_load_bias_nm is not None or joint_load_limit_nm is not None:
+        raise ValueError("joint load constraints must be provided together")
+    factored = torch.linalg.cholesky(hessian + resolved.admm_penalty * identity)
 
     projection_kwargs = {
         "minimum_virtual_z": minimum_virtual_z,
@@ -224,12 +241,15 @@ def solve_batched_virtual_thrust_qp(
             dtype=torch.long,
         ),
     }
+    projection_kwargs.update(load_constraints)
     projection = (
         _project_virtual_channels_compiled_small_batch
         if device.type == "cuda" and batch_size <= _SMALL_BATCH_COMPILE_LIMIT
         else _project_virtual_channels
     )
-    admm = _admm_cuda if (device.type == "cuda" and batch_size <= _SMALL_BATCH_COMPILE_LIMIT
+    # The projection compiler's small-shape limit is not an ADMM execution
+    # limit. Routing batches >=9 through Python launched every iteration again.
+    admm = _admm_cuda if (device.type == "cuda"
                          and not torch.is_grad_enabled()) else _admm_iterations
     x_value, z_value, previous_z = admm(
         factored, rhs, previous_virtual, projection_kwargs,
@@ -294,6 +314,13 @@ def solve_batched_virtual_thrust_qp(
     feasible = torch.isfinite(residual_norm) & (
         residual_norm <= float(unsupported_wrench_tolerance)
     )
+    if joint_load_matrix is not None:
+        # Check the actual rotor/vectoring-clamped command, not ADMM's
+        # separately projected joint-load variable.
+        applied_load = (c @ applied_channels.unsqueeze(-1)).squeeze(-1) + bias
+        load_feasible = torch.isfinite(applied_load).all(-1) & (applied_load.abs() <= limit + 1.e-3).all(-1)
+        feasible = feasible & load_feasible
+        solver_converged = solver_converged & load_feasible
     qp_residual = allocation_matrix @ z_value.unsqueeze(-1)
     qp_residual = qp_residual.squeeze(-1) - desired_wrench_body
     smooth = z_value - previous_flat
@@ -304,7 +331,7 @@ def solve_batched_virtual_thrust_qp(
         * resolved.previous_command_weight
         * smooth.square().sum(dim=-1)
     )
-    return BatchedVirtualThrustQPResult(
+    result = BatchedVirtualThrustQPResult(
         rotor_thrusts_n=thrust,
         vectoring_joint_targets_rad=target,
         virtual_channel_solution=channels,
@@ -319,6 +346,7 @@ def solve_batched_virtual_thrust_qp(
         dual_residual_norm=dual_norm,
         objective=objective,
     )
+    return result
 
 
 def _admm_iterations(factored, rhs, previous_virtual, projection_kwargs, penalty, iterations, projection):
@@ -327,15 +355,28 @@ def _admm_iterations(factored, rhs, previous_virtual, projection_kwargs, penalty
         if native is not None:
             return native
     batch, rotors, _ = previous_virtual.shape
-    z = projection(previous_virtual, **projection_kwargs).reshape(batch, rotors * 2)
+    c = projection_kwargs.get("joint_matrix")
+    rotor_kwargs = {k: v for k, v in projection_kwargs.items() if not k.startswith("joint_")}
+    z = projection(previous_virtual, **rotor_kwargs).reshape(batch, rotors * 2)
     x = z.clone()
     dual = torch.zeros_like(x)
     previous_z = z
+    if c is not None:
+        low, high = projection_kwargs["joint_lower"], projection_kwargs["joint_upper"]
+        y = (c @ z.unsqueeze(-1)).squeeze(-1).clamp(low, high)
+        joint_dual = torch.zeros_like(y)
     for _ in range(iterations):
-        x = torch.cholesky_solve((rhs + penalty * (z - dual)).unsqueeze(-1), factored).squeeze(-1)
+        correction = z - dual
+        if c is not None:
+            correction = correction + (c.transpose(1, 2) @ (y - joint_dual).unsqueeze(-1)).squeeze(-1)
+        x = torch.cholesky_solve((rhs + penalty * correction).unsqueeze(-1), factored).squeeze(-1)
         previous_z = z
-        z = projection((x + dual).reshape(batch, rotors, 2), **projection_kwargs).reshape(batch, rotors * 2)
+        z = projection((x + dual).reshape(batch, rotors, 2), **rotor_kwargs).reshape(batch, rotors * 2)
         dual = dual + x - z
+        if c is not None:
+            cx = (c @ x.unsqueeze(-1)).squeeze(-1)
+            y = (cx + joint_dual).clamp(low, high)
+            joint_dual = joint_dual + cx - y
     return x, z, previous_z
 
 
@@ -361,8 +402,12 @@ def _admm_native_cpu(factored, rhs, previous_virtual, projection_kwargs, penalty
         return None
     bounds = torch.stack([projection_kwargs[k] for k in
                           ('minimum_virtual_z', 'maximum_virtual_z', 'maximum_virtual_x', 'angle_lower', 'angle_upper')], dim=-1)
+    matrix = projection_kwargs.get("joint_matrix", rhs.new_zeros((rhs.shape[0], 0, rhs.shape[1])))
+    low = projection_kwargs.get("joint_lower", rhs.new_zeros((rhs.shape[0], 0)))
+    high = projection_kwargs.get("joint_upper", rhs.new_zeros((rhs.shape[0], 0)))
     result = torch.from_numpy(solver(factored.contiguous().numpy(), rhs.contiguous().numpy(),
-                                    previous_virtual.contiguous().numpy(), bounds.numpy(), penalty, iterations))
+        previous_virtual.contiguous().numpy(), bounds.numpy(), penalty, iterations,
+        matrix.contiguous().numpy(), low.contiguous().numpy(), high.contiguous().numpy()))
     return tuple(result.unbind(0))
 
 
@@ -374,6 +419,19 @@ def _admm_cuda(factored, rhs, previous_virtual, projection_kwargs, penalty, iter
     capture, including Cholesky's error check. No stopping tolerance is changed.
     """
     global _admm_cuda_cache
+    if ((factored.shape[0] == 1 or (factored.shape[0] <= 16 and factored.shape[1] <= 64))
+            and "joint_matrix" in projection_kwargs
+            and factored.dtype in (torch.float32, torch.float64)
+            and not torch.cuda.is_current_stream_capturing()):
+        # Small constrained batches remain launch-bound on CUDA. Use the same
+        # Eigen iteration/projection with one packed transfer; bigger systems
+        # retain GPU parallelism. Physical limits and residual checks stay in
+        # the common outer allocator, independently of the numerical backend.
+        from amsrr.utils.tensor_snapshot import cpu_snapshot
+        host = cpu_snapshot((factored, rhs, previous_virtual, projection_kwargs))
+        native = _admm_native_cpu(*host, penalty, iterations)
+        if native is not None:
+            return tuple(value.to(device=factored.device) for value in native)
     names = tuple(k for k, v in projection_kwargs.items() if isinstance(v, torch.Tensor))
     inputs = (factored, rhs, previous_virtual, *(projection_kwargs[k] for k in names))
     key = (tuple((tuple(x.shape), x.dtype, x.device) for x in inputs), penalty, iterations,

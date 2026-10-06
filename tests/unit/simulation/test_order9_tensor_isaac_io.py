@@ -64,6 +64,14 @@ def test_tensor_isaac_io_gathers_exact_module_and_joint_layout() -> None:
     )
     object_asset = SimpleNamespace(
         data=SimpleNamespace(
+            root_link_pose_w=torch.tensor(
+                [[1.0, 0.0, 0.2, 0.0, 0.0, 0.0, 1.0]] * batch
+            ),
+            root_link_vel_w=torch.tensor([[0.0, -0.1, 0.0, 0.0, 0.0, 1.0]] * batch),
+            root_com_pose_w=torch.tensor(
+                [[1.1, 0.0, 0.2, 0.0, 0.0, 0.70710678, 0.70710678]] * batch
+            ),
+            root_com_vel_w=torch.tensor([[0.0, 0.0, 0.0, 0.0, 0.0, 1.0]] * batch),
             root_pose_w=torch.tensor(
                 [[1.0, 0.0, 0.2, 0.0, 0.0, 0.0, 1.0]] * batch
             ),
@@ -73,6 +81,20 @@ def test_tensor_isaac_io_gathers_exact_module_and_joint_layout() -> None:
     )
 
     state = io.gather_state(robot=robot, object_asset=object_asset)
+
+    robot.data.body_link_vel_w = torch.cat((body_linear + .123, body_angular), dim=-1)
+    link_state = io.gather_state(robot=robot, object_asset=object_asset)
+    torch.testing.assert_close(link_state.module_twist_world[..., :3], state.module_twist_world[..., :3] + .123)
+    with torch.inference_mode():
+        inference_state = io.gather_state(robot=robot, object_asset=object_asset)
+    for name in ("module_pose_world", "module_twist_world", "local_joint_positions_rad", "local_joint_velocities_radps"):
+        observed = getattr(inference_state, name)
+        assert not observed.is_inference()
+        assert torch.equal(observed, getattr(link_state, name))
+        version = observed._version
+        observed.add_(.1)
+        assert observed._version > version
+        assert not torch.equal(observed, getattr(link_state, name))
 
     assert state.module_pose_world.shape == (batch, io.module_count, 7)
     assert state.module_twist_world.shape == (batch, io.module_count, 6)
@@ -89,6 +111,8 @@ def test_tensor_isaac_io_gathers_exact_module_and_joint_layout() -> None:
     )
     assert state.robot_root_twist_world.shape == (batch, 6)
     assert state.object_pose_world.shape == (batch, 7)
+    assert torch.equal(state.object_pose_world, object_asset.data.root_link_pose_w)
+    assert torch.equal(state.object_twist_world, object_asset.data.root_link_vel_w)
 
 
 def test_tensor_contact_reducer_separates_allowed_object_and_environment_contact() -> None:

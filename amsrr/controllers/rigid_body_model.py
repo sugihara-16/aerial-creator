@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from collections import OrderedDict
 from dataclasses import dataclass, field
 
 from amsrr.schemas.common import Pose7D, SchemaBase, SchemaValidationError, Vector3, require_len, require_non_empty
@@ -106,6 +107,82 @@ class _ModuleKinematics:
 
 class RigidBodyControlModelBuilder:
     """Build a quasi-static single-rigid-body control model from current joints."""
+
+    def __init__(self):
+        self._pose_model_key = None
+        self._pose_local_cache = OrderedDict()
+        self._pose_world_cache = OrderedDict()
+
+    def body_pose(self, morphology_graph, physical_model, runtime_observation):
+        """Exact build().body_pose_world arithmetic without inertia/actuators.
+
+        Keep module/link iteration and floating-point operations identical to
+        build: tiny CoM changes can choose a different nonlinear IK branch.
+        Every call uses current measured module poses and joint positions.
+        """
+        states = {s.module_id: s for s in runtime_observation.module_states}
+        module_ids = sorted(m.module_id for m in morphology_graph.modules)
+        if not module_ids:
+            raise SchemaValidationError("RigidBodyControlModel requires at least one active module")
+        missing = [m for m in module_ids if m not in states]
+        if missing:
+            raise SchemaValidationError(f"RuntimeObservation is missing module states for {missing}")
+        if morphology_graph.base_module_id not in states:
+            raise SchemaValidationError("RuntimeObservation is missing the base module state")
+        links = {link.link_id: link for link in physical_model.links}
+        # Values rather than object identity: callers may edit a model in place.
+        model_key = (tuple((link.link_id, float(link.mass_kg).hex(),
+                            tuple(float(x).hex() for x in link.local_com))
+                           for link in physical_model.links), _module_base_link(physical_model, set(links)),
+            tuple((j.joint_id, j.parent_link, j.child_link, j.joint_type,
+                   tuple(j.origin_xyz), tuple(j.origin_rpy), tuple(j.axis_xyz))
+                  for j in physical_model.joints))
+        if model_key != self._pose_model_key:
+            self._pose_local_cache.clear()
+            self._pose_world_cache.clear()
+            self._pose_model_key = model_key
+        masses, centers = [], []
+        for module_id in module_ids:
+            state = states[module_id]
+            key = tuple((name, float(value).hex())
+                        for name, value in sorted(state.joint_positions.items()))
+            world_key = (key, tuple(float(x).hex() for x in state.pose_world))
+            cached_world = self._pose_world_cache.get(world_key)
+            if cached_world is not None:
+                cached_centers, cached_masses = cached_world
+                centers.extend(cached_centers)
+                masses.extend(cached_masses)
+                self._pose_world_cache.move_to_end(world_key)
+                continue
+            local = self._pose_local_cache.get(key)
+            if local is None:
+                local, _ = _link_transforms_in_module_frame(physical_model, state.joint_positions)
+                self._pose_local_cache[key] = local
+                while len(self._pose_local_cache) > 256:
+                    self._pose_local_cache.popitem(last=False)
+            self._pose_local_cache.move_to_end(key)
+            root = _Transform(rotation=_quat_to_matrix(_pose_quat(state.pose_world)),
+                              translation=_pose_translation(state.pose_world))
+            module_centers, module_masses = [], []
+            for link_id, transform in local.items():
+                if link_id not in links:
+                    continue
+                link = links[link_id]
+                world = _compose(root, transform)
+                module_centers.append(_add(world.translation, _matvec(world.rotation, link.local_com)))
+                module_masses.append(link.mass_kg)
+            self._pose_world_cache[world_key] = (module_centers, module_masses)
+            while len(self._pose_world_cache) > 256:
+                self._pose_world_cache.popitem(last=False)
+            # Keep per-link summation order: summing each module first changes IK.
+            centers.extend(module_centers)
+            masses.extend(module_masses)
+        total_mass = sum(masses)
+        if total_mass <= 0.0:
+            raise SchemaValidationError("Cannot build rigid-body model with non-positive total mass")
+        com = _scale(_sum_vectors(_scale(c, mass) for c, mass in zip(centers, masses)),
+                     1.0 / total_mass)
+        return (*com, *states[morphology_graph.base_module_id].pose_world[3:7])
 
     def build(
         self,
@@ -382,7 +459,7 @@ class RigidBodyControlModelBuilder:
         joints_by_id = {joint.joint_id: joint for joint in physical_model.joints}
         for module_id in active_module_ids:
             for joint_id, joint in joints_by_id.items():
-                limits[_global_id(module_id, joint_id)] = _joint_limits(joint)
+                limits[_global_id(module_id, joint_id)] = _joint_limits(joint, physical_model)
         for actuator_id in dock_actuator_ids:
             limits.setdefault(actuator_id, {"lower": None, "upper": None, "velocity": None, "effort": None})
         return limits
@@ -478,11 +555,21 @@ def _joint_motion_transform(joint: JointModel, position: float) -> _Transform:
     return _Transform(rotation=_identity_matrix(), translation=(0.0, 0.0, 0.0))
 
 
-def _joint_limits(joint: JointModel) -> dict[str, float | None]:
+def _joint_limits(joint: JointModel, physical_model: PhysicalModel | None = None) -> dict[str, float | None]:
+    velocity = joint.velocity_limit
+    if physical_model is not None:
+        role = physical_model.metadata.get("joint_actuator_assignments", {}).get(joint.joint_id)
+        spec = physical_model.metadata.get("joint_actuator_specs", {}).get(role, {})
+        operating = spec.get("simulation_drive", {}).get("safe_velocity_limit_rad_s")
+        if operating is not None:
+            operating = float(operating)
+            if not math.isfinite(operating) or operating <= 0.:
+                raise ValueError("invalid joint operating velocity limit")
+            velocity = operating if velocity is None else min(abs(float(velocity)), operating)
     return {
         "lower": joint.limit_lower,
         "upper": joint.limit_upper,
-        "velocity": joint.velocity_limit,
+        "velocity": velocity,
         "effort": joint.effort_limit,
     }
 

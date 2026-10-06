@@ -4,6 +4,7 @@ import json
 import types
 from dataclasses import MISSING, dataclass, fields, is_dataclass
 from enum import Enum
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, ClassVar, Literal, TypeVar, get_args, get_origin, get_type_hints
 
@@ -83,6 +84,9 @@ def coerce_value(value: Any, target_type: Any, path: str = "") -> Any:
         if value is None:
             return None
         raise SchemaValidationError(f"{path} must be null")
+    if (target_type is bool or target_type is int or target_type is float
+            or target_type is str or target_type is Path):
+        return _coerce_primitive(value, target_type, path)
     if target_type is slice:
         if isinstance(value, slice):
             return value
@@ -162,9 +166,16 @@ def coerce_value(value: Any, target_type: Any, path: str = "") -> Any:
     return value
 
 
+_JSON_SCALAR_TYPES = frozenset((str, int, float, bool, type(None)))
+
+
 def to_plain_data(value: Any) -> Any:
     """Convert schema objects into deterministic JSON-compatible data."""
 
+    # Exact types only: IntEnum/str-enums and custom subclasses must retain
+    # the conversions below. Most snapshot leaves are plain JSON scalars.
+    if type(value) in _JSON_SCALAR_TYPES:
+        return value
     if isinstance(value, Enum):
         return value.value
     if isinstance(value, slice):
@@ -186,6 +197,14 @@ def canonical_json(data: Any) -> str:
     return json.dumps(to_plain_data(data), sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 
+@lru_cache(maxsize=256)
+def _schema_type_hints(cls):
+    # Schema classes are fixed for an execution process. Only their type
+    # declarations are reused; every input value still passes coercion and
+    # validate(), including unknown/missing fields and nested schemas.
+    return get_type_hints(cls)
+
+
 @dataclass
 class SchemaBase:
     """Base class for strict dataclass schemas."""
@@ -204,7 +223,7 @@ class SchemaBase:
         if unknown and not cls._allow_extra_fields:
             raise SchemaValidationError(f"{cls.__name__} got unknown fields: {sorted(unknown)}")
 
-        hints = get_type_hints(cls)
+        hints = _schema_type_hints(cls)
         kwargs: dict[str, Any] = {}
         for name, field in dataclass_fields.items():
             if name not in data:

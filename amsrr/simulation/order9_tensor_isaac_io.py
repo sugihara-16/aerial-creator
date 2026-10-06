@@ -217,9 +217,24 @@ class Order9TensorIsaacIO:
         return self._constant_cache[key]
 
     def gather_state(self, *, robot: Any, object_asset: Any) -> Order9TensorIsaacState:
+        # Owned observations retain version counters for the checked next-tick
+        # dynamics cache, even when the surrounding rollout is inference-only.
+        if torch.is_inference_mode_enabled():
+            with torch.inference_mode(False), torch.no_grad():
+                return self._gather_state(robot=robot, object_asset=object_asset)
+        return self._gather_state(robot=robot, object_asset=object_asset)
+
+    def _gather_state(self, *, robot: Any, object_asset: Any) -> Order9TensorIsaacState:
         body_pose = _torch(robot.data.body_pose_w)
-        body_linear = _torch(robot.data.body_lin_vel_w)
-        body_angular = _torch(robot.data.body_ang_vel_w)
+        # Module poses name link origins; legacy body_lin_vel_w is measured at
+        # each rigid body's COM. Use the velocity at the same observed point.
+        link_velocity = getattr(robot.data, "body_link_vel_w", None)
+        if link_velocity is None:
+            body_linear = _torch(robot.data.body_lin_vel_w)
+            body_angular = _torch(robot.data.body_ang_vel_w)
+        else:
+            body_velocity = _torch(link_velocity)
+            body_linear, body_angular = body_velocity[..., :3], body_velocity[..., 3:]
         joint_position = _torch(robot.data.joint_pos)
         joint_velocity = _torch(robot.data.joint_vel)
         constants = self._constants(body_pose.device, body_pose.dtype)
@@ -247,11 +262,13 @@ class Order9TensorIsaacIO:
             ),
             dim=-1,
         )
-        object_pose_source = getattr(object_asset.data, "root_com_pose_w", None)
+        # Task geometry, contacts and goals use the object link origin. COM
+        # pose also rotates into principal inertia axes for eccentric bodies.
+        object_pose_source = getattr(object_asset.data, "root_link_pose_w", None)
         if object_pose_source is None:
             object_pose_source = object_asset.data.root_pose_w
         object_velocity_source = getattr(
-            object_asset.data, "root_com_vel_w", None
+            object_asset.data, "root_link_vel_w", None
         )
         object_pose = _torch(object_pose_source)
         object_twist = (
@@ -468,6 +485,10 @@ class Order9TensorIsaacIO:
         if rotor_count != len(self.rotor_body_indices):
             raise ValueError("Order9 allocation rotor count differs from Isaac layout")
         device, dtype = thrust.device, thrust.dtype
+        if device.type == 'cpu' and hasattr(robot, 'actuators'):
+            from amsrr.simulation.cpu_actuator_staging import install_cpu_actuator_staging, install_cpu_selected_wrench_staging
+            install_cpu_actuator_staging(robot)
+            install_cpu_selected_wrench_staging(robot, self.rotor_body_indices)
         constants = self._constants(device, dtype)
         axes = constants["axes"]
         coefficients = constants["coefficients"]

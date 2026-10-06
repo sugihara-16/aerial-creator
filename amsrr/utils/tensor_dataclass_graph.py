@@ -24,7 +24,10 @@ def _flatten(value):
             return ("tuple", tuple(visit(item) for item in node))
         if node is None:
             return ("none",)
-        raise TypeError(f"unsupported CUDA graph leaf: {type(node).__name__}")
+        if isinstance(node, (str, int, float, bool)):
+            # Immutable model identifiers participate in the capture key.
+            return ("constant", type(node), node)
+        raise TypeError(f"unsupported tensor graph leaf: {type(node).__name__}")
 
     spec = visit(value)
     return tensors, spec
@@ -36,6 +39,8 @@ def _unflatten(tensors, spec):
         return tensors[spec[1]]
     if kind == "none":
         return None
+    if kind == "constant":
+        return spec[2]
     if kind == "tuple":
         return tuple(_unflatten(tensors, child) for child in spec[1])
     if kind == "dict":
@@ -46,14 +51,30 @@ def _unflatten(tensors, spec):
 class TensorDataclassGraph:
     def __init__(self):
         self._cache = None
+        self._cpu_cache = None
 
     def call(self, function, args=(), kwargs=None, *, configuration):
         kwargs = {} if kwargs is None else kwargs
         inputs, structure = _flatten((args, kwargs))
-        if (not inputs or inputs[0].device.type != "cuda"
-                or any(t.device != inputs[0].device or t.requires_grad for t in inputs)):
+        if (not inputs or any(t.device != inputs[0].device or t.requires_grad for t in inputs)):
             return function(*args, **kwargs)
         key = (structure, configuration, tuple((tuple(t.shape), t.dtype, t.device) for t in inputs))
+        if inputs[0].device.type == "cpu":
+            cached = self._cpu_cache
+            if cached is None or cached[0] != key:
+                with torch.no_grad():
+                    _, output_structure = _flatten(function(*args, **kwargs))
+                    def compute(*values):
+                        call_args, call_kwargs = _unflatten(values, structure)
+                        outputs, _ = _flatten(function(*call_args, **call_kwargs))
+                        return tuple(outputs)
+                    traced = torch.jit.trace(compute, tuple(inputs), check_trace=False)
+                cached = (key, traced, output_structure)
+                self._cpu_cache = cached
+            with torch.no_grad():
+                return _unflatten([t.clone() for t in cached[1](*inputs)], cached[2])
+        if inputs[0].device.type != "cuda":
+            return function(*args, **kwargs)
         cached = self._cache
         if cached is None or cached[0] != key:
             with torch.no_grad():

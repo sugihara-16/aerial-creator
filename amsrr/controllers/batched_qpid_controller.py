@@ -71,6 +71,9 @@ class BatchedQPIDController:
         self.qp_config = qp_config or BatchedVirtualThrustQPConfig()
         self.qp_config.validate()
         self._default_profiles = {}
+        self._tensor_constants = {}
+        from amsrr.utils.tensor_dataclass_graph import TensorDataclassGraph
+        self._wrench_graph = TensorDataclassGraph()
 
     def initial_state(
         self,
@@ -110,6 +113,7 @@ class BatchedQPIDController:
         payload_mass_kg: torch.Tensor | None = None,
         payload_inertia_body: torch.Tensor | None = None,
         payload_com_offset_body: torch.Tensor | None = None,
+        internal_joint_constraints: dict | None = None,
     ) -> BatchedQPIDResult:
         current_pose = control_model.body_pose_world
         current_twist = control_model.body_twist_world
@@ -136,143 +140,18 @@ class BatchedQPIDController:
             payload_inertia_body=payload_inertia_body,
             payload_com_offset_body=payload_com_offset_body,
         )
+        inputs = dict(control_model=control_model,
+            desired_body_pose_world=desired_body_pose_world, desired_body_twist=desired_body_twist,
+            residual_wrench_body=residual_wrench_body, state=state, profile=profile,
+            payload_active=payload_active, payload_mass_kg=payload_mass_kg,
+            payload_inertia_body=payload_inertia_body, payload_com_offset_body=payload_com_offset_body,
+            internal_joint_constraints=internal_joint_constraints)
+        prepared = self._wrench_graph.call(self._prepare_wrench, kwargs=inputs,
+            configuration=repr(self.config))
+        (desired_wrench, desired_acceleration_world, desired_angular_acceleration_body,
+         position_error, attitude_error, pending_position_integral, pending_attitude_integral,
+         internal_joint_constraints) = prepared
         dt = float(self.config.control_dt_s)
-        position_error = desired_body_pose_world[:, :3] - current_pose[:, :3]
-        velocity_error = desired_body_twist[:, :3] - current_twist[:, :3]
-        retention = torch.exp(-profile.integrator_decay_rate_per_s * dt)
-        pending_position_integral = (
-            state.position_error_integral_world * retention.unsqueeze(-1)
-            + position_error
-            * dt
-            * profile.integrator_accumulation_scale.unsqueeze(-1)
-        )
-        current_quaternion = current_pose[:, 3:7]
-        target_quaternion = desired_body_pose_world[:, 3:7]
-        attitude_error = _orientation_error_body(
-            current_quaternion, target_quaternion
-        )
-        body_from_world = _quaternion_to_matrix(current_quaternion).transpose(-1, -2)
-        current_angular_velocity_body = (
-            body_from_world @ current_twist[:, 3:6].unsqueeze(-1)
-        ).squeeze(-1)
-        angular_velocity_error = (
-            desired_body_twist[:, 3:6] - current_angular_velocity_body
-        )
-        pending_attitude_integral = (
-            state.attitude_error_integral_body * retention.unsqueeze(-1)
-            + attitude_error
-            * dt
-            * profile.integrator_accumulation_scale.unsqueeze(-1)
-        )
-        p_scale = profile.proportional_gain_scale.unsqueeze(-1)
-        i_scale = profile.integral_gain_scale.unsqueeze(-1)
-        d_scale = profile.derivative_gain_scale.unsqueeze(-1)
-        p_gain = torch.tensor(
-            [
-                self.config.xy_p_gain,
-                self.config.xy_p_gain,
-                self.config.z_p_gain,
-            ],
-            device=device,
-            dtype=dtype,
-        )
-        i_gain = torch.tensor(
-            [
-                self.config.xy_i_gain,
-                self.config.xy_i_gain,
-                self.config.z_i_gain,
-            ],
-            device=device,
-            dtype=dtype,
-        )
-        d_gain = torch.tensor(
-            [
-                self.config.xy_d_gain,
-                self.config.xy_d_gain,
-                self.config.z_d_gain,
-            ],
-            device=device,
-            dtype=dtype,
-        )
-        desired_acceleration_world = (
-            p_scale * p_gain * position_error
-            + i_scale * i_gain * pending_position_integral
-            + d_scale * d_gain * velocity_error
-        )
-        force_world = control_model.total_mass_kg.unsqueeze(-1) * (
-            desired_acceleration_world
-            + torch.tensor(
-                [0.0, 0.0, self.config.gravity_mps2],
-                device=device,
-                dtype=dtype,
-            )
-        )
-        force_body = (body_from_world @ force_world.unsqueeze(-1)).squeeze(-1)
-        angular_p_gain = torch.tensor(
-            [
-                self.config.roll_pitch_p_gain,
-                self.config.roll_pitch_p_gain,
-                self.config.yaw_p_gain,
-            ],
-            device=device,
-            dtype=dtype,
-        )
-        angular_i_gain = torch.tensor(
-            [
-                self.config.roll_pitch_i_gain,
-                self.config.roll_pitch_i_gain,
-                self.config.yaw_i_gain,
-            ],
-            device=device,
-            dtype=dtype,
-        )
-        angular_d_gain = torch.tensor(
-            [
-                self.config.roll_pitch_d_gain,
-                self.config.roll_pitch_d_gain,
-                self.config.yaw_d_gain,
-            ],
-            device=device,
-            dtype=dtype,
-        )
-        desired_angular_acceleration_body = (
-            p_scale * angular_p_gain * attitude_error
-            + i_scale * angular_i_gain * pending_attitude_integral
-            + d_scale * angular_d_gain * angular_velocity_error
-        )
-        torque_body = (
-            control_model.inertia_body_matrix
-            @ desired_angular_acceleration_body.unsqueeze(-1)
-        ).squeeze(-1)
-        desired_wrench = torch.cat((force_body, torque_body), dim=-1)
-        if payload_active is not None:
-            assert payload_mass_kg is not None
-            assert payload_inertia_body is not None
-            assert payload_com_offset_body is not None
-            active = payload_active.to(device=device, dtype=dtype).unsqueeze(-1)
-            payload_force_world = payload_mass_kg.unsqueeze(-1) * (
-                desired_acceleration_world
-                + torch.tensor(
-                    [0.0, 0.0, self.config.gravity_mps2],
-                    device=device,
-                    dtype=dtype,
-                )
-            )
-            payload_force_body = (
-                body_from_world @ payload_force_world.unsqueeze(-1)
-            ).squeeze(-1)
-            payload_inertia_matrix = _inertia6_to_matrix(payload_inertia_body)
-            payload_inertia_torque = (
-                payload_inertia_matrix
-                @ desired_angular_acceleration_body.unsqueeze(-1)
-            ).squeeze(-1)
-            payload_torque = torch.cross(
-                payload_com_offset_body, payload_force_body, dim=-1
-            ) + payload_inertia_torque
-            desired_wrench = desired_wrench + active * torch.cat(
-                (payload_force_body, payload_torque), dim=-1
-            )
-        desired_wrench = desired_wrench + residual_wrench_body
         allocation = solve_batched_virtual_thrust_qp(
             desired_wrench_body=desired_wrench,
             virtual_x_wrench_columns=control_model.virtual_x_wrench_columns,
@@ -290,6 +169,7 @@ class BatchedQPIDController:
             control_dt_s=dt,
             unsupported_wrench_tolerance=self.config.unsupported_wrench_tolerance,
             config=self.qp_config,
+            **(internal_joint_constraints or {}),
         )
         clipped = allocation.thrust_clipped.any(dim=-1) | (
             allocation.vectoring_clipped.any(dim=-1)
@@ -322,6 +202,178 @@ class BatchedQPIDController:
             ),
             integrator_committed=commit,
         )
+
+    def _constant_tensor(self, values, *, device, dtype):
+        key = (tuple(values), device, dtype)
+        if key not in self._tensor_constants:
+            self._tensor_constants[key] = torch.tensor(values, device=device, dtype=dtype)
+        return self._tensor_constants[key]
+
+    def _prepare_wrench(self, *, control_model, desired_body_pose_world,
+            desired_body_twist, residual_wrench_body, state, profile,
+            payload_active, payload_mass_kg, payload_inertia_body,
+            payload_com_offset_body, internal_joint_constraints):
+        """Pure PID/load arithmetic; validation and state commit stay outside capture."""
+        current_pose = control_model.body_pose_world
+        current_twist = control_model.body_twist_world
+        device, dtype = current_pose.device, current_pose.dtype
+        dt = float(self.config.control_dt_s)
+        position_error = desired_body_pose_world[:, :3] - current_pose[:, :3]
+        velocity_error = desired_body_twist[:, :3] - current_twist[:, :3]
+        retention = torch.exp(-profile.integrator_decay_rate_per_s * dt)
+        pending_position_integral = (
+            state.position_error_integral_world * retention.unsqueeze(-1)
+            + position_error
+            * dt
+            * profile.integrator_accumulation_scale.unsqueeze(-1)
+        )
+        current_quaternion = current_pose[:, 3:7]
+        target_quaternion = desired_body_pose_world[:, 3:7]
+        attitude_error = _orientation_error_body(
+            current_quaternion, target_quaternion
+        )
+        body_from_world = _quaternion_to_matrix(current_quaternion).transpose(-1, -2)
+        current_angular_velocity_body = (
+            body_from_world @ current_twist[:, 3:6].unsqueeze(-1)
+        ).squeeze(-1)
+        angular_velocity_error = (
+            desired_body_twist[:, 3:6] - current_angular_velocity_body
+        )
+        pending_attitude_integral = (
+            state.attitude_error_integral_body * retention.unsqueeze(-1)
+            + attitude_error
+            * dt
+            * profile.integrator_accumulation_scale.unsqueeze(-1)
+        )
+        p_scale = profile.proportional_gain_scale.unsqueeze(-1)
+        i_scale = profile.integral_gain_scale.unsqueeze(-1)
+        d_scale = profile.derivative_gain_scale.unsqueeze(-1)
+        p_gain = self._constant_tensor(
+            [
+                self.config.xy_p_gain,
+                self.config.xy_p_gain,
+                self.config.z_p_gain,
+            ],
+            device=device,
+            dtype=dtype,
+        )
+        i_gain = self._constant_tensor(
+            [
+                self.config.xy_i_gain,
+                self.config.xy_i_gain,
+                self.config.z_i_gain,
+            ],
+            device=device,
+            dtype=dtype,
+        )
+        d_gain = self._constant_tensor(
+            [
+                self.config.xy_d_gain,
+                self.config.xy_d_gain,
+                self.config.z_d_gain,
+            ],
+            device=device,
+            dtype=dtype,
+        )
+        desired_acceleration_world = (
+            p_scale * p_gain * position_error
+            + i_scale * i_gain * pending_position_integral
+            + d_scale * d_gain * velocity_error
+        )
+        force_world = control_model.total_mass_kg.unsqueeze(-1) * (
+            desired_acceleration_world
+            + self._constant_tensor(
+                [0.0, 0.0, self.config.gravity_mps2],
+                device=device,
+                dtype=dtype,
+            )
+        )
+        force_body = (body_from_world @ force_world.unsqueeze(-1)).squeeze(-1)
+        angular_p_gain = self._constant_tensor(
+            [
+                self.config.roll_pitch_p_gain,
+                self.config.roll_pitch_p_gain,
+                self.config.yaw_p_gain,
+            ],
+            device=device,
+            dtype=dtype,
+        )
+        angular_i_gain = self._constant_tensor(
+            [
+                self.config.roll_pitch_i_gain,
+                self.config.roll_pitch_i_gain,
+                self.config.yaw_i_gain,
+            ],
+            device=device,
+            dtype=dtype,
+        )
+        angular_d_gain = self._constant_tensor(
+            [
+                self.config.roll_pitch_d_gain,
+                self.config.roll_pitch_d_gain,
+                self.config.yaw_d_gain,
+            ],
+            device=device,
+            dtype=dtype,
+        )
+        desired_angular_acceleration_body = (
+            p_scale * angular_p_gain * attitude_error
+            + i_scale * angular_i_gain * pending_attitude_integral
+            + d_scale * angular_d_gain * angular_velocity_error
+        )
+        torque_body = (
+            control_model.inertia_body_matrix
+            @ desired_angular_acceleration_body.unsqueeze(-1)
+        ).squeeze(-1)
+        desired_wrench = torch.cat((force_body, torque_body), dim=-1)
+        if payload_active is not None:
+            assert payload_mass_kg is not None
+            assert payload_inertia_body is not None
+            assert payload_com_offset_body is not None
+            active = payload_active.to(device=device, dtype=dtype).unsqueeze(-1)
+            payload_force_world = payload_mass_kg.unsqueeze(-1) * (
+                desired_acceleration_world
+                + self._constant_tensor(
+                    [0.0, 0.0, self.config.gravity_mps2],
+                    device=device,
+                    dtype=dtype,
+                )
+            )
+            payload_force_body = (
+                body_from_world @ payload_force_world.unsqueeze(-1)
+            ).squeeze(-1)
+            payload_inertia_matrix = _inertia6_to_matrix(payload_inertia_body)
+            payload_inertia_torque = (
+                payload_inertia_matrix
+                @ desired_angular_acceleration_body.unsqueeze(-1)
+            ).squeeze(-1)
+            payload_torque = torch.cross(
+                payload_com_offset_body, payload_force_body, dim=-1
+            ) + payload_inertia_torque
+            desired_wrench = desired_wrench + active * torch.cat(
+                (payload_force_body, payload_torque), dim=-1
+            )
+        desired_wrench = desired_wrench + residual_wrench_body
+        if internal_joint_constraints is not None:
+            internal_joint_constraints = dict(internal_joint_constraints)
+            inertial_load = (control_model.joint_mass_jacobian * desired_acceleration_world[:, None]).sum(-1)
+            alpha_world = (body_from_world.transpose(-1, -2) @ desired_angular_acceleration_body.unsqueeze(-1)).squeeze(-1)
+            inertial_load = inertial_load + (control_model.joint_angular_mass_matrix * alpha_world[:, None]).sum(-1) + control_model.joint_centrifugal_load_nm
+            internal_joint_constraints["joint_load_bias_nm"] = internal_joint_constraints["joint_load_bias_nm"] - inertial_load
+            if "joint_opening_map" in internal_joint_constraints:
+                from amsrr.controllers.articulated_joint_load import append_grasp_opening_constraints
+                opening_map = internal_joint_constraints.pop("joint_opening_map")
+                normal_bias = internal_joint_constraints.pop("joint_normal_bias_nm")
+                c, bias, limits = append_grasp_opening_constraints(
+                    internal_joint_constraints["joint_load_matrix"],
+                    internal_joint_constraints["joint_load_bias_nm"],
+                    internal_joint_constraints["joint_load_limit_nm"],
+                    normal_bias, opening_map, control_model.thrust_max_n)
+                internal_joint_constraints.update(joint_load_matrix=c,
+                    joint_load_bias_nm=bias, joint_load_limit_nm=limits)
+        return (desired_wrench, desired_acceleration_world, desired_angular_acceleration_body,
+            position_error, attitude_error, pending_position_integral, pending_attitude_integral,
+            internal_joint_constraints)
 
     @staticmethod
     def reset_state_subset(

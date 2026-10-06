@@ -187,3 +187,34 @@ def test_batched_qpid_freezes_integrator_when_allocation_clips() -> None:
         state.position_error_integral_world,
     )
     assert result.allocation.thrust_clipped.any().item()
+
+
+def test_cuda_pid_graph_matches_eager_for_changing_inputs_and_retained_outputs():
+    import pytest
+    from dataclasses import fields, replace
+    from amsrr.controllers.batched_qpid_controller import BatchedQPIDTrackingProfile
+    if not torch.cuda.is_available():
+        pytest.skip('CUDA not available')
+    _, _, _, model = _fixture(torch.float32)
+    model = replace(model, **{f.name: getattr(model, f.name).cuda() for f in fields(model)
+        if isinstance(getattr(model, f.name), torch.Tensor)})
+    controller = BatchedQPIDController()
+    state = controller.initial_state(1, model.thrust_max_n.shape[1], device=torch.device('cuda'), dtype=torch.float32)
+    args = dict(control_model=model, desired_body_pose_world=model.body_pose_world.clone(),
+        desired_body_twist=model.body_twist_world, residual_wrench_body=torch.zeros(1, 6, device='cuda'),
+        state=state, profile=BatchedQPIDTrackingProfile.ones(1, device=torch.device('cuda'), dtype=torch.float32),
+        payload_active=torch.tensor([True], device='cuda'), payload_mass_kg=torch.tensor([.3], device='cuda'),
+        payload_inertia_body=torch.full((1, 6), .001, device='cuda'),
+        payload_com_offset_body=torch.tensor([[.1, 0., -.2]], device='cuda'), internal_joint_constraints=None)
+    retained = None
+    for _ in range(3):
+        args['desired_body_pose_world'][:, 0] += .01
+        expected = controller._prepare_wrench(**args)
+        actual = controller._wrench_graph.call(controller._prepare_wrench, kwargs=args, configuration=repr(controller.config))
+        for left, right in zip(expected, actual):
+            if left is not None:
+                torch.testing.assert_close(left, right, rtol=1e-6, atol=1e-6)
+        if retained is None:
+            retained = (actual[0], actual[0].clone())
+        else:
+            assert torch.equal(*retained)
