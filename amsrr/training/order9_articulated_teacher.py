@@ -3,6 +3,8 @@ from __future__ import annotations
 """Deterministic articulated trajectory teacher used before learned pi_H."""
 
 import math
+import pickle
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from typing import Callable, Mapping, Sequence
 
@@ -344,6 +346,19 @@ def _solve_contact_with_joint_limit_reserve_fallback(
     )
 
 
+def _cached_contact_ik(solver, cache, **kwargs):
+    """Request-local memoization of identical deterministic IK inputs only."""
+    if cache is None:
+        return solver.solve(**kwargs)
+    key = pickle.dumps((type(solver).__qualname__, solver.config, kwargs), protocol=4)
+    if key not in cache:
+        result = solver.solve(**kwargs)
+        if len(cache) >= 16:
+            cache.pop(next(iter(cache)))
+        cache[key] = deepcopy(result)
+    return deepcopy(cache[key])
+
+
 class Order9ArticulatedTrajectoryTeacher:
     """Generate one measured-state-anchored, phase-local rolling plan."""
 
@@ -372,7 +387,10 @@ class Order9ArticulatedTrajectoryTeacher:
             or DeterministicOrder9ConfigurationSpacePlanner()
         )
         self._planner_collision_resolver = None
+        self._trajectory_posture_resolver = None
+        self._trajectory_resolver_config = None
         self._configuration_route_cache = _ConfigurationRouteCache()
+        self._contact_ik_cache = {}
 
     def plan(
         self,
@@ -426,7 +444,8 @@ class Order9ArticulatedTrajectoryTeacher:
                     candidate.candidate_id: candidate
                     for candidate in candidate_set.candidates
                 }
-                solution = self.ik_solver.solve(
+                solution = _cached_contact_ik(
+                    self.ik_solver, self._contact_ik_cache,
                     morphology=attempt_context.morphology_graph,
                     assignments=active_knot.contact_assignments,
                     candidates=candidate_mapping,
@@ -574,6 +593,7 @@ class Order9ArticulatedTrajectoryTeacher:
                     collision_object=self.collision_object,
                     configuration_space_planner=(self.configuration_space_planner),
                     configuration_route_cache=(self._configuration_route_cache),
+                    contact_ik_cache=self._contact_ik_cache,
                     planner_collision_resolver=(
                         self._configuration_space_collision_resolver()
                         if self.collision_object is not None
@@ -581,6 +601,14 @@ class Order9ArticulatedTrajectoryTeacher:
                     ),
                 )
                 task_phase = _task_phase(attempt_context)
+                resolver_config = (self.config, self.collision_object)
+                if self._trajectory_resolver_config != resolver_config:
+                    self._trajectory_posture_resolver = _teacher_posture_resolver(
+                        self.physical_model, self.config, self.collision_object)
+                    self._trajectory_resolver_config = resolver_config
+                # Preserve fresh-window solution semantics while retaining
+                # immutable topology and collision geometry.
+                self._trajectory_posture_resolver.ik_solver._solution_cache.clear()
                 resolution = _resolve_teacher_posture_trajectory(
                     physical_model=self.physical_model,
                     config=self.config,
@@ -591,6 +619,7 @@ class Order9ArticulatedTrajectoryTeacher:
                     nominal_joint_seed_positions_by_raw_knot=(
                         nominal_joint_seed_positions
                     ),
+                    resolver=self._trajectory_posture_resolver,
                 )
             except (
                 Order9ConfigurationSpacePlanningError,
@@ -636,6 +665,11 @@ class Order9ArticulatedTrajectoryTeacher:
                 ),
                 collision_object=self.collision_object,
             )
+        # Shorten only collision-goal refinement. Initial contact IK and all
+        # alternative seeds, offsets and dense trajectory checks are retained.
+        self._planner_collision_resolver.ik_solver.config = replace(
+            self._planner_collision_resolver.ik_solver.config,
+            maximum_iterations=12, relaxed_seed_maximum_iterations=8)
         return self._planner_collision_resolver
 
 
@@ -795,6 +829,7 @@ def _decorate_raw_trajectory(
     ) = None,
     configuration_route_cache: _ConfigurationRouteCache | None = None,
     planner_collision_resolver: Order9PostureTrajectoryResolver | None = None,
+    contact_ik_cache=None,
 ) -> tuple[
     ContactWrenchTrajectory,
     Order9ConfigurationSpacePlan | None,
@@ -861,10 +896,9 @@ def _decorate_raw_trajectory(
                 "attach",
             ).contact_assignments
         )
-        pregrasp_solution = ArticulatedContactIKSolver(
-            physical_model,
-            kinematics=kinematics,
-        ).solve(
+        pregrasp_solution = _cached_contact_ik(
+            ArticulatedContactIKSolver(physical_model, kinematics=kinematics),
+            contact_ik_cache,
             morphology=context.morphology_graph,
             assignments=attach_assignments,
             candidates=_pregrasp_candidate_mapping(
@@ -1483,6 +1517,74 @@ def _pregrasp_base_pose(
         ),
         *contact_base_pose[3:],
     )
+
+
+def _free_pose_contact_collision_goal(*, morphology, physical_model, solver,
+        references, desired_q, desired_centroidal_pose, anchor_targets, scenes,
+        ground_plane_z_m):
+    """Resolve redundant body pose and joints while preserving point/normal goals.
+
+    A fixed centroidal pose can prevent removal of a self collision even when
+    the selected contacts are reachable. This finite solve changes no contact
+    assignment or collision criterion. The ordinary route and dense trajectory
+    validators remain responsible for the approach to its returned endpoint.
+    """
+    import numpy as np
+    from scipy.optimize import least_squares
+    from scipy.spatial.transform import Rotation
+
+    ids = ordered_global_dock_joint_ids(morphology, physical_model)
+    limits = _global_joint_limits(morphology, physical_model, ids)
+    q0 = np.array([desired_q[j] for j in ids])
+    p0 = np.asarray(desired_centroidal_pose[:3])
+    r0 = Rotation.from_quat(desired_centroidal_pose[3:])
+    fk = solver.kinematics.bind_centroidal_anchor_fk(morphology, references, ids)
+    targets = [anchor_targets[r.anchor.anchor_id] for r in references]
+    target_p = np.array([p[:3] for p in targets])
+    target_n = np.array([Rotation.from_quat(p[3:]).as_matrix()[:, 0] for p in targets])
+    scales = np.r_[np.full(3, .10), np.full(3, .35), np.ones(len(ids))]
+    lo = np.r_[-np.ones(6), [limits[j][0] - q0[i] for i, j in enumerate(ids)]]
+    hi = np.r_[np.ones(6), [limits[j][1] - q0[i] for i, j in enumerate(ids)]]
+    margin = float(solver.collision_config.collision_margin_m)
+
+    def evaluate(x):
+        d = x * scales
+        q = q0 + d[6:]
+        rot = r0 * Rotation.from_rotvec(d[3:6])
+        pos = p0 + d[:3]
+        local_p, local_r = fk(q[None, :])
+        world_p = rot.apply(local_p[0]) + pos
+        world_n = (rot.as_matrix() @ local_r[0])[:, :, 0]
+        pose = (*pos, *rot.as_quat())
+        joint_map = dict(zip(ids, q))
+        checks = []
+        for _, obstacle_pose, obstacle_size, allowed in scenes:
+            solver.set_collision_scene(morphology=morphology,
+                object_pose_world=obstacle_pose, object_size_m=obstacle_size,
+                allowed_anchor_ids=allowed)
+            checks.append(solver.check_configuration(morphology=morphology,
+                centroidal_pose_world=pose, joint_positions_rad=joint_map,
+                exact=False, margin_m=margin, ground_plane_z_m=ground_plane_z_m))
+        return world_p, world_n, checks, joint_map, pose
+
+    def residual(x):
+        p, n, checks, _, _ = evaluate(x)
+        return np.r_[(p - target_p).ravel() / .001,
+            (n - target_n).ravel() / .05,
+            [min(c["minimum_clearance_m"] - margin, 0.) / .001 for c in checks],
+            x * .005]
+
+    fit = least_squares(residual, np.clip(np.zeros(len(scales)), lo + 1e-10, hi - 1e-10),
+        bounds=(lo, hi), max_nfev=160, ftol=1e-9, xtol=1e-9, gtol=1e-9, diff_step=1e-4)
+    p, n, checks, q, pose = evaluate(fit.x)
+    if (not all(c["accepted"] for c in checks)
+            or np.max(np.linalg.norm(p - target_p, axis=1)) > .001
+            or np.max(np.arccos(np.clip(np.einsum('ai,ai->a', n, target_n), -1., 1.))) > .10):
+        return None
+    base = base_pose_for_centroidal_target(morphology, physical_model, q,
+        pose[:3], pose[3:], kinematics=solver.kinematics)
+    return Order9ConfigurationState(base_pose_world=tuple(base),
+        joint_positions_rad={j: float(v) for j, v in q.items()})
 
 
 def _configuration_space_phase_target(
@@ -2288,11 +2390,11 @@ def _centroidal_pose_from_fk(
             source_observation.task_progress.to_dict()
         ),
     )
-    return builder.build(
+    return builder.body_pose(
         context.morphology_graph,
         physical_model,
         observation,
-    ).body_pose_world
+    )
 
 
 def _interpolate_mapping(
@@ -2403,19 +2505,8 @@ def _retime_for_pregrasp(
     trajectory.horizon_s = float(trajectory.horizon_s) + shift
 
 
-def _resolve_teacher_posture_trajectory(
-    *,
-    physical_model: PhysicalModel,
-    config: Order9ArticulatedTeacherConfig,
-    context: HighLevelPolicyContext,
-    raw_trajectory: ContactWrenchTrajectory,
-    initial_joint_positions_rad: Mapping[str, float],
-    collision_object: Order9PostureCollisionObject | None,
-    nominal_joint_seed_positions_by_raw_knot: Sequence[Mapping[str, float]],
-) -> Order9ResolvedPostureTrajectory:
-    """Author sufficient teacher timing, then export one immutable raw plan."""
-
-    resolver = Order9PostureTrajectoryResolver(
+def _teacher_posture_resolver(physical_model, config, collision_object):
+    return Order9PostureTrajectoryResolver(
         physical_model,
         config=Order9PostureResolverConfig(
             output_rate_hz=config.posture_output_rate_hz,
@@ -2429,6 +2520,22 @@ def _resolve_teacher_posture_trajectory(
         ),
         collision_object=collision_object,
     )
+
+
+def _resolve_teacher_posture_trajectory(
+    *,
+    physical_model: PhysicalModel,
+    config: Order9ArticulatedTeacherConfig,
+    context: HighLevelPolicyContext,
+    raw_trajectory: ContactWrenchTrajectory,
+    initial_joint_positions_rad: Mapping[str, float],
+    collision_object: Order9PostureCollisionObject | None,
+    nominal_joint_seed_positions_by_raw_knot: Sequence[Mapping[str, float]],
+    resolver=None,
+) -> Order9ResolvedPostureTrajectory:
+    """Author sufficient teacher timing, then export one immutable raw plan."""
+    if resolver is None:
+        resolver = _teacher_posture_resolver(physical_model, config, collision_object)
     # Dense IK can identify a rate peak in more than one raw 2 Hz segment.
     # Bound the deterministic retiming loop generously enough to repair each
     # segment and a second-order peak without changing any geometric target.

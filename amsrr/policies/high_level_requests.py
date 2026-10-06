@@ -14,6 +14,7 @@ from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.high_level import (
     ActiveExecutionState,
     ContactLoadEstimate,
+    ContactMotionEstimate,
     ExecutionGuardSample,
     HighLevelObservation,
     HighLevelRequest,
@@ -124,22 +125,22 @@ class HighLevelDecisionContext:
     previous_outcome: PreviousRequestOutcome | None = None
 
     def compute_snapshot_hash(self) -> str:
+        # stable_hash performs the canonical dataclass conversion itself.
+        # Passing to_dict() here traversed every nested field twice; hashing
+        # the same objects directly retains byte-identical JSON and still
+        # detects mutation on every call (there is no snapshot hash cache).
         return stable_hash(
             {
-                "irg": self.scene.irg.to_dict(),
-                "envelope": self.scene.interaction_envelope.to_dict(),
-                "morphology": self.scene.morphology_graph.to_dict(),
-                "candidates": self.scene.contact_candidate_set.to_dict(),
-                "task": self.task_spec.to_dict(),
-                "model": self.physical_model.to_dict(),
-                "observation": self.observation.to_dict(),
-                "execution": self.execution_state.to_dict(),
-                "encoder_runtime": self.scene.runtime_observation.to_dict(),
-                "previous_outcome": (
-                    None
-                    if self.previous_outcome is None
-                    else self.previous_outcome.to_dict()
-                ),
+                "irg": self.scene.irg,
+                "envelope": self.scene.interaction_envelope,
+                "morphology": self.scene.morphology_graph,
+                "candidates": self.scene.contact_candidate_set,
+                "task": self.task_spec,
+                "model": self.physical_model,
+                "observation": self.observation,
+                "execution": self.execution_state,
+                "encoder_runtime": self.scene.runtime_observation,
+                "previous_outcome": self.previous_outcome,
             }
         )
 
@@ -173,6 +174,7 @@ class RequestCatalogBuilder:
         physical_model: PhysicalModel,
         execution_state: ActiveExecutionState,
         contact_estimates: list[ContactLoadEstimate] | None = None,
+        contact_motion: list[ContactMotionEstimate] | None = None,
         guard_samples: list[ExecutionGuardSample] | None = None,
         previous_outcome: PreviousRequestOutcome | None = None,
     ) -> HighLevelDecisionContext:
@@ -203,6 +205,7 @@ class RequestCatalogBuilder:
                 ),
                 contact_estimates=contact_estimates or [],
                 guard_samples=guard_samples or [],
+                contact_motion=contact_motion or [],
             ).to_dict()
         )
         execution = ActiveExecutionState.from_dict(execution_state.to_dict())
@@ -429,6 +432,14 @@ class RequestCatalogBuilder:
                     )
                 )
         entries.sort(key=lambda e: (-e.heuristic_score, e.request.stable_hash()))
+        if state.plan_id is None:
+            # The initial actor can only choose a contact in the current phase.
+            # Future transition requests must not consume its catalog budget.
+            initial = [e for e in entries if e.phase_id == state.phase_id
+                       and e.request.transition_id is None]
+            deferred = [e for e in entries if e.phase_id != state.phase_id
+                        or e.request.transition_id is not None]
+            entries = initial + deferred
         return entries[: self.maximum_entries]
 
     @staticmethod

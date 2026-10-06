@@ -20,6 +20,7 @@ from amsrr.controllers.qp_allocator_interface import (
 from amsrr.controllers.rigid_body_model import (
     RigidBodyControlModel,
     RigidBodyControlModelBuilder,
+    _joint_limits,
 )
 from amsrr.schemas.common import SchemaValidationError
 from amsrr.schemas.physical_model import JointModel, PhysicalModel
@@ -902,9 +903,10 @@ def _joint_velocity_limits(
 ) -> dict[str, tuple[float, float]]:
     limits: dict[str, tuple[float, float]] = {}
     for joint in physical_model.joints:
-        if joint.velocity_limit is None:
+        velocity = _joint_limits(joint, physical_model)["velocity"]
+        if velocity is None:
             continue
-        limit = abs(float(joint.velocity_limit))
+        limit = abs(float(velocity))
         limits[joint.joint_id] = (-limit, limit)
     if active_module_ids is not None:
         limits.update(

@@ -477,6 +477,7 @@ def solve_order9_virtual_contact_compression(
                 centroidal_pose[:3],
                 centroidal_pose[3:7],
                 kinematics=solver.kinematics,
+                rigid_body_builder=solver._rigid_body_builder,
             )
             result = solver.kinematics.forward(
                 morphology, physical_model, q, base_pose, references
@@ -559,6 +560,7 @@ def solve_order9_virtual_contact_compression(
                     centroidal_pose[:3],
                     centroidal_pose[3:7],
                     kinematics=solver.kinematics,
+                    rigid_body_builder=solver._rigid_body_builder,
                 )
                 candidate_result = solver.kinematics.forward(
                     morphology,
@@ -636,6 +638,7 @@ def solve_order9_virtual_contact_compression(
                 centroidal_pose[:3],
                 centroidal_pose[3:7],
                 kinematics=solver.kinematics,
+                rigid_body_builder=solver._rigid_body_builder,
             )
             candidate_result = solver.kinematics.forward(
                 morphology,
@@ -694,6 +697,7 @@ def solve_order9_virtual_contact_compression(
         centroidal_pose[:3],
         centroidal_pose[3:7],
         kinematics=solver.kinematics,
+        rigid_body_builder=solver._rigid_body_builder,
     )
     final = solver.kinematics.forward(
         morphology, physical_model, q, final_base, references

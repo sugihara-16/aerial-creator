@@ -64,6 +64,37 @@ def test_contact_candidate_pairwise_conflict_matrix() -> None:
     assert candidate_set.slot_coverage == {0: [0, 1], 1: [2]}
 
 
+def test_numeric_candidate_features_ignore_identifier_scores():
+    from amsrr.policies.contact_candidate_encoder import ContactCandidateEncoder
+
+    candidate = _candidate(0, slot_id=0, anchor_id=0)
+    catalog = build_contact_candidate_set(set_id="s", task_id="t",
+        morphology_graph_id="m", candidates=[candidate])
+    encoder = ContactCandidateEncoder()
+    before = encoder._candidate_features(catalog, candidate, candidate_index=0)
+    candidate.candidate_scores.update(surface_port_id=12345., anchor_module_id=98765.)
+    after = encoder._candidate_features(catalog, candidate, candidate_index=0)
+    assert before == after
+
+
+def test_normalized_contact_features_ignore_catalog_size_and_keep_geometry():
+    import torch
+    from amsrr.policies.contact_group_geometry import (
+        CONTACT_FEATURE_DIM, LOCAL_COLUMNS, normalize_contact_features,
+    )
+
+    x = torch.randn(2, 3, CONTACT_FEATURE_DIM, requires_grad=True)
+    changed = x.detach().clone()
+    changed[..., [LOCAL_COLUMNS.index(17), LOCAL_COLUMNS.index(18)]] += 10000
+    mean, scale = torch.ones(CONTACT_FEATURE_DIM), torch.full((CONTACT_FEATURE_DIM,), .05)
+    a = normalize_contact_features(x, mean, scale)
+    b = normalize_contact_features(changed, mean, scale)
+    torch.testing.assert_close(a, b)
+    a.sum().backward()
+    assert x.grad[..., LOCAL_COLUMNS.index(17)].count_nonzero() == 0
+    assert x.grad[..., 0].count_nonzero() == 6
+
+
 def test_assignment_level_qp_infeasible_case() -> None:
     candidate_set = build_contact_candidate_set(
         set_id="set_001",

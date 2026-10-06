@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from copy import deepcopy
 from itertools import combinations
 from typing import Callable, Iterable, TypeVar
 
@@ -14,7 +15,7 @@ from amsrr.geometry.pose_math import (
     transform_from_xyz_rpy,
 )
 from amsrr.schemas.common import Pose7D, SchemaValidationError, Vector3
-from amsrr.schemas.morphology import MorphologyGraph, PortNode
+from amsrr.schemas.morphology import MorphologyGraph, PortNode, RobotAnchor
 from amsrr.schemas.physical_model import (
     CollisionPrimitive,
     DockPortSpec,
@@ -86,6 +87,164 @@ class GripperSurfacePair:
     second_inward_alignment: float
     opposition_alignment: float
     grasp_anchor_module_ids: tuple[int, ...]
+
+
+def with_available_grasp_anchors(morphology, physical_model, *, slot_ids,
+                                max_force_n, max_torque_nm):
+    """Expose physical grasp surfaces before selecting a group.
+
+    IDs depend only on free ports, never on a teacher's selected surfaces.
+    The assembly and its initial joint state are unchanged. This returns a new
+    morphology; historical teacher bindings must not be reused with these IDs.
+    """
+    result = deepcopy(morphology)
+    retained = [a for a in result.robot_anchors if a.anchor_type != 'grasp']
+    first = max((a.anchor_id for a in retained), default=-1) + 1
+    surfaces = sorted(resolve_unoccupied_gripper_surfaces(morphology, physical_model),
+                      key=lambda s: s.port_global_id)
+    result.robot_anchors = retained + [RobotAnchor(
+        anchor_id=first+i, module_id=s.module_id, link_id=s.mechanism_link_id,
+        local_pose=s.grasp_contact_frame_link, anchor_type='grasp',
+        associated_contact_slot_ids=list(slot_ids), capability=dict(
+            capability_type='grasp', contact_mode='grasp',
+            max_force_n=float(max_force_n), max_torque_nm=float(max_torque_nm),
+            surface_port_id=s.port_global_id, dock_port_global_id=s.port_global_id,
+            dock_port_local_id=s.port_local_id, dock_port_type=s.port_type,
+            dock_mechanism_link_id=s.mechanism_link_id,
+            dock_mechanism_joint_id=s.mechanism_joint_id,
+            mesh_backed_gripper_surface=True,
+            dock_collision_primitive_ids=[p.primitive_id for p in s.collision_primitives],
+        )) for i, s in enumerate(surfaces)]
+    result.validate()
+    return result
+
+
+def with_designated_grasp_anchors(morphology, physical_model, port_ids, *, slot_ids,
+                                 max_force_n, max_torque_nm):
+    """Bind upstream-selected free ports; the policy cannot change this set.
+
+    Explicit port order determines anchor order. Resolve geometry/capabilities
+    from the physical model, never from user-authored transforms or a teacher.
+    """
+    if (not isinstance(port_ids, (list, tuple)) or len(port_ids) < 2
+            or any(type(p) is not int for p in port_ids)
+            or len(set(port_ids)) != len(port_ids)):
+        raise ValueError('designated grasp ports must be distinct integer IDs')
+    available = with_available_grasp_anchors(morphology, physical_model,
+        slot_ids=slot_ids, max_force_n=max_force_n, max_torque_nm=max_torque_nm)
+    by_port = {a.capability['surface_port_id']: a for a in available.robot_anchors
+               if a.anchor_type == 'grasp'}
+    if not set(port_ids) <= set(by_port):
+        raise ValueError('designated grasp port is occupied or unavailable')
+    retained = [a for a in available.robot_anchors if a.anchor_type != 'grasp']
+    first = max((a.anchor_id for a in retained), default=-1) + 1
+    selected = []
+    for i, port in enumerate(port_ids):
+        anchor = by_port[port]
+        anchor.anchor_id = first + i
+        selected.append(anchor)
+    available.robot_anchors = retained + selected
+    available.validate()
+    return available
+
+
+def free_dock_boundary_cycles(morphology, physical_model):
+    """Walk the assembled boundary, crossing a dock seam before continuing.
+
+    The rotation system is the authored cyclic order of each module's docks.
+    Occupied seam endpoints are never candidates. Ordering uses module-local
+    geometry, so world pose, module IDs and port IDs do not define adjacency.
+    """
+    physical = {p.port_id: p for p in physical_model.dock_ports}
+    ports = {p.port_global_id: p for p in morphology.ports}
+    successor = {}
+    for module in morphology.modules:
+        local = [p for p in ports.values() if p.module_id == module.module_id]
+        if len(local) < 3:
+            raise GripperSurfaceResolutionError('boundary needs a cyclic dock layout')
+        cx = sum(physical[p.port_local_id].local_pose[0] for p in local) / len(local)
+        cy = sum(physical[p.port_local_id].local_pose[1] for p in local) / len(local)
+        local.sort(key=lambda p: math.atan2(physical[p.port_local_id].local_pose[1]-cy,
+                                           physical[p.port_local_id].local_pose[0]-cx))
+        for i, p in enumerate(local):
+            successor[p.port_global_id] = local[(i+1) % len(local)].port_global_id
+    seams = {}
+    for edge in morphology.dock_edges:
+        if edge.src_port_id in seams or edge.dst_port_id in seams:
+            raise GripperSurfaceResolutionError('dock endpoint belongs to multiple seams')
+        seams[edge.src_port_id] = edge.dst_port_id
+        seams[edge.dst_port_id] = edge.src_port_id
+    if any(p.occupied and p.port_global_id not in seams for p in ports.values()):
+        raise GripperSurfaceResolutionError('occupied dock has no seam for boundary traversal')
+    free = set(ports) - set(seams)
+    next_free = {}
+    for start in free:
+        p = successor[start]
+        visited = set()
+        while p in seams:
+            if p in visited:
+                raise GripperSurfaceResolutionError('boundary has no next free dock')
+            visited.add(p)
+            p = successor[seams[p]]
+        next_free[start] = p
+    cycles, remaining = [], set(free)
+    while remaining:
+        start = min(remaining)
+        cycle, p = [], start
+        while p not in cycle:
+            if p not in remaining:
+                raise GripperSurfaceResolutionError('inconsistent dock boundary cycle')
+            cycle.append(p)
+            remaining.remove(p)
+            p = next_free[p]
+        if p != start:
+            raise GripperSurfaceResolutionError('dock boundary did not close')
+        cycles.append(tuple(cycle))
+    return tuple(cycles)
+
+
+def with_neighbor_grasp_anchors(morphology, physical_model, *, slot_ids,
+                               max_force_n, max_torque_nm):
+    """Two five-dock neighborhoods; a shared physical dock has one anchor ID."""
+    centers = [a for a in morphology.robot_anchors if a.anchor_type == 'grasp']
+    if len(centers) != 2:
+        raise GripperSurfaceResolutionError('two grasp anchor centers are required')
+    cycles = free_dock_boundary_cycles(morphology, physical_model)
+    masks = {}
+    distances = {}
+    for i, anchor in enumerate(centers):
+        port = anchor.capability.get('surface_port_id', anchor.capability.get('dock_port_global_id'))
+        cycle = next((c for c in cycles if port in c), None)
+        if cycle is None or len(cycle) < 5:
+            raise GripperSurfaceResolutionError('anchor needs five distinct free boundary docks')
+        index = cycle.index(port)
+        for delta in (-2, -1, 0, 1, 2):
+            neighbor = cycle[(index+delta) % len(cycle)]
+            masks[neighbor] = masks.get(neighbor, 0) | (1 << i)
+            distances.setdefault(neighbor, {})[str(i)] = abs(delta)
+    available = with_available_grasp_anchors(morphology, physical_model, slot_ids=slot_ids,
+        max_force_n=max_force_n, max_torque_nm=max_torque_nm)
+    by_port = {a.capability['surface_port_id']: a for a in available.robot_anchors if a.anchor_type == 'grasp'}
+    result = deepcopy(morphology)
+    existing = {a.capability.get('surface_port_id', a.capability.get('dock_port_global_id')): a
+                for a in result.robot_anchors if a.anchor_type == 'grasp'}
+    next_id = max(a.anchor_id for a in result.robot_anchors) + 1
+    for port, mask in sorted(masks.items()):
+        anchor = existing.get(port)
+        if anchor is None:
+            if port not in by_port:
+                raise GripperSurfaceResolutionError('boundary dock has no grasp surface')
+            anchor = deepcopy(by_port[port])
+            anchor.anchor_id = next_id
+            next_id += 1
+            result.robot_anchors.append(anchor)
+        anchor.capability['surface_port_id'] = port
+        anchor.capability['grasp_neighborhood_mask'] = mask
+        # Keep group-specific distances: taking each dock's nearest center
+        # independently could assign both contacts to the same anchor group.
+        anchor.capability['grasp_neighborhood_distances'] = distances[port]
+    result.validate()
+    return result
 
 
 def resolve_unoccupied_gripper_surfaces(

@@ -14,6 +14,8 @@ from amsrr.robot_model.gripper_surfaces import (
     GripperSurfaceResolutionError,
     resolve_unoccupied_gripper_surfaces,
     select_opposing_gripper_surface_pair,
+    with_available_grasp_anchors,
+    with_designated_grasp_anchors,
 )
 from amsrr.robot_model.physical_model_builder import (
     build_physical_model_from_config,
@@ -32,6 +34,52 @@ def _representative_three_module_grasp(grasp_carry_dict: dict):
         variant=GraspCarryMorphologyVariant.SYMMETRIC_TWO_ANCHOR_GRASP,
     )
     return physical_model, design.target_morphology
+
+
+def test_all_available_grasp_anchors_are_canonical_and_mesh_backed(grasp_carry_dict):
+    from copy import deepcopy
+    physical, source = _representative_three_module_grasp(grasp_carry_dict)
+    before = source.to_dict()
+    kwargs = dict(slot_ids=[0], max_force_n=30., max_torque_nm=4.)
+    result = with_available_grasp_anchors(source, physical, **kwargs)
+    reordered = deepcopy(source)
+    reordered.robot_anchors = list(reversed(reordered.robot_anchors))
+    for a in reordered.robot_anchors:
+        if a.anchor_type == 'grasp':
+            a.anchor_id += 100
+    other = with_available_grasp_anchors(reordered, physical, **kwargs)
+    assert [a.to_dict() for a in result.robot_anchors] == [a.to_dict() for a in other.robot_anchors]
+    surfaces = {s.port_global_id:s for s in resolve_unoccupied_gripper_surfaces(source,physical)}
+    anchors = [a for a in result.robot_anchors if a.anchor_type == 'grasp']
+    assert len(anchors) == len(surfaces) > 2
+    for anchor in anchors:
+        surface = surfaces[anchor.capability['surface_port_id']]
+        assert anchor.link_id == surface.mechanism_link_id
+        assert anchor.local_pose == surface.grasp_contact_frame_link
+    assert source.to_dict() == before
+
+
+def test_upstream_designated_ports_remain_fixed_and_use_physical_geometry(grasp_carry_dict):
+    physical, source = _representative_three_module_grasp(grasp_carry_dict)
+    before = source.to_dict()
+    surfaces = resolve_unoccupied_gripper_surfaces(source, physical)
+    selected = [surfaces[-1], surfaces[0]]
+    kwargs = dict(slot_ids=[0], max_force_n=30., max_torque_nm=4.)
+    result = with_designated_grasp_anchors(source, physical,
+        [s.port_global_id for s in selected], **kwargs)
+    anchors = [a for a in result.robot_anchors if a.anchor_type == 'grasp']
+    assert len(anchors) == 2
+    for anchor, surface in zip(anchors, selected):
+        assert anchor.capability['surface_port_id'] == surface.port_global_id
+        assert anchor.module_id == surface.module_id
+        assert anchor.link_id == surface.mechanism_link_id
+        assert anchor.local_pose == surface.grasp_contact_frame_link
+    assert source.to_dict() == before
+    occupied = source.dock_edges[0].src_port_id
+    for ports in ([occupied, selected[0].port_global_id], [9999, 9998],
+                  [selected[0].port_global_id]*2, [True, 2]):
+        with pytest.raises(ValueError):
+            with_designated_grasp_anchors(source, physical, ports, **kwargs)
 
 
 def test_resolves_only_unoccupied_ports_to_actual_mesh_backed_dock_links(
@@ -231,3 +279,34 @@ def test_resolver_fails_closed_for_stale_graph_connect_frame(
 
     with pytest.raises(GripperSurfaceResolutionError, match="connect frame is stale"):
         resolve_unoccupied_gripper_surfaces(stale_morphology, physical_model)
+
+
+def test_assembled_boundary_crosses_seam_and_skips_occupied_docks():
+    from types import SimpleNamespace as NS
+    from amsrr.robot_model.gripper_surfaces import free_dock_boundary_cycles
+    physical = build_physical_model_from_config('configs/robot/robot_model.yaml')
+    names = ['pitch_connect_point_1', 'pitch_connect_point_2', 'yaw_connect_point_1', 'yaw_connect_point_2']
+    graph = NS(modules=[NS(module_id=0), NS(module_id=1)],
+        ports=[NS(module_id=m, port_global_id=base+i, port_local_id=n, occupied=base+i in (10,23))
+               for m,base in [(0,10),(1,20)] for i,n in enumerate(names)],
+        dock_edges=[NS(src_port_id=10,dst_port_id=23)])
+    # Authored perimeter of two joined modules, including the seam crossing.
+    assert free_dock_boundary_cycles(graph, physical) == ((11,21,20,22,12,13),)
+    graph.ports.reverse()
+    graph.modules.reverse()
+    assert free_dock_boundary_cycles(graph, physical) == ((11,21,20,22,12,13),)
+
+
+def test_neighbor_anchors_have_five_members_per_group_without_duplicate_surfaces(grasp_carry_dict):
+    from amsrr.robot_model.gripper_surfaces import with_neighbor_grasp_anchors
+    physical, source = _representative_three_module_grasp(grasp_carry_dict)
+    before = source.to_dict()
+    result = with_neighbor_grasp_anchors(source, physical, slot_ids=[0], max_force_n=30., max_torque_nm=4.)
+    anchors = [a for a in result.robot_anchors if a.anchor_type == 'grasp']
+    assert len({a.capability['surface_port_id'] for a in anchors}) == len(anchors)
+    for mask in (1,2):
+        assert sum(bool(a.capability['grasp_neighborhood_mask'] & mask) for a in anchors) == 5
+    for old in source.robot_anchors:
+        new = next(a for a in result.robot_anchors if a.anchor_id == old.anchor_id)
+        assert (new.module_id,new.link_id,new.local_pose) == (old.module_id,old.link_id,old.local_pose)
+    assert source.to_dict() == before

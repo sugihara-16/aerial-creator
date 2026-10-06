@@ -332,3 +332,28 @@ def test_link_jacobian_is_shifted_to_grasp_frame_origin() -> None:
     torch.testing.assert_close(
         shifted[0, 0, :, 1], torch.tensor([1.0, 2.0, 3.0])
     )
+
+
+def test_cpu_coordinate_fixed_point_matches_complete_sweeps_with_changing_inputs():
+    from amsrr.training.order9_anchor_normal_force_estimator import _cpu_coordinate_forces
+    torch.manual_seed(1809)
+    for anchors in (1, 2, 4, 7):
+        for diagonal in (False, True):
+            factors = torch.randn(5, anchors, 16)
+            gram = factors @ factors.transpose(-1, -2) + .01 * torch.eye(anchors)
+            if diagonal:
+                gram = torch.diag_embed(gram.diagonal(dim1=-2, dim2=-1))
+            observable = torch.rand(5, anchors) > .2
+            traced = torch.jit.trace(lambda g, r, o: _cpu_coordinate_forces(g, r, o, 12, 100.),
+                                     (gram, torch.zeros(5, anchors), observable))
+            for scale in (0., 1., 10., 1000.):
+                right = torch.randn(5, anchors) * scale
+                reference = torch.zeros_like(right)
+                for _ in range(12):
+                    for i in range(anchors):
+                        d = gram[:, i, i].clamp_min(1e-12)
+                        coupled = (gram[:, i, :] * reference).sum(-1) - d * reference[:, i]
+                        value = ((right[:, i] - coupled) / d).clamp(0., 100.)
+                        reference[:, i] = torch.where(observable[:, i], value, torch.zeros_like(value))
+                actual = traced(gram, right, observable)
+                assert torch.equal(actual.contiguous().view(torch.uint8), reference.contiguous().view(torch.uint8))

@@ -76,6 +76,9 @@ def _candidates_conflict(left: ContactCandidate, right: ContactCandidate) -> boo
         return True
     if left.anchor_id == right.anchor_id:
         return True
+    surface = left.candidate_scores.get('surface_port_id', -1)
+    if surface >= 0 and surface == right.candidate_scores.get('surface_port_id', -1):
+        return True
     if left.slot_id == right.slot_id and left.anchor_id == right.anchor_id:
         return True
     return False

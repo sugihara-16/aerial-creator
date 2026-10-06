@@ -34,7 +34,7 @@ from amsrr.training.order9_virtual_contact_compression import (
 
 
 ORDER9_ACTUATOR_AWARE_NOMINAL_PRELOAD_VERSION = (
-    "order9_actuator_leverage_contact_compliance_nominal_preload_v2_calibrated_margin"
+    "order9_nominal_preload_v5_additive_patch_moment"
 )
 
 
@@ -89,6 +89,12 @@ class Order9ActuatorAwareNominalPreloadSolution:
     limiting_joint_id: str
     feasible: bool
     rejection_reason: str | None
+    target_contact_force_world_n: tuple[tuple[float, float, float], ...] = ()
+    commanded_inward_lead_m_by_anchor: tuple[float, ...] = ()
+    equilibrium_residual: float | None = None
+    torsion_preload_requested_scale: float | None = None
+    torsion_preload_applied_scale: float | None = None
+    contact_torsion_radii_m: tuple[float, ...] = ()
     version: str = ORDER9_ACTUATOR_AWARE_NOMINAL_PRELOAD_VERSION
 
     def to_dict(self) -> dict[str, object]:
@@ -116,6 +122,12 @@ class Order9ActuatorAwareNominalPreloadSolution:
             "limiting_joint_id": self.limiting_joint_id,
             "feasible": self.feasible,
             "rejection_reason": self.rejection_reason,
+            "target_contact_force_world_n": [list(f) for f in self.target_contact_force_world_n],
+            "commanded_inward_lead_m_by_anchor": list(self.commanded_inward_lead_m_by_anchor),
+            "equilibrium_residual": self.equilibrium_residual,
+            "torsion_preload_requested_scale": self.torsion_preload_requested_scale,
+            "torsion_preload_applied_scale": self.torsion_preload_applied_scale,
+            "contact_torsion_radii_m": list(self.contact_torsion_radii_m),
         }
 
 
@@ -130,6 +142,12 @@ def solve_order9_actuator_aware_nominal_preload_from_jacobian(
     contact_friction: float | Sequence[float],
     contact_stiffness_n_per_m: float,
     config: Order9ActuatorAwareNominalPreloadConfig | None = None,
+    contact_positions_world: np.ndarray | None = None,
+    inward_normals_world: np.ndarray | None = None,
+    object_com_world: np.ndarray | None = None,
+    contact_position_joint_jacobian: np.ndarray | None = None,
+    maximum_contact_force_n: Sequence[float] | None = None,
+    contact_torsion_radii_m: Sequence[float] | None = None,
 ) -> Order9ActuatorAwareNominalPreloadSolution:
     """Resolve balanced contact forces and the corresponding servo lead."""
 
@@ -179,23 +197,75 @@ def solve_order9_actuator_aware_nominal_preload_from_jacobian(
     required_support = (
         mass * float(resolved.gravity_mps2) * float(resolved.support_safety_factor)
     )
-    forces = _minimum_peak_utilization_force_allocation(
-        jacobian=jacobian,
-        friction=friction,
-        peak_effort_limit_nm=peak,
-        required_support_force_n=required_support,
-        minimum_anchor_force_fraction=float(
-            resolved.minimum_anchor_force_fraction
-        ),
-    )
-    torque = jacobian.T @ forces
+    contact_forces = None
+    equilibrium_residual = None
+    torsion_requested_scale = torsion_applied_scale = None
+    baseline_leads = None
+    if anchor_count > 2:
+        if any(x is None for x in (contact_positions_world, inward_normals_world,
+                                  object_com_world, contact_position_joint_jacobian)):
+            raise ValueError("multi-contact preload requires contact geometry and COM")
+        contact_forces, equilibrium_residual = solve_contact_force_equilibrium(
+            positions=contact_positions_world, inward_normals=inward_normals_world,
+            center_of_mass=object_com_world, friction=friction / resolved.support_safety_factor,
+            required_force=np.array([0., 0., mass * resolved.gravity_mps2]),
+            position_jacobian=contact_position_joint_jacobian,
+            effort_limits=peak, maximum_utilization=resolved.maximum_peak_effort_utilization,
+            minimum_normal_force=resolved.minimum_anchor_force_fraction * required_support / friction.sum(),
+            maximum_contact_force_n=maximum_contact_force_n,
+        )
+        forces = np.einsum('ai,ai->a', contact_forces, inward_normals_world)
+        torque = np.einsum('aij,ai->j', contact_position_joint_jacobian, contact_forces)
+    else:
+        internal_wrench = None
+        if contact_positions_world is not None or inward_normals_world is not None:
+            positions = np.asarray(contact_positions_world, dtype=float)
+            normals = np.asarray(inward_normals_world, dtype=float)
+            if (positions.shape != (anchor_count, 3)
+                    or normals.shape != (anchor_count, 3)
+                    or not np.isfinite(positions).all()
+                    or not np.isfinite(normals).all()
+                    or not np.allclose(np.linalg.norm(normals, axis=1), 1., atol=1e-5, rtol=0)):
+                raise ValueError("normal preload requires finite contact positions and unit normals")
+            # A squeeze is an internal load: opposing normal forces must not
+            # introduce a net force or couple on the object. Friction still
+            # supplies the approximate support capacity used below.
+            internal_wrench = np.vstack((normals.T,
+                np.cross(positions - positions.mean(axis=0), normals).T))
+        forces = _minimum_peak_utilization_force_allocation(
+            jacobian=jacobian, friction=friction, peak_effort_limit_nm=peak,
+            required_support_force_n=required_support,
+            minimum_anchor_force_fraction=float(resolved.minimum_anchor_force_fraction),
+            internal_wrench=internal_wrench)
+        # Existing two-contact execution uses one common gravity preload.
+        # Additional rotational reserve must not reduce either existing command.
+        baseline_prediction = np.maximum(jacobian @ ((jacobian.T @ forces) / stiffness)
+            + forces / contact_stiffness, 0.)
+        quantum = float(resolved.inward_lead_quantization_m)
+        baseline_uniform = quantum * math.ceil((max(resolved.minimum_inward_lead_m,
+            float(baseline_prediction.max()) + resolved.model_error_margin_m) - 1e-12) / quantum)
+        baseline_leads = np.full(anchor_count, baseline_uniform)
+        if contact_torsion_radii_m is not None:
+            from amsrr.training.soft_contact_preload import patch_normal_forces, bounded_normal_reserve
+            if object_com_world is None or internal_wrench is None:
+                raise ValueError("finite patch preload requires contact geometry and estimated COM")
+            requested, _ = patch_normal_forces(
+                positions=positions, normals=normals, center=object_com_world,
+                required_force=[0., 0., mass * resolved.gravity_mps2],
+                friction=friction / resolved.support_safety_factor,
+                radii=contact_torsion_radii_m, normal_jacobian=jacobian,
+                effort_limits=peak, minimum_normal_force=resolved.minimum_anchor_force_fraction * required_support / friction.sum())
+            forces, torsion_requested_scale, torsion_applied_scale = bounded_normal_reserve(
+                forces=forces, requested=requested, jacobian=jacobian, stiffness=stiffness,
+                peak=peak, contact_stiffness=contact_stiffness,
+                maximum_utilization=resolved.maximum_peak_effort_utilization,
+                maximum_lead=resolved.maximum_inward_lead_m,
+                quantum=resolved.inward_lead_quantization_m, margin=resolved.model_error_margin_m)
+        torque = jacobian.T @ forces
     peak_ratio = np.abs(torque) / peak
     continuous_ratio = np.abs(torque) / continuous
     limiting_index = int(np.argmax(peak_ratio))
-    compliance = (
-        jacobian @ np.diag(1.0 / stiffness) @ jacobian.T
-    )
-    predicted_lead = compliance @ forces + forces / contact_stiffness
+    predicted_lead = jacobian @ (torque / stiffness) + forces / contact_stiffness
     predicted_lead = np.maximum(predicted_lead, 0.0)
     compliance_predicted_lead = float(np.max(predicted_lead))
     requested = max(
@@ -204,6 +274,10 @@ def solve_order9_actuator_aware_nominal_preload_from_jacobian(
     )
     quantum = float(resolved.inward_lead_quantization_m)
     requested = quantum * math.ceil((requested - 1.0e-12) / quantum)
+    commanded_leads = quantum * np.ceil((np.maximum(resolved.minimum_inward_lead_m,
+        predicted_lead + resolved.model_error_margin_m) - 1e-12) / quantum)
+    if baseline_leads is not None:
+        commanded_leads = np.maximum(commanded_leads, baseline_leads)
     peak_utilization = float(np.max(peak_ratio))
     rejection_reason = None
     if peak_utilization > float(resolved.maximum_peak_effort_utilization) + 1.0e-9:
@@ -225,6 +299,12 @@ def solve_order9_actuator_aware_nominal_preload_from_jacobian(
         limiting_joint_id=ids[limiting_index],
         feasible=rejection_reason is None,
         rejection_reason=rejection_reason,
+        target_contact_force_world_n=() if contact_forces is None else tuple(tuple(float(x) for x in f) for f in contact_forces),
+        commanded_inward_lead_m_by_anchor=tuple(float(x) for x in commanded_leads),
+        equilibrium_residual=equilibrium_residual,
+        torsion_preload_requested_scale=torsion_requested_scale,
+        torsion_preload_applied_scale=torsion_applied_scale,
+        contact_torsion_radii_m=() if contact_torsion_radii_m is None else tuple(float(x) for x in contact_torsion_radii_m),
     )
 
 
@@ -238,6 +318,7 @@ def solve_order9_actuator_aware_nominal_preload(
     contact_friction: float,
     contact_stiffness_n_per_m: float,
     config: Order9ActuatorAwareNominalPreloadConfig | None = None,
+    object_com_world: np.ndarray | None = None,
 ) -> Order9ActuatorAwareNominalPreloadSolution:
     """Build the contact Jacobian at the reviewed grasp and resolve preload."""
 
@@ -308,6 +389,11 @@ def solve_order9_actuator_aware_nominal_preload(
     stiffness, peak, continuous = _global_joint_actuator_values(
         ordered_ids, physical_model
     )
+    anchors = {a.anchor_id:a for a in morphology.robot_anchors}
+    from amsrr.training.soft_contact_preload import nominal_patch_radius
+    radii = [nominal_patch_radius(physical_model.urdf_path,
+        anchors[a.anchor_id].link_id, tuple(anchors[a.anchor_id].local_pose),
+        physical_model.metadata['urdf_hash']) for a in assignments] if len(assignments) == 2 and object_com_world is not None else None
     return solve_order9_actuator_aware_nominal_preload_from_jacobian(
         inward_normal_joint_jacobian_m=np.stack(rows),
         joint_ids=ordered_ids,
@@ -318,7 +404,77 @@ def solve_order9_actuator_aware_nominal_preload(
         contact_friction=contact_friction,
         contact_stiffness_n_per_m=contact_stiffness_n_per_m,
         config=config,
+        contact_positions_world=np.array([candidate_by_id[int(a.candidate_id)].contact_pose_world[:3] for a in assignments]),
+        inward_normals_world=np.array([-np.asarray(candidate_by_id[int(a.candidate_id)].normal_world) /
+            np.linalg.norm(candidate_by_id[int(a.candidate_id)].normal_world) for a in assignments]),
+        object_com_world=object_com_world,
+        contact_torsion_radii_m=radii,
+        contact_position_joint_jacobian=np.stack([jacobians[int(a.anchor_id)][:3] for a in assignments]),
+        maximum_contact_force_n=[float(anchors[a.anchor_id].capability['max_force_n']) for a in assignments],
     )
+
+
+def solve_contact_force_equilibrium(*, positions, inward_normals, center_of_mass,
+                                    friction, required_force, position_jacobian,
+                                    effort_limits, maximum_utilization,
+                                    minimum_normal_force, maximum_contact_force_n=None):
+    """Nominal force on object: 6D balance, inscribed friction pyramid, effort.
+
+    Solved only at planning time. No measured contact force is used. The
+    inscribed square (|t1|+|t2| <= mu*fn) never overestimates Coulomb friction.
+    """
+    from scipy.optimize import linprog
+    p, n, center, mu, force, jac, limits = [np.asarray(x, dtype=float) for x in
+        (positions, inward_normals, center_of_mass, friction, required_force,
+         position_jacobian, effort_limits)]
+    count = len(p)
+    if (p.shape != (count, 3) or n.shape != p.shape or center.shape != (3,)
+            or mu.shape != (count,) or force.shape != (3,) or jac.shape != (count, 3, len(limits))
+            or not all(np.isfinite(x).all() for x in (p, n, center, mu, force, jac, limits))
+            or (mu <= 0).any() or (limits <= 0).any()
+            or not np.allclose(np.linalg.norm(n, axis=1), 1., atol=1e-6)):
+        raise ValueError("invalid multi-contact equilibrium geometry")
+    width = 3 * count + 1
+    equilibrium = np.zeros((6, width))
+    inequality, upper = [], []
+    for i, (point, normal) in enumerate(zip(p, n)):
+        block = slice(3*i, 3*i+3)
+        equilibrium[:3, block] = np.eye(3)
+        x, y, z = point - center
+        equilibrium[3:, block] = [[0, -z, y], [z, 0, -x], [-y, x, 0]]
+        tangent = np.cross(normal, np.eye(3)[np.argmin(abs(normal))])
+        tangent /= np.linalg.norm(tangent)
+        other = np.cross(normal, tangent)
+        for a, b in ((1,1), (1,-1), (-1,1), (-1,-1)):
+            row = np.zeros(width); row[block] = a*tangent + b*other - mu[i]*normal
+            inequality.append(row); upper.append(0.)
+        row = np.zeros(width); row[block] = -normal
+        inequality.append(row); upper.append(-minimum_normal_force)
+        if maximum_contact_force_n is not None:
+            limit = float(maximum_contact_force_n[i])
+            if not math.isfinite(limit) or limit <= 0:
+                raise ValueError("invalid contact force capability")
+            # Inscribed octahedron bounds the Euclidean force magnitude.
+            for sx in (-1.,1.):
+                for sy in (-1.,1.):
+                    for sz in (-1.,1.):
+                        row=np.zeros(width); row[block]=[sx,sy,sz]
+                        inequality.append(row); upper.append(limit)
+    for j, limit in enumerate(limits):
+        for sign in (-1., 1.):
+            row = np.r_[sign * jac[:, :, j].ravel(), -limit]
+            inequality.append(row); upper.append(0.)
+    objective = np.r_[1e-7*n.ravel(), 1.]
+    rhs = np.r_[force, np.zeros(3)]
+    result = linprog(objective, A_ub=np.asarray(inequality), b_ub=np.asarray(upper),
+        A_eq=equilibrium, b_eq=rhs,
+        bounds=[(None, None)]*(width-1)+[(0., maximum_utilization)], method='highs')
+    if not result.success:
+        raise ValueError("contact preload infeasible: multi-contact force/moment equilibrium")
+    residual = float(np.max(np.abs(equilibrium @ result.x - rhs)))
+    if residual > 1e-6 or np.max(np.asarray(inequality) @ result.x - upper) > 1e-6:
+        raise ValueError("contact preload infeasible: equilibrium solver residual")
+    return result.x[:-1].reshape(count, 3), residual
 
 
 def _minimum_peak_utilization_force_allocation(
@@ -328,10 +484,16 @@ def _minimum_peak_utilization_force_allocation(
     peak_effort_limit_nm: np.ndarray,
     required_support_force_n: float,
     minimum_anchor_force_fraction: float,
+    internal_wrench: np.ndarray | None = None,
 ) -> np.ndarray:
     from scipy.optimize import linprog
 
     anchor_count, joint_count = jacobian.shape
+    if internal_wrench is not None:
+        internal_wrench = np.asarray(internal_wrench, dtype=float)
+        if (internal_wrench.ndim != 2 or internal_wrench.shape[1] != anchor_count
+                or not np.isfinite(internal_wrench).all()):
+            raise ValueError("invalid internal squeeze wrench matrix")
     # Variables are per-anchor normal force followed by peak utilization.
     objective = np.zeros(anchor_count + 1, dtype=float)
     objective[-1] = 1.0
@@ -357,6 +519,8 @@ def _minimum_peak_utilization_force_allocation(
         objective,
         A_ub=np.stack(rows),
         b_ub=np.asarray(upper, dtype=float),
+        A_eq=None if internal_wrench is None else np.c_[internal_wrench, np.zeros(len(internal_wrench))],
+        b_eq=None if internal_wrench is None else np.zeros(len(internal_wrench)),
         bounds=[(minimum_force, None)] * anchor_count + [(0.0, None)],
         method="highs",
     )

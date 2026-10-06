@@ -53,7 +53,7 @@ from amsrr.schemas.runtime import (
 
 ARTICULATED_REACHABILITY_VERSION = "articulated_reachability_v1"
 ARTICULATED_IK_TEACHER_VERSION = (
-    "articulated_contact_ik_teacher_v3_feasibility_bootstrap"
+    "articulated_contact_ik_teacher_v4_bounded_native_multicontact"
 )
 CENTROIDAL_POSTURE_IK_VERSION = "centroidal_posture_ik_v2_feasibility_bootstrap"
 
@@ -275,7 +275,103 @@ class ArticulatedContactIKSolver:
         self.kinematics = kinematics or WholeStructureKinematics()
         self._rigid_body_builder = RigidBodyControlModelBuilder()
 
-    def solve(
+    def solve(self, *, morphology, assignments, candidates,
+              initial_joint_positions_rad=None, initial_base_pose_world=None):
+        active = [a for a in assignments if a.schedule_state in _ACTIVE_CONTACT_STATES]
+        if len(active) > 2:
+            return self._solve_multiple_contacts(morphology=morphology,
+                assignments=active, candidates=candidates,
+                initial_joint_positions_rad=initial_joint_positions_rad,
+                initial_base_pose_world=initial_base_pose_world)
+        return self._solve(morphology=morphology, assignments=assignments,
+            candidates=candidates, initial_joint_positions_rad=initial_joint_positions_rad,
+            initial_base_pose_world=initial_base_pose_world)
+
+    def _solve_multiple_contacts(self, *, morphology, assignments, candidates,
+                                 initial_joint_positions_rad, initial_base_pose_world):
+        """Simultaneous bounded IK, using native FK and four fixed yaw seeds.
+
+        All requested points and normals are checked again with the independent
+        whole-structure FK. This only initializes contact posture; existing path,
+        collision, load and actuator admission still apply afterward.
+        """
+        import numpy as np
+        from scipy.optimize import least_squares
+        from scipy.spatial.transform import Rotation
+        from amsrr.feasibility.order9_native_posture_ik import CppWholeStructureKinematics
+        assignments = sorted(assignments, key=lambda a: a.anchor_id)
+        if len({a.anchor_id for a in assignments}) != len(assignments):
+            raise SchemaValidationError('contact IK requires distinct anchors')
+        selected = [candidates[a.candidate_id] for a in assignments]
+        if any(a.anchor_id != c.anchor_id for a,c in zip(assignments,selected)):
+            raise SchemaValidationError('contact IK assignment/anchor mismatch')
+        references = resolve_mesh_backed_anchor_references(morphology, self.physical_model,
+            [a.anchor_id for a in assignments])
+        ids = ordered_global_dock_joint_ids(morphology,self.physical_model)
+        limits = _joint_limits_with_normalized_reserve(
+            _global_joint_limits(morphology,self.physical_model,ids),
+            self.config.minimum_normalized_joint_limit_reserve)
+        lo=np.array([limits[j][0] for j in ids]); hi=np.array([limits[j][1] for j in ids])
+        q0=np.clip([(initial_joint_positions_rad or {}).get(j,0.) for j in ids],lo,hi)
+        if not hasattr(self,'_multi_kinematics'):
+            self._multi_kinematics=CppWholeStructureKinematics(self.physical_model)
+        fk=self._multi_kinematics.bind_centroidal_anchor_fk(morphology,references,ids)
+        target=np.array([c.contact_pose_world[:3] for c in selected])
+        normals=-np.array([c.normal_world for c in selected]);normals/=np.linalg.norm(normals,axis=1,keepdims=True)
+        initial_rotation=Rotation.from_quat((initial_base_pose_world or _IDENTITY_POSE)[3:])
+        rotation_width=1 if self.config.preserve_base_tilt else 3
+        count=len(ids)
+        lower=np.r_[lo,np.full(rotation_width,-np.pi),np.full(3,-np.inf)]
+        upper=np.r_[hi,np.full(rotation_width,np.pi),np.full(3,np.inf)]
+        def values(x):
+            rotation_vector=np.array([0.,0.,x[count]]) if rotation_width==1 else x[count:count+3]
+            rotation=Rotation.from_rotvec(rotation_vector)*initial_rotation
+            positions,rotations=fk(x[None,:count])
+            return (positions[0]@rotation.as_matrix().T+x[-3:],
+                    (rotation.as_matrix()@rotations[0])[:,:,0],rotation)
+        def residual(x):
+            points,axes,_=values(x)
+            return np.r_[(points-target).ravel()/self.config.contact_position_tolerance_m,
+                (axes-normals).ravel()/self.config.contact_normal_tolerance_rad,
+                .001*(x[:count]-q0),.01*x[count:count+rotation_width]]
+        best=None
+        local,_=fk(q0[None])
+        for yaw in (0.,np.pi/2,-np.pi/2,np.pi-1e-8):
+            angle=np.array([yaw]) if rotation_width==1 else np.array([0.,0.,yaw])
+            rotation=Rotation.from_rotvec([0.,0.,yaw])*initial_rotation
+            center=target.mean(0)-rotation.apply(local[0]).mean(0)
+            initial=np.r_[q0,angle,center]
+            fit=least_squares(residual,np.clip(initial,lower+1e-10,upper-1e-10),
+                bounds=(lower,upper),max_nfev=self.config.maximum_iterations,
+                ftol=1e-9,xtol=1e-9,gtol=1e-9)
+            points,axes,rotation=values(fit.x)
+            error=float(np.max(np.linalg.norm(points-target,axis=-1)))
+            normal_error=float(np.max(np.arccos(np.clip((axes*normals).sum(-1),-1.,1.))))
+            score=error/self.config.contact_position_tolerance_m+normal_error/self.config.contact_normal_tolerance_rad
+            if best is None or score<best[0]: best=(score,fit,rotation)
+            if error<=self.config.contact_position_tolerance_m and normal_error<=self.config.contact_normal_tolerance_rad:
+                break
+        _,fit,rotation=best
+        native_points,native_axes,_=values(fit.x)
+        q=dict(zip(ids,fit.x[:count].tolist()))
+        centroidal=(*fit.x[-3:].tolist(),*rotation.as_quat().tolist())
+        base=base_pose_for_centroidal_target(morphology,self.physical_model,q,
+            centroidal[:3],centroidal[3:],kinematics=self.kinematics, rigid_body_builder=self._rigid_body_builder)
+        checked=self.kinematics.forward(morphology,self.physical_model,q,base,references)
+        points=np.array([checked.anchor_poses_world[a.anchor_id][:3] for a in assignments])
+        axes=np.array([_pose_x_axis(checked.anchor_poses_world[a.anchor_id]) for a in assignments])
+        if (not np.allclose(points,native_points,atol=1e-6,rtol=0)
+                or not np.allclose(axes,native_axes,atol=1e-6,rtol=0)):
+            raise RuntimeError('multi-contact native/independent FK mismatch')
+        error=float(np.max(np.linalg.norm(points-target,axis=-1)))
+        normal_error=float(np.max(np.arccos(np.clip((axes*normals).sum(-1),-1.,1.))))
+        return ArticulatedIKSolution(
+            feasible=error<=self.config.contact_position_tolerance_m and normal_error<=self.config.contact_normal_tolerance_rad,
+            joint_positions_rad=q,base_pose_world=base,centroidal_pose_world=centroidal,
+            anchor_poses_world=dict(checked.anchor_poses_world),maximum_position_error_m=error,
+            maximum_normal_error_rad=normal_error,iterations=fit.nfev)
+
+    def _solve(
         self,
         *,
         morphology: MorphologyGraph,
@@ -513,7 +609,7 @@ class ArticulatedContactIKSolver:
                     pitch_joint_regularization_weight=0.0,
                 ),
                 kinematics=self.kinematics,
-            ).solve(
+            )._solve(
                 morphology=morphology,
                 assignments=assignments,
                 candidates=candidates,
@@ -521,7 +617,7 @@ class ArticulatedContactIKSolver:
                 initial_base_pose_world=initial_base_pose_world,
             )
             if bootstrap.feasible:
-                return self.solve(
+                return self._solve(
                     morphology=morphology,
                     assignments=assignments,
                     candidates=candidates,
@@ -696,6 +792,7 @@ class CentroidalPostureIKSolver:
                 tuple(float(value) for value in centroidal_pose_world[:3]),
                 tuple(float(value) for value in centroidal_pose_world[3:7]),
                 kinematics=self.kinematics,
+                rigid_body_builder=self._rigid_body_builder,
             )
             result = self.kinematics.forward(
                 morphology,
@@ -897,6 +994,7 @@ class CentroidalPostureIKSolver:
             tuple(float(value) for value in centroidal_pose_world[:3]),
             tuple(float(value) for value in centroidal_pose_world[3:7]),
             kinematics=self.kinematics,
+            rigid_body_builder=self._rigid_body_builder,
         )
         result = self.kinematics.forward(
             morphology,
@@ -1026,6 +1124,7 @@ class CentroidalPostureIKSolver:
             tuple(float(value) for value in centroidal_pose_world[:3]),
             tuple(float(value) for value in centroidal_pose_world[3:7]),
             kinematics=self.kinematics,
+            rigid_body_builder=self._rigid_body_builder,
         )
         best_q = dict(current_q)
         best_objective = math.inf
@@ -1199,6 +1298,7 @@ class CentroidalPostureIKSolver:
                 tuple(float(value) for value in centroidal_pose_world[:3]),
                 tuple(float(value) for value in centroidal_pose_world[3:7]),
                 kinematics=self.kinematics,
+                rigid_body_builder=self._rigid_body_builder,
             )
             perturbed = self.kinematics.forward(
                 morphology,
@@ -1481,6 +1581,7 @@ def base_pose_for_centroidal_target(
     body_orientation_world: tuple[float, float, float, float],
     *,
     kinematics: WholeStructureKinematics | None = None,
+    rigid_body_builder: RigidBodyControlModelBuilder | None = None,
 ) -> Pose7D:
     """Recover the base-root pose whose assembled CoM equals the target."""
 
@@ -1504,7 +1605,7 @@ def base_pose_for_centroidal_target(
         physical_model,
         joint_positions_rad,
         fk.module_root_poses_world,
-        RigidBodyControlModelBuilder(),
+        rigid_body_builder if rigid_body_builder is not None else RigidBodyControlModelBuilder(),
     )
     return (
         float(com_pos_world[0]) - actual[0],
@@ -1816,7 +1917,7 @@ def _centroidal_pose(
         controller_status=ControllerStatus(status="ok", qp_feasible=True),
         task_progress=TaskProgressState(),
     )
-    return builder.build(morphology, physical_model, observation).body_pose_world
+    return builder.body_pose(morphology, physical_model, observation)
 
 
 def _initial_base_pose(

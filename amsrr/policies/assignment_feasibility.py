@@ -10,6 +10,7 @@ CONTACT_CANDIDATE_PAIR_CONFLICT_CODE = "E_CONTACT_CANDIDATE_PAIR_CONFLICT"
 CONTACT_CANDIDATE_UNARY_INVALID_CODE = "E_CONTACT_CANDIDATE_UNARY_INVALID"
 CONTACT_GROUP_INSUFFICIENT_CODE = "E_CONTACT_GROUP_INSUFFICIENT"
 COLLISION_MARGIN_FAIL_CODE = "E_COLLISION_MARGIN_FAIL"
+DEFAULT_OPPOSING_NORMAL_DOT_THRESHOLD = -0.25
 
 
 def assignment_key_from_assignments(
@@ -73,7 +74,7 @@ def evaluate_selected_assignment_feasibility(
     min_required_friction: float = 0.05,
     min_collision_margin_m: float | None = None,
     collision_margin_threshold_m: float = 0.0,
-    opposing_normal_dot_threshold: float = -0.25,
+    opposing_normal_dot_threshold: float = DEFAULT_OPPOSING_NORMAL_DOT_THRESHOLD,
     active_phase_id: int | None = None,
     update_cache: bool = True,
 ) -> AssignmentFeasibilityResult:

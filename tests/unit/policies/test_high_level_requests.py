@@ -41,6 +41,39 @@ from amsrr.schemas.runtime import (
 from amsrr.schemas.task_spec import TaskSpec
 
 
+def test_catalog_budget_preserves_current_uncommitted_choices(request_scene):
+    from amsrr.policies.request_actor_critic import RequestActorCritic
+    scene, task, physical, execution = request_scene
+    full = RequestCatalogBuilder(maximum_entries=10000).build(
+        scene, task_spec=task, physical_model=physical, execution_state=execution)
+    expected = {e.request.stable_hash() for e in full.catalog.entries
+                if e.phase_id == execution.phase_id and e.request.transition_id is None}
+    assert expected
+    bounded = RequestCatalogBuilder(maximum_entries=len(expected)).build(
+        scene, task_spec=task, physical_model=physical, execution_state=execution)
+    assert {e.request.stable_hash() for e in bounded.catalog.entries} == expected
+    assert bool(RequestActorCritic().encode(bounded)['mask'].all())
+
+
+def test_snapshot_hash_matches_explicit_serialization_and_recomputes_after_mutation(request_scene):
+    from amsrr.utils.hashing import stable_hash
+    context = decision(request_scene)
+    def reference():
+        fields = dict(irg=context.scene.irg, envelope=context.scene.interaction_envelope,
+            morphology=context.scene.morphology_graph, candidates=context.scene.contact_candidate_set,
+            task=context.task_spec, model=context.physical_model, observation=context.observation,
+            execution=context.execution_state, encoder_runtime=context.scene.runtime_observation,
+            previous_outcome=context.previous_outcome)
+        return stable_hash({key: value.to_dict() if value is not None else None
+                            for key, value in fields.items()})
+    original = context.compute_snapshot_hash()
+    assert original == reference()
+    context.scene.runtime_observation.time_s += .125
+    assert context.compute_snapshot_hash() == reference() != original
+    with pytest.raises(SchemaValidationError, match='modified'):
+        context.validate_snapshot()
+
+
 @pytest.fixture
 def request_scene(grasp_carry_dict):
     task = TaskSpec.from_dict(grasp_carry_dict)

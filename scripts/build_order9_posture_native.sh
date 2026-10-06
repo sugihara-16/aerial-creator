@@ -4,15 +4,10 @@ set -euo pipefail
 repository_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 source_path="${repository_root}/amsrr/feasibility/native/order9_posture_native.cpp"
 output_dir="${repository_root}/build/order9_posture_native"
-if command -v python3-config >/dev/null 2>&1; then
-  python_config=python3-config
-elif command -v python3.10-config >/dev/null 2>&1; then
-  python_config=python3.10-config
-else
-  echo "Python development config helper was not found" >&2
-  exit 1
-fi
 python_executable="${PYTHON:-python3}"
+# Compile against the interpreter that will load the extension. A system
+# python3-config may describe a different ABI from the selected environment.
+python_include="$("${python_executable}" -c 'import sysconfig; print(sysconfig.get_path("include"))')"
 pybind11_include="$(
   "${python_executable}" - <<'PY'
 from pathlib import Path
@@ -33,7 +28,7 @@ else:
     print(pybind11.get_include())
 PY
 )"
-extension_suffix="$("${python_config}" --extension-suffix)"
+extension_suffix="$("${python_executable}" -c 'import sysconfig; print(sysconfig.get_config_var("EXT_SUFFIX"))')"
 mkdir -p "${output_dir}"
 
 g++ \
@@ -46,7 +41,7 @@ g++ \
   -fPIC \
   -shared \
   -std=c++17 \
-  $("${python_config}" --includes) \
+  -I"${python_include}" \
   -I"${pybind11_include}" \
   -I/usr/include/eigen3 \
   "${source_path}" \

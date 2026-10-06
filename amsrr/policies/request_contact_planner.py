@@ -140,6 +140,11 @@ def complete_request_phases(grasp_phases, task):
         task_spec=task,
         lift_clearance_m=0.1,
         retreat_offset_m=0.1,
+        phase_duration_s={
+            "approach": grasp_phases["approach"].horizon_s,
+            "contact_acquisition": grasp_phases["contact_acquisition"].horizon_s,
+            **{phase: 3.0 for phase in ("lift", "transport", "place", "release", "retreat", "settle")},
+        },
     )
     contact = grasp_phases["contact_acquisition"]
     source = contact.knots[-1].object_targets[0].pose_target_world
@@ -169,8 +174,12 @@ class _PregraspGoalInitializationError(ValueError):
     """The nominal open-grasp intermediate target has no IK solution."""
 
 
+class _PregraspLocalRouteError(_PregraspGoalInitializationError):
+    """A safe open-grasp pose has no certified local route to contact."""
+
+
 def _plan_with_pregrasp_clearance(context, request, **kwargs):
-    """Shorten only an unreachable open-grasp intermediate target, finitely.
+    """Shorten an unreachable or locally disconnected open-grasp target.
 
     Every candidate still traverses the unchanged full collision/path checks.
     This neither changes the selected contact nor relaxes any safety margin.
@@ -193,10 +202,11 @@ def _plan_with_pregrasp_clearance(context, request, **kwargs):
             continue
         if index:
             result.provenance["pregrasp_clearance_retry"] = dict(
-                version="bounded_pregrasp_clearance_v1", attempts=index + 1,
+                version="bounded_pregrasp_clearance_v2", attempts=index + 1,
                 nominal_clearance_m=nominal, accepted_clearance_m=attempt["pregrasp_clearance_m"],
                 maximum_attempts=3, collision_margin_unchanged=True,
             )
+            result.provenance["planning_seconds"] = time.monotonic() - started
         return result
     raise failure
 
@@ -289,6 +299,71 @@ def _plan_request_geometry(
                     f"position={solution.maximum_position_error_m:.6g},"
                     f"normal={solution.maximum_normal_error_rad:.6g}"
                 )
+            # Resolve the contact endpoint before constructing its pregrasp.
+            # Refining it only after approach can select a different redundant
+            # posture branch and leave no short collision-free acquisition.
+            from amsrr.training.order9_posture_resolver import (
+                Order9PostureTrajectoryResolver, Order9PostureResolverConfig)
+            from amsrr.feasibility.articulated_reachability import resolve_mesh_backed_anchor_references
+            from amsrr.training.order9_articulated_teacher import _free_pose_contact_collision_goal
+            if not hasattr(self, "_collision_resolver"):
+                self._collision_resolver = Order9PostureTrajectoryResolver(physical,
+                    config=Order9PostureResolverConfig(collision_margin_m=.005),
+                    collision_object=build_order9_c3_posture_collision_object(task),
+                    prefer_native_solver=True, require_native_solver=True)
+            solver = self._collision_resolver.ik_solver
+            obstacle = build_order9_c3_posture_collision_object(task)
+            anchor_ids = tuple(sorted(solution.anchor_poses_world))
+            refs = resolve_mesh_backed_anchor_references(scene.morphology_graph, physical, anchor_ids)
+            objects = [o for o in task.scene.objects if o.object_id in observed]
+            object_pose = objects[0].pose_world
+            scenes = [("object", object_pose, obstacle.size_m, anchor_ids),
+                *[(b.box_id, b.pose_world, b.size_m, ()) for b in obstacle.environment_boxes]]
+            accepted = True
+            for _, pose, size, allowed in scenes:
+                solver.set_collision_scene(morphology=scene.morphology_graph,
+                    object_pose_world=pose, object_size_m=size, allowed_anchor_ids=allowed)
+                accepted &= solver.check_configuration(morphology=scene.morphology_graph,
+                    centroidal_pose_world=solution.centroidal_pose_world,
+                    joint_positions_rad=solution.joint_positions_rad, exact=False,
+                    margin_m=.005, ground_plane_z_m=obstacle.ground_plane_z_m)["accepted"]
+            if not accepted and not self.config.preserve_base_tilt:
+                goal = _free_pose_contact_collision_goal(morphology=scene.morphology_graph,
+                    physical_model=physical, solver=solver, references=refs,
+                    desired_q=solution.joint_positions_rad,
+                    desired_centroidal_pose=solution.centroidal_pose_world,
+                    anchor_targets=solution.anchor_poses_world, scenes=scenes,
+                    ground_plane_z_m=obstacle.ground_plane_z_m)
+                if goal is not None:
+                    fk = solver.kinematics.forward(scene.morphology_graph, physical,
+                        goal.joint_positions_rad, goal.base_pose_world, refs)
+                    from amsrr.controllers.rigid_body_model import RigidBodyControlModelBuilder
+                    from amsrr.training.order9_articulated_teacher import _centroidal_pose_from_fk
+                    centroidal = _centroidal_pose_from_fk(context=scene, physical_model=physical,
+                        q=goal.joint_positions_rad, module_root_poses_world=fk.module_root_poses_world,
+                        source_observation=observation, builder=RigidBodyControlModelBuilder())
+                    import numpy as np
+                    from scipy.spatial.transform import Rotation
+                    position_errors, normal_errors = [], []
+                    for assignment in kwargs["assignments"]:
+                        if assignment.anchor_id not in fk.anchor_poses_world:
+                            continue
+                        candidate = kwargs["candidates"][assignment.candidate_id]
+                        actual = fk.anchor_poses_world[assignment.anchor_id]
+                        position_errors.append(float(np.linalg.norm(np.array(actual[:3]) - candidate.contact_pose_world[:3])))
+                        target_normal = -np.asarray(candidate.normal_world)
+                        target_normal /= np.linalg.norm(target_normal)
+                        actual_normal = Rotation.from_quat(actual[3:]).as_matrix()[:, 0]
+                        normal_errors.append(float(np.arccos(np.clip(actual_normal @ target_normal, -1., 1.))))
+                    position_error, normal_error = max(position_errors), max(normal_errors)
+                    if (position_error > self.config.contact_position_tolerance_m
+                            or normal_error > self.config.contact_normal_tolerance_rad):
+                        raise _ContactGoalInitializationError("collision refinement violated original candidate point/normal tolerance")
+                    solution = replace(solution, maximum_position_error_m=position_error,
+                        maximum_normal_error_rad=normal_error, joint_positions_rad=goal.joint_positions_rad,
+                        base_pose_world=goal.base_pose_world, centroidal_pose_world=centroidal,
+                        anchor_poses_world=fk.anchor_poses_world,
+                        solver_version=solution.solver_version + ":collision_clear_free_pose_v1")
             return solution
 
     teacher_config = Order9ArticulatedTeacherConfig(
@@ -321,6 +396,8 @@ def _plan_request_geometry(
                     configuration_goal_joint_seed_positions_rad=joint_seed,
                 )
             except SchemaValidationError as error:
+                if "bounded deterministic local contact search exhausted" in str(error):
+                    raise _PregraspLocalRouteError(str(error)) from error
                 if "could not resolve its collision-clear pregrasp configuration" not in str(error):
                     raise
                 raise _PregraspGoalInitializationError(str(error)) from error

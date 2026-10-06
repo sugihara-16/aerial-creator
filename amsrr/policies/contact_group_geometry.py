@@ -39,6 +39,20 @@ LOCAL_COLUMNS = (
     *range(75, 88),
 )
 CONTACT_FEATURE_DIM = len(LOCAL_COLUMNS)
+CONTACT_NUMERIC_FEATURE_CONTRACT = "physical_scores_without_ids_or_catalog_counts_v1"
+
+
+def normalize_contact_features(candidates, mean, scale):
+    """Keep checkpoint width while excluding proposal enumeration statistics.
+
+    Catalog membership/coverage counts depend on the sampling budget, not the
+    quality of a physical contact. Mask after normalization so old checkpoint
+    means cannot reintroduce these nonphysical signals.
+    """
+    local = (candidates - mean) / scale
+    local = local.clone()
+    local[..., [LOCAL_COLUMNS.index(17), LOCAL_COLUMNS.index(18)]] = 0
+    return local
 
 
 def relative_pose_features(parent, child):
@@ -100,6 +114,11 @@ def observed_anchor_poses(context):
 def contact_geometry(context):
     """Return [candidate,55] local features and [request,candidate] membership."""
     context.validate_snapshot()
+    return _contact_geometry(context)
+
+
+def _contact_geometry(context):
+    """Calculate geometry for an already validated, unchanged context."""
     if context.execution_state.plan_id is None and any(
         key.startswith("r1_")
         for candidate in context.scene.contact_candidate_set.candidates

@@ -331,7 +331,11 @@ class ContactCandidateEncoder:
         *,
         candidate_index: int,
     ) -> list[float]:
-        score_values = [float(value) for value in candidate.candidate_scores.values()]
+        # Port/module IDs are membership metadata, not ordered quality scores.
+        score_values = [
+            float(value) for key, value in candidate.candidate_scores.items()
+            if not key.endswith("_id")
+        ]
         conflict_row = candidate_set.pairwise_conflict_matrix[candidate_index]
         compatibility_row = candidate_set.pairwise_compatibility_score[candidate_index]
         denominator = float(max(1, len(candidate_set.candidates) - 1))

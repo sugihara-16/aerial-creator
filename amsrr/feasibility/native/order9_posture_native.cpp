@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <cmath>
 #include <fstream>
 #include <limits>
@@ -379,6 +380,12 @@ struct CollisionMetrics {
   int broad_phase_pruned_count = 0;
 };
 
+struct CachedRobotPairMetric {
+  double clearance;
+  bool colliding;
+  bool broad_phase_safe;
+};
+
 template <typename T, int Flags>
 void require_rank(
     const py::array_t<T, Flags>& value, int rank, const char* name) {
@@ -558,6 +565,7 @@ class Kernel {
     auto centers = proxy_center.unchecked<2>();
     auto half = proxy_half_extent.unchecked<2>();
     auto scales = mesh_scale.unchecked<2>();
+    collision_configuration_valid_ = false;
     collision_geometry_.clear();
     nominal_same_module_collision_.clear();
     collision_pair_cache_.clear();
@@ -650,6 +658,7 @@ class Kernel {
   void configure_nominal_collision_pairs(
       py::array_t<int, py::array::c_style | py::array::forcecast>
           collision_pairs) {
+    collision_configuration_valid_ = false;
     require_rank(collision_pairs, 2, "collision_pairs");
     if (collision_pairs.shape(1) != 2) {
       throw std::invalid_argument(
@@ -1272,14 +1281,41 @@ class Kernel {
     const Transform centroidal{
         read_matrix(centroidal_r.data()),
         read_vector(centroidal_p.data())};
-    const Evaluation evaluation =
-        evaluate_recentered(q_values, centroidal, {}).second;
-    const CollisionFrameCache frames = collision_frame_cache(evaluation, active_collision_scene_, exact);
+    // Consecutive object/support checks share exactly the same robot state.
+    // Preserve arithmetic and reports; reuse only bit-identical inputs. Scene
+    // pose, contact permissions and ground checks are always applied afresh.
+    const bool same_configuration = collision_configuration_valid_ &&
+        collision_configuration_exact_ == exact &&
+        collision_configuration_q_.size() == q_values.size() &&
+        std::memcmp(collision_configuration_q_.data(), q_values.data(),
+                    sizeof(double) * q_values.size()) == 0 &&
+        std::memcmp(collision_configuration_pose_.rotation.data(), centroidal.rotation.data(),
+                    sizeof(double) * 9) == 0 &&
+        std::memcmp(collision_configuration_pose_.translation.data(), centroidal.translation.data(),
+                    sizeof(double) * 3) == 0;
+    if (!same_configuration) {
+      collision_configuration_evaluation_ = evaluate_recentered(q_values, centroidal, {}).second;
+      collision_configuration_frames_ = collision_frame_cache(
+          collision_configuration_evaluation_, active_collision_scene_, exact);
+      collision_configuration_q_ = q_values;
+      collision_configuration_pose_ = centroidal;
+      collision_configuration_exact_ = exact;
+      collision_configuration_valid_ = true;
+      collision_robot_metrics_.clear();
+    }
+    if (collision_configuration_margin_ != margin_m) {
+      collision_robot_metrics_.clear();
+      collision_configuration_margin_ = margin_m;
+    }
+    collision_configuration_frames_.object_aabb = box_world_aabb(
+        active_collision_scene_.object_pose, 0.5 * active_collision_scene_.object_size);
+    const Evaluation& evaluation = collision_configuration_evaluation_;
+    const CollisionFrameCache& frames = collision_configuration_frames_;
     const CollisionMetrics metrics = collision_metrics(
         evaluation,
         active_collision_scene_,
         exact,
-        margin_m, &frames);
+        margin_m, &frames, &collision_robot_metrics_);
     const bool ground_plane_enabled = std::isfinite(ground_plane_z_m);
     double minimum_ground_clearance_m =
         std::numeric_limits<double>::infinity();
@@ -1890,13 +1926,15 @@ class Kernel {
       const CollisionScene& scene,
       bool exact,
       double activation_distance,
-      const CollisionFrameCache* prepared_frames = nullptr) const {
+      const CollisionFrameCache* prepared_frames = nullptr,
+      std::vector<CachedRobotPairMetric>* robot_cache = nullptr) const {
     CollisionMetrics output;
     output.clearances.reserve(scene.pairs.size());
     output.colliding.reserve(scene.pairs.size());
     const CollisionFrameCache local_frames = prepared_frames == nullptr
         ? collision_frame_cache(evaluation, scene, exact) : CollisionFrameCache{};
     const CollisionFrameCache& frames = prepared_frames == nullptr ? local_frames : *prepared_frames;
+    std::size_t robot_index = 0;
     for (const CollisionPair& pair : scene.pairs) {
       if (!exact && !pair.proxy_enabled) {
         output.clearances.push_back(
@@ -1905,13 +1943,15 @@ class Kernel {
         continue;
       }
       ++output.evaluated_count;
-      const double broad_phase_clearance =
+      const bool robot_pair = pair.second_kind == CollisionTargetKind::kRobot;
+      const bool reuse = robot_pair && robot_cache != nullptr && robot_index < robot_cache->size();
+      const double broad_phase_clearance = reuse ? 0.0 :
           cached_pair_aabb_clearance(pair, frames);
-      const bool broad_phase_safe =
+      const bool broad_phase_safe = reuse ? (*robot_cache)[robot_index].broad_phase_safe :
           exact
               ? broad_phase_clearance > 0.0
               : broad_phase_clearance > activation_distance;
-      const double clearance =
+      const double clearance = reuse ? (*robot_cache)[robot_index].clearance :
           broad_phase_safe
               ? broad_phase_clearance
               : cached_pair_clearance(
@@ -1922,9 +1962,13 @@ class Kernel {
         ++output.narrow_phase_count;
       }
       output.clearances.push_back(clearance);
-      const bool colliding =
+      const bool colliding = reuse ? (*robot_cache)[robot_index].colliding :
           exact && clearance <= 0.0 &&
           pair_collides(evaluation, scene, pair, true);
+      if (robot_pair && robot_cache != nullptr) {
+        if (!reuse) robot_cache->push_back({clearance, colliding, broad_phase_safe});
+        ++robot_index;
+      }
       output.colliding.push_back(colliding);
       output.minimum = std::min(output.minimum, clearance);
       if (clearance < activation_distance) {
@@ -1937,10 +1981,7 @@ class Kernel {
     return output;
   }
 
-  Evaluation evaluate_one(
-      const Eigen::VectorXd& q,
-      const Transform& base,
-      const std::vector<AnchorSpec>& anchors) const {
+  std::vector<Transform> evaluate_local_links(const Eigen::VectorXd& q) const {
     const std::size_t local_count =
         static_cast<std::size_t>(module_count_ * link_count_);
     std::vector<Transform> local(local_count);
@@ -1970,6 +2011,19 @@ class Kernel {
       }
     }
 
+    return local;
+  }
+
+  Evaluation evaluate_one(
+      const Eigen::VectorXd& q,
+      const Transform& base,
+      const std::vector<AnchorSpec>& anchors,
+      const std::vector<Transform>* prepared_local = nullptr) const {
+    const std::vector<Transform> computed_local = prepared_local == nullptr
+        ? evaluate_local_links(q) : std::vector<Transform>{};
+    const std::vector<Transform>& local = prepared_local == nullptr
+        ? computed_local : *prepared_local;
+    const std::size_t local_count = local.size();
     Evaluation output;
     output.roots.assign(module_count_, Transform{});
     output.roots[base_module_] = base;
@@ -2014,11 +2068,14 @@ class Kernel {
       const std::vector<AnchorSpec>& anchors) const {
     Transform zero_base;
     zero_base.rotation = centroidal.rotation;
-    Evaluation zero = evaluate_one(q, zero_base, anchors);
+    // Recentring changes only the world root pose, never local joint geometry.
+    // Keep both world evaluations and all arithmetic in their original order.
+    const std::vector<Transform> local = evaluate_local_links(q);
+    Evaluation zero = evaluate_one(q, zero_base, anchors, &local);
     Transform base;
     base.rotation = centroidal.rotation;
     base.translation = centroidal.translation - zero.com;
-    return {base, evaluate_one(q, base, anchors)};
+    return {base, evaluate_one(q, base, anchors, &local)};
   }
 
   static Vector3 attitude_error(
@@ -2685,6 +2742,14 @@ class Kernel {
   std::vector<Vector3> link_centers_;
   std::vector<CollisionGeometry> collision_geometry_;
   CollisionScene active_collision_scene_;
+  mutable bool collision_configuration_valid_ = false;
+  mutable bool collision_configuration_exact_ = false;
+  mutable double collision_configuration_margin_ = std::numeric_limits<double>::quiet_NaN();
+  mutable Eigen::VectorXd collision_configuration_q_;
+  mutable Transform collision_configuration_pose_;
+  mutable Evaluation collision_configuration_evaluation_;
+  mutable CollisionFrameCache collision_configuration_frames_;
+  mutable std::vector<CachedRobotPairMetric> collision_robot_metrics_;
   mutable std::unordered_map<std::uint64_t, bool>
       nominal_same_module_collision_;
   std::unordered_map<std::string, std::vector<CollisionPair>>
@@ -2769,7 +2834,10 @@ py::array_t<T> virtual_thrust_admm(
     py::array_t<T, py::array::c_style | py::array::forcecast> rhs_array,
     py::array_t<T, py::array::c_style | py::array::forcecast> previous_array,
     py::array_t<T, py::array::c_style | py::array::forcecast> bounds_array,
-    T penalty, int iterations) {
+    T penalty, int iterations,
+    py::array_t<T, py::array::c_style | py::array::forcecast> joint_matrix,
+    py::array_t<T, py::array::c_style | py::array::forcecast> joint_lower,
+    py::array_t<T, py::array::c_style | py::array::forcecast> joint_upper) {
   using Vec = Eigen::Matrix<T, Eigen::Dynamic, 1>;
   using Mat = Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
   using Point = Eigen::Matrix<T, 2, 1>;
@@ -2783,6 +2851,12 @@ py::array_t<T> virtual_thrust_admm(
       bounds_array.ndim() != 3 || bounds_array.shape(0) != batch ||
       bounds_array.shape(1) != rotors || bounds_array.shape(2) != 5 ||
       !(penalty > T(0)) || iterations < 1) throw std::invalid_argument("invalid native ADMM inputs");
+  if (joint_matrix.ndim() != 3 || joint_matrix.shape(0) != batch || joint_matrix.shape(2) != width
+      || joint_lower.ndim() != 2 || joint_upper.ndim() != 2
+      || joint_lower.shape(0) != batch || joint_upper.shape(0) != batch
+      || joint_lower.shape(1) != joint_matrix.shape(1) || joint_upper.shape(1) != joint_matrix.shape(1))
+    throw std::invalid_argument("invalid native ADMM joint constraints");
+  const int joints = joint_matrix.shape(1);
   py::array_t<T> output({3, batch, width});
   T* out = output.mutable_data();
   const T eps = std::numeric_limits<T>::epsilon();
@@ -2834,15 +2908,26 @@ py::array_t<T> virtual_thrust_admm(
         if (p.feasible(vertex)) p.vertices.push_back(vertex);
       }
     }
+    Eigen::Map<const Mat> c(joint_matrix.data() + env * joints * width, joints, width);
+    Eigen::Map<const Vec> low(joint_lower.data() + env * joints, joints);
+    Eigen::Map<const Vec> high(joint_upper.data() + env * joints, joints);
+    Vec joint_dual = Vec::Zero(joints), y(joints), cx(joints);
     Vec z(width), x(width), dual = Vec::Zero(width), previous_z(width), solve_rhs(width);
     for (int rotor = 0; rotor < rotors; ++rotor) z.template segment<2>(rotor*2) = polygons[rotor].project(previous.template segment<2>(rotor*2));
+    if (joints) y = (c * z).cwiseMax(low).cwiseMin(high);
     for (int k = 0; k < iterations; ++k) {
       solve_rhs = rhs + penalty * (z - dual);
+      if (joints) solve_rhs += penalty * c.transpose() * (y - joint_dual);
       x = l.template triangularView<Eigen::Lower>().solve(solve_rhs);
       l.transpose().template triangularView<Eigen::Upper>().solveInPlace(x);
       previous_z = z;
       for (int rotor = 0; rotor < rotors; ++rotor) z.template segment<2>(rotor*2) = polygons[rotor].project(x.template segment<2>(rotor*2) + dual.template segment<2>(rotor*2));
       dual = dual + x - z;
+      if (joints) {
+        cx = c * x;
+        y = (cx + joint_dual).cwiseMax(low).cwiseMin(high);
+        joint_dual += cx - y;
+      }
     }
     Eigen::Map<Vec>(out + env*width, width) = x;
     Eigen::Map<Vec>(out + batch*width + env*width, width) = z;

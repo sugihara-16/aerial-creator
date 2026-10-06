@@ -72,7 +72,8 @@ def test_base_tilt_preservation_is_explicit_and_boolean():
 
 
 @pytest.mark.parametrize('failures',[1,2])
-def test_unreachable_pregrasp_shortens_intermediate_clearance_only(monkeypatch,failures):
+@pytest.mark.parametrize('failure_kind',['goal_ik','local_route'])
+def test_unreachable_pregrasp_shortens_intermediate_clearance_only(monkeypatch,failures,failure_kind):
     calls=[];ctx=object();request=object();seed={'joint':.3};base=(0,0,1,0,0,0,1)
     def plan(c,r,**kw):
         assert c is ctx and r is request
@@ -80,7 +81,9 @@ def test_unreachable_pregrasp_shortens_intermediate_clearance_only(monkeypatch,f
         assert 'initial_ik_config' not in kw
         calls.append(kw)
         if len(calls)<=failures:
-            raise p._PregraspGoalInitializationError('unreachable open grasp')
+            error_type = (p._PregraspGoalInitializationError if failure_kind == 'goal_ik'
+                          else p._PregraspLocalRouteError)
+            raise error_type('unreachable open grasp or local route')
         return SimpleNamespace(provenance={})
     monkeypatch.setattr(p,'_plan_request_geometry',plan)
     result=p.plan_request_geometry(ctx,request,joint_seed=seed,base_seed=base,deadline_s=20)

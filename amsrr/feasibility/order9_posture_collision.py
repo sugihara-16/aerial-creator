@@ -9,6 +9,7 @@ from a hash-bound manifest and fails closed on identity mismatch.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import OrderedDict
 import hashlib
 import json
 import math
@@ -161,78 +162,68 @@ def _mesh_path(
     )
 
 
+# Cache only derived, immutable arrays, never file bytes or unchecked paths.
+# Reading and hashing each input preserves invalidation even when a mesh is
+# overwritten in place with the same size and modification time.
+_MESH_GEOMETRY_CACHE: OrderedDict = OrderedDict()
+_MESH_GEOMETRY_CACHE_SIZE = 32
+
+
+def _mesh_geometry(path: Path, scale: np.ndarray):
+    data = path.read_bytes()
+    digest = hashlib.sha256(data).hexdigest()
+    key = (digest, tuple(float(x) for x in scale))
+    cached = _MESH_GEOMETRY_CACHE.get(key)
+    if cached is not None:
+        _MESH_GEOMETRY_CACHE.move_to_end(key)
+        return digest, cached
+    if len(data) < 84:
+        raise ValueError(f"binary STL is truncated: {path}")
+    count = struct.unpack_from("<I", data, 80)[0]
+    if 84 + count * 50 != len(data):
+        raise ValueError(f"posture collision mesh must be binary STL: {path}")
+    records = np.ndarray(shape=(count,), dtype=np.dtype([
+        ("normal", "<f4", (3,)), ("vertices", "<f4", (3, 3)),
+        ("attribute", "<u2")], align=False), buffer=data, offset=84)
+    points = np.asarray(records["vertices"], dtype=np.float64).reshape(-1, 3)
+    points *= np.asarray(scale).reshape(1, 3)
+    lower, upper = points.min(axis=0), points.max(axis=0)
+    points = np.unique(points, axis=0)
+    hull = ConvexHull(points)
+    simplices = np.asarray(hull.simplices, dtype=np.int32).copy()
+    # Same orientation test, evaluated together instead of a Python loop.
+    triangles = points[simplices]
+    normals = np.cross(triangles[:, 1] - triangles[:, 0],
+                       triangles[:, 2] - triangles[:, 0])
+    flip = np.einsum("ij,ij->i", normals, hull.equations[:, :3]) < 0.0
+    simplices[flip] = simplices[flip][:, [0, 2, 1]]
+    used = np.unique(simplices)
+    remap = np.full(points.shape[0], -1, dtype=np.int32)
+    remap[used] = np.arange(used.size, dtype=np.int32)
+    values = (lower, upper, np.ascontiguousarray(points[used]),
+              np.ascontiguousarray(remap[simplices]))
+    for value in values:
+        value.setflags(write=False)
+    _MESH_GEOMETRY_CACHE[key] = values
+    while len(_MESH_GEOMETRY_CACHE) > _MESH_GEOMETRY_CACHE_SIZE:
+        _MESH_GEOMETRY_CACHE.popitem(last=False)
+    return digest, values
+
+
 def _binary_stl_bounds(
     path: Path,
     scale: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    data = path.read_bytes()
-    if len(data) < 84:
-        raise ValueError(f"binary STL is truncated: {path}")
-    triangle_count = struct.unpack_from("<I", data, 80)[0]
-    if 84 + triangle_count * 50 != len(data):
-        raise ValueError(
-            f"posture collision mesh must be binary STL: {path}"
-        )
-    records = np.ndarray(
-        shape=(triangle_count,),
-        dtype=np.dtype(
-            [
-                ("normal", "<f4", (3,)),
-                ("vertices", "<f4", (3, 3)),
-                ("attribute", "<u2"),
-            ],
-            align=False,
-        ),
-        buffer=data,
-        offset=84,
-    )
-    vertices = np.asarray(records["vertices"], dtype=np.float64)
-    vertices *= scale.reshape(1, 1, 3)
-    return (
-        np.min(vertices, axis=(0, 1)),
-        np.max(vertices, axis=(0, 1)),
-    )
+    _, values = _mesh_geometry(path, scale)
+    return values[0], values[1]
 
 
 def _binary_stl_convex_hull(
     path: Path,
     scale: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    data = path.read_bytes()
-    triangle_count = struct.unpack_from("<I", data, 80)[0]
-    records = np.ndarray(
-        shape=(triangle_count,),
-        dtype=np.dtype(
-            [
-                ("normal", "<f4", (3,)),
-                ("vertices", "<f4", (3, 3)),
-                ("attribute", "<u2"),
-            ],
-            align=False,
-        ),
-        buffer=data,
-        offset=84,
-    )
-    points = np.asarray(records["vertices"], dtype=np.float64).reshape(-1, 3)
-    points *= scale.reshape(1, 3)
-    points = np.unique(points, axis=0)
-    hull = ConvexHull(points)
-    simplices = np.asarray(hull.simplices, dtype=np.int32).copy()
-    for index, simplex in enumerate(simplices):
-        first, second, third = points[simplex]
-        normal = np.cross(second - first, third - first)
-        if float(np.dot(normal, hull.equations[index, :3])) < 0.0:
-            simplices[index, 1], simplices[index, 2] = (
-                simplices[index, 2],
-                simplices[index, 1],
-            )
-    used = np.unique(simplices)
-    remap = np.full(points.shape[0], -1, dtype=np.int32)
-    remap[used] = np.arange(used.size, dtype=np.int32)
-    return (
-        np.ascontiguousarray(points[used], dtype=np.float64),
-        np.ascontiguousarray(remap[simplices], dtype=np.int32),
-    )
+    _, values = _mesh_geometry(path, scale)
+    return values[2], values[3]
 
 
 def build_collision_geometry_arrays(
@@ -258,10 +249,6 @@ def build_collision_geometry_arrays(
         repository_root / "module_urdf",
         repository_root / "module_urdf" / "mesh",
     )
-    hull_cache: dict[
-        tuple[str, tuple[float, float, float]],
-        tuple[np.ndarray, np.ndarray],
-    ] = {}
     canonical_mesh_by_digest: dict[str, Path] = {}
     for link in root.findall("link"):
         link_id = link.attrib.get("name")
@@ -293,18 +280,8 @@ def build_collision_geometry_arrays(
                 urdf_path=urdf_path,
                 search_directories=search_directories,
             )
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            digest, (lower, upper, hull_vertices, hull_faces) = _mesh_geometry(path, scale)
             path = canonical_mesh_by_digest.setdefault(digest, path)
-            lower, upper = _binary_stl_bounds(path, scale)
-            hull_key = (
-                str(path),
-                tuple(float(value) for value in scale),
-            )
-            if hull_key not in hull_cache:
-                hull_cache[hull_key] = _binary_stl_convex_hull(
-                    path, scale
-                )
-            hull_vertices, hull_faces = hull_cache[hull_key]
             center = 0.5 * (lower + upper)
             link_ids.append(link_id)
             link_indices.append(link_index[link_id])

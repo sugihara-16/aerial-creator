@@ -214,6 +214,31 @@ def order9_branch_free_motion_baseline_update_mask(
     )
 
 
+@torch.jit.script
+def _cpu_coordinate_forces(gram: torch.Tensor, right: torch.Tensor,
+                           observable: torch.Tensor, iterations: int,
+                           maximum_force: float) -> torch.Tensor:
+    """Identical coordinate updates; stop only at a bitwise fixed point.
+
+    A complete sweep is deterministic for these fixed inputs. If its output
+    equals its input, all remaining sweeps produce exactly the same force.
+    The scripted data-dependent branch stays dynamic inside a traced caller.
+    """
+    force = torch.zeros_like(right)
+    for _ in range(iterations):
+        previous = force.clone()
+        for anchor_index in range(force.shape[-1]):
+            gram_row = gram[:, anchor_index, :]
+            diagonal = gram[:, anchor_index, anchor_index].clamp_min(1.0e-12)
+            coupled = (gram_row * force).sum(dim=-1) - diagonal * force[:, anchor_index]
+            coordinate = ((right[:, anchor_index] - coupled) / diagonal).clamp(0.0, maximum_force)
+            force[:, anchor_index] = torch.where(observable[:, anchor_index], coordinate,
+                                                torch.zeros_like(coordinate))
+        if torch.equal(force, previous) and torch.equal(torch.signbit(force), torch.signbit(previous)):
+            break
+    return force
+
+
 @dataclass(frozen=True)
 class Order9AnchorNormalForceEstimatorConfig:
     baseline_update_alpha: float = 0.10
@@ -408,22 +433,26 @@ class Order9AnchorNormalForceEstimator:
         # anchor has a much shorter force moment arm than another; the exact
         # coordinate minimizer below normalizes every anchor by its own Gram
         # diagonal and therefore retains weak-but-valid force observations.
-        force = torch.zeros_like(right)
-        for _ in range(cfg.projected_iterations):
-            for anchor_index in range(force.shape[-1]):
-                gram_row = gram[:, anchor_index, :]
-                diagonal = gram[:, anchor_index, anchor_index].clamp_min(1.0e-12)
-                coupled = (gram_row * force).sum(dim=-1) - diagonal * force[
-                    :, anchor_index
-                ]
-                coordinate = (
-                    (right[:, anchor_index] - coupled) / diagonal
-                ).clamp(0.0, cfg.maximum_normal_force_n)
-                force[:, anchor_index] = torch.where(
-                    observable[:, anchor_index],
-                    coordinate,
-                    torch.zeros_like(coordinate),
-                )
+        if gram.device.type == "cpu":
+            force = _cpu_coordinate_forces(gram, right, observable,
+                                           cfg.projected_iterations, cfg.maximum_normal_force_n)
+        else:
+            force = torch.zeros_like(right)
+            for _ in range(cfg.projected_iterations):
+                for anchor_index in range(force.shape[-1]):
+                    gram_row = gram[:, anchor_index, :]
+                    diagonal = gram[:, anchor_index, anchor_index].clamp_min(1.0e-12)
+                    coupled = (gram_row * force).sum(dim=-1) - diagonal * force[
+                        :, anchor_index
+                    ]
+                    coordinate = (
+                        (right[:, anchor_index] - coupled) / diagonal
+                    ).clamp(0.0, cfg.maximum_normal_force_n)
+                    force[:, anchor_index] = torch.where(
+                        observable[:, anchor_index],
+                        coordinate,
+                        torch.zeros_like(coordinate),
+                    )
         force = force.clamp_max(cfg.maximum_normal_force_n)
         predicted_torque = torch.einsum("baj,ba->bj", normal_jacobian, force)
         # Only the residual projected back onto each contact-normal Jacobian
