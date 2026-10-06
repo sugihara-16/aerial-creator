@@ -1,0 +1,12 @@
+{
+  "selected_checkpoint_sha256": "d099f955e960065232494cecf3e4775ea9cce7979550bf994371023512834428",
+  "same_imitation_weights": true,
+  "runtime_source_files_verified": 598,
+  "evaluation_cases_verified": 42,
+  "greedy_ranked_execution_unchanged": true,
+  "focused_tests_passed": 638,
+  "test_seconds": 71.37,
+  "test_log": "artifacts/p4_full/order9/request_ppo/20261006_commit_release/test_guard/process.log",
+  "test_guard_sha256": "a30f2ea6c6e8c825fce0a048efc32a5a91acf621c4941f5f406e9928d6513f8e",
+  "source_commit": "bf64963183369ec1b980aedad09d37f6e750ca45"
+}

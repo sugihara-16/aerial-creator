@@ -1,0 +1,1759 @@
+{
+  "models": {
+    "untrained": {
+      "count": 42,
+      "successes": 0,
+      "safety_failures": 0,
+      "mean_reward": -5.791114761904805,
+      "mean_planning_attempts": 2.5714285714285716,
+      "checkpoint_sha256": "4fe86bdc6777076707d4fc36b53c4a374f1951fcc0628202ff1dfdd2c39b6063"
+    },
+    "imitation": {
+      "count": 42,
+      "successes": 42,
+      "safety_failures": 0,
+      "mean_reward": 12.633818571428492,
+      "mean_planning_attempts": 1.1428571428571428,
+      "checkpoint_sha256": "d099f955e960065232494cecf3e4775ea9cce7979550bf994371023512834428"
+    },
+    "update8": {
+      "count": 42,
+      "successes": 41,
+      "safety_failures": 1,
+      "mean_reward": 12.20754285714278,
+      "mean_planning_attempts": 1.1428571428571428,
+      "checkpoint_sha256": "581f4f9911253c8140bdb04a42b5c7ab50fe327cc3655dc70984b25959345fc4"
+    },
+    "q4": {
+      "count": 42,
+      "successes": 42,
+      "safety_failures": 0,
+      "mean_reward": 12.580746190476113,
+      "mean_planning_attempts": 1.3571428571428572,
+      "checkpoint_sha256": "dcedc61b5e270975bc644e16062eadb86ffcc2591cddad020df3bfd62e0fa8e1"
+    }
+  },
+  "ranking_counts": {
+    "untrained": {
+      "1": 8,
+      "2": 4,
+      "3": 28,
+      "4": 2
+    },
+    "imitation": {
+      "1": 37,
+      "2": 4,
+      "3": 1
+    },
+    "update8": {
+      "1": 37,
+      "2": 4,
+      "3": 1
+    },
+    "q4": {
+      "1": 30,
+      "2": 9,
+      "3": 3
+    }
+  },
+  "cases": [
+    {
+      "case": "validation_m2_00",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.400020000000052,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m2_01",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.900020000000064,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m2_02",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.400020000000052,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m2_03",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 2,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.650020000000064,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m2_04",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "phase_timeout",
+      "reward": -5.8260000000000645,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m2_05",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.400020000000052,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m3_00",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.400020000000052,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m3_01",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.900020000000064,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m3_02",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.900020000000052,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m3_03",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.900020000000052,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m3_04",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.400020000000064,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m3_05",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.900020000000052,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m4_00",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.400020000000064,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m4_01",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.400020000000064,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m4_02",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.900020000000067,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m4_03",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.900020000000067,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m4_04",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 2,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.650020000000067,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m4_05",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.900020000000067,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m5_00",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 2,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.65002000000007,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m5_01",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.900020000000045,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m5_02",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.400020000000061,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m5_03",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.900020000000045,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m5_04",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 2,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.65002000000007,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m5_05",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.900020000000045,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m6_00",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.900020000000061,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m6_01",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 4,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -6.150019999999725,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m6_02",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.90002000000006,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m6_08",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.90002000000006,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m6_04",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.90002000000006,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m6_05",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.900020000000045,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m7_00",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.9000200000000635,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m7_01",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.900020000000064,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m7_02",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.900020000000064,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m7_03",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.90002000000006,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m7_04",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.9000200000000635,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m7_05",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 4,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -6.150019999999697,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m8_00",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.900020000000064,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m8_01",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.9000200000000635,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m8_02",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.9000200000000635,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m8_03",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.9000200000000635,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m8_04",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.9000200000000635,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m8_05",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 3,
+      "passed": false,
+      "safety_failure": false,
+      "failure_reason": "object_pose_goal_deadline_missed",
+      "reward": -5.900020000000064,
+      "model": "untrained"
+    },
+    {
+      "case": "validation_m2_00",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.673239999999923,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m2_01",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661319999999911,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m2_02",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.673219999999924,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m2_03",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 2,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.430399999999931,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m2_04",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661319999999911,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m2_05",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.672359999999923,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m3_00",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.673099999999923,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m3_01",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661279999999913,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m3_02",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.673159999999925,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m3_03",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.672879999999925,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m3_04",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661319999999911,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m3_05",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.673279999999924,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m4_00",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661319999999911,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m4_01",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661319999999911,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m4_02",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.664319999999915,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m4_03",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.65831999999991,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m4_04",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 3,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.15831999999991,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m4_05",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 2,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.408279999999909,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m5_00",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 2,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.405279999999905,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m5_01",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.667659999999918,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m5_02",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.664279999999914,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m5_03",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.66785999999992,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m5_04",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 2,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.405279999999905,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m5_05",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.667719999999917,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m6_00",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661859999999912,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m6_01",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661859999999912,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m6_02",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.65885999999991,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m6_08",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661859999999912,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m6_04",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.65885999999991,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m6_05",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661859999999912,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m7_00",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.685579999999936,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m7_01",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.685199999999936,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m7_02",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.685679999999936,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m7_03",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.685679999999936,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m7_04",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.685579999999936,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m7_05",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.683679999999937,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m8_00",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.682859999999934,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m8_01",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.682839999999933,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m8_02",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.682859999999934,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m8_03",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.667839999999918,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m8_04",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.667799999999918,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m8_05",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.682779999999934,
+      "model": "imitation"
+    },
+    {
+      "case": "validation_m2_00",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.673239999999923,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m2_01",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661319999999911,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m2_02",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": false,
+      "safety_failure": true,
+      "failure_reason": "qp_infeasible_terminal",
+      "reward": -5.281600000000031,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m2_03",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 2,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.430399999999931,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m2_04",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.667439999999917,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m2_05",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.672859999999924,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m3_00",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.673099999999923,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m3_01",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661279999999913,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m3_02",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.673159999999925,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m3_03",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.672879999999925,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m3_04",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661319999999911,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m3_05",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.673279999999924,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m4_00",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.673319999999924,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m4_01",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.676379999999927,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m4_02",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.664319999999915,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m4_03",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.65831999999991,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m4_04",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 3,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.15831999999991,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m4_05",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 2,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.408279999999909,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m5_00",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 2,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.405279999999905,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m5_01",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.667659999999918,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m5_02",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.664279999999914,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m5_03",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.66785999999992,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m5_04",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 2,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.405279999999905,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m5_05",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.667719999999917,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m6_00",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661859999999912,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m6_01",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661859999999912,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m6_02",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.65885999999991,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m6_08",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661859999999912,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m6_04",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.65885999999991,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m6_05",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661859999999912,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m7_00",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.685579999999936,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m7_01",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.685699999999937,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m7_02",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.685679999999936,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m7_03",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.685679999999936,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m7_04",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.685579999999936,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m7_05",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.685679999999936,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m8_00",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.682859999999934,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m8_01",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.682839999999933,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m8_02",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.682859999999934,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m8_03",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.667839999999918,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m8_04",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.682859999999934,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m8_05",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.682779999999934,
+      "model": "update8"
+    },
+    {
+      "case": "validation_m2_00",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.666999999999918,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m2_01",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661319999999911,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m2_02",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.673219999999924,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m2_03",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.663219999999916,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m2_04",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661319999999911,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m2_05",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.672859999999924,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m3_00",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.673099999999923,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m3_01",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.67031999999992,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m3_02",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.673159999999925,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m3_03",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.672879999999925,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m3_04",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.667479999999918,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m3_05",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.673279999999924,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m4_00",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.673319999999924,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m4_01",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.676379999999927,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m4_02",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.664319999999915,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m4_03",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 2,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.423319999999924,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m4_04",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 3,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.15831999999991,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m4_05",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 2,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.426279999999927,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m5_00",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.655279999999905,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m5_01",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 2,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.42985999999993,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m5_02",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.655279999999905,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m5_03",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 3,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.16785999999992,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m5_04",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.655279999999905,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m5_05",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 2,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.42985999999993,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m6_00",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 2,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.411859999999912,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m6_01",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661859999999912,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m6_02",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.65885999999991,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m6_08",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661859999999912,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m6_04",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.65885999999991,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m6_05",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.661859999999912,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m7_00",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.685579999999936,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m7_01",
+      "selected_group": "slot_0:grasp_pair:0",
+      "planning_attempts": 2,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.417699999999918,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m7_02",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 2,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.435679999999936,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m7_03",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.685679999999936,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m7_04",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 2,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.435579999999936,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m7_05",
+      "selected_group": "slot_0:grasp_pair:4",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.685679999999936,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m8_00",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.667419999999918,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m8_01",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.667679999999919,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m8_02",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.667379999999918,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m8_03",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 3,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.182859999999934,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m8_04",
+      "selected_group": "slot_0:grasp_pair:1",
+      "planning_attempts": 2,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.432859999999934,
+      "model": "q4"
+    },
+    {
+      "case": "validation_m8_05",
+      "selected_group": "slot_0:grasp_pair:3",
+      "planning_attempts": 1,
+      "passed": true,
+      "safety_failure": false,
+      "failure_reason": null,
+      "reward": 12.667559999999918,
+      "model": "q4"
+    }
+  ],
+  "sources": {
+    "untrained": {
+      "path": "artifacts/p4_full/order9/request_ppo/20261006_untrained_current_controller/results/validation42.json",
+      "sha256": "1a88dd443564ba078528c2765834ed8277b32cd1dffed18e40087e34a5a81661"
+    },
+    "imitation": {
+      "path": "artifacts/p4_full/order9/request_ppo/20261006_imitation_current_controller/results/validation42.json",
+      "sha256": "97cb492334cf4347806329feb3575fb8d1b4ded8a1cc386844334a10128f9fcc"
+    },
+    "update8": {
+      "path": "artifacts/p4_full/order9/request_ppo/20261006_update8_current_controller/results/validation42.json",
+      "sha256": "9d041a7a7383844e984629a17dca306a70a6125e9081bd524b94df235c80f53c"
+    },
+    "q4": {
+      "path": "artifacts/p4_full/order9/request_ppo/20261005_remaining_six/additive_preload/physical_comparison/results/full42.json",
+      "sha256": "3d989b6f91dcd3c77ab3a7d7a56bfe3ba96fbb53919fbb06614ec7b171993fb6"
+    }
+  }
+}

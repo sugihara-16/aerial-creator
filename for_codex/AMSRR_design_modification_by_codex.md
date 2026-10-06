@@ -4816,3 +4816,440 @@ GPU QPは同じ固定ADMMをCUDA Graph化、CPUでは同じ射影/反復をnativ
 - 複数環境の既存QP CUDA GraphではMAGMA batched cholesky_solveがcapture非対応でprocess終了する問題を検出。executorの実行中はPyTorch CUDA線形代数をcuSOLVERに指定し、finallyで元のbackendへ戻す。同じQP・制約・反復数であるが数値backendの変更として扱う。実28rotor入力でB1は旧backendとbit一致、B3はcuSOLVER eager/graph bit一致。B3旧MAGMAとの差はthrust最大0.001251N、vectoring6.95e-6rad、achieved wrench2.15e-6（詳細artifact）。
 - PhysX workerを1にする診断は初期化が進まず中止・不採用。APIが永続設定も書き換えることを確認し、user.config.jsonの当該値のみ元の8へ復旧。physics設定を変更した高速化として残さない。
 - 実行結果・独立監査・時間比較は `artifacts/p4_full/order9/request_ppo/20260924_simulation_speed/README.md` を参照。source bindingにIO・推定・gate・graph helperを追加し、既存checkpointを固定して検証する。
+
+
+### 2026-09-25: R2の物体条件と質量特性の実行契約
+
+v0.5 §24.5.9のR2実装として、既存TaskSpecのmass/COM/full inertiaを物理objectへ設定し、COMとobject軸での完全慣性行列を読み戻す。Taskの物体pose、接触点、目標は幾何link原点のため、Isaacのroot_link_pose/velocityを観測・resetの正本とする。重心主軸frameを物体geometry frameに流用しない。保護harnessのファイルは維持し、既存request executor内のsource adapterで接続する。
+
+R2箱の非均質分布は全質量80%の均質外箱＋20%の内部小箱（各辺20%）で生成する。真COM各軸±5%辺長に対し内部小箱中心をCOM/.2とし、全体COMまわりの慣性を平行軸定理で合成する。推定誤差は真COMと分離、元donorの推定相対誤差を新物性へ移す。size変更時は初期Task/観測/goalそれぞれの姿勢で底面高さを保持し、支持台と機体を移動しない。条件JSONを既存prepareへ渡して候補を新規生成する。donorはrobot asset・初期状態の由来であり、新条件の教師成功や選択labelとして扱わず、経路は全て再計画する。公開policy/TaskSpec schemaは変更しない。
+
+fresh request plannerの後半6phaseは旧C3 default30秒を流用せず、既存成功R1経路と同じ3秒とする。これは共通時間設定で、物理速度上限・接触・衝突・goal許容と期限は維持し、全経路検査に不合格なら拒否する。pilot幅小を同一幾何でretimeした最小診断は実成功（約58sim秒）だが、R2受入と把持維持の頑健性は固定bucket/追加診断で別確認する。
+
+名目押込みIKは固定CoMの関節のみの解から、bounded body translation＋関節の正則化最小二乗へ変更する。R2の2-module訓練条件で、旧法が片側約2mmを実現するため他側約13.5mmを押し込む偏りを検出したため。目標法線押込み量の決定式・接触群・機体姿勢角は維持し、translation norm≤30mm、各関節変化≤既存150mrad・物理限界とする。normal/tangent誤差を実FKで検査し、不成立は拒否する。native FKで計画時だけ解き、runtime IKは追加しない。box寸法やcase IDに依存しない。
+
+得られたtranslationはbody座標に保持し、各phaseの姿勢でworldへ変換して既存の滑らかなpreload weightを掛ける。com velocityへweight微分と回転輸送項ω×δを加え、phase端点は停止指令とする。変更済み全軌道を同じjoint/speed/全身衝突検査に通す。追加slip reserveは実際に圧縮されたnominal knotのCoM/関節を基準に求め、元接触面に対する総接線誤差と追加押込み上限を維持する。plan versionはv3_joint_centroidal_preload、公開schemaは不変。R1/R2の実成功は別途検証し、計算上の解だけを受入証拠としない。
+
+request名目時間評価器はbody quaternionの既存shortest-arc normalized lerpを維持し、その厳密微分からworld角速度を生成する。従来のC3評価器はbody角速度を常に0としており、姿勢が回転する新規軌道では位置と速度が不整合だった。phase端点/終端holdでは0とする。QPIDの角速度入力は実測body座標であるため、TeacherContactControllerの呼出境界で現在body回転の逆を掛ける。線速度および保存される目標twistはworldのまま、保護C3や汎用QPIDの入力契約を変更しない。既知の非yaw回転微分と傾斜body変換を試験する。PPO archive契約にnominal plan/reference/twist versionを追加し、旧速度意味のrolloutを新しい学習と混ぜない。checkpointのactor出力は維持し、既存u8を新しい実環境で評価できる。
+
+全機CoM線速度も関節運動と整合させる。従来batched builderの`v_base＋ω_base×(CoM−base)`は固定形状の剛体近似であり、各moduleと関節から計算したCoM位置の微分ではなかった。current nominal controllerではbuilderへ観測joint velocityを渡し、全linkの質量加重module-frame線速度・角速度による点速度と、内部関節Jacobian×joint velocityから重心速度を計算する。既存FK/関節軸/固定祖先関係を再利用し、履歴・有限差分observer・runtime IKを追加しない。body角速度は引き続き指定したbase frameの角速度。公開policy schemaは不変、旧呼出元のqdot省略時は保護履歴の剛体式を保持する。Isaacのmodule姿勢はlink原点なので、速度も`body_link_vel_w`へ揃える。旧COM速度との混在を解消する。
+
+既知の任意module運動・関節運動を独立に微小時間進めたCoM位置差分と解析速度を照合し、CPU compile/CUDA graphが毎回新しいqdotを使うことを検査する。実失敗記録への適用では取得中y速度RMS誤差26.27→0.200mm/s、最大35.02→0.390mm/s（link原点速度補正前）。PPO archiveへcentroidal_velocity契約を追加する。これは実機の姿勢/速度推定とencoder feedbackから計算可能であり、PhysXの真の全機CoM速度はcontroller入力に用いない。
+
+接触維持推定は、各接触に対応づけたmotor負荷を個別接触力と同一視しない。接触取得は従来の全接触近接・相対速度・全motor負荷・QP・.25秒dwellを満たす実際の取得phase退出時にのみ確立とする。その後は、全接触の幾何と滑り速度が有効範囲内で、群内motor負荷が継続する場合にその証拠を保持する。QP不成立は接触喪失の観測ではないため履歴を消去しないが、その間の遷移・補正は従来どおり拒否する。いずれかの喪失、観測binding変更、releaseで即失効する。lift/transportの物体追従・姿勢条件は維持し、初期取得にany-motor条件を用いない。slip/姿勢補正にも同じ接触推定を渡す。真値接触力は診断・評価専用、Taskの成功/安全条件は変更しない。runtime契約はacquired_contact_geometry_motor_continuity_v2。
+
+
+R2の8-module新経路で、既存approach速度設定0.20rad/sがdense IKとcubic補間後には守られず、最大1.33rad/sの関節指令と実関節の崩れを確認した。名目衝突検査は同じ補間を使っており、同じ経路を2倍時間で実行する診断は成功した。正式修正は一律の時間倍率ではなく、既存approach速度設定を最終実行cubicに適用する局所retimingとする。各区間の二次速度多項式の端点と内部極値を厳密評価し、違反区間だけ延長、monotone slopeを再計算する（最大24回、未収束は拒否）。節点の幾何は保持し、変更後の曲線全体を衝突・物理joint/速度制約で再検査する。Taskの期限と許容値は維持する。
+
+時刻変更に伴いhorizon/qdot/body速度を再構成する。runtimeのbody線速度は線形位置補間の厳密微分、角速度は既存nlerpの厳密微分とし、phase端点holdでは0にする。approach中の物体目標は静止、他phaseの時間は変更しない。plan契約はv4_executed_approach_rate、reference契約はlinear_centroidal_exact_twist_cubic_joint_v3。速度制限だけを完全な全身動力学の可行性証明とせず、Isaacで成功/荷重proxy/追従を別検証する。
+
+### 2026-09-25 R2: 運搬先の環境を含む名目接触姿勢
+
+把持時の姿勢が無衝突でも、その姿勢を配置先へ剛体移送すると機体が支持台に干渉する場合がある。名目押込IKは接触取得・lift・transport・placeの終端も評価し、従来解が既存clearance検査を満たさない場合だけbounded body pose/jointの同時解を求める。translation norm30mm、rotation norm.1rad、各joint.15radと物理限界、contact normal.10rad、従来の押込/tangent条件を上限とする。環境clearanceは既存幾何plannerの5mmを目標とし、全補間経路の元の安全検査を必須とする。case IDや成功実績の分岐は置かず、接触群とTaskSpecは不変。新しい可動自由度は名目計画生成時のみで、実行時の追加IKなし。公開schema変更なし、nominal plan契約v5_carried_goal_clearance。実証はWORKLOG/固定protocolの現source評価を参照。
+
+### 2026-09-25 R2: 機体並進の連続速度
+
+線形位置補間の厳密な速度は節点で不連続となり、把持中の励振源になる。名目機体位置にも形状を保つPCHIP傾きのHermite補間を適用し、その厳密微分をQPIDへ渡す。phase両端の傾きは0、phase外は静止保持。同じ曲線を全経路の衝突・関節制限検査と実行で共有する。幾何節点・Task/物理/合否・接触群は不変、interpolation契約cubic_centroidal_joint_exact_twist_v4、plan v6_smooth_centroidal_curve。R2 m5の固定比較では回転発散が既存bounded補正で回復できる範囲へ減り、全task成功。滑りそのものの消滅や未検証条件への保証とは扱わない。
+
+- 2026-09-25 R2補足: 安全なpregrasp姿勢と接触姿勢が個別に存在しても、冗長IK枝の差によって両者を結ぶ局所経路がない場合がある。既存の80/40/20mm有限pregrasp選択をこの局所探索不成立にも適用する。群・最終接触目標は固定し、全経路の衝突/速度制約を再検査する。ケースID例外、探索seedの選び直し、安全閾値変更は導入しない。R2開発m6_02の元経路は途中object干渉、40mm経路はCPU検査成立。物理受入は別に評価する。
+
+### 2026-09-25 R2: 接触goalの先行衝突解決と内部関節荷重
+
+free-base contact IKが得た接触点/法線が実現可能でも、姿勢が自己干渉し、固定CoMの後段q-only解では解消できない場合がある。request経路では接触goalを先に全環境collision検査し、必要時だけ有限body pose/joint同時解を求め、その同じ枝からpregraspを生成する。body各軸translation±.10m、local回転各軸±.35rad、joint物理限界、接触point/normalは元candidate許容内、従来collision margin/全補間経路検査を維持。明示base tilt保持の初期seed再試行ではこの姿勢変更を使わない。後から接触goalだけを置換する案は接近経路との不整合があったため残さない。同一request内の完全一致IK入力のみ上限16件でmemoizeし、観測時系列・異なるseed・異なる候補を流用しない。
+
+現行全体6D wrench配分は内部dock joint荷重を制約しないため、全体wrenchを達成しても関節保持トルクを超え得る。tree接続の各関節を切った移動側集合をURDF符号付きで構成し、観測link pose/encoderからgravityとrotor力のJ^Tを解析計算する。選択接触点には既存名目normal/重量支持配分を使う。これは接触力の直接計測や精密な実レンチ推定ではなく、名目荷重の可行性制約である。
+
+既存ADMMへ線形予測joint荷重区間を第二射影として追加する。CPU/nativeとGPU batched/captureで同じ計算を使い、最終rotor/vectoring clamp済み指令からも予測荷重を再計算する。制約は既存preload peak利用率80%、実機のモータ上限と安全条件を変更しない。未知の反力・payload動的分担まで保証するものではなく、追従と実task成功を別に評価する。公開policy/Task schemaは不変。private model/controller補助入力を追加し、PPO runtime契約`tree_virtual_work_nominal_payload_constrained_admm_v1`で旧経験と混合しない。R3の他形状やπ_Dの未検証構造での実性能まで今回の箱評価から主張しない。
+
+- 補正用の接触存在と、遷移を許す安定接触を分ける。速度が大きい場合も、表面距離・motor load・QP・観測有効性が成立していれば滑り/姿勢補正を許す。遷移の非滑り条件・取得dwell・物理成功判定は維持する。名目荷重は配列位置ではなくassignmentと対で並替え、選択anchorとの対応を維持する。
+
+- 接触normal以外の荷重（robot重力/推力、名目接線支持、robot並進慣性）がjoint PDの定常偏差を介してgraspを開くため、推力配分に非normal一般化荷重を減らす副目的を追加する。Aを6D wrench写像、Cをjoint荷重写像、N=I−A⁺Aとして `||CN x + C A⁺w + b_non||²/2` を最小化する。主wrenchと全hard制約は従来のapplied commandで検査し、不合格なら同制約・同stateの副目的無し解を1回だけ評価する。両方不合格は安全側の不成立を維持。副目的不採用を記録し、無条件の正確な接触レンチ/荷重保証は主張しない。
+- 現行仕様のconnected tree・同一holon・回転dock関節を対象とする。閉ループ/異種module/直動jointへの一般性や、8module超の実時間性能を主張しない。物体箱に依存する式はcontact参照層以外へ追加していないため、R3でsphere/cylinderの参照生成を接続できる。
+
+- controllerのjoint速度予測は、URDF無負荷速度とPhysicalModelに記録した運用drive速度の小さい方を用いる。Isaacのdrive/readbackと同じ設定を参照し、物理限界自体は変更しない。
+- 内部joint荷重予測にはrobot並進慣性だけでなく、剛体角加速の全リンクCOM項とlink慣性項、観測角速度による遠心/gyro項を含める。機体角加速に必要な正当な内部荷重を静的な余分荷重として抑制しないための整合修正である。相対joint運動の完全な逆動力学や実接触レンチ計測への置換ではない。
+
+### 2026-09-25 02:29 UTC — bounded full object-pose correction (R2)
+- v0.5 / controller execution work package. Angular-inertia allocation removed early instability (zero secondary rejections) and contact loss in train_m8_03, but lift peaked at 41.4 mm then settled 87.6 mm below its goal, with closure at its existing 6.588 mm limit. Raw force/position data support initial material slip followed by a stable low grasp. No additional allocator weight search.
+- Extend existing endpoint body/joint posture servo from orientation to object translation as well. Carry only the hand-centroid displacement realized by the previously accepted bounded posture, adding filtered observed object position error. Original body 30 mm, rotation 0.20 rad, joint 0.10 rad, speeds, grasp rigidity and whole-body collision checks remain. No independent unconstrained integrator; rejected proposals do not update state. Trigger uses existing phase position/orientation tolerances. No case IDs, changed task criteria, or contact truth inputs.
+- Files: grasp_slip_compensation.py, test_grasp_pose_compensation.py. Public schema/interface changes: None. Private execution contract v4. Related unit tests: 120 passed (full_pose_feedback_tests.log). Physical result pending; saved-state geometric feasibility being independently audited before Isaac.
+
+- 02:30 UTC follow-up: independent saved-state test found 400/400 proposed postures collision/rigidity safe, with the existing absolute body/joint limits. Added a 20 mm/s cap on the requested common translation increment (same existing servo linear-speed limit); no limit relaxation. Re-ran 120 related tests successfully. Started bounded_full_pose_preflight, same u8/contact choices and geometry, train_m8_03 then train_m8_02, source frozen. Formal 76 still pending.
+
+### 2026-09-25 02:39 UTC — independent activation / preflight correction
+- Capped full-pose preflight retained lift timeout: pose proposals were rejected by native safety, not applied. Independent exact saved-state audit found self-clearance module0 pitch_dock_mech1 vs module3 gimbal_link2 .6628 mm < existing .8 mm accepted floor. The position trigger also requested a .065 rad orientation correction already within .2 rad task tolerance; translation-only initial clearance .8256 mm passed, with >75 mm safe vertical reach before the next boundary.
+- Added separate orientation activation latch; position-only recovery preserves accepted orientation request. Existing endpoint/settling conditions and all physical/task/safety bounds remain.
+- New orientation-preservation unit fixture initially held a slipping object permanently fixed; corrected to a closed-loop fixture and existing 3 mrad soft-solver accuracy (exact requested rotation must remain zero). One compound shell launch mistakenly started the preflight before that failing test result was inspected; both own Isaac processes were terminated, recorded as interrupted, and are not acceptance evidence. No physical/safety thresholds changed.
+- Verified test command completed exit 0: 121 passed in 2.90 s. Only after inspecting that result, started separate_pose_activation_verified for the same two development cases.
+- Existing artifact driver now supports at most two isolated Isaac workers. Per-case paths, fixed record order, thread-safe process-group control and source/config hashes retained. Both in-flight normal results are collected before stopping on a failure; test split remains after validation and R1. Independent monitor reviewed race/resource risks. Serial driver identity retained in run_before_concurrent_execution.py.
+
+### 2026-09-25 02:43 UTC — execution throughput decision
+- Independent common approach interval: two Isaac processes each 13.65 steps/s, combined 27.30, compared with single-process 29.46–30.08. GPU utilization 98%, 50 C, VRAM 6.9/24.6 GB; safe capacity but approximately 8% slower total throughput. Finish the two already-running development cases; formal.py uses one Isaac execution plus two CPU preparation workers. No physical timing, case count or evaluation criteria changed.
+
+### 2026-09-25 02:49 UTC — clear a rejected orientation request when current attitude is acceptable
+- separate_pose_activation_verified: train_m8_02 passed; train_m8_03 retained the same lift timeout. Independent raw replay found exactly two settled ticks (78.238884/78.258881 s) with orientation error >.2 rad, then .065 rad, but an orientation activation latch continued to force the rejected rotation.
+- Removed that extra latch: current orientation error determines whether to update the rotational request; otherwise retain only previously accepted rotation. This preserves established safe corrections and lets translation recover independently. No bounds/goal/deadline changes. An actual apply-path test reproduces a rejected .25 rad correction followed by .065 rad acceptable attitude plus .09 m position error, asserting translation is applied with zero rotation request. Related tests: 122 passed.
+
+### 2026-09-25 02:56 UTC — achieved versus requested grasp attitude
+- current_pose_error_preflight still failed: a small rotation request was accepted before the object attitude returned within tolerance, but soft IK achieved only part of it. Later position-only proposals retained the *requested* rotation (norm .007842), kept chasing its unrealized ~.003568 rad, and were repeatedly rejected.
+- The position-only branch now translates the actual previously accepted hand poses and holds their actual rotations. It does not pursue an unachieved target. Absolute posture/rate/grasp/collision bounds remain unchanged. New test starts with nonzero accepted body rotation .01 rad and unachieved requested rotation .10 rad to reproduce this boundary. Related tests: 123 passed. Independent exact nonzero saved-state replay required before another simulator run.
+
+### 2026-09-25 03:13 UTC — ground-safe carried grasp correction
+Existing bounded body/joint grasp feedback is carried across phases. Forecast its ground clearance at the known current-phase endpoint and apply the minimum required common upward translation at the existing rate and absolute limits. Actual commanded postures retain all native collision and rigidity checks. This uses planned geometry and accepted feedback state, not future measured object poses. Insufficient bounded clearance fails closed. Scalar GPU control uses the same native CPU ADMM solve (including tensor roundtrip); batched execution keeps CUDA. The solver constraints and iteration count are unchanged; numerical parity is tolerance-based and requires physical regression.
+
+### 2026-09-25 03:24 UTC — composed safety and release continuity
+Check the actual sum of closure and accepted posture corrections, not a closure-only intermediate posture that will never be commanded. All final posture/rigidity/collision checks remain. At release with active pose correction, retain the nominal entry pose while bounded closure and pose offsets return to zero, then execute the unchanged nominal release path. A private reference clock pauses only that path; real phase/episode clocks, actor transition requests, deadlines and success predicates are unchanged. This avoids combining an unplanned offset with a changing nominal morphology during release.
+
+### 2026-09-25 03:46 UTC — constrained primary priority and smooth redistribution
+Optional internal-load minimization now preserves the requested6D wrench as an explicit ADMM equality, in addition to final applied-command verification. A wrench-nullspace objective alone cannot guarantee that priority when actuator/load inequalities couple both spaces. Regularize changes throughout the full wrench nullspace, including directions invisible to the load map; scale by that map's maximum curvature and a.5 s response time. This replaces the unsuccessful load-coordinate-only smoothing. Existing physical limits,64 iterations and feasible-primary fallback remain. Static numerical validity does not establish closed-loop stability; fixed Isaac regression is required.
+
+### 2026-09-25 — R2: replace unsuccessful load objective with bounded opening constraint
+The attempted nonnormal-load minimization, its temporal smoothing and primary-wrench equality variant are removed from the active implementation. They destabilized validation_m8_05; retaining only hard joint-load limits restored that case but failed train_m8_03. The sign of contact-point displacement distinguishes helpful closure from harmful opening.
+The allocator now adds D(Cx+b−b_normal)≤0 in ATTACH/MAINTAIN. C and b are the existing generalized rotor/gravity/payload/rigid-inertia load prediction, b_normal is the nominal normal-reaction contribution already handled by preload, and D is outward-normal projection of the fixed-CoM contact Jacobian divided by each motor stiffness. Positive displacement denotes opening. Row normalization conditions the solve; a rotor-maximum-derived conservative lower bound expresses the one-sided inequality through existing symmetric intervals without restricting physically feasible closure. Actual clamped actuator channels are still checked.
+This is a quasistatic mechanical approximation, not a precise contact-wrench observer/controller. It adds no actor input, output, case ID rule or policy fallback. The connected revolute-joint tree scope remains unchanged. CPU/CUDA tests and saved-state diagnostics pass; physical transfer and the unchanged R2 acceptance protocol remain required before adoption is considered validated.
+
+### 2026-09-25 — finite-object separation for release
+Corrected release guard geometry: a contact point leaving a finite face in a tangential direction can remain near the face's infinite plane after actual separation. Release uses positive signed distance to the observed finite primitive at the same 5 mm threshold. Input is measured object pose and encoder/FK contact-point position plus authored geometry; no privileged contact force or target pose is used. Box, uniformly scaled sphere and radially uniform cylinder have analytic distances; unsupported geometry/scales conservatively cannot certify release. Contact acquisition/maintenance and final physical success criteria are unchanged. This fixes an observation-to-predicate error, not a relaxation of separation or a case-specific controller adjustment.
+
+### 2026-09-25 — release trajectory time distribution
+Finite-geometry release exposed a distinct dynamic limitation in a2-module condition: the31-knot/3s release path had0.1m/s cruising speed but zero endpoint derivative concentrated acceleration in the first0.1s interval (~4m/s²). Retiming uses the inverse quintic progress function10u³−15u⁴+6u⁵ and extends duration by15/8, its maximum derivative, so no original knot interval becomes shorter. Positions/joint configurations/contact assignments are unchanged; the existing checked Hermite path is rebuilt and collision-checked at new times. This is a phase-wide release rule independent of caseID, morphology count or validation label. It reduces commanded acceleration without increasing nominal path speed or relaxing actuator/success constraints; it does not claim full inverse-dynamics feasibility or C² continuity of the rebuilt piecewise cubic. Physical verification remains mandatory.
+
+### 2026-09-25 — stationary placement load handoff
+Release now separates load transfer from opening motion: the existing half-release-duration cubic smooth payload ownership handoff runs on actual phase time while the nominal opening reference is held at its entry. Opening starts after ownership and accepted grasp correction offsets reachzero. Normal reaction from commanded compression follows the reference preload-release profile, separately from payload gravity/inertia feedforward. This avoids simultaneously changing posture and losing physical contact while retaining a substantial fictitious carried mass.
+This is a deterministic placement-adapter sequence; it uses no contact-force measurement and does not certify support from low speed alone. Existing finite support/force outcome auditing must validate the assumption after execution. It preserves the physical phase/episode clock, authored deadline, policy authority and task criteria, and does not add a case-specific branch.
+
+### 2026-09-25 — R2 validation limit: grasp-axis rotation
+The final implementation is not R2-accepted. Same-source validation evaluated4/42 conditions with3 successes and1 lift timeout; R1 retention20 and untouched test14 remain outstanding. In validation_m7_05, measured hand/joint tracking stays close to its commands while the object rotates relative to both hands, approximately about the line connecting the contacts. Bounded pose correction is active and reaches its translation/joint/rotation limits. The observed direction is consistent with the gravity moment around that line; finite-patch torsional capacity has not been quantitatively identified.
+The current geometric pose correction cannot be assumed to enforce rigid object attachment. Candidate grasp suitability must account for rotational holding as well as reachability, collision clearance and nominal normal preload. This finding does not establish a particular new contact model or policy solution; no public contract, physical limit or task criterion was changed to accommodate the failure. R3 readiness, generalization and improvement from additional learning remain unproven.
+
+### 2026-09-25 — 可変接触数と新しい教師データ境界
+- ユーザー承認の2点→3点以上拡張をv0.5 §19.4.2へ反映。π_H出力／公開schemaは変えず、既存multi_grasp集合表現を使用する。旧教師が付けた2anchorに候補空間を閉じず、全未占有物理把持面をcanonical anchorへ展開する。IRG上限、有限beam、点数別quota、同一物理面の重複禁止を適用。
+- N>2は推定mg・COMの準静的力／モーメントLP、摩擦安全余裕・力／関節effort制約から各点の名目力／compliance予圧を算出する。正確なforce observerは追加しない。全点同時IKを有限4-yaw seedとnative FKで解き、独立FKを再照合し既存path collision/safetyへ渡す。2点への暗黙fallbackや既存閾値の緩和はしない。
+- 実行荷重も全点の名目world forceを使う。現時点では計画姿勢近傍の準静的搬送用で、大回転や別接触モードのforce再配分は別途必要。法線の一律増加が釣合を崩す群では既存追加squeezeを無効にする。guardと物理rewardの必要点数は選択全点へ合わせる。
+- `--max-grasp-contacts` は新catalog生成、無指定は旧artifact再現。新catalogへ旧教師anchor番号／経路を転用しない。`--teacher-contact-group` は観測を固定後の教師label指定であり、greedy/実行失敗/計画失敗を含めteacher flagを保存してPPOから拒否する。既存u8は段階切替expertとしてのみ流用でき、新しい3点policy学習済みとはしない。
+- `prepare-demonstrations` は成功full Isaac記録のみを、job/source/checkpoint/scene/planのhashと元episode split、初期encodingの一致を確認して既存BC形式へimportする。旧承認canonical split overrideをこの新importerは自動適用しない。同じdonorから複数成功があってもBCのsource identityは一意、各実行receiptは別保持。両headは既存warmup→PPO経路を使う。
+- 実装証拠／未解決範囲は同日WORKLOGと `artifacts/p4_full/order9/request_ppo/20260925_multi_contact/README.md` を参照。3点full成功1例、2点full成功1例、失敗/拒否例を保存。接続確認2episodeを本学習用データや3点汎化性能の証拠とはしない。旧R234/42をこの変更後の再評価結果とも扱わない。
+
+### 2026-09-25 — Variable-contact numeric feature boundary and PPO continuation (Agent K)
+- Public schemas, π_H outputs and tensor dimensions remain unchanged. Candidate score keys ending `_id` are structural identifiers and are excluded from score count/mean/max. In both learned policy paths, contact-member local group-membership and slot-coverage columns are zeroed **after** checkpoint normalization; these enumerate proposals rather than describe contact geometry. This prevents expanded catalogs/renumbered surfaces from becoming arbitrary numeric quality signals. Runtime contract `contact_numeric_features` versions the boundary, and encoder source is included in provenance. Existing checkpoints may supply weights, but a declared initialization/new optimizer stage and new on-policy data are required; old outcomes do not establish migrated-policy performance. Temporal group-summary counts are retained in this bounded experiment; their ablation probe did not show a material decision change.
+- New 3-point demonstrations are an optional warmup aid, not a prerequisite for further PPO from an existing BC-trained actor. A small continuation probe may use fresh categorical outcomes directly. Exploration calibration is part of the declared initialization, applied identically at training/inference by changing checkpoint weights; it is not reported as PPO reward gain.
+- Bounded selected-contact-goal IK nonconvergence is a normal terminal planning rejection with the existing -5 outcome, not an uncaught infrastructure exception. Invalid schemas/nonfinite data still raise errors.
+
+#### 2026-09-25 continuation result and candidate coverage limitation
+- The bounded direct-PPO probe completed one update and a fixed common-seed32-episode before/after comparison. No actual reward/success improvement was observed; success-group probability alone increased. This supports the correctness of the reward-to-policy path, not R2 acceptance or an assertion that PPO cannot improve.
+- The expanded finite beam omitted031's old successful physical2-contact combination even though its members still exist. This remains unresolved; no case-specific proposal injection, label-conditioned mask, feasibility-threshold change or task relaxation was applied. Future coverage changes must be general to physical morphology/geometry and validated separately from the frozen experiment. Runtime input repair and exploration calibration remain explicitly separate from PPO gains.
+
+### 2026-09-25 — Bounded candidate coverage repair (Agent K)
+- `contact_sampler_v4_directional_diverse_grasp` replaces the v3 ranking for newly generated catalogs; archived catalogs are unchanged. Public schemas, actor tensor dimensions, 32-group expansion budget and cardinality allocation remain unchanged.
+- Pair generation applies the existing assignment guard's default opposing-normal threshold (-0.25) before spending its budget. The threshold is shared, not relaxed. Pair and multi-contact extension also use the existing physical-surface conflict predicate.
+- The observed-geometry soft score compares relative **vectors** and each observed inward contact normal to its target, replacing distances/normal Gram matrices which could not distinguish reversed bindings. Common world-frame translation/rotation leaves the score unchanged. This estimates motion/deformation cost; it neither certifies IK nor rejects a candidate based on the estimated reach cost.
+- Ranked pair proposals cover distinct physical-surface sets and target-region sets before reversed assignments/repeated samples in those sets. The finite beam remains heuristic: no guarantee to retain every feasible grasp; no case-specific IDs, teacher selections or cached successes enter proposal generation.
+- CPU regression restores031's prior successful physical binding as an admissible actor choice. Four original cases retain both2/3-contact choices. Some new proposals still fail existing object/support occlusion admission (notably bottom-face contacts); those guards remain authoritative and are not bypassed. This change does not establish PPO or physical-success improvement. New source/contract-bound on-policy data must be collected for subsequent learning; do not reuse old event log-probabilities as new-catalog data.
+
+### 2026-09-29 — Request execution throughput, unchanged policy/physics contract
+- Public schemas, π_H outputs/inputs, task conditions, physics/control timestep, allocation constraints, reward and physical success predicates remain unchanged. Pure QPID/load arithmetic can replay CUDA graphs; a post-step kinematics-only result carries the same articulated CoM pose/twist without unused full dynamics. Bulk host snapshots preserve owned values and scalar guard semantics. Corrected CUDA ADMM dispatch at batch sizes above8; numerical/constraint tests include9/16, and actual fixed16trial outcomes/reward are retained.
+- A sequential persistent Isaac worker shares application startup across freshly initialized jobs; source identity, private command receipts, independent RNG/model bindings and explicit failure cleanup remain mandatory. The source-controlled request collector preserves fresh categorical draws, rejects, on-policy replay and independent physical outcome checks. It defaults to at most16environments; benchmark/subset data are marked ineligible for PPO/acceptance. The former frozen artifact optimizer loop has not been migrated or resumed.
+- Completed deterministic planning may be reused only under matching observations/request/task/physical model/record/prefix/configuration/source/library/native-binary/planning-budget identity. Never cache deadline failures, physical success/failure, policy probabilities or rollout rewards. A cached bounded planning rejection records the planner result, not a proof of physical infeasibility. Fresh actor inference remains mandatory before lookup.
+- Independent physical-motion audit loads/hashes the raw batch once and evaluates each environment with the former frozen audit predicate. Actual16environment reports match exactly. No test label or future geometry is added to actor inputs.
+- Performance limitation remains explicit: different selected plans/topologies still serialize, and remaining per-environment CPU feedback/guard/reference operations limit scaling. The measured full16trial collector is2.223× faster under unchanged case/seed/request/scene/trajectory and retains16/16success; a whole448trial PPO-update20× gain has NOT been achieved or measured. CPU-physics/plain-compile/spaced-environment diagnostic alternatives were not adopted. Full heterogeneous-plan batching and full-loop migration remain open engineering work; no claim that all execution limitations are resolved. See the2026-09-29 WORKLOG and `20260929_throughput/throughput_report.json` for evidence and rejected experiments.
+
+### 2026-09-29 — Bounded independent-plan scheduling and equivalent hot-path work (Agent K/J)
+- No public schema, policy input/output, task, solver, reward or success-contract change. Selected-plan groups can run in independent persistent simulator workers, while replicas of each common plan remain vectorized. Process completion order cannot change policy sampling seeds or training-archive ordering. This is process-level heterogeneous-plan parallelism, not a claim that unlike morphologies share one GPU physics scene.
+- CPU physics is explicit in the collection binding; GPU remains the default. A process pool requires the owned resource guard with aggregate CPU/memory limits and host-health checks. Checkpoint/source/configuration/condition identities, fresh physical outcomes, motion audit, all rejected actions and probability replay are preserved. The source-controlled entry can explicitly invoke one existing PPO update only after a complete training panel; diagnostics/evaluation/teacher data are rejected.
+- Pure arithmetic/reference/guard calculations are batched where regression checks permit it. CPU traces and same-observation post-step model reuse retain live current inputs and owned outputs. Snapshot canonical hashing traverses the same data once, without caching validation. Raw tensor history uses complete owned blocks with the same artifact fields; single-use finalization frees copied blocks to bound memory. No sample dropping, reward shortcut or relaxed deadline is introduced.
+- GPU link/rotor arithmetic rebatching was removed after full physical outcome regression; original operation order is retained. The unadopted shared-GPU-scene prototype is archived outside production. Throughput and physical outcome differences are recorded separately in `20260929_throughput_extension`; CPU speed measurements do not establish GPU rollout equivalence, R2 acceptance, or a completed full448-episode PPO-update speedup.
+- Canonical serialization also fast-paths exact built-in JSON scalar types; enum/subclass/nested conversions and canonical bytes remain unchanged. `schemas/common.py` is now included in request runtime source provenance. This changes serializer implementation, not a schema or a checkpoint feature contract.
+- Final measured boundary: fixed128 trials completed in477.935s with16CPU workers versus a conservative4507.513s serial-GPU comparison (9.431×). CPU success122/128 versusGPU127/128; keep backend choice explicit and do not describe this as verified physical equivalence or≥10×. GPU default retains16/16 on the restored m5 probe, with physical states/commands/rewards exactly matching its prior trace. No full448-episode PPO update or R2 acceptance was executed. All owned workers are stopped; see the linked worklog/evidence for timings and source hashes.
+
+### 2026-09-29 — Full-panel execution acceleration, implementation-only boundaries (Agent K/J)
+- User's clarified target is40× against16971.134313666s for448 independent trials plus one PPO update (target424.278357842s). Complete CPU updates have now been measured; this supersedes the earlier statement that no448-trial update was measured. Main R2 training is still paused. Comparison updates are separate artifacts and are not promoted.
+- Native CPU dynamics retain authored articulated FK, mass/inertia, COM velocity, gravity, centrifugal/gyroscopic and nominal contact loads. CPU-only no-gradient selection is explicit, the native binary is source-bound, and reference/autograd/GPU paths remain available. No controller gain, allocation constraint, task, physics timestep/solver, reward or success predicate is changed.
+- Physics still uses independent topology/selected-plan jobs with vectorized replicas. CPU worker thread limits, memory recycling and source-bound staged planning/physics/audits are execution policy. Independent RNG, full physical trials, all planning rejections, replay checks and stable training-archive order are preserved. Deterministic plan reuse never reuses outcomes or learned probabilities.
+- CPU contact-point Jacobians can use measured link poses and authored revolute joint axes/origins, selecting only required joint columns and contacts. Re-rooted joints use the corresponding sign; disconnected/cyclic/unsupported trees and invalid columns fail explicitly. This is an Isaac backend optimization of the existing motor-feedback estimator, not a new contact-force sensor or ideal-FK observation. Fixed-base dense fallback row offsets are preserved. Backend-scoped implicit actuator staging preserves original actuator.compute and all output/state buffers, and rejects unsupported backends.
+- Owned CPU snapshots, exact constant-sample log compression, batched phase metrics/reference checks, schema primitive fast paths and frozen-critic feature reuse preserve interfaces and original checks. CPU coordinate descent may end at an exact fixed point; this does not loosen a convergence tolerance. Inference-only loop context keeps observations as normal owned tensors so mutation/version checks still invalidate the next-tick dynamics cache.
+- GPU shared-scene/CPU-host coordination, environment translation, whole-kernel compilation and thread-placement alternatives remain separately recorded diagnostics. Prototype GPU execution is not adopted into production or represented as a full-update result. Intermediate retained CPU variants match all448 outcomes/reward and updated checkpoint bytes; short600-step sparse/staging/inference probes match73/73 tensor fields. Final40× acceptance remains pending in the ongoing task; see WORKLOG and20260929_full_update_throughput artifacts.
+- CPU-only execution adapters retain standard Isaac semantics: partial joint-target writes and selected rigid-body local wrench writes are instance-scoped, verify backend/order/layout, and fall back for unsupported calls or non-selected loads. Loaded7-environment probes preserve all73raw tensor fields; a complete CPU448-trial update preserves updated checkpoint bytes. Optional GPU broadphase keeps CPU dynamics/tensors and derives pair capacity from supported collision shapes, without reducing solver/contact settings. Current-job PhysX overflow/errors invalidate the receipt regardless of process exit status.
+- `--cpu-log-storage file` optionally uses private dense CPU mappings for complete raw-history blocks and finalized fields. No logging field, timestamp, precision or validation is omitted. Mappings own separate storage; scratch paths are unlinked immediately and the OS releases storage with the last tensor/process. Ordinary artifact files and downstream readers remain unchanged. Allocation failures propagate and remove scratch paths. RAM remains the default; GPU execution rejects this CPU-specific flag. File-backed whole-panel throughput is still under measurement.
+- CPU affinity/quota-period choices affect owned worker placement only, within the existing aggregate resource guard. The tested full-panel path retains bounded process recycling; unlimited reuse and24-worker RAM reclamation trials were rejected, not adopted as a speed result. Independent reviews are bounded to important code differences, with no standing second agent.
+- Optional `--initial-workers` uses at most4 spawned CPU workers for independent initial observations and fresh policy draws. Each worker checks source/configuration/checkpoint/record/condition identities, enforces the training split when appropriate, and receives the original explicit per-case seeds. The parent consumes results in protocol order and validates model/seed ordering. Workers stop before physics starts; no future trajectory, teacher label, outcome or cached probability enters inference. The serial default and policy/artifact schemas remain unchanged. All448 actual initial decision rows match the serial reference exactly; the parallel preflight took6.906s. A full cold448-trial update with this path preserves the GPU-broadphase reference PPO checkpoint bytes. These observations do not establish40× throughput; final whole-update receipts determine that claim.
+- Final measurement:448 independent draws and one unchanged PPO update completed in446.753s (37.988× original16971.134s); guarded command startup/exit included453.083s. The40× target424.278s is **not achieved**. Native CPU dynamics/control with GPU broadphase and CUDA PPO,20 workers,4 initial workers,12 planning/audit workers, two-job recycling and RAM logs is the best measured combination. Prioritization uses `(environment_count + 4) * planned_horizon`; every job still executes, and no case IDs or past outcomes enter the priority. The2.908s advantage over module-weighted priority is small and is not a statistically established general scheduling gain. Final source removes only the unused scene read relative to that frozen measured scheduler; all39 priority values match. First-use planning on the preceding scheduler took644.067s; neither cold cost nor new planning is represented as free.
+- Complete CPU/GPU-broadphase comparisons preserve219/448 successes, zero safety failures and the same updated checkpoint bytes. Original GPU-dynamics baseline had228/448 successes, so this is not evidence of cross-backend physical equivalence. The full20-worker file-storage comparison took473.254s with identical checkpoint bytes: retain it only as explicit memory-pressure control, not the speed default. Main R2 training/checkpoints remain paused/protected; comparison updates are not promoted. Reproduction, resource limits, unsuccessful alternatives and full timings are recorded in `artifacts/p4_full/order9/request_ppo/20260929_full_update_throughput/throughput_report.md`.
+
+### 2026-09-29 — R2継続学習の外側scheduleを既存collectorへ接続
+- Spec v0.5 §§19.4.1/19.4.2/22.8への運用補足。`scripts/run_request_training.py`は完了済みcheckpoint/optimizerから`run_guarded_request.py`→`run_request_collection.py`を繰り返す外側の入口。過去artifact runnerのsimulator/collector実装をコピー・importしない。policy、行動、報酬、物理、schemaは変更しない。
+- 固定protocolの全train panel、3更新ごとの全validation panel、事前指定の最小更新数・停滞回数・最良近傍検証を行う。選定順と許容報酬差を固定し、近傍に新しい最良が見つかった場合は停滞判定を再計算する。test splitは参照しない。再開は同じ実行の完了stageだけを検証して採用し、不完全stageを自動再試行しない。
+- source/command/protocol/checkpoint/seed/件数を拘束し、最速実測の固定snapshotで実行。生のmotion logだけをzstd保存・展開SHA検証・manifest保存の順に可逆圧縮して容量を抑える。PPO入力、checkpoint、metrics、auditは維持する。
+- 使用者: R2本学習担当。従来のartifact scheduleは履歴再現用に残すが、新規継続はsource-controlled outer scheduleを使う。今回の設定値・pathsはrunのexecution_contract/schedule_inputs/保存argvに分離。追加interfaceはschedule用CLIのみ。実装確認: 選定・停滞・guardコマンド・不完全/不正panel排除・可逆圧縮・全schedule境界の6tests。
+- 実行中の資源対処補足: 訓練policy update22以降は`training_file_storage_from_update`によって既存CPU file-log保存を使用。RAM版がmemory.highで停滞したためで、task/physics/PPO/schemaやseedを変更しない。全448比較のcheckpoint一致証拠、旧binding、中断attempt、変更理由を保存して同一checkpointから再収集。signal handlerは`Popen.wait`から例外でunwindした後にmain側でguard停止・reapし、再入lockを避ける。最終8tests（実process中断試験を含む）と全4032訓練/378検証の完了監査を通過。
+
+### 2026-09-29 — R2訓練条件poolの拡充
+- v0.5 §§19.4.1/22.8/24.5.9へのデータ生成補足。`scripts/prepare_request_condition_dataset.py`で、既存train record98場面に物体条件8種類ずつ（内部4/単一境界2/複合境界2）を付与し、旧28条件と合わせ812条件を生成する。98場面は19機体構造を含む。元validation/held_out場面、現在の検証42/test14はtrainへ移さない。
+- R2の既存7軸（体積、x/y、z/y、質量、CoM3軸）の範囲を維持。Latin hypercubeに単一面/2〜3面境界を組み合わせ、単一境界は全軸両端を各module countで2回含む。独立な訓練seedを使い、検証結果、教師の接触選択、IK成立可否、成功報酬を新条件の採否へ使わない。
+- 812条件は29個の完全な28条件panelへ分割する。各panel4条件/module count、同じ元場面の重複なし、1周期ですべての条件を1回使用。16draw/条件の同条件baselineと448episode/updateを維持できる。条件だけを増やした巨大な全件updateを既定にしない。panel用protocolは既存collectorと同じ形式で、policy/schema/reward/controller変更なし。
+- 初期checkpoint/optimizerは採用済みupdate16をhashで記録。今回PPO/Isaac/教師収集は起動しない。生成するのはonline PPOの場面条件であり、新物体の教師trajectory/正解labelではない。データ全件の既存expand→二点catalog→初回actor入力検査と、split/coverage/hash監査を行う。
+- 外側scheduleへのpanel切替接続は学習再開時の責務。固定検証を維持し、panelの異なる訓練平均には条件sampleによる変動が入ることを記録する。既存失敗を消したりR2条件を緩和したりしない。
+- 2026-09-29学習再開: 既存outer scheduleへ任意の`training_dataset`/hashを接続し、update番号から29panelを順番に巡回する。全pool重複なし被覆、検証/test/PPO等の不変、毎stageの入力hashを検査。最小更新数は全panel数以上とし、今回30更新・3更新ごと検証・停滞3回・近傍±2で固定。初回update16以降は最新optimizer/checkpointを継承する。panel番号/周期/protocol hashを訓練曲線へ記録し、隣接平均報酬の条件差を可視化する。実行元source・collector・policyの契約は変えない。
+- 実行補足: CPU収集とCUDA全batch再生のfloat32差が既存on-policy閾値を超えた実例に対し、PPOを既存CPU経路へ統一する。閾値やpolicy/PPO実装は変更しない。outer scheduleは`training_ppo_cpu_from_update`で切替点を記録する。収集完了・optimizer未完了の復旧は、元guardの失敗を保持したまま、全収集入力hash・同じcheckpoint/state・device以外不変のoptimizer argv・別guard正常終了を拘束した`optimizer_recovery.json`がある場合のみ採用できる。再実行の自動ループや不完全データの採用は行わない。
+
+- 初期reset運用補足: 同じauthored物体条件を複製した環境の初期settling差により共有phase bankの前提検査が停止する場合、bank生成前に既存の基準env0のsettled object poseを明示的に複製する。env0の開始状態・task/成功条件・bank readback閾値は変えない。一致済み/単環境では書込なし、異なるauthored物体poseは拒否。物理task開始後のpose補正ではない。`request_reset_alignment.json`で適用有無と初期差を保存。全複製が既存bankの同じresetを使う前提の初期化修正。
+- outer scheduleの診断後継続はhash-bound前run曲線/最新checkpointとpanel offsetを受け取り、全pool被覆数と検証間隔の原点を維持する。新runのsource/configは固定し、元runの失敗guardや成果物を変更しない。前run episode数を完了証跡に併記する。
+
+- 拡充条件でのruntime safety rejection: bounded grasp補正の既知の「安全な連続commandなし」は、その環境を失敗終端とする。request runnerだけが明示opt-inし、安全判定・成功閾値・失敗報酬を変更しない。拒否候補のactuator出力を遮断し、他envを継続する。未知例外/速度限界の内部不整合は依然raise。inactive環境の補正はskipし、終了後の結果を変更しない。学習入力には拒否までの実actor eventsと既存失敗報酬を保持する。simulated episode打切り機構であり、実機非常制御の置換ではない。schema/interface変更なし（runner/controller内部のopt-in接続）。
+
+- 計画拒否分類補足: nominal preload用joint/centroidal IKのbounded lead不成立、carried-goalの過大clearance/normal errorは通常の選択失敗として既存-5/done eventへ変換する。元の幾何・押し込み計算・衝突/速度/成功条件は変えない。入力shape/nonfinite/内部軌道不連続を同じ拒否に隠さずraiseする。分類は既存request runnerに一元化し、PPOから失敗選択が欠落することを防ぐ。
+
+### 2026-09-30 — 拡充R2学習の選定結果（仕様変更なし）
+- 812訓練条件を29panelで一巡以上、update16→46の30更新、13,440episode。固定42検証/3更新ごと/最小30更新/3回停滞/近傍±2という事前選定を完了。採用16=15/42・1.695570、17/18は許容差0.01内の同等、最終46=7/42・-1.734937。物体/タスク/二点把持/成功安全基準/報酬/学習率・探索条件を変更していない。R2完了や検証改善を認定しない。
+- 本依頼中の実装補足は上記の複製reset同期・環境ごとの安全失敗終了・通常のbounded IK拒否分類・学習継続証跡に限定。各修正後の16/42条件は個別結果まで一致。公開schema/interface変更なし。
+- 再現性は、CUDA PPO17–22/CPU PPO23以降、記録したruntime修正点、hash-bound panel/optimizer継承の順序で記録。全更新を最終runtimeで最初から再実行したわけではない。最終監査と制限は `artifacts/p4_full/order9/request_ppo/20260929_r2_expanded_training_planning_resume/training_report.md` に集約。
+
+### 2026-09-30 — 計画成否による接触順位の追加教師あり試験
+- v0.5 22.6/24.5.5の候補分類を、既存contact scoreへの二値分類損失で局所検証。共有morphology/contact encoderとcontact headを学習、公開request/schema/checkpoint tensor shapeは維持。推論時入力に計画結果・将来姿勢を追加せず、未観測候補は負例にしない。安全判定/IK/制御/タスクの変更なし。
+- 追加学習と形態/donorを分離した116条件で全候補greedy選択を現行plannerへ通した結果、元16の67/116に対して58/116、改善0/悪化9。この設定は不採用。既存ログ候補内の順位向上をfull-support成功へ読み替えない。
+- 保存モデルは計画成否の実験用。共有encoder更新に伴う遷移出力の変化、物理実行、PPO optimizer継承はこの試験の完了認定に含まない。本番採用モデル16を維持。詳細/再現先は20260930_planning_supervision/report.md。
+
+## 2026-09-30 — 計画成否学習の責務分離と実計画による選定
+
+- v0.5 §§22.6/22.8/24.5.5に基づく小規模offline候補順位学習の修正。既存actor logitを計画成否の絶対binary logitとして回帰する経路は廃止。観測済みの計画成功候補と失敗候補の相対順位（softplus(score_negative-score_positive)）をactorへ、BCEをtraining-onlyの別headへ与える。shared morphology/contact encoderは共通、未知候補を負例へ変換しない。物理タスク報酬やplanning feasibilityの意味を変更しない。
+- 全有効候補上の旧方策KLを保持損失とする。接触側のhard KL上限は各epochの更新幅に適用し、累積学習を小さい固定上限で封じない。今回学習対象ではない遷移判断は実際の訓練途中観測で累積KLを制限する。超過時にはmodel/auxiliary/Adam/RNGを戻してstepを縮める。監視範囲を超える実行の非劣化を保証しない。
+- モデル選定は固定checkpoint(epoch0を含む)の全候補greedy選択を現行plannerへ通した結果で行う。成否未記録候補も実際に判定し、既知候補だけの精度やBCE低下で採用しない。同数なら早いepochを維持。deterministic checker、候補生成、公開schema、runtime actor tensor shape、入力契約に変更なし。補助headはruntime checkpointのstate_dictに入れない。
+- これはPPOそのものの修正・更新ではなく、PPOで得た元16へのoffline順位学習試験。元16/optimizerは保護し、改善はまず計画通過に限定して測る。元のvalidation42/test14は不使用。前回比較済み116を新規未見testとは扱わない。
+- 再現・点検結果は `artifacts/p4_full/order9/request_ppo/20260930_planning_auxiliary/`。学習目的の不足・累積上限制約の停滞をCPU smokeで修正してから最終手法を固定し、途中案を採用結果へ混ぜない。
+
+### 2026-09-30 — 初回接触選択への宣言済み物体推定値の接続
+- v0.5 §19.2に反映。旧v2の初回contact headはrequest featuresを利用しておらず、幾何を固定した実条件で推定質量・重心を変えても接触logitが完全に同じだった。サイズの変更には応答する対照と、実task→encoding→headの反実仮想検査で確認した。
+- plannerがすでに利用しているtask metadataの`estimated_mass_kg`と`estimated_com_object`だけを4要素として与える。COMは物体座標系mを0.1mで正規化する。真の物理値や隠れた乱数化値へのfallbackは設けず、推定値欠落は明示的に拒否する。実機で推定値を取得する機構を新たに実装したとはしない。
+- private actor checkpointを`causal_object_condition_event_request_actor_critic_v3`へ明示移行する。旧v2は従来どおり読める。共有group表現と推定値からcontact logitへの残差を追加し、末段をゼロ初期化することで移行時の方策を完全に保持する。全812条件で旧16とscoreの完全一致を確認。公開HighLevelRequest/Task schema、候補生成、タスク条件は変更しない。
+- 新しい4要素はserialize/collate/PPO再生/runtimeまで同じ契約で渡す。新旧入力の混在は拒否。追加学習では成否補助headにも同じ推定値を与える。旧encoderデータ・labels・splitは変更せず、既存条件生成器からこの4要素だけを再構築する。
+- 使用者は物体条件を扱うv3接触actor。旧v2との互換経路は保護済みupdate16を維持・比較するために残す。v3への移行は明示的に行い、旧モデルを自動で改変しない。補助学習後のPPOは新しいparameter構成に対応するoptimizer初期化が必要で、旧optimizer状態を無条件に流用しない。
+- 点検: migrationの出力一致・保存再読込・PPO入力伝達・質量/COM反実仮想・simulator真値への非依存を検査。関連51tests合格。実データで学習後の質量/COMへの非ゼロ応答を確認したが、この応答だけで性能改善とは判断しない。実計画比較は`20260930_planning_auxiliary/condition_aware/`に保存。
+
+- 最終再比較: v3入力での固定20epoch学習後、モデル選定dev116はepoch0/1/5/20いずれも80/116。前回比較116は元16相当のepoch0と最終epoch20で67/116→67/116、改善0/悪化0。前回の直接BCEによる9件の悪化は9件すべて回復した。追加学習の性能改善として採用せず元16を維持する。これらは実planner生成件数でありIsaac把持成功率ではなく、PPO更新は0。51tests、実データの分類/順位正常対照、812件の移行時score一致、全比較の入力・request・source/hash監査を完了。最終証跡は上記condition_aware/report.md。
+
+### 2026-09-30 — R2の定義済みanchor境界へ復帰
+- ユーザー指示により、二点R2は`grasp_anchor_source=defined`を明示し、入力のtask-conditioned MorphologyGraphに保存されたRobotAnchorを保持する。全空き把持面からの再定義は`all_free`という拡張実験に限定する。既存protocolは再現用に従来動作を維持。
+- 同じ物体条件から候補を再生成したinitial_sceneを維持し、元のraw観測へ戻さない。初回並列推論、直列推論、prepareの候補境界を一致させる。元のgrasp2個に対して物体側の位置・割当てと遷移をPPOで学習する。anchorは固定設計入力であり、学習済みπ_Dの成果とはしない。
+- 再開元はR1完了update8のactor/critic/Adam。全空き面を探索したupdate16/46とは別系統とし、過去rolloutを新しい候補空間のon-policy経験へ混ぜない。物体条件・報酬・安全/成功基準・制御は維持する。
+
+### 2026-10-01 — 二つの五anchor近傍群から一つずつ選ぶR2
+- ユーザー承認に基づき`grasp_anchor_source=neighborhood`を追加。結合後のdock周回順をmodule-local dock配置と接続edgeから構成し、各基準anchorの前後2dock＋中心の5候補を保持する。使用中dockは境界走査で通過するが候補には入れない。
+- 同じ物理dockには単一anchor IDを与え、capabilityの所属bitmaskを使い、各群一つを満たすペアのみ生成する。同一module禁止は追加しない。物理ペアの重複は統合する。
+- 暫定採点を残し、物体側候補の上限8を各物理ペア内へ適用する。全体上限で25通りのペアを失わない。boxではペアあたり6候補。既存defined/all_free protocolは旧動作を維持。
+- 局所48 tests合格、既存140機体で両群各5、代表7条件で全合法物理ペア被覆と直列/並列の選択・snapshot一致。実験は`20261001_r2_anchor_neighborhoods`で元R2update16から3updateを行う。
+
+### 2026-10-01 — initial request catalog budget
+For an uncommitted plan, the bounded request catalog retains current-phase, no-transition choices before future transition choices. This prevents inactive future requests from displacing legal initial grasp selections when five-anchor neighborhoods enlarge the candidate set. The catalog size limit and downstream safety/admission checks remain. Candidate neighborhood membership is `_id` metadata, excluded from numeric actor score summaries.
+
+### 2026-10-01 — bounded grasp posture不成立のepisode終端処理を補完
+- 姿勢補正の保持不能・速度区間なし・予見地面余裕不成立・総関節速度超過は、既存の制約拒否である。request runnerが明示的に有効化するper-environment terminationでは、その行だけを既存actuator masking/安全失敗報酬へ送る。単独制御呼出のfail-closed例外と、未知の実装不具合のraiseは維持する。
+- 新しい回復動作や制約緩和ではなく、既存terminal契約への例外接続漏れの修正。正常なcommand数値、π_H入力/出力、学習率・損失・成功基準の変更なし。WORKLOGの同日「制御拒否例外の修正」を参照。
+
+### 2026-10-01 — π_D中心anchorへの持続的な優先度（ユーザー承認）
+- 初期値だけでなく推論時にも中心優先を残す要求を反映。仕様28.10に記載。境界周回順の距離を各群別にRobotAnchor.capabilityへ保持。重複群は一群一接触の最小費用割当で距離を計算し、最寄り中心への独立割当による二重使用を禁止。
+- 新actor v4は学習した初回contact logitsへ -ln(2)*合計距離を加える。PPOは同一forward経路を再生し、固定priorへのKL(π||q)を0.05倍して損失に加える。係数はcheckpoint保存、既存entropy/実行報酬/成功安全基準/temporal判断は維持。物理スコア特徴へ距離を混入させず独立したencoding fieldで保存する。
+- 旧v1/v2/v3は従来動作。configure-anchor-preferenceで明示移行し、重み・Adam状態・完了update番号を保持してcheckpoint hashを更新する。変更後モデルで新しく収集し、旧データや異なるprior設定でのPPO再開は拒否する。旧凍結runtimeはv4を読めないため、次回正式runは現行sourceを新たに固定する。
+- collectorは各初回選択の合計距離、平均距離、中心選択数を物理報酬と別に記録。PPOはprior KLと係数付き損失、更新前後の中心確率/期待距離を記録。学習・実行インターフェースの変更は本ユーザー承認の範囲。R2性能改善やπ_Dの実学習は今回未認定。
+
+## 2026-10-01 — π_Hのanchor選択権限を廃止
+
+ユーザー指示により、機体構成と使用anchorはπ_D、物体側接触点・遷移・subgoalはπ_Hとする。
+周辺dock展開、中心優先v4、90/10初期化および固定update8補正案は正式経路から外す。
+正式R2は既存defined経路と固定sourceを用い、20260930_r2_defined_anchors/update_11から
+optimizerを継承する。旧all_free/neighborhoodの最良update16等は今回の選定対象外とし、
+再現証拠は保持する。公開request schema・計画器・制御・判定の変更なし。
+詳細はv0.5 §28.10およびWORKLOGの同日継続学習項。
+
+### 2026-10-02: R2継続時の未観測接触の失敗処理（Agent H/training）
+- 指定anchorの接触判定に利用できる関節集合が空のとき、収集全体を例外終了せず、motor-load evidenceを0として既存の全接触成立判定を通さない。候補、関節選別規則、接触閾値、成功条件、報酬は変更しない。通常のphase timeout等をPPOに含める。
+- 保護された旧C3 harnessは変更せず、既存のrequest実行入口内でこの例外分岐のみを適応する。従来の非空集合の計算と異常shape/ID検査は保持。静止関節を新しく観測集合へ含める設計変更は今回行わない。
+- 同時に、完了jobのdeadline alarmはprepare/execute返却直後に解除し、結果送信・後片付けは既存parent RPC deadlineで保護する。計画時間予算そのものは変えない。
+
+### 2026-10-02: Isaac startup dependency ordering (training runtime)
+Initialize the active Isaac package’s Carb dictionary/settings plugins synchronously before importing Kit app. Two observed deadlocks involved AppSettings background initialization and main-thread dictionary startup. No settings values, control equations, policy outputs, or interfaces change. Minimal physical replay retained identical motion and terminal outcome. Applies to the existing request execution entry; installed packages remain untouched.
+
+
+### 2026-10-03 — 計画生成の同一計算の再利用（WP J/K、仕様v0.5 §28.10）
+
+- 計画器の数値計算順序・候補・探索回数・衝突余裕・軌道検査間隔は維持する。π_Dが指定したanchorをπ_Hが変更する経路は追加しない。PPO、制御、安全判定、公開schemaの変更なし。
+- 衝突メッシュの派生配列は、毎回読み直したファイル内容のSHA256とscaleをキーに最大32件まで再利用する。配列は書込不可。パス、ファイルサイズ、mtimeだけで同一と判定しない。
+- 軌道の各3秒窓で姿勢解法の初期化を繰り返さず、同じteacher instanceで不変の機体・衝突形状を共有する。各窓の解キャッシュは消し、以前の解による探索順序の変更を避ける。設定・物体定義変更時はresolverを作り直す。
+- 重心姿勢だけが必要な呼出では、慣性・ロータ・力配分行列を作らず、従来と同じリンク順序・浮動小数点演算で重心を計算する。局所リンク姿勢と世界座標のリンク重心を各最大256件保持。関節角・機体poseは丸めずに識別し、物理モデルの関節定義・質量・局所重心変更も反映する。モジュール別に先に重心を集計すると丸めが変わるため、リンク別の加算順序を保つ。
+- Python順運動学では、同一物理モデル・同一局所関節角のリンク姿勢を最大256件再利用する。物理モデルを差し替えた場合は破棄。従来のモデルcontext契約に従い、モデルの変更は新しいPhysicalModel instanceで渡す。
+- C++衝突判定では、連続する物体・台との照合でロボット姿勢がビット単位で同じ場合、ロボット形状と自己衝突距離を再利用する。物体・許可接触・地面との判定は毎回行う。衝突余裕、形状、自己衝突対象表変更時は関係キャッシュを破棄。判定結果・対象ペア順・診断値を維持する。
+- Pythonの順運動学・重心計算全体を既存C++計算へ置換する案は採用しない。1e-11程度の差でも非線形IKの探索が変化し、既存成功例の不成立と遅延を確認した。採用実装は同一演算の省略・再利用に限定。実測・再現手順はWORKLOGとISAAC_TRAINING_THROUGHPUT_RUNBOOKの同日項を参照。
+- 残存負荷への追加対応: 重心位置から機体根元位置を復元する呼出へ既存solverの重心計算器を渡し、毎サンプル生成によるキャッシュ消失を防ぐ。C++の重心合わせに必要な2回の世界座標計算では、共通する局所関節形状を1回だけ生成して渡す。世界座標計算・加算順は維持し、C++関節形状は呼出内共有なのでスレッド間の可変共有状態を増やさない。
+
+### 2026-10-03: First-feasible contact ranking with on-policy PPO credit
+
+User-authorized π_H ranking replaces the single-candidate admission action for the new R2 run. π_D-defined robot anchors remain fixed. The existing contact head supplies logits over legal object assignments; no new weights or head are introduced. Training samples a without-replacement ordering; evaluation uses descending logits. The complete existing deterministic planner tries candidates until the first accepted complete path. Physical execution uses that assignment and the ordinary learned transition policy. No task-success oracle enters selection.
+
+The initial PPO action is the tried prefix. Its probability is the product of each conditional choice probability after excluding previously tried candidates. Only this prefix contributes to the ratio/gradient; the untried suffix is not credited. Full-order RNG consumption is retained across prepare/live reset, so seed replay is independent of the successful rank. Store one initial event, keeping the established same-condition return baseline. Conditional entropies and KL are summed over visited prefix decisions; the mean conditional KL across old-policy samples estimates the stopped-ranking KL. Existing physical rewards remain; charge0.25 for each planning attempt at time0, including accepted/failed attempts. If all candidates fail, retain terminal-5 plus these costs. Timeout interrupts the collection and is not treated as proof of geometric impossibility.
+
+The mode/cost is explicit checkpoint metadata, accepted by the existing actor without changing parameter shapes. Original update8 parameters and optimizer moments are copied exactly into a separately named run; historical checkpoints remain immutable. Collector batching uses identical tried prefixes, ignoring unused suffix differences. Completed deterministic plans/rejections are cached by source/configuration/input identity under per-key interprocess locks. Physics is always executed anew.
+
+Only the previously compared collision-goal refinement budget changes60->12 (+40 native refinement =52 total). Initial contact IK60 and240 retries, every seed/offset, collision margins, dense checks, actuator/controller and success criteria stay unchanged. The supported four successful/failure comparisons are recorded in20261003_planner_iteration_budget; this is not a universal feasibility-preservation proof.
+
+The first formal run exposed a lifecycle bug after two complete updates: a worker-wide360s alarm still counted the sum of multiple candidate searches. Separate the collector's whole-ranking transport deadline from each candidate's solver budget; execution deadlines retain their original meaning. Standalone preparation relies on per-candidate solver deadlines and its guarded caller. Cache-owner waiting time is not deducted from the tail solver budget. A candidate cut after251s was independently completed as an ordinary goal-search rejection in319s, so the early cutoff was not legitimate infeasibility feedback. Incomplete collection is excluded from PPO. This correction changes process budgeting, not task/safety constraints or candidate ranking probabilities.
+
+
+## 2026-10-03 — 学習信号の修正（ユーザー承認済み）
+
+- 対象はv0.5 §19.2の追記。監査で確認した、物性入力の未接続、継続選択確率の消失、同一条件の成功割当を弱める共有重み更新を修正する。π_Dのanchor所有権、後段計画・制御、元の報酬・安全・成功判定は変更しない。
+- 既存のゼロ補正物性headを有効化し、旧重みと各parameterのAdam履歴を名前で移行する。旧checkpointを上書きせず、fresh on-policy収集を必須にする。
+- private decisionには有限の継続時間を加え、入力・sample・log probability・実行・checkpointを同じ選択肢で結ぶ。公開HighLevelRequestは3IDのまま。20%の初期継続確率は学習可能なheadの初期値で、固定の実行時補正ではない。
+- 現batchの反復観測による成功／失敗の比較だけを補助損失と更新制約に使う。成功同士の細かな報酬差や未観測候補へ強い順位labelを作らない。射影後も実ネットワークと既存KL制限を検査し、成り立たない提案はoptimizerを含めて戻す。数値誤差を超える悪化を通さないことと、実機・未知条件での成功保証を区別する。
+- 過去データでの対照実験および少数訓練条件での実経路検証は `20261003_learning_signal_repair` に保存する。正式なR2学習・全42条件検証の代わりにはしない。詳細な試験結果と次の入口はWORKLOGを参照。
+
+
+## 2026-10-03 — 接触選択の更新制約と独立した遷移出力の分離
+
+- 正式448episode収集で、成功／失敗の接触順位を守る更新幅縮小が、接触logitsへ依存経路を持たないrequest_headとhold_headにも及び、8epochすべてで更新を1/16〜1/32へ縮めていた。
+- 接触制約の縮小は共有encoder・接触出力に適用し、独立した遷移要求／保持時間の専用出力は元の提案幅を保持する。最終ネットワークの接触順位および接触・遷移KL制限、棄却時のoptimizer復元は従来どおり。報酬・学習率・学習対象・実行時の制御は変えない。
+- 回帰試験は、実ネットワークの専用出力を変えても接触logitsが変わらないこと、および実際に縮小を要する非線形制約で専用出力の更新が保持されることを確認する。同じ親checkpointで今回新規収集した448episodeから更新を再計算し、古い方策のデータを新しい方策の収集として扱わない。確定結果・再現性検査はWORKLOGに記録する。
+
+
+## 2026-10-03 — 学習機構の原因診断と接触観測の接続
+
+- ユーザーの2時間の調査・診断学習・修正の許可に基づくv0.5§19.2の補足。成功比較制約は維持し、一度の線形化と全体縮小を、元の更新に近い解を求める反復線形化へ置換した。実ネットワーク検査、接触／遷移のKL上限、棄却時のoptimizer復元は維持。
+- 制御側に存在する接触距離・観測滑り速度・モータ負荷がπ_Hの観測には渡らず、保存済み3261遷移判断で既存接触feedback欄が全ゼロだった。型付きContactMotionEstimateとHighLevelObservation.contact_motionを追加し、姿勢/FKと既存motor feedbackのみを時刻付きで渡す。normal_load_nにトルクを詰めず、正確な接触レンチ推定も要求しない。
+- 可変接触点数に対応するmin/max集約9値を遷移・待機headおよびcriticへ追加する。旧入力重みとoptimizer履歴を保ち、新列だけゼロにして移行する。学習・推論・serializer・PPO replayを同じ入力契約へ接続し、旧checkpointでの待機学習再開は事前に拒否する。公開action、物理・安全・成功基準は変更しない。
+- 観測の追加はunknown状態を成功状態として教えるものではない。因果性、単位、移行、確率再現、実シミュレーションでの非ゼロ入力と更新を検証し、個別条件での適応能力と未知条件の収束保証を区別する。結果はWORKLOGと20261003_learning_mechanism_diagnosis参照。
+
+- 接触側KLが上限へ達する一方で遷移側KLが9.45e-6に留まる実収集を確認した。共有部／接触／価値を固定した追加の遷移・待機head更新を`temporal_epochs`として既存PPOへ追加し、同じ収集時分布からのKL上限を維持する。今回の診断では64回を使用した。新runnerや別報酬、ケースIDによる例外は追加しない。
+- 共有部の提案がすべて棄却された場合も、独立した遷移更新だけが成立すれば有効な更新として記録する。保存済みの旧結果を再現する場合は従来の更新回数欄を読み、新結果は合計actor step数を記録する。計画が全件不成立で遷移経験がなければ追加遷移更新は行わない。
+- 旧入力・同じ収集時方策・同じon-policy rolloutによるoptimizer再計算は追加updateとして数えない。今回の既存update12補正は凍結したproduction実装で重みとAdam状態の完全一致まで再現した。新しい観測入力への移行後はすべて新規収集を使う。人工報酬の切り分け試験の重みを物理実行モデルへ流用しない。
+
+### 2026-10-03 — Estimated object properties for temporal/value decisions
+- Extend the existing explicitly estimated mass/COM input to request/hold and value first layers, not only initial contact scoring. The same four object_features are used; no simulator truth, new physical action, observation schema or success criterion. Private checkpoint temporal_object_conditions declares the pathway. Existing configure-motion-feedback --include-object-conditions appends zero input weights/moments; old checkpoint outputs and Adam history preserved. Require fresh collection from migrated checkpoint. Legacy checkpoints remain readable for historical evaluations.
+- Unit checks cover migration/optimizer steps, actual waiting/value gradients and property counterfactual sensitivity, checkpoint replay and frozen critic input equality. Details and fresh physical evidence: 20261003_learning_completion.
+
+### 2026-10-03 — 予圧計算と最終衝突検査の制約統一
+- 訓練側の8モジュール条件で、必要な押し込み12 mmに対して11.10/11.36 mmしか得られず、全候補が拒否されていた。予圧姿勢の計算だけが5 mmの障害物間隔を目標にし、既存の最終検査が要求する1 mmより過剰な余裕へ押し込み量を費やしていた。
+- 暫定計画器v9は、予圧計算・姿勢解法・独立した軌道検査で1 mmの共通定数を使う。最終検査の数値許容差0.2 mm、押し込み量、補正量上限、接触法線・関節制限は不変。追加補正が不要な既存解を変更しない。ケースIDによる分岐や教師正解を導入しない。
+- 同じ接触割当で12.20 mmの押し込みと1.089 mmの最小間隔を得て全軌道検査に合格し、本番ソースによるIsaac実行でもタスク成功を確認。これは割当を指定した実行可能性の対照試験であり、学習済み方策の成功数へ加算しない。v8で収集・学習した更新とv9での最終評価を分け、次回PPOにはv9による新規収集を要求する。
+
+### 2026-10-03 — 標準PPOとの比較を既存学習器で実施
+- ユーザーの2時間の比較・診断許可に基づき、既存PPOに成功比較補助損失と重み射影を同時に無効化する明示設定を追加。無効化時も重み、候補、推論分布、Adam履歴を継承する。暫定の独自補正が必要という前提を置かず、同一の新規on-policyデータによる独立した一回更新で比較する。
+- 標準GAEを任意設定として追加。実時刻に基づく区間割引、判断回数に基づくlambda、記録済み行動前価値を使用し、途中打切りを拒否する。lambda=1のMC一致、lambda=0の一段予測誤差、不均等時刻での独立参照計算をテスト。接触側の同条件leave-one-out比較を有効にした場合はそのMC基準を維持する。
+- 既存optimizerの学習率変更は旧値を明示した場合に限り許可し、momentを維持する。公開行動、計画器、制御、安全・成功条件、元の報酬は不変。新しいproduction runnerは追加しない。実験条件・比較結果は `20261003_standard_ppo_comparison` とWORKLOGに保存する。
+
+### 2026-10-04 — update8から固定標準PPOを検証
+- 目的: 成功候補保護の独自損失・重み投影、成績を見て行う途中のAdam初期化に依存せず、固定方式の継続学習でR2評価を改善する。既存update8の重み・Adam履歴を維持する。
+- 既存collectorにprotocol所有の `ppo.contact_baseline` を追加。省略時は従来の同条件比較、`value_v1` は全判断で記録済み価値予測を利用。方式切替は保存状態と照合して一度明記し、履歴を削除しない。GAEと組み合わせると初回接触にもGAEが適用される。
+- 既存入力移行CLIの `--disable-return-correction` により、物性/保持時間入力の追加と実験的な成功比較補正を分離する。既存重み・履歴の保持と新規列のゼロ初期化を検査。公開schema/HighLevelRequest/制御・物理・安全/成功判定は変更しない。
+- 使用者: 標準PPO比較/学習の実行者。選択と解除条件はprotocolに明記し、同一run中に変更しない。歴史的な補正ありの再現経路は残す。関連88tests合格。実測結果・継続用モデルはWORKLOGおよび20261004_standard_ppo_from_update8/result.jsonへ記録する。
+
+### 2026-10-04 — PPO価値学習の順序修正（v0.5§19.2）
+- 共有encoderの方策更新前に価値予測部を適合させると、方策更新が予測の入力表現を変え、保存時の予測精度を悪化させる。同一update8重み・Adam履歴・256試行・80価値更新の比較では、更新後のlambda収益予測MSEは従来8.69247、方策更新後の価値学習で6.32720。
+- 価値部の最適化を、全方策更新後へ移動。advantage/価値学習targetは従来どおり収集時の予測から先に固定する。方策の重み、学習率、更新回数、Adam継続、報酬、物理・安全条件を直接変更しない。公開schema/interface変更なし。
+- 同じ設定でupdate8から独立比較する。進行中の旧実験は凍結済み旧sourceを維持する。初回update9の方策が完全一致した場合のみ、同じ方策で得た次の経験を明示的な共有on-policy標本として比較に再利用できる。価値は前バッチだけで学習した新しい予測部で再計算し、元ログは保存、元/派生hashと同一方策証明を残す。これは異なる方策で収集した経験の再利用ではない。再現実行では最初から新順序を固定して新規収集する。
+- 補足: float32の一括推論と単独推論の丸め差で、rankingの対数確率の和が再現誤差2e-5を超える場合がある。超過行のみ実行時と同じ単独観測で再計算し、記録値との2e-5閾値を維持する。単独/一括の全logitと有効候補もfloat32の標準許容誤差で照合し、真の方策不一致は拒否する。記録log_probやPPOの比率を上書きしない。
+
+### 2026-10-04 — Independent actor copies for the user-requested branch ablation
+
+The user authorized two copies of update8: freeze timing while learning contact assignment, then independently freeze contact assignment while learning timing. A frozen output head alone would not isolate the shared representation. RequestActorCritic therefore supports a versioned private composite checkpoint containing a complete trainable actor and complete frozen actor. Initial contact logits and committed transition/wait logits are routed to their assigned copies. The learner's critic estimates returns of the combined policy at every decision; all original timed rewards remain unchanged. PPO actor loss, advantage normalization, entropy and KL use only the trainable branch's events. The fixed network is excluded from optimization and is checked byte-for-byte, with exact fixed-observation logits checks and save/load checks. Existing non-composite checkpoints and the public HighLevelRequest contract retain their behavior. Original Adam state is retained for the learner. Both ablations start independently at8, use the same32×8 training cases and42-case validation, and perform3updates; no success correction or manual policy overrides are introduced.
+
+### 2026-10-05 — Upstream anchor coverage in training conditions (v0.5 §19.2)
+
+User-authorized training coverage experiment: a condition may explicitly bind
+`designated_grasp_port_ids`, an ordered list of distinct free physical Dock IDs.
+The authoring step owns this list; π_H never selects or changes robot anchors.
+Geometry and capabilities are resolved from the existing physical model. Occupied,
+unknown and duplicate ports are rejected. Without the field, existing conditions
+retain their original anchors and behavior. New scenes regenerate object contacts
+and exclude the donor teacher trajectory from planning reuse.
+
+The reproducible generator uses training records only, covers all19 training
+structural patterns, and adds two independent6-module pitch1/pitch1 and two
+7-module yaw2/yaw2 designs. An offline nearest-donor-pair rule chooses free ports;
+this is a data-authoring heuristic, not learned action scoring or proof of
+feasibility. Each of32 designs receives two shape/COM samples paired at R2's low
+and high mass endpoints (128 cases). Four32-case panels rotate with8 fresh draws
+per condition. Held-out42 and test14 are unchanged. Same-method PPO from8 for10
+updates evaluates coverage as a hypothesis; it does not assume coverage is the
+proven cause of stagnation or filter training conditions by measured success.
+
+#### 2026-10-05 — Physical binding for additional upstream training morphologies
+
+- Scope: optional training-condition augmentation, v0.5 fixed-anchor ownership unchanged. Additional morphology is an upstream design input. The actor never chooses robot docks. The condition can bind `designated_morphology` (graph path/SHA and `asset_manifest` path/SHA) plus fixed `designated_grasp_port_ids`.
+- Require the existing Order9 morphology asset manifest, matching physical-model hash, planning graph identity and every physical-asset payload. A new planning graph without its physical robot is rejected before planning. Execution uses the manifest's graph and USD, with the same module inventory/base as the task donor. Initial zero-Dock posture is recomputed from that graph; later observations use ordinary simulator feedback. Existing conditions remain unchanged.
+- Dataset authoring consumes independently authored train-only morphology/asset pools; rejects held-out overlap. Two new6-module designs retain an existing training manipulation subgraph and add modules through existing assembly/flight feasibility rules. No candidate-control/reward/controller exception, teacher endpoint input, policy-time anchor search, or held-out success labels are introduced. Test28/28 and two complete physical task successes; see the2026-10-05 H/J/K WORKLOG and bound artifacts for experiment results. This is a data-coverage experiment, not evidence yet of held-out performance improvement.
+
+#### 2026-10-05 — Request action-value learning comparison (experimental)
+
+The user authorizes alternative reproducible learning methods to resolve greedy waiting and assignment-ranking failures. A versioned Double-DQN policy reuses causal morphology/contact representations, adds observed task time and authored deadlines, and predicts physical-time discounted return for each legal assignment or transition/duration. A categorical exploration distribution and greedy evaluation order are derived from the same action values. Existing π_D fixed anchors, planner, contact binding, transition guards, reward events and task/safety thresholds remain unchanged. Failed planner-prefix attempts become observed zero-time MDP transitions with the original attempt charge; successful planning continues to physical execution. Training replay is explicitly bound to training records; held-out labels are prohibited. This is an experimental comparison until physical validation demonstrates stable improvement; no R2 completion is asserted. Standard references: Double DQN (van Hasselt et al., https://arxiv.org/abs/1509.06461), task time limits (Pardo et al., https://proceedings.mlr.press/v80/pardo18a.html).
+
+The offline comparison additionally supports the standard discrete CQL(H) loss: `alpha * (logsumexp(Q(s, legal_actions)) - Q(s, recorded_action))`, added to the Bellman regression loss. This addresses overestimation outside the experience distribution; it is not a per-case corrective projection. `alpha` is fixed by the run protocol and persisted with optimizer state. Reference: Kumar et al., NeurIPS2020, https://arxiv.org/abs/2006.04779. Adoption still requires physical verification.
+
+Bellman fitting uses the squared error from the CQL objective, with global
+optimizer-gradient clipping. Huber derivative saturation combined with the
+conservative behavior-frequency term can suppress a repeatedly successful rare
+action even in a two-action convex problem; it is therefore excluded from the
+CQL optimization phase. Monte Carlo initialization remains a separate fixed
+warmup. The optimizer receipt versions this objective, preventing an unnoticed
+same-stage continuation with different loss semantics. Physical execution and
+inference source remain frozen during this learner-only comparison.
+
+#### 2026-10-05 — Fixed-method physical acceptance of request Q learning
+
+The squared-Bellman CQL/Double-DQN series completed four online updates with
+unchanged settings and continuous Adam/target-network state. Validation scores
+were35/42,36/42,36/42,36/42. The frozen fourth model reproduced36/42 twice;
+the original update8 reproduced34/42 in the same runtime. All128 training
+conditions were independently executed greedily:110/128→111/128, no previously
+successful condition lost, and no waiting actions or repeated-wait failures.
+All10 observed repeated-success/repeated-failure assignment contrasts rank the
+successful action higher. These checks support adopting the Q-learning branch
+for this comparison; they do not establish42/42 or completed R2.
+
+The policy remains a shared scorer over variable contact groups and temporal
+actions. No case-ID rules, manual action replacement, per-update corrections,
+anchor-selection authority or controller changes are introduced. The existing
+training pool's geometric coverage limitations remain; this task demonstrates
+learning improvements with that fixed pool, not new morphology coverage.
+Continuation uses `scripts/train_request_q.py` and its persisted target/Adam
+state. `ppo_update` explicitly rejects Q checkpoints to prevent accidental
+optimizer misuse. Reproducible settings, source snapshots, replay provenance,
+checkpoints and physical receipts reside in
+`artifacts/p4_full/order9/request_ppo/20261005_policy_resolution/`.
+
+After freezing that checkpoint, the untouched14-condition test gives13/14 for
+both original8 and Q4, with identical pass/fail cases. It was used only for the
+final comparison. The evidence therefore supports improved fixed-validation
+performance and preserved test performance, not a generalization guarantee.
+
+### 2026-10-05 — Authored initial robot heading for independent training coverage
+- User-authorized remaining-six resolution; spec v0.5, fixed π_D anchors. Optional condition metadata `initial_robot_transform={yaw_rad,translation_world_m}` applies one finite planar rigid transform to all initial robot module poses and world twists. Joint positions, structural graph, object, supports, goals and criteria are unchanged. Missing field preserves the existing path exactly.
+- This is upstream training-scene authoring, not a π_H action, runtime contact correction or validation-condition modification. The same transformed observation feeds causal encoding, planning and simulator reset. Data generator rotates independently sampled training designs around their initial contact centroid so heading varies without translating that centroid; no held-out outcomes or poses select the transform.
+- Implementation: `amsrr/training/request_object_conditions.py`; validation:13focused tests plus current-scene centroid/anchor/velocity algebra review. Two real-simulator training cases at90/270degree headings both succeed (125.78s), including reset/provenance/physical-motion checks. This validates the authoring path, not completion of the remaining validation cases.
+- An additional independently authored training dataset uses the same transform to place new robot grasp midpoints at existing training scenes' initial grasp midpoints. The reference is an initial training observation, never a teacher target or a held-out pose.168new conditions combine21designs with4interior and4independently sampled R2 boundary variants. All168 initial midpoint transformations pass independent checks; physical initial-state fingerprints have zero overlap with the42validation+14previously exposed test cases. The held-out conditions and criteria are unchanged.
+
+### 2026-10-06 — π_H conditional action-set value state
+- Scope: remaining-six task, v0.5. Extend causal Double-DQN observation of each candidate with a permutation-invariant summary of the remaining legal candidate set (masked nonlinear feature mean plus count). Previous local-only Q aliased different planner-prefix states; evidence in `20261005_remaining_six/mask_state_audit.json`.
+- Deployment/learning use the same conditional ranking: after a hypothetical plan rejection, remove that candidate and recompute the next candidate distribution. Only the actually executed prefix receives reward; planning costs, physical-time discount and downstream safety remain unchanged.
+- `causal_request_set_conditioned_double_q_v2` and `first_feasible_autoregressive_q_v2` identify this contract. Existing v1 models remain loadable for reproducible baselines. One-time migration zero-initializes only the new context projections and preserves old Q/encoder weights, Adam moments and target-network lag by name.
+- No robot/case IDs, task-specific choice tables, validation labels, teacher outcomes or simulator-only inputs. Standard Deep Sets construction (https://arxiv.org/abs/1703.06114); variable action/contact counts remain supported. Evaluation evidence is recorded in WORKLOG; this design change alone does not assert completion.
+
+### 2026-10-06 — Balanced nominal squeeze and horizontal tracking response
+- Scope: existing downstream nominal planner/QPID controller, v0.5, fixed π_D anchors and learned π_H requests. For two opposed contacts, constrain the approximate normal preload allocation to zero net force and moment. The previous effort-minimizing allocation could request unequal opposed normal forces, although squeezing should be an internal load. Three-or-more-contact full force/moment equilibrium remains unchanged. The normal-only two-contact estimate remains approximate and does not claim accurate contact-wrench control or sensing.
+- Keep module-mass normalization, vertical/attitude gains, actuator limits, load-allocation limits and controller integral state unchanged; set the nominal executor's horizontal PID gains to P=12,I=1,D=4 instead of3,.05,2. This increases tracking response and removes the very slow horizontal bias pole. No task-specific case branches. `nominal_body_tracking` now records this physical-execution contract in replay provenance so future training cannot silently mix the old and new controller data.
+- Matched fixed-Q4 validation: original36/42; balanced normal squeeze40/42; balanced squeeze plus tracking response41/42, zero collision failures. Task conditions and all success/safety predicates are unchanged; m7_05 remains unresolved at this point. The same model is used for every case. These improvements are downstream-control improvements, not additional learning gains.
+- Production files: `order9_actuator_aware_nominal_preload.py`, `teacher_contact_execution.py`, `request_ppo.py`.64focused preload/planner/scalar-and-batched QPID tests pass. The added normal-balance tests include unequal lever arms, rigid-frame transformation, force/couple infeasibility and malformed inputs. Evidence and independent physical receipts: `20261005_remaining_six/balanced_preload/` and `tracking_response/`.
+- Q replay loading now requires a nonempty, identical physical-execution contract across every input replay file. Previously preparation validated individual files but training did not compare them. `load_compatible_replay` rejects missing/mixed contracts and records the accepted contract in the optimizer-stage result;13focusedQtests pass. The new fixed continuation starts from Q4's weights/Adam/target state with zero-context migration, but its replay starts empty and contains only newly collected corrected-controller experience. Ordinary varied training morphology/object conditions remain allowed; physical-controller contract mismatch is the rejected condition.
+
+### 2026-10-06 — Bounded rotational-slip reserve in nominal contact planning
+
+- Scope: the existing downstream force-to-indentation calculation, spec v0.5. π_D still defines the robot anchors; π_H still selects object-contact assignments and transition timing. No extra policy authority, case-ID branch, manual action override or changed task/success/safety predicate is introduced.
+- The two-contact gravity-support calculation omitted resistance to rotation about the grasp axis. The new nominal model uses the authored gripper collision mesh, including its URDF collision transform, to estimate the contact patch's mean radius under uniform pressure. Estimated mass/COM and selected contact geometry determine the gravitational moment. Tangential force and twisting moment share an ellipsoidal friction bound, with six-dimensional static force/moment balance. This is a nominal preload recommendation, not exact contact-wrench estimation or control; it consumes no simulator contact-force measurement. Full-pad uniform pressure can overestimate partially contacting patches and must not be treated as a hard grasp-feasibility certificate. Reference: https://journals.sagepub.com/doi/10.1177/02783649922066673.
+- Preserve the previously accepted gravity-support squeeze. Scale its balanced normal forces together to request additional rotational reserve, saturating at the existing 0.8 nominal peak-effort utilization and quantized 40 mm lead limits. Record both requested and applied scale, including unmet reserve. An already invalid gravity baseline remains invalid. The effort calculation remains the existing normal-load approximation; it is not a certificate of total motor load or thermal feasibility.
+- Pass the computed per-anchor indentation to the trajectory compiler for two contacts, as already done for larger sets. Retain the previously executed common gravity-only indentation as a lower bound on each two-contact command. Adding reserve must not accidentally reduce an existing squeeze because of this representation change. The usual composed-command collision checks, real actuator bounds, body/joint correction bounds and measured contact guards remain active.
+- The finite-patch equilibrium helper accepts arbitrary contact counts and uses one bounded optimization with four variables per contact, not a combinatorial action enumeration. Current R2 uses two contacts; the established three-or-more-contact force-equilibrium path is unchanged. Its physical extension to other object/contact geometries is not certified by this R2 result. The new calculation runs during planning, not at every control tick.
+- Contracts: `order9_nominal_preload_v5_additive_patch_moment`, `naive_quasistatic_contact_plan_v10_per_anchor_preload`. `scripts/run_request_policy.py` includes the new helper in source/cache provenance. New physical experience must carry this controller contract; mixed old/new controller replay remains rejected. Future learning can warm-start from the selected weights, collecting compatible new experience.
+- Implementation: `amsrr/training/soft_contact_preload.py`, `order9_actuator_aware_nominal_preload.py`, `amsrr/policies/naive_contact_planner.py`. The original selected Double-DQN+CQL Q4 checkpoint is unchanged. First frozen physical evaluation: 42/42, zero safety failures, versus original 36/42; repeat receipts and final acceptance audit are in `artifacts/p4_full/order9/request_ppo/20261005_remaining_six/additive_preload/physical_comparison/`. These are downstream-control gains, not additional-learning gains.
+- Final acceptance: 42/42 in all three fresh frozen physics runs (126/126), zero safety failures; canonical source matches the tested snapshot. Ninety focused unit tests pass. Additional current-controller learning was not selected; the original Q4 model with the corrected common downstream implementation is the accepted result. Full reproducibility/identity receipt: `20261005_remaining_six/completion.json`.
+
+### 2026-10-06 — Selected imitation policy; learning methods on hold
+
+User decision: freeze the contact+temporal imitation checkpoint as the current best model. Canonical selection: `configs/training/order9_pi_h_selected_model.json`; Git-preserved weights and compact evidence: `outputs/order9/pi_h_imitation_release/`. This supersedes historical Q4 adoption and run-local best-update receipts for current model selection. The evaluated ranking metadata is retained, with every imitation weight unchanged. Current downstream planning/control stays unchanged.
+
+PPO and Double DQN+CQL, including Monte Carlo return pretraining and offline CQL warmup, remain reproducible candidates on hold. No additional learning or model migration is performed. Same42/current-runtime results: untrained0, imitation42, update8 41, Q4 42 successes; first-ranked feasible counts8/37/37/30. Therefore current-runtime performance does not support claiming an added RL benefit. Public schemas/interfaces unchanged by this selection. Full scope and limitations: `for_codex/PI_H_SELECTED_MODEL.md`.

@@ -1,0 +1,49 @@
+{
+  "version": "order9_pi_h_selected_model_v1",
+  "selected_on": "2026-10-06",
+  "status": "frozen_selected",
+  "model": "contact_and_temporal_imitation_before_ppo",
+  "checkpoint": "outputs/order9/pi_h_imitation_release/checkpoint.pt",
+  "checkpoint_sha256": "d099f955e960065232494cecf3e4775ea9cce7979550bf994371023512834428",
+  "source_imitation_checkpoint": "artifacts/p4_full/order9/request_ppo/20260923_strict_ppo/bc_temporal/checkpoint.pt",
+  "source_imitation_sha256": "8b523e43c45170186379c9eac6a8759efa775f04ee82951ecbaf769a956b3f4d",
+  "weights_identical_to_imitation": true,
+  "training_after_imitation": false,
+  "runtime": {
+    "grasp_anchor_source": "defined",
+    "max_grasp_contacts": 2,
+    "sampling": "greedy",
+    "ranking": {
+      "version": "first_feasible_plackett_luce_v1",
+      "attempt_cost": 0.25
+    },
+    "source_manifest": "outputs/order9/pi_h_imitation_release/runtime_sources.json",
+    "source_manifest_sha256": "5be0c6653cf2f9ee38c98f834c7419e94b782821d2cda967bc39da2a059281e3"
+  },
+  "evaluation": {
+    "conditions": "outputs/order9/pi_h_imitation_release/evaluation_cases.json",
+    "conditions_sha256": "340b40a1cd8d09b1279b8e1612b99bfcbeb11fd9c1447009c46b8c7d7702a1a3",
+    "comparison": "outputs/order9/pi_h_imitation_release/comparison.json",
+    "comparison_sha256": "dbd65ca8270defe3a21f421633decc901d6228d24fc21574219031fdaa8585f1",
+    "successes": 42,
+    "count": 42,
+    "safety_failures": 0,
+    "mean_reward": 12.633818571428492
+  },
+  "learning_candidates": [
+    {
+      "method": "PPO",
+      "status": "on_hold"
+    },
+    {
+      "method": "Double DQN + CQL",
+      "status": "on_hold",
+      "includes": [
+        "Monte Carlo return pretraining",
+        "offline CQL pretraining",
+        "online Double DQN + CQL updates"
+      ]
+    }
+  ],
+  "selection_policy": "Use this frozen imitation checkpoint until explicitly reselected; old best/completed run receipts are historical, not the active selection. Do not overwrite this checkpoint when training candidates."
+}
