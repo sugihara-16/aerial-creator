@@ -63,11 +63,15 @@ def setup():
     s.pending = object()
     s.dwell = 0.0
     s.release_latched = False
+    s.contact_established = False
     s.final_goal_position_tolerance_m = 0.05
     s.final_goal_orientation_tolerance_rad = 0.2
     s.initial_object = torch.zeros(3)
     s.maximum_lift = 0.0
     s.maximum_transport = 0.0
+    s.maximum_estimated_joint_motor_load_nm = 0.0
+    s.group = SimpleNamespace(candidate_ids=[0, 1])
+    s.contact_motion = []
     s.events = [{"reward": 0.0, "reward_events": [], "reward_timing": "observed_reward_time_v1"}]
     s.evaluator_phase_exits = []
     s.trace = []
@@ -133,6 +137,102 @@ def test_false_privileged_label_cannot_override_observed_guard():
     a["privileged_reward"].phase_success.zero_()
     assert s.step(**a).item()
     assert not s.evaluator_phase_exits[-1]["privileged_phase_success"]
+
+
+def test_contact_continuity_requires_actual_verified_acquisition_exit():
+    s, a = setup()
+    s.phase = 1
+    a['phase_index'].fill_(1)
+    s.dwell = .20
+    assert not s.step(**a).item()
+    assert not s.contact_established
+    s.dwell = .26
+    s.pending = None
+    s.next_decision_s = 100.
+    assert not s.step(**a).item()
+    assert not s.contact_established
+    s.pending = object()
+    assert s.step(**a).item()
+    assert s.contact_established
+    s.phase = 2
+    a['phase_index'].fill_(2)
+    a['motor_load'][0, 0] = .02
+    a['privileged_reward'].phase_success.zero_()
+    assert s.step(**a).item()
+    assert s.grip_contact_present
+
+
+@pytest.mark.parametrize('failure', ['never_acquired', 'separated', 'slipping', 'unloaded', 'nonfollowing', 'release'])
+def test_contact_continuity_cannot_hide_loss_or_missing_task_progress(failure):
+    s, a = setup()
+    s.contact_established = failure != 'never_acquired'
+    a['motor_load'][0, 0] = .02
+    if failure == 'separated': a['surface_distance'][0, 0] = .009
+    if failure == 'slipping': a['relative_speed'][0, 0] = .051
+    if failure == 'unloaded': a['motor_load'].zero_()
+    if failure == 'nonfollowing':
+        a['state'].object_pose_world = a['state'].object_pose_world.clone()
+        a['state'].object_pose_world[0, 2] -= .06
+    if failure == 'release':
+        s.phase = 5
+        a['phase_index'].fill_(5)
+    assert not s.step(**a).item()
+    if failure != 'nonfollowing':
+        assert not s.contact_established
+        assert not s.grip_contact_present
+    # Geometry returning alone must not resurrect a lost contact estimate.
+    if failure in ('separated', 'slipping'):
+        a['surface_distance'].zero_()
+        a['relative_speed'].zero_()
+        a['qp_feasible'].fill_(True)
+        assert not s.step(**a).item()
+
+
+@pytest.mark.parametrize('loss', [None, 'separation', 'slip', 'unloaded'])
+def test_temporary_qp_loss_blocks_action_but_is_not_contact_loss(loss):
+    s, a = setup()
+    s.contact_established = True
+    a['motor_load'][0, 0] = .02
+    a['qp_feasible'].zero_()
+    if loss == 'separation': a['surface_distance'][0, 0] = .009
+    if loss == 'slip': a['relative_speed'][0, 0] = .051
+    if loss == 'unloaded': a['motor_load'].zero_()
+    assert not s.step(**a).item()
+    assert not s.grip_contact_present
+    assert s.contact_established is (loss is None)
+    a['qp_feasible'].fill_(True)
+    a['surface_distance'].zero_()
+    a['relative_speed'].zero_()
+    a['motor_load'][0] = torch.tensor([.02, 1.])
+    assert s.step(**a).item() is (loss is None)
+
+
+def test_sliding_loaded_contact_allows_correction_but_blocks_transition():
+    s, a = setup()
+    s.contact_established = True
+    a['relative_speed'][0, 0] = .08
+    assert not s.step(**a).item()
+    assert not s.contact_established
+    assert s.grip_contact_present
+    a['surface_distance'][0, 0] = .009
+    assert not s.step(**a).item()
+    assert not s.grip_contact_present
+
+
+def test_contact_continuity_invalidated_by_unobserved_or_changed_binding():
+    from amsrr.simulation.request_event_execution import ContactPointVelocityObserver
+    s, a = setup()
+    s.contact_established = True
+    s.contact_velocity_observer = ContactPointVelocityObserver()
+    s.task = SimpleNamespace(scene=SimpleNamespace(objects=[SimpleNamespace(object_id='box')]))
+    s.expected_group = 'new_group'
+    points = torch.zeros(1, 2, 3)
+    s.contact_velocity_observer.update(points, a['state'].object_pose_world,
+        time_s=s.time_s, binding=('box', 'old_group'))
+    a.update(grasp_position_world=points)
+    a['motor_load'][0, 0] = .02
+    assert not s.step(**a).item()
+    assert not s.contact_established
 
 
 @pytest.fixture
@@ -668,3 +768,134 @@ def test_colocated_harness_requires_explicit_collision_isolation():
     with pytest.raises(ValueError, match="boundary changed"):
         _with_colocated_request_environments(adapted)
     assert PROTECTED_HARNESS.read_text() == original
+
+
+def test_release_distance_uses_finite_box_surface_and_observed_rotation():
+    from amsrr.simulation.request_event_execution import observed_object_signed_distance
+    g=SimpleNamespace(geometry_type='box',primitive_params={'size_m':[2.,2.,2.]},scale=[1.,1.,1.])
+    local=torch.tensor([[[0.,0.,0.],[1.003,0.,0.],[1.003,0.,1.02],[1.,0.,1.]]])
+    pose=torch.tensor([[3.,4.,5.,0.,0.,2**-.5,2**-.5]])
+    # Rotation by 90 degrees about Z, plus observed translation.
+    world=torch.stack((-local[...,1],local[...,0],local[...,2]),dim=-1)+pose[:,None,:3]
+    got=observed_object_signed_distance(world,pose,g)
+    torch.testing.assert_close(got,torch.tensor([[-1.,.003,(.003**2+.02**2)**.5,0.]]),atol=1e-6,rtol=0)
+
+
+@pytest.mark.parametrize('kind,params,expected',[
+    ('sphere',{'radius_m':1.},[-1.,.01,.02]),
+    ('cylinder',{'radius_m':1.,'height_m':2.},[-1.,.01,.02]),
+])
+def test_release_primitive_distance_interior_side_and_top(kind,params,expected):
+    from amsrr.simulation.request_event_execution import observed_object_signed_distance
+    g=SimpleNamespace(geometry_type=kind,primitive_params=params,scale=[1.,1.,1.])
+    points=torch.tensor([[[0.,0.,0.],[1.01,0.,0.],[0.,0.,1.02]]])
+    pose=torch.tensor([[0.,0.,0.,0.,0.,0.,1.]])
+    torch.testing.assert_close(observed_object_signed_distance(points,pose,g),torch.tensor([expected]),atol=1e-6,rtol=0)
+
+
+def test_release_guard_accepts_tangential_departure_but_rejects_inside_point():
+    from amsrr.simulation.request_event_execution import ContactPointVelocityObserver
+    for height,expected in [(1.02,True),(.5,False)]:
+        s,a=setup();s.phase=5;s.dwell=2.;a['phase_index'].fill_(5)
+        s.object_geometry=SimpleNamespace(geometry_type='box',primitive_params={'size_m':[2.,2.,2.]},scale=[1.,1.,1.])
+        s.task=SimpleNamespace(scene=SimpleNamespace(objects=[SimpleNamespace(object_id='o')]))
+        s.expected_group='g';s.contact_velocity_observer=ContactPointVelocityObserver()
+        a['grasp_position_world']=torch.tensor([[[.999,0.,height+.1],[.999,0.,height+.1]]])
+        a['surface_distance'].fill_(-.001) # infinite side-plane distance
+        assert bool(s.step(**a).item()) is expected
+
+
+@pytest.mark.parametrize('distance,load', [(0.00799, .0501), (0.00801, .0501), (.0, .0499)])
+def test_cpu_snapshot_batch_guard_matches_scalar_cuda_near_thresholds(distance, load):
+    if not torch.cuda.is_available():
+        pytest.skip('CUDA not available')
+    def cuda(value):
+        if isinstance(value, torch.Tensor):
+            return value.cuda()
+        if isinstance(value, SimpleNamespace):
+            return SimpleNamespace(**{k: cuda(v) for k, v in vars(value).items()})
+        return value
+    scalar, one = setup()
+    individual, two = setup()
+    scalar.task = individual.task = deadline_task()
+    batch = BatchedRequestEventSupervisor([individual])
+    for args in (one, two):
+        args['surface_distance'].fill_(distance)
+        args['motor_load'].fill_(load)
+        args.update({k: cuda(v) for k, v in args.items()})
+    for _ in range(3):
+        reference = scalar.step(**one)
+        actual = batch.step(active=torch.tensor([True], device='cuda'), **two)
+        assert torch.equal(reference, actual)
+        assert scalar.contact_established == individual.contact_established
+        assert scalar.dwell == individual.dwell
+        assert scalar.events[-1]['reward'] == individual.events[-1]['reward']
+
+
+def test_batched_measured_guards_match_scalar_observer_state_rewards_and_transitions():
+    from copy import deepcopy
+    from amsrr.simulation.request_event_execution import ContactPointVelocityObserver
+    originals=[];copies=[];arguments=[]
+    for phase in range(8):
+        supervisor,args=setup()
+        supervisor.phase=phase;supervisor.dwell=.3;supervisor.release_latched=True
+        supervisor.contact_established=True;supervisor.expected_group='group'
+        supervisor.contact_velocity_observer=ContactPointVelocityObserver()
+        supervisor.task=SimpleNamespace(scene=SimpleNamespace(objects=[SimpleNamespace(object_id='box')]),goals=[])
+        supervisor.object_geometry=SimpleNamespace(geometry_type='box',primitive_params={'size_m':[.1,.1,.1]},scale=[1.,1.,1.])
+        args['phase_index'].fill_(phase)
+        args['phase_elapsed_s'].fill_(.5)
+        args['target'].phase_progress.fill_(.4)  # Avoid actor calls: test the observed guard only.
+        args['grasp_position_world']=torch.tensor([[[.05,0.,.1],[-.05,0.,.1]]])
+        args['joint_motor_load']=torch.tensor([[.2,.4]])
+        originals.append(supervisor);copies.append(deepcopy(supervisor));arguments.append(args)
+    batch=BatchedRequestEventSupervisor(copies)
+    def combine(values):
+        if isinstance(values[0],torch.Tensor):return torch.cat(values)
+        if isinstance(values[0],SimpleNamespace):return SimpleNamespace(**{k:combine([getattr(v,k) for v in values]) for k in vars(values[0])})
+        raise TypeError(type(values[0]))
+    for tick in range(4):
+        for index,args in enumerate(arguments):
+            args['grasp_position_world'] += .0002*(index%2)
+            if tick==2 and index==3: originals[index].expected_group=copies[index].expected_group='new_group'
+        active=torch.ones(8,dtype=torch.bool);active[6]=tick%2==0
+        expected=torch.zeros(8,dtype=torch.bool)
+        for index,(s,args) in enumerate(zip(originals,arguments)):
+            if active[index]:expected[index]=s.step(**args)[0]
+        actual=batch.step(active=active,**{k:combine([a[k] for a in arguments]) for k in arguments[0]})
+        torch.testing.assert_close(actual,expected)
+        for left,right in zip(originals,copies):
+            for name in ('time_s','dwell','maximum_lift','maximum_transport','contact_established','grip_contact_present','maximum_estimated_joint_motor_load_nm'):
+                if hasattr(left,name):assert getattr(right,name)==pytest.approx(getattr(left,name))
+            assert right.events==left.events
+            if left.contact_velocity_observer.previous is not None:
+                torch.testing.assert_close(right.contact_velocity_observer.previous,left.contact_velocity_observer.previous,rtol=0,atol=0)
+
+
+def test_learned_hold_defers_decisions_but_keeps_observed_guards_running(request_scene):
+    from dataclasses import replace
+    from amsrr.policies.request_actor_critic import RequestActorCritic
+    scene,task,physical,execution=request_scene
+    execution=replace(execution,plan_id='active',contact_group_id=scene.contact_candidate_set.group_proposals[0].group_id)
+    context=decision((scene,task,physical,execution))
+    model=RequestActorCritic().eval();model.enable_temporal_options()
+    with torch.no_grad():
+        model.ranker.hold_head[-1].bias.fill_(-30.)
+        model.ranker.hold_head[-1].bias[-1]=30.
+    s,args=setup();s.model=model;s.sample=False;s.generator=torch.Generator().manual_seed(7)
+    s.pending=None;s.next_decision_s=0.;s.phase_ids={}
+    s.observation=lambda state,**kwargs:None
+    s.context=lambda observation,phase:context
+    start=s.time_s
+    assert not bool(s.step(**args))
+    assert s.events[-1]['hold_duration_s']==8.
+    assert len(s.contact_motion)==2
+    assert [x.motor_load_nm for x in s.contact_motion]==pytest.approx(args['motor_load'][0].tolist())
+    assert all(x.time_s==s.time_s for x in s.contact_motion)
+    assert s.next_decision_s==pytest.approx(start+s.dt+8.)
+    events=len(s.events)
+    for _ in range(100):
+        args['qp_feasible'].fill_(False)
+        assert not bool(s.step(**args))
+        assert s.dwell==0.  # The guard still observes the new control failure.
+    assert len(s.events)==events and s.time_s>start+1.

@@ -18,7 +18,9 @@ from amsrr.encoders.morphology_graph_encoder import (
 )
 from amsrr.encoders.interaction_envelope_encoder import InteractionEnvelopeEncoder
 from amsrr.policies.contact_candidate_encoder import ContactCandidateEncoder
-from amsrr.policies.contact_group_geometry import contact_geometry, CONTACT_FEATURE_DIM
+from amsrr.policies.contact_group_geometry import (
+    contact_geometry, CONTACT_FEATURE_DIM, normalize_contact_features,
+)
 from amsrr.policies.high_level_requests import HighLevelDecisionContext
 from amsrr.schemas.common import SchemaBase, SchemaValidationError
 from amsrr.schemas.high_level import (
@@ -121,6 +123,10 @@ class RequestHighLevelPolicy(nn.Module):
 
     def request_features(self, context: HighLevelDecisionContext) -> torch.Tensor:
         context.validate_snapshot()
+        return self._request_features(context)
+
+    def _request_features(self, context: HighLevelDecisionContext) -> torch.Tensor:
+        """Pure feature calculation after the caller validates this snapshot."""
         encoding = self.candidate_encoder.encode(context.scene.contact_candidate_set)
         group_tokens = dict(zip(encoding.group_ids[0], encoding.group_tokens()))
         envelope = deepcopy(context.scene.interaction_envelope)
@@ -364,7 +370,7 @@ class RequestHighLevelPolicy(nn.Module):
         ):
             raise SchemaValidationError("invalid contact-member batch or normalization")
         member = self.contact_member(
-            (candidates - self.contact_mean) / self.contact_scale
+            normalize_contact_features(candidates, self.contact_mean, self.contact_scale)
         )
         weights = membership.to(member.dtype)
         count = weights.sum(-1, keepdim=True)

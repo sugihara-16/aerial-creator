@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 from amsrr.schemas.common import ContactMode
 from amsrr.schemas.contact_candidates import (
     AssignmentFeasibilityResult,
@@ -24,6 +25,28 @@ from amsrr.schemas.irg import IRGEdge, IRGEdgeType, IRGNode, IRGNodeType, Intera
 from amsrr.schemas.physical_model import JointModel, LinkModel, PhysicalModel
 from amsrr.schemas.policies import ControllerStatus, PolicyCommand
 from amsrr.schemas.task_spec import TaskSpec
+
+
+def test_plain_data_scalar_fast_path_keeps_enum_and_nested_conversion():
+    from dataclasses import dataclass
+    from enum import IntEnum, Enum
+    from pathlib import Path
+    from amsrr.schemas.common import canonical_json, to_plain_data
+    class Number(IntEnum):
+        ONE = 1
+    class Text(str, Enum):
+        A = 'a'
+    @dataclass
+    class Nested:
+        values: tuple
+    value = Nested((None, True, 3, 1.25, 'x', Number.ONE, Text.A, Path('local'),
+                    {'slice': slice(1, 4, 2)}))
+    expected = {'values': [None, True, 3, 1.25, 'x', 1, 'a', 'local',
+                           {'slice': {'start': 1, 'stop': 4, 'step': 2}}]}
+    actual = to_plain_data(value)
+    assert actual == expected
+    assert type(actual['values'][5]) is int and type(actual['values'][6]) is str
+    assert canonical_json(value) == canonical_json(expected)
 
 
 def test_schema_roundtrip_json(grasp_carry_dict: dict) -> None:
@@ -168,4 +191,36 @@ def test_schema_roundtrip_json(grasp_carry_dict: dict) -> None:
 
 def test_irg_edge_type_includes_allows() -> None:
     assert IRGEdgeType.ALLOWS.value == "allows"
+
+
+def test_repeated_schema_loading_retains_strict_validation_and_owned_values():
+    from dataclasses import dataclass
+    import pytest
+    from amsrr.schemas.common import SchemaBase, SchemaValidationError
+
+    @dataclass
+    class RepeatedSchema(SchemaBase):
+        count: int
+        weight: float
+        active: bool
+        label: str
+        values: list[float]
+
+    data = dict(count='3', weight=2, active=True, label='sample', values=[1, 2])
+    first = RepeatedSchema.from_dict(data)
+    second = RepeatedSchema.from_dict(data)
+    assert first.count == 3 and first.weight == 2.0
+    first.values[0] = 99.0
+    assert second.values == [1.0, 2.0] and data['values'] == [1, 2]
+    for field, value in [('count', True), ('weight', True), ('active', 1),
+                         ('label', 3), ('values', [False])]:
+        with pytest.raises(SchemaValidationError):
+            RepeatedSchema.from_dict({**data, field: value})
+    with pytest.raises(SchemaValidationError, match='required'):
+        RepeatedSchema.from_dict({k: v for k, v in data.items() if k != 'count'})
+    RepeatedSchema._allow_extra_fields = True
+    RepeatedSchema.from_dict({**data, 'extra': 1})
+    RepeatedSchema._allow_extra_fields = False
+    with pytest.raises(SchemaValidationError, match='unknown fields'):
+        RepeatedSchema.from_dict({**data, 'extra': 1})
 

@@ -172,6 +172,31 @@ def test_contact_phase_requires_order8_contact_dwell() -> None:
     assert results[4].reward.item() > results[3].reward.item()
 
 
+def test_selected_three_contact_group_requires_third_contact():
+    from dataclasses import fields, replace
+    evidence=_evidence(Order9ObjectTaskPhase.CONTACT_ACQUISITION)
+    expanded={}
+    for field in fields(evidence):
+        value=getattr(evidence,field.name)
+        if isinstance(value,torch.Tensor) and value.ndim>=2 and value.shape[1]==2:
+            expanded[field.name]=torch.cat((value,value[:,:1].clone()),dim=1)
+    evidence=replace(evidence,**expanded)
+    engine=Order9TensorRewardEngine(control_dt_s=.05,
+        gate_config=Order9TensorRewardGateConfig(required_contact_count=3))
+    state=engine.initial_state(object_pose_world=evidence.object_pose_world,
+        desired_object_pose_world=evidence.desired_object_pose_world)
+    evidence.selected_contact_forces_world[:,2]=0.
+    for _ in range(6):
+        result=engine.step(evidence,state);state=result.next_state
+        assert result.active_contact_count.item()==2
+        assert not result.phase_success.item()
+    evidence.selected_contact_forces_world[:,2,2]=1.
+    for _ in range(6):
+        result=engine.step(evidence,state);state=result.next_state
+    assert result.active_contact_count.item()==3
+    assert result.phase_success.item()
+
+
 def test_grasp_loss_after_acquisition_is_terminal_drop() -> None:
     engine = Order9TensorRewardEngine(control_dt_s=0.05)
     contact = _evidence(Order9ObjectTaskPhase.CONTACT_ACQUISITION)

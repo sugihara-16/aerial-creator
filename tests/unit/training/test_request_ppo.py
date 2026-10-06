@@ -14,8 +14,57 @@ from amsrr.training.request_ppo import (
     categorical_kl_from_logits,
     branch_weighted_mean,
     request_runtime_contracts,
+    generalized_event_advantages,
 )
 from amsrr.utils.hashing import hash_file
+
+
+def test_event_gae_matches_mc_and_independent_irregular_time_td_reference():
+    # Rewards actually occur inside intervals of unequal length.
+    trajectory = [
+        dict(time_s=0., end_time_s=2., reward=2., reward_events=[(1., 2.)],
+             reward_timing='observed_reward_time_v1', value=3., done=False),
+        dict(time_s=2., end_time_s=5., reward=4., reward_events=[(4., 4.)],
+             reward_timing='observed_reward_time_v1', value=5., done=False),
+        dict(time_s=5., end_time_s=6., reward=-1., reward_events=[(6., -1.)],
+             reward_timing='observed_reward_time_v1', value=7., done=True),
+    ]
+    gamma = .9
+    returns = discounted_event_returns(trajectory, gamma)
+    assert generalized_event_advantages(trajectory, gamma, 1.) == pytest.approx(
+        [r-e['value'] for r, e in zip(returns, trajectory)])
+    td = [2*gamma + gamma**2*5 - 3, 4*gamma**2 + gamma**3*7 - 5, -gamma - 7]
+    assert generalized_event_advantages(trajectory, gamma, 0.) == pytest.approx(td)
+    expected = [td[0]+gamma**2*.8*(td[1]+gamma**3*.8*td[2]),
+                td[1]+gamma**3*.8*td[2], td[2]]
+    assert generalized_event_advantages(trajectory, gamma, .8) == pytest.approx(expected)
+    trajectory[-1]['done'] = False
+    with pytest.raises(ValueError, match='complete episode'):
+        generalized_event_advantages(trajectory, gamma, .95)
+
+
+def test_actor_validates_once_and_matches_independently_checked_features(request_scene, monkeypatch):
+    from amsrr.policies.contact_group_geometry import contact_geometry
+    from amsrr.schemas.common import SchemaValidationError
+    context = decision(request_scene)
+    model = RequestActorCritic().eval()
+    expected_features = model.ranker.request_features(context)
+    expected_candidates, expected_membership = contact_geometry(context)
+    original = type(context).validate_snapshot
+    calls = []
+    def validate(value):
+        calls.append(1)
+        original(value)
+    monkeypatch.setattr(type(context), 'validate_snapshot', validate)
+    encoded = model.encode(context)
+    assert len(calls) == 1
+    for actual, expected in [(encoded['features'], expected_features),
+        (encoded['candidates'], expected_candidates), (encoded['membership'], expected_membership)]:
+        torch.testing.assert_close(actual, expected, atol=0, rtol=0)
+    original(context)
+    context.scene.runtime_observation.time_s += .25
+    with pytest.raises(SchemaValidationError, match='modified'):
+        model.encode(context)
 
 
 @pytest.mark.parametrize("fault", [None, "missing_manifest", "changed_dataset", "wrong_record", "validation"])
@@ -119,11 +168,19 @@ def test_ppo_rejects_teacher_and_greedy_and_updates_actor_from_sampled_events(
         ("teacher_phase_supervision", True),
         ("diagnostic_only", True),
         ("evaluation_only", True),
+        ("teacher_contact_supervision", True),
     ]:
         bad = {**rollout, key: value}
         torch.save(bad, path)
         with pytest.raises(ValueError, match="on-policy"):
             ppo_update(checkpoint, [path], tmp_path / key)
+    # A genuine behavior-probability mismatch must still fail the individual
+    # replay check, rather than being excused as batched floating-point error.
+    bad = deepcopy(rollout)
+    bad['episodes'][0][0]['log_prob'] += .01
+    torch.save(bad, path)
+    with pytest.raises(ValueError, match='on-policy replay probabilities differ'):
+        ppo_update(checkpoint, [path], tmp_path/'wrong_behavior_probability')
 
 
 def test_initial_input_geometry_changes_logits_but_label_has_no_channel(request_scene):
@@ -277,6 +334,66 @@ def test_branch_limits_require_explicit_balanced_all_actor_configuration(tmp_pat
             ppo_update(tmp_path / "unused.pt", [], tmp_path / "unused", **args)
 
 
+def test_independent_temporal_budget_preserves_contact_and_rolls_back_adam(request_scene, tmp_path, monkeypatch):
+    torch.manual_seed(31)
+    model = RequestActorCritic().eval()
+    checkpoint = tmp_path / 'initial.pt'
+    torch.save(model.checkpoint(), checkpoint)
+    episodes = []
+    for i in range(12):
+        episode = []
+        for step in range(2):
+            encoded = model.encode(decision(request_scene))
+            encoded['initial'] = torch.tensor(step == 0)
+            with torch.no_grad():
+                logits, value = model.evaluate_encoding(encoded)
+                dist = torch.distributions.Categorical(logits=logits[0])
+                action = dist.sample()
+            reward = float((i + step) % 3 - 1)
+            episode.append(dict(encoding=serialize_encoding(encoded), action=int(action),
+                log_prob=float(dist.log_prob(action)), value=float(value[0]),
+                time_s=float(step), end_time_s=float(step+1), reward=reward, done=step == 1,
+                reward_timing='observed_reward_time_v1', reward_events=[(float(step+1), reward)]))
+        episodes.append(episode)
+    path = tmp_path / 'rollout.pt'
+    torch.save(dict(checkpoint_sha256=hash_file(checkpoint), sampling='categorical',
+        teacher_phase_supervision=False, complete=True, runtime_contracts=request_runtime_contracts(),
+        episodes=episodes), path)
+    settings = dict(training_profile='timed_mc_v1', epochs=1, value_epochs=2,
+        learning_rate=.001, entropy_coefficient=.02, contact_loss_weight=.5,
+        contact_target_kl=100., temporal_target_kl=100.)
+    base = ppo_update(checkpoint, [path], tmp_path/'base', **settings)
+    extra = ppo_update(checkpoint, [path], tmp_path/'extra', temporal_epochs=3, **settings)
+    a = RequestActorCritic.load(tmp_path/'base/checkpoint.pt')
+    b = RequestActorCritic.load(tmp_path/'extra/checkpoint.pt')
+    for name, parameter in a.named_parameters():
+        if not name.startswith(('ranker.request_head.', 'ranker.hold_head.')):
+            torch.testing.assert_close(parameter, dict(b.named_parameters())[name], rtol=0., atol=0.)
+    assert extra['optimization']['completed_temporal_epochs'] == 3
+    first, second = [r['temporal_kl'] for r in extra['temporal_updates'][:2]]
+    assert second > first > base['updates'][-1]['branch_kl']['temporal']
+    bounded = ppo_update(checkpoint, [path], tmp_path/'bounded', temporal_epochs=3,
+        **{**settings, 'temporal_target_kl': (first+second)/2})
+    direct = ppo_update(checkpoint, [path], tmp_path/'direct', temporal_epochs=1, **settings)
+    assert bounded['optimization']['completed_temporal_epochs'] == 1
+    assert bounded['optimization']['temporal_rejected_step']['epoch'] == 2
+    assert bounded['checkpoint_sha256'] == direct['checkpoint_sha256']
+    x = torch.load(tmp_path/'bounded/training_state.pt', weights_only=True)['actor_optimizer']
+    y = torch.load(tmp_path/'direct/training_state.pt', weights_only=True)['actor_optimizer']
+    torch.testing.assert_close(x, y, rtol=0., atol=0.)
+    # Rejection of every shared/contact proposal must still permit a real
+    # independent temporal update, and its receipt must count that update.
+    monkeypatch.setattr('amsrr.training.request_ppo.preserve_observed_contact_preferences',
+                        lambda *a, **k: dict(accepted=False))
+    independent = ppo_update(checkpoint, [path], tmp_path/'only_temporal', temporal_epochs=3, **settings)
+    assert independent['optimization']['completed_epochs'] == 0
+    assert independent['optimization']['completed_actor_steps'] == 3
+    actor = RequestActorCritic.load(tmp_path/'only_temporal/checkpoint.pt')
+    for name, parameter in model.ranker.named_parameters():
+        if not name.startswith(('request_head.', 'hold_head.')):
+            torch.testing.assert_close(parameter, dict(actor.ranker.named_parameters())[name], rtol=0., atol=0.)
+
+
 def test_timed_first_step_backtracking_restores_adam_before_retry(request_scene, tmp_path):
     torch.manual_seed(31)
     model = RequestActorCritic().eval()
@@ -425,10 +542,17 @@ def test_physical_reward_discount_is_invariant_to_empty_intermediate_decisions()
         discounted_event_returns([event(0, 5, []), dict(time_s=5., reward=1.)], .99)
 
 
-@pytest.mark.parametrize("profile", ["timed_mc_v1", "timed_value_v1", "timed_value_grouped"])
-def test_timed_ppo_learns_known_reward_and_resumes_adam(request_scene, tmp_path, profile):
+@pytest.mark.parametrize("profile", ["timed_mc_v1", "timed_value_v1", "timed_value_grouped",
+                                     "timed_value_lr_change", "timed_value_gae"])
+def test_timed_ppo_learns_known_reward_and_resumes_adam(request_scene, tmp_path, profile, monkeypatch):
     """Fresh on-policy bandit episodes have a known optimum, independent of code loss."""
-    active_profile = "timed_value_v1" if profile == "timed_value_grouped" else profile
+    active_profile = "timed_value_v1" if profile.startswith("timed_value") else profile
+    fitted_representations = []
+    original_features = RequestActorCritic.frozen_value_features
+    def capture_representation(model, *args, **kwargs):
+        fitted_representations.append(deepcopy(model.ranker.state_dict()))
+        return original_features(model, *args, **kwargs)
+    monkeypatch.setattr(RequestActorCritic, 'frozen_value_features', capture_representation)
     torch.manual_seed(432)
     model = RequestActorCritic().eval()
     torch.nn.init.zeros_(model.ranker.contact_head[3].weight)
@@ -460,6 +584,14 @@ def test_timed_ppo_learns_known_reward_and_resumes_adam(request_scene, tmp_path,
                         teacher_phase_supervision=False, complete=True, runtime_contracts=request_runtime_contracts(), episodes=episodes), rollout_path)
         out = tmp_path/f'update_{update}'
         extra = {}
+        learning_rate = .0015 if profile == 'timed_value_lr_change' and update >= 2 else .003
+        if profile == 'timed_value_gae' and update > 0:
+            extra['gae_lambda'] = .95
+        if profile == 'timed_value_lr_change' and update == 2:
+            with pytest.raises(ValueError, match='explicit previous value'):
+                ppo_update(path, [rollout_path], tmp_path/'undeclared_rate', training_profile=active_profile,
+                           learning_rate=learning_rate)
+            extra['previous_learning_rate'] = .003
         if profile == 'timed_value_grouped' and update >= 2:
             import json
             from amsrr.utils.hashing import stable_hash
@@ -480,17 +612,27 @@ def test_timed_ppo_learns_known_reward_and_resumes_adam(request_scene, tmp_path,
                                learning_rate=.003, **extra)
                 extra['contact_baseline_transition_from'] = 'value_v1'
         final_report = ppo_update(path, [rollout_path], out, training_profile=active_profile, **extra,
-                                  epochs=8, value_epochs=5, learning_rate=.003,
+                                  epochs=8, value_epochs=5, learning_rate=learning_rate,
                                   entropy_coefficient=.001)
         assert final_report['optimization']['optimizer_updates_resumed'] == update
-        if extra:
+        if 'contact_group_manifest' in extra:
             assert final_report['contact_baseline_kind'] == 'condition_loo_v1'
             assert final_report['contact_baseline']['condition_count'] == 1
             assert (final_report['contact_baseline_transition'] is not None) == (update == 2)
+        if profile == 'timed_value_lr_change':
+            assert (final_report['optimization']['learning_rate_transition'] is not None) == (update == 2)
+        if profile == 'timed_value_gae':
+            assert final_report['optimization']['gae_lambda_per_decision'] == (.95 if update > 0 else None)
         expected_baseline = 'collected_value' if active_profile == 'timed_value_v1' and update > 0 else 'batch_constant'
         assert final_report['value_diagnostics']['baseline'] == expected_baseline
         assert math.isfinite(final_report['value_diagnostics']['collected_value_mse'])
         path = out/'checkpoint.pt'
+        # The critic must describe the representation actually saved for the
+        # next rollout; later actor updates must not invalidate that fit.
+        assert final_report['optimization']['value_fit_order'] == 'after_actor'
+        saved_ranker = RequestActorCritic.load(path).ranker.state_dict()
+        for name, tensor in fitted_representations[-1].items():
+            torch.testing.assert_close(tensor, saved_ranker[name], rtol=0, atol=0)
     state = torch.load(path.parent/'training_state.pt', weights_only=True)
     assert state['completed_updates'] == 4
     actor_steps = [int(v['step']) for v in state['actor_optimizer']['state'].values()]
@@ -500,6 +642,38 @@ def test_timed_ppo_learns_known_reward_and_resumes_adam(request_scene, tmp_path,
         logits, _ = RequestActorCritic.load(path).evaluate_encoding(encoded)
     assert int(logits[0].argmax()) == desired
     assert float(logits[0].softmax(-1)[desired]) > initial_probability + .2
+
+
+@pytest.mark.parametrize("morphology_aware", [False, True])
+def test_frozen_value_feature_reuse_preserves_every_adam_step(request_scene, morphology_aware):
+    from amsrr.training.request_imitation import graph_batch
+    torch.manual_seed(317)
+    model = RequestActorCritic(morphology_aware=morphology_aware).eval()
+    encoded = model.encode(decision(request_scene))
+    data = collate_transitions([dict(encoding=serialize_encoding(encoded)) for _ in range(3)])
+    ids = torch.arange(3)
+    with pytest.raises(ValueError, match="frozen ranker"):
+        model.frozen_value_features(data['features'], graph_batch(data['graphs'], ids, 'cpu'), data['mask'])
+    for p in model.ranker.parameters():
+        p.requires_grad_(False)
+    reference = deepcopy(model)
+    features = model.frozen_value_features(data['features'], graph_batch(data['graphs'], ids, 'cpu'), data['mask'])
+    assert not features.requires_grad
+    optimizers = [torch.optim.Adam(m.value_head.parameters(), lr=.001) for m in (model, reference)]
+    target = torch.tensor([3., -5., 1.])
+    for _ in range(8):
+        predictions = [model.value_head(features).squeeze(-1), evaluate_batch(reference, data, ids, 'cpu')[1]]
+        torch.testing.assert_close(*predictions, rtol=0, atol=0)
+        for m, optimizer, prediction in zip((model, reference), optimizers, predictions):
+            optimizer.zero_grad(set_to_none=True)
+            torch.nn.functional.mse_loss(prediction, target).backward()
+            torch.nn.utils.clip_grad_norm_(m.value_head.parameters(), 1., error_if_nonfinite=True)
+            optimizer.step()
+        for actual, expected in zip(model.parameters(), reference.parameters()):
+            torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+        for key, value in optimizers[0].state_dict()['state'].items():
+            for name, actual in value.items():
+                torch.testing.assert_close(actual, optimizers[1].state_dict()['state'][key][name], rtol=0, atol=0)
 
 
 def test_contact_baseline_is_independent_of_own_reward_and_case_offset():

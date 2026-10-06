@@ -84,6 +84,28 @@ class ContactLoadEstimate(SchemaBase):
 
 
 @dataclass
+class ContactMotionEstimate(SchemaBase):
+    """Observed geometry and motor torque; no inferred contact wrench."""
+
+    candidate_id: int
+    time_s: float
+    signed_distance_m: float
+    slip_speed_mps: float
+    motor_load_nm: float
+    velocity_valid: bool
+    source: Literal["observed_pose_fk_motor_v1"] = "observed_pose_fk_motor_v1"
+
+    def validate(self) -> None:
+        if self.candidate_id < 0 or self.source != "observed_pose_fk_motor_v1":
+            raise SchemaValidationError("invalid contact motion identity")
+        _finite(self.time_s, "contact motion time")
+        _finite(self.slip_speed_mps, "contact motion speed")
+        _finite(self.motor_load_nm, "contact motor torque")
+        if not math.isfinite(self.signed_distance_m) or not isinstance(self.velocity_valid, bool):
+            raise SchemaValidationError("invalid contact motion observation")
+
+
+@dataclass
 class ExecutionGuardSample(SchemaBase):
     """Named, timestamped predicate from a deployable deterministic observer."""
 
@@ -134,6 +156,7 @@ class HighLevelObservation(SchemaBase):
     controller_status: ControllerStatus
     contact_estimates: list[ContactLoadEstimate] = field(default_factory=list)
     guard_samples: list[ExecutionGuardSample] = field(default_factory=list)
+    contact_motion: list[ContactMotionEstimate] = field(default_factory=list)
 
     def validate(self) -> None:
         _finite(self.time_s, "observation time")
@@ -142,11 +165,12 @@ class HighLevelObservation(SchemaBase):
             (self.object_states, "object_id"),
             (self.contact_estimates, "candidate_id"),
             (self.guard_samples, "guard_id"),
+            (self.contact_motion, "candidate_id"),
         ):
             ids = [getattr(x, key) for x in values]
             if len(ids) != len(set(ids)):
                 raise SchemaValidationError(f"duplicate {key}")
-        for item in (*self.contact_estimates, *self.guard_samples):
+        for item in (*self.contact_estimates, *self.guard_samples, *self.contact_motion):
             item.validate()
             if item.time_s > self.time_s:
                 raise SchemaValidationError("future estimator result in observation")
